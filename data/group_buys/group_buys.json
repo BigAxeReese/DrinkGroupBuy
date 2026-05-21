@@ -1,0 +1,64 @@
+[
+  {
+    "id": "gb_mpexuija_78az5a",
+    "title": "台中科大下午茶團購",
+    "shopId": "shop_006",
+    "shopName": "測試店家",
+    "promotionId": "promo_005",
+    "promotionTitle": "50 杯折 500 元",
+    "createdBy": "google_user_demo",
+    "status": "open",
+    "deadline": "2026-05-22T07:00:00.000Z",
+    "note": "測試建立團購功能",
+    "totals": {
+      "cups": 0,
+      "amount": 0,
+      "participants": 0
+    },
+    "createdAt": "2026-05-21T04:00:00.000Z",
+    "updatedAt": "2026-05-21T04:00:00.000Z"
+  },
+  {
+    "id": "gb_mpf9jook_p9icqc",
+    "title": "123",
+    "shopId": "shop_001",
+    "shopName": "清心福全 台中一中店",
+    "promotionId": "promo_custom_2",
+    "promotionTitle": "自訂優惠矩陣",
+    "promotions": [
+      {
+        "id": "promo_custom_1",
+        "title": "15 杯折 90 元",
+        "description": "預購團購累積達 15 杯，整筆訂單可折抵 90 元，平均每杯折 6.0 元。",
+        "targetType": "cups",
+        "targetValue": 15,
+        "rewardType": "fixed_amount",
+        "rewardValue": 90,
+        "currency": "TWD",
+        "status": "active"
+      },
+      {
+        "id": "promo_custom_2",
+        "title": "50 杯折 500 元",
+        "description": "預購團購累積達 50 杯，整筆訂單可折抵 500 元，平均每杯折 10.0 元。",
+        "targetType": "cups",
+        "targetValue": 50,
+        "rewardType": "fixed_amount",
+        "rewardValue": 500,
+        "currency": "TWD",
+        "status": "active"
+      }
+    ],
+    "createdBy": "google_user_demo",
+    "status": "open",
+    "deadline": "2026-05-21T23:00:00.000Z",
+    "note": "",
+    "totals": {
+      "cups": 0,
+      "amount": 0,
+      "participants": 0
+    },
+    "createdAt": "2026-05-21T09:03:16.148Z",
+    "updatedAt": "2026-05-21T09:03:16.148Z"
+  }
+]

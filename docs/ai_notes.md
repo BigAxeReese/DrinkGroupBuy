@@ -2,17 +2,18 @@
 
 ## Project Goal
 
-DrinkGroupBuy is planned as a drink group-buying system. The first version should feel like an upgraded Google Form workflow: easy to create a group buy, easy for participants to submit drink orders, and easy for the organizer to summarize orders for the shop.
+DrinkGroupBuy is planned as a B2C drink group-buying preorder platform. Shops can publish preorder promotions, and consumers can discover nearby shops, start or join group buys, and unlock shop-provided discounts after the group buy reaches the promotion target.
 
 ## Current Discussion Summary
 
 - Build the project with a small, stable architecture that can grow later.
 - Start with an MVP before adding heavier features such as accounts, notifications, LINE Bot integration, or payments.
-- Prefer a simple web app flow:
-  - Users open a group-buy link.
-  - Participants submit drink orders.
-  - Organizer reviews order details and summary.
-  - Organizer closes the group buy and sends/export orders to the shop.
+- Product direction changed from a pure self-organized drink order tool to a B2C preorder promotion platform:
+  - Shops publish preorder promotions.
+  - Consumers browse nearby shops and active promotions.
+  - Consumers start or join group buys for a promotion.
+  - The system tracks cups or amount toward the promotion target.
+  - When the target is reached, the discount can be applied to the group-buy order.
 
 ## Suggested MVP Scope
 
@@ -25,6 +26,9 @@ DrinkGroupBuy is planned as a drink group-buying system. The first version shoul
 - Mark payment status.
 - Close and reopen a group buy.
 - Export a text version of the final order.
+- Show nearby shops on a map.
+- Show shop preorder promotions.
+- Calculate promotion progress, such as 50 cups for a 500 TWD discount.
 
 ## Main Roles
 
@@ -32,6 +36,7 @@ DrinkGroupBuy is planned as a drink group-buying system. The first version shoul
 
 - Creates group buys.
 - Selects shop and menu.
+- Selects a shop promotion when starting a group buy.
 - Sets title, deadline, payment instructions, and notes.
 - Reviews all submitted orders.
 - Closes the group buy.
@@ -39,8 +44,16 @@ DrinkGroupBuy is planned as a drink group-buying system. The first version shoul
 ### Participant
 
 - Opens a shared group-buy link.
+- Browses nearby shops and preorder promotions.
 - Selects drink, sugar, ice, toppings, quantity, and notes.
 - Submits an order.
+
+### Shop
+
+- Publishes preorder promotions.
+- Defines promotion target, such as total cups or total amount.
+- Defines reward, such as a fixed amount discount.
+- Provides menu and shop information.
 
 ### Admin / Closer
 
@@ -89,14 +102,44 @@ menu_items
 - base_price
 - is_available
 
+promotions
+- id
+- shop_id
+- title
+- description
+- target_type
+- target_value
+- reward_type
+- reward_value
+- currency
+- starts_at
+- ends_at
+- status
+
 group_buys
 - id
 - shop_id
+- promotion_id
 - title
 - status
 - deadline
 - created_by
 - created_at
+
+Initial group-buy creation service:
+
+- `src/services/groupBuyService.js`
+
+Current create fields:
+
+- `title`
+- `shopId`
+- `promotionId`
+- `createdBy`
+- `deadline`
+- `note`
+
+The service validates that the shop exists, the promotion belongs to that shop, the promotion is active, and the deadline is in the future.
 
 orders
 - id
@@ -152,3 +195,49 @@ The preferred first version is lightweight:
 - Keep the workflow fast for small office, class, or team group buys.
 - Add authentication, richer permissions, LINE notifications, and payment features only after the core order flow is solid.
 
+## Promotion Model
+
+Promotions should be structured so the backend can calculate eligibility.
+
+Example:
+
+```json
+{
+  "id": "promo_001",
+  "shopId": "shop_001",
+  "title": "50 cups for 500 TWD off",
+  "targetType": "cups",
+  "targetValue": 50,
+  "rewardType": "fixed_amount",
+  "rewardValue": 500,
+  "currency": "TWD",
+  "status": "active"
+}
+```
+
+Initial supported promotion rules:
+
+- `targetType: cups`: total quantity must reach `targetValue`.
+- `targetType: amount`: total order amount must reach `targetValue`.
+- `rewardType: fixed_amount`: subtract `rewardValue` from the group-buy total.
+- A shop can define multiple cup-based tiers as a promotion matrix. The current calculator picks the eligible promotion with the highest discount amount.
+
+Example promotion matrix:
+
+```text
+15 cups -> 90 TWD off
+30 cups -> 240 TWD off
+50 cups -> 500 TWD off
+```
+
+The first reusable promotion calculator is implemented in:
+
+- `src/services/promotionCalculator.js`
+
+It currently supports:
+
+- Checking whether a promotion is active.
+- Calculating progress toward the target.
+- Calculating remaining cups or amount.
+- Applying fixed amount discounts.
+- Returning original amount and final amount.

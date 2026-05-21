@@ -1,0 +1,9 @@
+{
+  "name": "drink-group-buy",
+  "version": "0.1.0",
+  "private": true,
+  "description": "B2C drink group-buying preorder prototype.",
+  "scripts": {
+    "start": "node server.js"
+  }
+}

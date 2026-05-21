@@ -1,0 +1,123 @@
+<!doctype html>
+<html lang="zh-Hant">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>DrinkGroupBuy</title>
+    <link rel="stylesheet" href="/styles.css">
+  </head>
+  <body>
+    <main class="app-shell">
+      <header class="topbar">
+        <div>
+          <p class="eyebrow">DrinkGroupBuy</p>
+          <h1>建立團購</h1>
+        </div>
+        <button class="icon-button" id="refreshButton" type="button" title="重新整理">↻</button>
+      </header>
+
+      <section class="panel" id="createPanel">
+        <form id="groupBuyForm" class="form">
+          <label>
+            <span>團購名稱</span>
+            <input id="titleInput" name="title" type="text" placeholder="例如：台中科大下午茶團購" required>
+          </label>
+
+          <label>
+            <span>店家</span>
+            <select id="shopSelect" name="shopId" required></select>
+          </label>
+
+          <div class="promotion-editor">
+            <div class="inline-heading">
+              <span>優惠方案</span>
+              <button class="secondary-button" id="addPromotionButton" type="button">新增方案</button>
+            </div>
+            <div class="promotion-list" id="promotionList"></div>
+          </div>
+
+          <label>
+            <span>建立者</span>
+            <input id="createdByInput" name="createdBy" type="text" value="google_user_demo" required>
+          </label>
+
+          <label>
+            <span>截止時間</span>
+            <input id="deadlineInput" name="deadline" type="datetime-local" required>
+          </label>
+
+          <label>
+            <span>備註</span>
+            <textarea id="noteInput" name="note" rows="3" placeholder="可填付款方式、取餐時間或其他提醒"></textarea>
+          </label>
+
+          <button class="primary-button" type="submit">建立團購</button>
+          <p class="message" id="formMessage" role="status"></p>
+        </form>
+      </section>
+
+      <section class="panel group-panel" id="groupBuyPanel" hidden>
+        <div class="section-heading">
+          <p class="eyebrow">目前團購</p>
+          <h2 id="groupTitle">尚未建立</h2>
+        </div>
+
+        <dl class="summary-list">
+          <div>
+            <dt>店家</dt>
+            <dd id="groupShop">-</dd>
+          </div>
+          <div>
+            <dt>優惠</dt>
+            <dd id="groupPromotion">-</dd>
+          </div>
+          <div>
+            <dt>截止</dt>
+            <dd id="groupDeadline">-</dd>
+          </div>
+          <div>
+            <dt>狀態</dt>
+            <dd id="groupStatus">-</dd>
+          </div>
+        </dl>
+
+        <div class="progress-block">
+          <div class="progress-header">
+            <span id="progressLabel">0 / 0</span>
+            <strong id="discountLabel">尚未達標</strong>
+          </div>
+          <div class="progress-track">
+            <div class="progress-fill" id="progressFill"></div>
+          </div>
+        </div>
+
+        <div class="totals-grid">
+          <div>
+            <span>杯數</span>
+            <strong id="totalCups">0</strong>
+          </div>
+          <div>
+            <span>金額</span>
+            <strong id="totalAmount">$0</strong>
+          </div>
+          <div>
+            <span>人數</span>
+            <strong id="totalParticipants">0</strong>
+          </div>
+        </div>
+
+        <p class="note-text" id="groupNote"></p>
+      </section>
+
+      <section class="panel recent-panel">
+        <div class="section-heading">
+          <p class="eyebrow">紀錄</p>
+          <h2>已建立團購</h2>
+        </div>
+        <div class="group-list" id="groupList"></div>
+      </section>
+    </main>
+
+    <script src="/app.js"></script>
+  </body>
+</html>

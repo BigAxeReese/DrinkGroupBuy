@@ -1,0 +1,326 @@
+[
+  {
+    "id": "shop_001",
+    "name": "清心福全 台中一中店",
+    "address": "台中市北區一中街96號",
+    "phone": "04-2220-1001",
+    "latitude": 24.1492,
+    "longitude": 120.6848,
+    "rating": 4.2,
+    "hasActivePromotion": true,
+    "promotions": [
+      {
+        "id": "promo_001",
+        "title": "50 杯折 500 元",
+        "description": "預購團購累積達 50 杯，整筆訂單可折抵 500 元。",
+        "targetType": "cups",
+        "targetValue": 50,
+        "rewardType": "fixed_amount",
+        "rewardValue": 500,
+        "currency": "TWD",
+        "startsAt": "2026-05-01T00:00:00+08:00",
+        "endsAt": "2026-12-31T23:59:59+08:00",
+        "status": "active"
+      }
+    ],
+    "menu": [
+      {
+        "id": "item_001",
+        "name": "烏龍綠茶",
+        "category": "茶類",
+        "price": 35
+      },
+      {
+        "id": "item_002",
+        "name": "珍珠奶茶",
+        "category": "奶茶",
+        "price": 55
+      },
+      {
+        "id": "item_003",
+        "name": "蜂蜜檸檬",
+        "category": "果茶",
+        "price": 60
+      }
+    ]
+  },
+  {
+    "id": "shop_002",
+    "name": "迷客夏 台中中友店",
+    "address": "台中市北區三民路三段161號",
+    "phone": "04-2220-1002",
+    "latitude": 24.152,
+    "longitude": 120.6843,
+    "rating": 4.5,
+    "hasActivePromotion": true,
+    "promotions": [
+      {
+        "id": "promo_002",
+        "title": "30 杯折 240 元",
+        "description": "預購團購累積達 30 杯，整筆訂單可折抵 240 元。",
+        "targetType": "cups",
+        "targetValue": 30,
+        "rewardType": "fixed_amount",
+        "rewardValue": 240,
+        "currency": "TWD",
+        "startsAt": "2026-05-01T00:00:00+08:00",
+        "endsAt": "2026-09-30T23:59:59+08:00",
+        "status": "active"
+      }
+    ],
+    "menu": [
+      {
+        "id": "item_004",
+        "name": "伯爵紅茶拿鐵",
+        "category": "鮮奶茶",
+        "price": 65
+      },
+      {
+        "id": "item_005",
+        "name": "珍珠紅茶拿鐵",
+        "category": "鮮奶茶",
+        "price": 75
+      },
+      {
+        "id": "item_006",
+        "name": "青檸香茶",
+        "category": "果茶",
+        "price": 60
+      }
+    ]
+  },
+  {
+    "id": "shop_003",
+    "name": "五十嵐 台中育才店",
+    "address": "台中市北區育才街6巷4號",
+    "phone": "04-2220-1003",
+    "latitude": 24.1504,
+    "longitude": 120.6859,
+    "rating": 4.1,
+    "hasActivePromotion": true,
+    "promotions": [
+      {
+        "id": "promo_003",
+        "title": "滿 1000 元折 100 元",
+        "description": "預購團購金額達 1000 元，整筆訂單可折抵 100 元。",
+        "targetType": "amount",
+        "targetValue": 1000,
+        "rewardType": "fixed_amount",
+        "rewardValue": 100,
+        "currency": "TWD",
+        "startsAt": "2026-05-01T00:00:00+08:00",
+        "endsAt": "2026-08-31T23:59:59+08:00",
+        "status": "active"
+      }
+    ],
+    "menu": [
+      {
+        "id": "item_007",
+        "name": "四季春青茶",
+        "category": "茶類",
+        "price": 35
+      },
+      {
+        "id": "item_008",
+        "name": "波霸奶茶",
+        "category": "奶茶",
+        "price": 55
+      },
+      {
+        "id": "item_009",
+        "name": "檸檬綠茶",
+        "category": "果茶",
+        "price": 50
+      }
+    ]
+  },
+  {
+    "id": "shop_004",
+    "name": "可不可熟成紅茶 台中一中店",
+    "address": "台中市北區一中街25號",
+    "phone": "04-2220-1004",
+    "latitude": 24.1486,
+    "longitude": 120.684,
+    "rating": 4.4,
+    "hasActivePromotion": false,
+    "promotions": [],
+    "menu": [
+      {
+        "id": "item_010",
+        "name": "熟成紅茶",
+        "category": "茶類",
+        "price": 35
+      },
+      {
+        "id": "item_011",
+        "name": "白玉歐蕾",
+        "category": "奶茶",
+        "price": 65
+      },
+      {
+        "id": "item_012",
+        "name": "胭脂多多",
+        "category": "果茶",
+        "price": 60
+      }
+    ]
+  },
+  {
+    "id": "shop_005",
+    "name": "龜記 台中一中店",
+    "address": "台中市北區太平路75巷6號",
+    "phone": "04-2220-1005",
+    "latitude": 24.1481,
+    "longitude": 120.6831,
+    "rating": 4.6,
+    "hasActivePromotion": true,
+    "promotions": [
+      {
+        "id": "promo_004",
+        "title": "40 杯折 360 元",
+        "description": "預購團購累積達 40 杯，整筆訂單可折抵 360 元。",
+        "targetType": "cups",
+        "targetValue": 40,
+        "rewardType": "fixed_amount",
+        "rewardValue": 360,
+        "currency": "TWD",
+        "startsAt": "2026-05-01T00:00:00+08:00",
+        "endsAt": "2026-07-31T23:59:59+08:00",
+        "status": "active"
+      }
+    ],
+    "menu": [
+      {
+        "id": "item_013",
+        "name": "紅柚翡翠",
+        "category": "果茶",
+        "price": 75
+      },
+      {
+        "id": "item_014",
+        "name": "翡翠雷夢",
+        "category": "果茶",
+        "price": 65
+      },
+      {
+        "id": "item_015",
+        "name": "三韻奶茶",
+        "category": "奶茶",
+        "price": 60
+      }
+    ]
+  },
+  {
+    "id": "shop_006",
+    "name": "測試店家",
+    "address": "台中市北區三民路三段129號",
+    "phone": "04-2220-1006",
+    "latitude": 24.1498,
+    "longitude": 120.6839,
+    "rating": 4.0,
+    "hasActivePromotion": true,
+    "promotions": [
+      {
+        "id": "promo_005",
+        "title": "50 杯折 500 元",
+        "description": "預購團購累積達 50 杯，整筆訂單可折抵 500 元。",
+        "targetType": "cups",
+        "targetValue": 50,
+        "rewardType": "fixed_amount",
+        "rewardValue": 500,
+        "currency": "TWD",
+        "startsAt": "2026-05-01T00:00:00+08:00",
+        "endsAt": "2026-12-31T23:59:59+08:00",
+        "status": "active"
+      },
+      {
+        "id": "promo_006",
+        "title": "30 杯折 240 元",
+        "description": "預購團購累積達 30 杯，整筆訂單可折抵 240 元，平均每杯折 8 元。",
+        "targetType": "cups",
+        "targetValue": 30,
+        "rewardType": "fixed_amount",
+        "rewardValue": 240,
+        "currency": "TWD",
+        "startsAt": "2026-05-01T00:00:00+08:00",
+        "endsAt": "2026-12-31T23:59:59+08:00",
+        "status": "active"
+      },
+      {
+        "id": "promo_007",
+        "title": "15 杯折 90 元",
+        "description": "預購團購累積達 15 杯，整筆訂單可折抵 90 元，平均每杯折 6 元。",
+        "targetType": "cups",
+        "targetValue": 15,
+        "rewardType": "fixed_amount",
+        "rewardValue": 90,
+        "currency": "TWD",
+        "startsAt": "2026-05-01T00:00:00+08:00",
+        "endsAt": "2026-12-31T23:59:59+08:00",
+        "status": "active"
+      }
+    ],
+    "menu": [
+      {
+        "id": "item_016",
+        "name": "測試紅茶",
+        "category": "茶類",
+        "price": 25
+      },
+      {
+        "id": "item_017",
+        "name": "測試綠茶",
+        "category": "茶類",
+        "price": 30
+      },
+      {
+        "id": "item_018",
+        "name": "測試青茶",
+        "category": "茶類",
+        "price": 35
+      },
+      {
+        "id": "item_019",
+        "name": "測試烏龍茶",
+        "category": "茶類",
+        "price": 40
+      },
+      {
+        "id": "item_020",
+        "name": "測試奶茶",
+        "category": "奶茶",
+        "price": 45
+      },
+      {
+        "id": "item_021",
+        "name": "測試珍珠奶茶",
+        "category": "奶茶",
+        "price": 50
+      },
+      {
+        "id": "item_022",
+        "name": "測試鮮奶茶",
+        "category": "鮮奶茶",
+        "price": 55
+      },
+      {
+        "id": "item_023",
+        "name": "測試檸檬茶",
+        "category": "果茶",
+        "price": 60
+      },
+      {
+        "id": "item_024",
+        "name": "測試水果茶",
+        "category": "果茶",
+        "price": 65
+      },
+      {
+        "id": "item_025",
+        "name": "測試特調",
+        "category": "特調",
+        "price": 70
+      }
+    ]
+  }
+]
