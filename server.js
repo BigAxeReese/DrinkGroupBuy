@@ -1,7 +1,16 @@
 const fs = require("fs");
 const http = require("http");
 const path = require("path");
-const { createGroupBuy, getGroupBuy, listGroupBuys } = require("./src/services/groupBuyService");
+const {
+  cancelGroupBuy,
+  completeGroupBuy,
+  createGroupBuy,
+  getGroupBuy,
+  joinGroupBuy,
+  leaveGroupBuy,
+  listGroupBuys,
+  simulateGroupBuyDeadline
+} = require("./src/services/groupBuyService");
 const { calculateBestPromotion } = require("./src/services/promotionCalculator");
 
 const port = Number(process.env.PORT || 3000);
@@ -70,9 +79,14 @@ function getPromotionForGroupBuy(groupBuy, shops) {
 function buildGroupBuyPayload(groupBuy) {
   const shops = readJson(shopsPath, []);
   const { shop, selectedPromotion, bestPromotion } = getPromotionForGroupBuy(groupBuy, shops);
+  const isReceiving = groupBuy.status === "open" && new Date(groupBuy.deadline).getTime() <= Date.now();
 
   return {
     ...groupBuy,
+    displayStatus: isReceiving ? "receiving" : groupBuy.status,
+    isJoinable: groupBuy.status === "open" && !isReceiving,
+    isCancellable: groupBuy.status === "open" && !isReceiving,
+    isCompletable: isReceiving,
     shop,
     selectedPromotion,
     bestPromotion
@@ -110,6 +124,63 @@ async function handleApi(request, response, url) {
     }
 
     sendJson(response, 200, buildGroupBuyPayload(groupBuy));
+    return;
+  }
+
+  const participantCollectionMatch = url.pathname.match(/^\/api\/group-buys\/([^/]+)\/participants$/);
+  if (request.method === "POST" && participantCollectionMatch) {
+    try {
+      const input = await readBody(request);
+      const groupBuy = joinGroupBuy(participantCollectionMatch[1], input);
+      sendJson(response, 201, buildGroupBuyPayload(groupBuy));
+    } catch (error) {
+      sendJson(response, 400, { error: error.message });
+    }
+    return;
+  }
+
+  const participantMatch = url.pathname.match(/^\/api\/group-buys\/([^/]+)\/participants\/([^/]+)$/);
+  if (request.method === "DELETE" && participantMatch) {
+    try {
+      const groupBuy = leaveGroupBuy(participantMatch[1], participantMatch[2]);
+      sendJson(response, 200, buildGroupBuyPayload(groupBuy));
+    } catch (error) {
+      sendJson(response, 400, { error: error.message });
+    }
+    return;
+  }
+
+  const cancelMatch = url.pathname.match(/^\/api\/group-buys\/([^/]+)\/cancel$/);
+  if (request.method === "POST" && cancelMatch) {
+    try {
+      const input = await readBody(request);
+      const groupBuy = cancelGroupBuy(cancelMatch[1], input);
+      sendJson(response, 200, buildGroupBuyPayload(groupBuy));
+    } catch (error) {
+      sendJson(response, 400, { error: error.message });
+    }
+    return;
+  }
+
+  const completeMatch = url.pathname.match(/^\/api\/group-buys\/([^/]+)\/complete$/);
+  if (request.method === "POST" && completeMatch) {
+    try {
+      const groupBuy = completeGroupBuy(completeMatch[1]);
+      sendJson(response, 200, buildGroupBuyPayload(groupBuy));
+    } catch (error) {
+      sendJson(response, 400, { error: error.message });
+    }
+    return;
+  }
+
+  const simulateDeadlineMatch = url.pathname.match(/^\/api\/group-buys\/([^/]+)\/simulate-deadline$/);
+  if (request.method === "POST" && simulateDeadlineMatch) {
+    try {
+      const groupBuy = simulateGroupBuyDeadline(simulateDeadlineMatch[1]);
+      sendJson(response, 200, buildGroupBuyPayload(groupBuy));
+    } catch (error) {
+      sendJson(response, 400, { error: error.message });
+    }
     return;
   }
 

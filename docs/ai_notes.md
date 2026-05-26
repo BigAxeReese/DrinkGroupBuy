@@ -18,6 +18,7 @@ DrinkGroupBuy is planned as a B2C drink group-buying preorder platform. Shops ca
 ## Suggested MVP Scope
 
 - Create a group buy.
+- When the merchant leaves the group-buy name empty, store `飲料團購` as its default name.
 - Manage shops and menu items.
 - Let participants submit orders.
 - Show order list.
@@ -65,20 +66,23 @@ DrinkGroupBuy is planned as a B2C drink group-buying preorder platform. Shops ca
 
 Recommended first implementation:
 
-- Frontend: HTML/CSS/JavaScript or React.
-- Backend: Node.js + Express.
-- Database: SQLite.
+- Frontend: lightweight HTML/CSS/JavaScript prototype first; React can be introduced later when UI complexity grows.
+- Backend: Node.js HTTP server first; Express can be introduced later when routes grow.
+- Database: JSON files for the prototype, SQLite/PostgreSQL later.
 - API style: REST API.
 - Deployment later: local first, then Render, Railway, VPS, or similar.
+- Mobile strategy: build as a Web App first, then package with Capacitor for Android/iOS.
 
 High-level flow:
 
 ```text
 Browser
   -> Frontend UI
-  -> Express REST API
-  -> SQLite database
+  -> Node REST API
+  -> JSON data files
 ```
+
+The project intentionally starts as a Web App so the UI and core flow can be tested in a browser. Later, Capacitor can wrap the same Web App into a mobile app. For map features, start with a Web map and consider a Capacitor native map plugin only if mobile performance or native gestures become a problem.
 
 ## Initial Data Model Draft
 
@@ -134,12 +138,12 @@ Current create fields:
 
 - `title`
 - `shopId`
-- `promotionId`
+- `promotionMatrix`
 - `createdBy`
 - `deadline`
 - `note`
 
-The service validates that the shop exists, the promotion belongs to that shop, the promotion is active, and the deadline is in the future.
+The service validates that the shop exists, the custom promotion matrix is valid, and the deadline is in the future.
 
 orders
 - id
@@ -241,3 +245,100 @@ It currently supports:
 - Calculating remaining cups or amount.
 - Applying fixed amount discounts.
 - Returning original amount and final amount.
+
+## Current Prototype UI
+
+The first browser-testable UI is implemented in:
+
+- `public/index.html`
+- `public/app.js`
+- `public/styles.css`
+- `server.js`
+
+Current UI features:
+
+- Create a group buy.
+- Select a shop.
+- Define custom promotion tiers by entering cup count and discount amount.
+- Preview average discount per cup for each tier.
+- Add and remove promotion tiers.
+- Show created group-buy detail.
+- Show group-buy progress toward the next eligible tier.
+- Show existing group-buy records.
+- Switch between customer and merchant prototype views.
+- Provide a dedicated customer join flow: select an open group buy, view the matching shop menu, then select a drink and customize the order.
+- Let customers submit drink orders with sugar level, ice level, quantity, and notes.
+- Show participant order entries and allow customers to leave an open group buy.
+- Let merchants cancel an open group buy and record a cancellation reason.
+- In customer mode, the group-buy list only shows activities that are currently open for joining; tapping an entry opens its details.
+- The customer home-page join action lists only open group buys and loads menu items from the selected activity's shop record in `data/shops/shops.json`.
+- Tapping a customer group-buy list entry first opens activity information; an open activity provides an explicit join button.
+- After the customer chooses to join, the selected shop menu displays drinks and prices; choosing a drink opens a customization dialog.
+- Show each customer-facing list entry with group-buy name, shop name, and cup progress against the nearest promotion tier not yet reached. After all tiers are reached, keep showing the highest tier.
+- Main navigation is presented as function entries on the home screen instead of a persistent tab bar; feature screens provide a return-to-home action.
+- In merchant mode, provide a simulated merchant-account selector backed by shop records in `data/shops/shops.json`.
+- In customer mode, provide simulated accounts `test1`, `test2`, and `test3`; the selected account is recorded on joined orders without asking for a name in the drink customization dialog.
+- The selected simulated merchant controls the shop used when creating a group buy and filters the merchant activity list.
+- In merchant mode, the group-buy view is list-first as well; selecting an activity opens detail and cancellation controls.
+- In merchant mode, list views are split into active activities and historical orders.
+- When a group-buy deadline passes, an open activity is presented as `receiving` / 接單中; customers can no longer modify participation.
+- A merchant can mark a receiving order as completed, recording `completedAt` and moving it into historical orders.
+- For prototype testing, a merchant can use a simulate-deadline action on an open activity to set its deadline to the current time and immediately exercise the receiving/completion flow.
+
+The merchant- and customer-account switchers are UI-level simulation only; they do not yet provide authentication or backend authorization.
+
+Current group-buy participant model:
+
+```text
+participants
+- id
+- customerName
+- menuItemId
+- itemName
+- unitPrice
+- quantity
+- subtotal
+- sugar
+- ice
+- note
+- joinedAt
+```
+
+On join or leave, the backend recalculates group-buy cup count, amount, and participant count. Expired group buys are displayed as closed for joining.
+Cancelled group buys preserve `cancelReason` and `cancelledAt`; they cannot be joined, left, or cancelled again. Cancelled and completed activities are displayed under merchant historical orders.
+
+Current visual direction:
+
+- Mobile-width dark interface with green accent colors.
+- Dense function-first screens for repeated customer and merchant tasks.
+- Desktop browser preview presents the app inside a phone-frame mockup; narrow screens fall back to a full-screen mobile layout.
+
+Current local URL:
+
+```text
+http://localhost:3000
+```
+
+## Development Conversation Record - 2026-05-26
+
+Decisions and implementation progress recorded from the current development discussion:
+
+- The product is a B2C drink preorder group-buy application: merchants publish limited-time activities and customers join orders to reach tiered discounts.
+- The prototype remains a browser-testable Web App first, with Capacitor kept as the later mobile packaging direction.
+- Data remains JSON-backed for this prototype; a Firebase/Firestore and Google Login architecture has been discussed as future direction, not yet implemented.
+- Shops and menu seed data are centered around the National Taichung University of Science and Technology area, including a test shop with ten differently priced drinks.
+- Merchant discount rules are entered as cup targets and fixed discount amounts; the UI calculates average per-cup discount.
+- Merchant mode supports simulated shop accounts, group-buy creation, cancellation with reason, simulated deadline completion, receiving-order handling, and historical orders.
+- A blank merchant-created group-buy title defaults to `飲料團購`.
+- Customer mode supports simulated accounts `test1`, `test2`, and `test3`.
+- The customer list displays only group buys that can currently be joined, with shop name as the primary label and group-buy name as secondary information.
+- Customers open group-buy details first, tap the join action to view that shop's drink menu and prices, then select a drink to open a customization dialog.
+- Customer order customization stores sugar, ice, quantity, and note; the selected simulated customer account supplies the order name.
+- Participant totals, promotion progress, joining, leaving, cancellation, and order-completion states are supported by the current Node API.
+- The interface uses a dark mobile-oriented layout and now includes a desktop phone-frame preview.
+
+Suggested next feature discussion:
+
+- Decide whether a customer should see only their own submitted entries in the detail page.
+- Add an order review step before final submission or implement customer order editing.
+- Begin nearby-shop/map browsing once the order workflow is stable.

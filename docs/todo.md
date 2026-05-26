@@ -3,20 +3,22 @@
 ## Current Progress
 
 - Project folder exists at `C:\vscode\DrinkGroupBuy`.
-- Repository currently has only `.git`; no application scaffold has been created yet.
+- Lightweight Node/Web prototype has been created.
 - Initial system architecture discussion is documented in `docs/ai_notes.md`.
 - Initial project handoff notes are documented in `AGENTS.md`.
 - Test shop data exists in `data/shops/shops.json`.
 - Shop test data now uses B2C preorder promotion fields.
+- Group-buy records are stored in `data/group_buys/group_buys.json`.
+- Current UI runs at `http://localhost:3000`.
+- Latest committed prototype commit: `303d3a0 Add group buy prototype UI`.
+- The 2026-05-26 discussion and implemented feature summary is recorded in `docs/ai_notes.md`.
 
 ## Next Decisions
 
 - Decide MVP scope:
   - Option A: single shop, single active group buy first.
   - Option B: multi-shop, multi-group-buy support from the start.
-- Decide frontend stack:
-  - Plain HTML/CSS/JavaScript for fastest simple version.
-  - React for a more scalable UI structure.
+- Keep current lightweight HTML/CSS/JavaScript prototype until the flow becomes complex enough to justify React.
 - Decide whether participants need login in version 1.
 - Decide how organizer/admin access should work:
   - Private admin link.
@@ -28,9 +30,9 @@
 
 ## Implementation TODO
 
-- Create project scaffold.
-- Add `package.json`.
-- Set up Express server.
+- Create project scaffold. Done for the lightweight prototype.
+- Add `package.json`. Done.
+- Set up Node server. Done in `server.js`.
 - Set up SQLite database.
 - Create database schema/migrations.
 - Add REST API routes:
@@ -50,9 +52,13 @@
   - Validate shop and promotion.
   - Store group-buy records in `data/group_buys/group_buys.json`.
 - Next group-buy functions:
-  - Join group buy.
-  - Leave group buy.
-  - Recalculate group-buy totals.
+  - Join group buy. Done in prototype.
+  - Leave group buy. Done in prototype.
+  - Recalculate group-buy totals. Done in prototype.
+- Preserve custom promotion matrix on created group buys.
+- Add participant order storage.
+- Add join form that selects drink items from the shop menu. Done in prototype.
+- Add dedicated customer join flow with shop-backed drink menu and sugar, ice, quantity, and note customization. Done in prototype.
 - Build initial frontend pages:
   - Group-buy list.
   - Create group buy.
@@ -67,14 +73,41 @@
   - Average discount per cup preview.
   - Group-buy detail panel.
   - Existing group-buy list.
+  - Customer list-first navigation with progress toward the nearest unreached cup-discount tier and drill-down detail. Done in prototype.
+  - Customer join screen that lists joinable campaigns, then loads the corresponding shop menu and order customization form. Done in prototype.
+  - Customer can open activity information from the list, tap join, view shop menu prices, and customize the selected drink in a dialog. Done in prototype.
+  - Customer group-buy list is filtered to activities that can still be joined. Done in prototype.
+  - Merchant group-buy name defaults to `飲料團購` when left blank. Done in prototype.
+  - Simulated merchant-account selector mapped to seeded shop data. Done in prototype.
+  - Simulated customer accounts `test1` to `test3`, used automatically when joining without a name field in drink customization. Done in prototype.
+  - Desktop phone-frame preview with full-screen fallback for small viewports. Done in prototype.
+  - Merchant list-first group-buy management navigation. Done in prototype.
+  - Merchant active/history order views and completion action after deadline. Done in prototype.
+  - Merchant-only simulated deadline trigger for testing receiving flow. Done in prototype.
 - Add order summary calculation.
 - Add payment status update.
 - Add close/reopen group-buy behavior.
+- Add merchant group-buy cancellation with reason. Done in prototype.
+- Add formal order status machine and payment/refund handling when backend architecture is upgraded.
 - Add text export for final shop order.
+
+## Current Test Commands
+
+```powershell
+node C:\vscode\DrinkGroupBuy\server.js
+node C:\vscode\DrinkGroupBuy\scripts\verifyPromotions.js
+```
+
+Browser:
+
+```text
+http://localhost:3000
+```
 
 ## Later Enhancements
 
 - User accounts and permissions.
+- Enforce merchant authorization on group-buy creation and cancellation once authentication is introduced.
 - LINE Bot notifications.
 - Payment integration.
 - CSV/Excel export.
