@@ -51,8 +51,12 @@
             <span>02</span>
             <strong>加入團購</strong>
           </button>
-          <button class="feature-card customer-only is-disabled" type="button" disabled>
+          <button class="feature-card customer-only" type="button" data-view-target="orders">
             <span>03</span>
+            <strong>我的訂單</strong>
+          </button>
+          <button class="feature-card customer-only is-disabled" type="button" disabled>
+            <span>04</span>
             <strong>附近店家</strong>
           </button>
           <button class="feature-card merchant-only is-disabled" type="button" disabled>
@@ -174,6 +178,12 @@
             </section>
           </div>
         </section>
+      </section>
+
+      <section class="view customer-only" id="ordersView" hidden>
+        <button class="back-button view-back-button" type="button" data-view-target="home">‹ 返回主頁</button>
+
+        <section class="customer-order-list" id="customerOrderList"></section>
       </section>
 
       <section class="view" id="groupsView" hidden>

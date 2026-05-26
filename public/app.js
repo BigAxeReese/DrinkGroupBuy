@@ -24,6 +24,7 @@ const elements = {
     home: document.querySelector("#homeView"),
     create: document.querySelector("#createView"),
     join: document.querySelector("#joinView"),
+    orders: document.querySelector("#ordersView"),
     groups: document.querySelector("#groupsView")
   },
   form: document.querySelector("#groupBuyForm"),
@@ -88,13 +89,15 @@ const elements = {
   joinFromDetailButton: document.querySelector("#joinFromDetailButton"),
   participantList: document.querySelector("#participantList"),
   participantMessage: document.querySelector("#participantMessage"),
-  groupList: document.querySelector("#groupList")
+  groupList: document.querySelector("#groupList"),
+  customerOrderList: document.querySelector("#customerOrderList")
 };
 
 const viewTitles = {
   home: "主頁",
   create: "建立團購",
   join: "加入團購",
+  orders: "我的訂單",
   groups: "團購管理"
 };
 
@@ -408,6 +411,85 @@ function renderParticipants(groupBuy) {
     .join("");
 }
 
+function getCustomerOrderEstimate(groupBuy, participants) {
+  const originalAmount = participants.reduce((total, participant) => total + Number(participant.subtotal || 0), 0);
+  const groupAmount = Number(groupBuy.totals && groupBuy.totals.amount) || 0;
+  const groupDiscount = groupBuy.bestPromotion && groupBuy.bestPromotion.isEligible
+    ? Number(groupBuy.bestPromotion.discountAmount) || 0
+    : 0;
+  const discountAmount = groupBuy.status === "cancelled" || groupAmount <= 0
+    ? 0
+    : Math.round((groupDiscount * originalAmount) / groupAmount);
+
+  return {
+    originalAmount,
+    discountAmount,
+    finalAmount: groupBuy.status === "cancelled" ? 0 : Math.max(originalAmount - discountAmount, 0)
+  };
+}
+
+function renderCustomerOrders() {
+  const customerName = elements.customerAccountSelect.value;
+  const orders = state.groupBuys
+    .map((groupBuy) => {
+      const participants = (groupBuy.participants || [])
+        .filter((participant) => participant.customerName === customerName);
+      return {
+        groupBuy,
+        participants,
+        estimate: getCustomerOrderEstimate(groupBuy, participants)
+      };
+    })
+    .filter((order) => order.participants.length > 0)
+    .reverse();
+
+  if (orders.length === 0) {
+    elements.customerOrderList.innerHTML = `
+      <section class="panel empty-order-panel">
+        <p class="note-text">目前帳號尚未加入任何團購訂單。</p>
+      </section>
+    `;
+    return;
+  }
+
+  elements.customerOrderList.innerHTML = orders.map(({ groupBuy, participants, estimate }) => `
+    <section class="panel customer-order-card">
+      <div class="order-card-header">
+        <div>
+          <p class="eyebrow">${escapeHtml(groupBuy.shopName)}</p>
+          <h2>${escapeHtml(groupBuy.title)}</h2>
+        </div>
+        <em class="row-status">${escapeHtml(getStatusLabel(groupBuy))}</em>
+      </div>
+      <dl class="order-meta">
+        <div><dt>截止時間</dt><dd>${formatDateTime(groupBuy.deadline)}</dd></div>
+        <div><dt>優惠內容</dt><dd>${escapeHtml(summarizePromotions(groupBuy))}</dd></div>
+      </dl>
+      <div class="owned-order-items">
+        ${participants.map((participant) => `
+          <div class="owned-order-row">
+            <div>
+              <strong>${escapeHtml(participant.itemName)} x ${Number(participant.quantity)}</strong>
+              <span>${escapeHtml(participant.sugar || "-")} / ${escapeHtml(participant.ice || "-")}${participant.note ? ` · ${escapeHtml(participant.note)}` : ""}</span>
+            </div>
+            <strong>${formatMoney(participant.subtotal)}</strong>
+          </div>
+        `).join("")}
+      </div>
+      ${groupBuy.status === "cancelled" ? `
+        <p class="cancelled-order-copy">此團購已取消，不列入應付試算。</p>
+      ` : `
+        <div class="order-estimate">
+          <div><span>訂購金額</span><strong>${formatMoney(estimate.originalAmount)}</strong></div>
+          <div><span>預估分攤折扣</span><strong>-${formatMoney(estimate.discountAmount)}</strong></div>
+          <div class="payable"><span>預估應付</span><strong>${formatMoney(estimate.finalAmount)}</strong></div>
+        </div>
+        <p class="estimate-note">折扣依整團訂購金額比例分攤試算，最終金額以店家結單結果為準。</p>
+      `}
+    </section>
+  `).join("");
+}
+
 function renderGroupBuy(groupBuy) {
   state.currentGroupBuy = groupBuy;
   elements.groupBuyPanel.hidden = !groupBuy;
@@ -521,6 +603,9 @@ function showView(viewName) {
   if (viewName === "join" && state.role !== "customer") {
     viewName = "home";
   }
+  if (viewName === "orders" && state.role !== "customer") {
+    viewName = "home";
+  }
 
   Object.entries(elements.views).forEach(([name, view]) => {
     view.hidden = name !== viewName;
@@ -533,6 +618,9 @@ function showView(viewName) {
   }
   if (viewName === "join") {
     showJoinCampaigns();
+  }
+  if (viewName === "orders") {
+    renderCustomerOrders();
   }
 }
 
@@ -552,13 +640,14 @@ function setRole(role) {
 
   if (role === "customer" && !elements.views.create.hidden) {
     showView("home");
-  } else if (role === "merchant" && !elements.views.join.hidden) {
+  } else if (role === "merchant" && (!elements.views.join.hidden || !elements.views.orders.hidden)) {
     showView("home");
   } else if (!elements.views.groups.hidden) {
     showGroupList();
   }
   renderGroupList();
   renderJoinCampaigns();
+  renderCustomerOrders();
 }
 
 function updateMerchantOrderTabs() {
@@ -577,6 +666,7 @@ function updateStoredGroupBuy(groupBuy, options = {}) {
 
   renderGroupList();
   renderJoinCampaigns();
+  renderCustomerOrders();
   if (options.renderDetail !== false) {
     renderGroupBuy(groupBuy);
   }
@@ -589,6 +679,7 @@ async function loadInitialData() {
   renderPromotionRows();
   renderGroupList();
   renderJoinCampaigns();
+  renderCustomerOrders();
   renderGroupBuy(state.groupBuys[state.groupBuys.length - 1] || null);
 }
 
@@ -819,6 +910,7 @@ elements.roleButtons.forEach((button) => {
   button.addEventListener("click", () => setRole(button.dataset.roleTarget));
 });
 elements.merchantAccountSelect.addEventListener("change", syncSelectedMerchant);
+elements.customerAccountSelect.addEventListener("change", renderCustomerOrders);
 elements.orderTabButtons.forEach((button) => {
   button.addEventListener("click", () => {
     state.merchantOrderList = button.dataset.orderList;

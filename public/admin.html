@@ -1,0 +1,146 @@
+<!doctype html>
+<html lang="zh-Hant">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>DrinkGroupBuy 後台管理</title>
+    <link rel="stylesheet" href="/admin.css">
+  </head>
+  <body>
+    <header class="admin-header">
+      <div>
+        <p class="eyebrow">DrinkGroupBuy Admin</p>
+        <h1>團購後台管理</h1>
+        <p class="subtitle">查看所有活動、參與訂單與調整團購設定</p>
+      </div>
+      <div class="header-actions">
+        <a class="outline-button" href="/">開啟前台</a>
+        <button class="primary-button" id="refreshButton" type="button">重新整理</button>
+      </div>
+    </header>
+
+    <main class="dashboard">
+      <aside class="sidebar">
+        <div class="metrics" id="metrics"></div>
+        <section class="panel list-panel">
+          <div class="panel-title">
+            <div>
+              <p class="eyebrow">活動列表</p>
+              <h2>所有團購</h2>
+            </div>
+          </div>
+          <div class="filters">
+            <input id="searchInput" type="search" placeholder="搜尋團購或店家">
+            <select id="statusFilter" aria-label="依狀態篩選">
+              <option value="all">全部狀態</option>
+              <option value="open">開放揪團</option>
+              <option value="receiving">接單中</option>
+              <option value="completed">已完成</option>
+              <option value="cancelled">已取消</option>
+            </select>
+          </div>
+          <div class="group-list" id="groupList"></div>
+        </section>
+      </aside>
+
+      <section class="content">
+        <section class="panel empty-detail" id="emptyDetail">
+          <h2>請選擇一筆團購</h2>
+          <p>從左側清單點選活動，即可查看完整資訊與進行修改。</p>
+        </section>
+
+        <section class="detail-layout" id="detailLayout" hidden>
+          <section class="panel detail-overview">
+            <div class="detail-heading">
+              <div>
+                <p class="eyebrow" id="detailShop">店家</p>
+                <h2 id="detailTitle">團購名稱</h2>
+              </div>
+              <span class="status-pill" id="detailStatus">-</span>
+            </div>
+            <div class="totals" id="detailTotals"></div>
+            <div class="progress-panel">
+              <div class="progress-label">
+                <span id="progressText">-</span>
+                <strong id="discountText">-</strong>
+              </div>
+              <div class="progress-track"><div class="progress-fill" id="progressFill"></div></div>
+            </div>
+            <dl class="record-meta" id="recordMeta"></dl>
+          </section>
+
+          <section class="panel">
+            <div class="panel-title">
+              <div>
+                <p class="eyebrow">活動設定</p>
+                <h2>修改團購資訊</h2>
+              </div>
+            </div>
+            <form class="edit-form" id="editForm">
+              <div class="form-grid">
+                <label>
+                  <span>團購名稱</span>
+                  <input id="titleInput" type="text" placeholder="飲料團購">
+                </label>
+                <label>
+                  <span>活動店家</span>
+                  <select id="shopInput" required></select>
+                  <small class="field-hint" id="shopEditHint"></small>
+                </label>
+                <label>
+                  <span>建立者</span>
+                  <input id="createdByInput" type="text" required>
+                </label>
+                <label>
+                  <span>截止時間</span>
+                  <input id="deadlineInput" type="datetime-local" required>
+                </label>
+                <label>
+                  <span>狀態</span>
+                  <select id="statusInput" required>
+                    <option value="open">開放揪團</option>
+                    <option value="completed">已完成</option>
+                    <option value="cancelled">已取消</option>
+                  </select>
+                </label>
+                <label class="cancel-reason-field" id="cancelReasonField" hidden>
+                  <span>取消原因</span>
+                  <input id="cancelReasonInput" type="text" placeholder="請填寫取消原因">
+                </label>
+                <label class="full-width">
+                  <span>備註</span>
+                  <textarea id="noteInput" rows="3" placeholder="活動說明或取餐備註"></textarea>
+                </label>
+              </div>
+
+              <div class="promotion-header">
+                <div>
+                  <p class="eyebrow">優惠矩陣</p>
+                  <h3>優惠達標方案</h3>
+                </div>
+                <button class="outline-button" id="addPromotionButton" type="button">新增方案</button>
+              </div>
+              <div class="promotion-list" id="promotionList"></div>
+
+              <div class="form-actions">
+                <p class="message" id="formMessage" role="status"></p>
+                <button class="primary-button" type="submit">儲存修改</button>
+              </div>
+            </form>
+          </section>
+
+          <section class="panel">
+            <div class="panel-title">
+              <div>
+                <p class="eyebrow">訂單明細</p>
+                <h2>參與者與訂購資訊</h2>
+              </div>
+            </div>
+            <div class="participant-list" id="participantList"></div>
+          </section>
+        </section>
+      </section>
+    </main>
+    <script src="/admin.js"></script>
+  </body>
+</html>

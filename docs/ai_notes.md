@@ -319,6 +319,20 @@ Current local URL:
 http://localhost:3000
 ```
 
+Current admin dashboard URL:
+
+```text
+http://localhost:3000/admin
+```
+
+The desktop admin dashboard is implemented in:
+
+- `public/admin.html`
+- `public/admin.js`
+- `public/admin.css`
+
+It lists group buys across all shops, opens complete group-buy and participant detail, and edits activity title, shop, creator, deadline, note, cup/amount-based discount tiers, and lifecycle status through `PATCH /api/group-buys/:id`. It intentionally leaves participant order entries read-only for now, and blocks shop changes after orders exist so item/shop ownership is not corrupted. This is a prototype administration page without authentication or server-side admin authorization yet.
+
 ## Development Conversation Record - 2026-05-26
 
 Decisions and implementation progress recorded from the current development discussion:
@@ -334,11 +348,15 @@ Decisions and implementation progress recorded from the current development disc
 - The customer list displays only group buys that can currently be joined, with shop name as the primary label and group-buy name as secondary information.
 - Customers open group-buy details first, tap the join action to view that shop's drink menu and prices, then select a drink to open a customization dialog.
 - Customer order customization stores sugar, ice, quantity, and note; the selected simulated customer account supplies the order name.
+- Customer mode includes a "我的訂單" page which filters joined entries for the selected simulated account, displays drink customization details, and estimates payable amount within each group buy by allocating any eligible group discount proportionally to that customer's order subtotal.
+- A proposed in-app administrator role switch was removed; administration is instead provided through a separate desktop-oriented web dashboard so customer and merchant prototype flows stay focused.
+- A separate desktop web admin dashboard at `/admin` lists every group buy and supports detail inspection plus editing of core activity, promotion-tier, and status fields while keeping participant entries read-only.
+- Before uploading this work to GitHub, runtime changes in `data/group_buys/group_buys.json` were intentionally kept local because they represent browser test activity rather than source changes.
 - Participant totals, promotion progress, joining, leaving, cancellation, and order-completion states are supported by the current Node API.
 - The interface uses a dark mobile-oriented layout and now includes a desktop phone-frame preview.
 
 Suggested next feature discussion:
 
-- Decide whether a customer should see only their own submitted entries in the detail page.
 - Add an order review step before final submission or implement customer order editing.
+- Decide whether the shared group-buy detail page should hide other customers' submitted entries now that personal order management exists.
 - Begin nearby-shop/map browsing once the order workflow is stable.

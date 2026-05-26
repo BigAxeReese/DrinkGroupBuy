@@ -9,7 +9,8 @@ const {
   joinGroupBuy,
   leaveGroupBuy,
   listGroupBuys,
-  simulateGroupBuyDeadline
+  simulateGroupBuyDeadline,
+  updateGroupBuy
 } = require("./src/services/groupBuyService");
 const { calculateBestPromotion } = require("./src/services/promotionCalculator");
 
@@ -127,6 +128,17 @@ async function handleApi(request, response, url) {
     return;
   }
 
+  if (request.method === "PATCH" && groupBuyMatch) {
+    try {
+      const input = await readBody(request);
+      const groupBuy = updateGroupBuy(groupBuyMatch[1], input);
+      sendJson(response, 200, buildGroupBuyPayload(groupBuy));
+    } catch (error) {
+      sendJson(response, 400, { error: error.message });
+    }
+    return;
+  }
+
   const participantCollectionMatch = url.pathname.match(/^\/api\/group-buys\/([^/]+)\/participants$/);
   if (request.method === "POST" && participantCollectionMatch) {
     try {
@@ -188,7 +200,11 @@ async function handleApi(request, response, url) {
 }
 
 function sendStatic(request, response, url) {
-  const pathname = url.pathname === "/" ? "/index.html" : url.pathname;
+  const pathname = url.pathname === "/"
+    ? "/index.html"
+    : url.pathname === "/admin" || url.pathname === "/admin/"
+      ? "/admin.html"
+      : url.pathname;
   const filePath = path.normalize(path.join(publicRoot, pathname));
 
   if (!filePath.startsWith(publicRoot)) {

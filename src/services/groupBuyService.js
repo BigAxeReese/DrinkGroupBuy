@@ -47,6 +47,17 @@ function assertFutureDate(value, fieldName, now = new Date()) {
   return date.toISOString();
 }
 
+function assertValidDate(value, fieldName) {
+  assertNonEmptyString(value, fieldName);
+
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) {
+    throw new Error(`${fieldName} must be a valid date`);
+  }
+
+  return date.toISOString();
+}
+
 function findShop(shopId) {
   const shops = readJson(shopsPath, []);
   const shop = shops.find((item) => item.id === shopId);
@@ -64,11 +75,12 @@ function normalizePromotionMatrix(promotionMatrix) {
   }
 
   const promotions = promotionMatrix.map((item, index) => {
+    const targetType = item.targetType === "amount" ? "amount" : "cups";
     const targetValue = Number(item.targetValue);
     const rewardValue = Number(item.rewardValue);
 
     if (!Number.isFinite(targetValue) || targetValue <= 0) {
-      throw new Error("promotion cups must be greater than 0");
+      throw new Error("promotion target must be greater than 0");
     }
 
     if (!Number.isFinite(rewardValue) || rewardValue <= 0) {
@@ -77,9 +89,13 @@ function normalizePromotionMatrix(promotionMatrix) {
 
     return {
       id: `promo_custom_${index + 1}`,
-      title: `${targetValue} 杯折 ${rewardValue} 元`,
-      description: `預購團購累積達 ${targetValue} 杯，整筆訂單可折抵 ${rewardValue} 元，平均每杯折 ${(rewardValue / targetValue).toFixed(1)} 元。`,
-      targetType: "cups",
+      title: targetType === "cups"
+        ? `${targetValue} 杯折 ${rewardValue} 元`
+        : `滿 ${targetValue} 元折 ${rewardValue} 元`,
+      description: targetType === "cups"
+        ? `預購團購累積達 ${targetValue} 杯，整筆訂單可折抵 ${rewardValue} 元，平均每杯折 ${(rewardValue / targetValue).toFixed(1)} 元。`
+        : `預購團購金額達 ${targetValue} 元，整筆訂單可折抵 ${rewardValue} 元。`,
+      targetType,
       targetValue,
       rewardType: "fixed_amount",
       rewardValue,
@@ -165,6 +181,71 @@ function getGroupBuy(groupBuyId) {
   assertNonEmptyString(groupBuyId, "groupBuyId");
   const groupBuys = readJson(groupBuysPath, []);
   return groupBuys.find((groupBuy) => groupBuy.id === groupBuyId) || null;
+}
+
+function updateGroupBuy(groupBuyId, input, options = {}) {
+  const now = options.now || new Date();
+  const groupBuys = readJson(groupBuysPath, []);
+  const groupBuy = groupBuys.find((item) => item.id === groupBuyId);
+
+  if (!groupBuy) {
+    throw new Error(`group buy not found: ${groupBuyId}`);
+  }
+
+  assertNonEmptyString(input.shopId, "shopId");
+  assertNonEmptyString(input.createdBy, "createdBy");
+
+  const shop = findShop(input.shopId);
+  if ((groupBuy.participants || []).length > 0 && shop.id !== groupBuy.shopId) {
+    throw new Error("shop cannot be changed after participants have joined");
+  }
+
+  const status = typeof input.status === "string" ? input.status.trim() : "";
+  if (!["open", "completed", "cancelled"].includes(status)) {
+    throw new Error("status is not a valid option");
+  }
+
+  const deadline = status === "open"
+    ? assertFutureDate(input.deadline, "deadline", now)
+    : assertValidDate(input.deadline, "deadline");
+  const promotions = normalizePromotionMatrix(input.promotionMatrix);
+  const highestPromotion = promotions[promotions.length - 1];
+  const updatedAt = now.toISOString();
+
+  groupBuy.title = typeof input.title === "string" && input.title.trim()
+    ? input.title.trim()
+    : "飲料團購";
+  groupBuy.shopId = shop.id;
+  groupBuy.shopName = shop.name;
+  groupBuy.promotionId = highestPromotion.id;
+  groupBuy.promotionTitle = "自訂優惠矩陣";
+  groupBuy.promotions = promotions;
+  groupBuy.createdBy = input.createdBy.trim();
+  groupBuy.deadline = deadline;
+  groupBuy.note = typeof input.note === "string" ? input.note.trim() : "";
+  groupBuy.status = status;
+  groupBuy.updatedAt = updatedAt;
+
+  if (status === "open") {
+    delete groupBuy.cancelReason;
+    delete groupBuy.cancelledAt;
+    delete groupBuy.completedAt;
+    delete groupBuy.simulatedDeadlineAt;
+  } else if (status === "cancelled") {
+    assertNonEmptyString(input.cancelReason, "cancelReason");
+    groupBuy.cancelReason = input.cancelReason.trim();
+    groupBuy.cancelledAt = groupBuy.cancelledAt || updatedAt;
+    delete groupBuy.completedAt;
+  } else {
+    groupBuy.completedAt = groupBuy.completedAt || updatedAt;
+    delete groupBuy.cancelReason;
+    delete groupBuy.cancelledAt;
+  }
+
+  recalculateTotals(groupBuy);
+  writeJson(groupBuysPath, groupBuys);
+
+  return groupBuy;
 }
 
 function joinGroupBuy(groupBuyId, input, options = {}) {
@@ -333,5 +414,6 @@ module.exports = {
   joinGroupBuy,
   leaveGroupBuy,
   listGroupBuys,
-  simulateGroupBuyDeadline
+  simulateGroupBuyDeadline,
+  updateGroupBuy
 };

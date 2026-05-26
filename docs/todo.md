@@ -10,7 +10,8 @@
 - Shop test data now uses B2C preorder promotion fields.
 - Group-buy records are stored in `data/group_buys/group_buys.json`.
 - Current UI runs at `http://localhost:3000`.
-- Latest committed prototype commit: `303d3a0 Add group buy prototype UI`.
+- Web admin dashboard runs at `http://localhost:3000/admin`.
+- Latest pushed prototype commit before current work: `7fe6751 Build merchant and customer group buy flows`.
 - The 2026-05-26 discussion and implemented feature summary is recorded in `docs/ai_notes.md`.
 
 ## Next Decisions
@@ -77,6 +78,7 @@
   - Customer join screen that lists joinable campaigns, then loads the corresponding shop menu and order customization form. Done in prototype.
   - Customer can open activity information from the list, tap join, view shop menu prices, and customize the selected drink in a dialog. Done in prototype.
   - Customer group-buy list is filtered to activities that can still be joined. Done in prototype.
+  - Customer order management page lists the selected simulated account's joined drink entries and provides per-group-buy proportional discount amount estimates. Done in prototype.
   - Merchant group-buy name defaults to `飲料團購` when left blank. Done in prototype.
   - Simulated merchant-account selector mapped to seeded shop data. Done in prototype.
   - Simulated customer accounts `test1` to `test3`, used automatically when joining without a name field in drink customization. Done in prototype.
@@ -84,12 +86,14 @@
   - Merchant list-first group-buy management navigation. Done in prototype.
   - Merchant active/history order views and completion action after deadline. Done in prototype.
   - Merchant-only simulated deadline trigger for testing receiving flow. Done in prototype.
-- Add order summary calculation.
+  - Desktop web admin dashboard listing all group buys with detail viewing, participant order inspection, and editing for activity fields, discount tiers, and status. Done in prototype.
+- Add order summary calculation. Customer-facing per-order estimated amount display done in prototype.
 - Add payment status update.
 - Add close/reopen group-buy behavior.
 - Add merchant group-buy cancellation with reason. Done in prototype.
 - Add formal order status machine and payment/refund handling when backend architecture is upgraded.
 - Add text export for final shop order.
+- Protect the web admin dashboard and group-buy edit endpoint with authenticated authorization once login architecture is introduced.
 
 ## Current Test Commands
 
