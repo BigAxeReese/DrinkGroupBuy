@@ -19,12 +19,12 @@ export function PrimaryButton({ label, onPress, variant = "primary" }) {
 
 const styles = StyleSheet.create({
   button: {
-    minHeight: 52,
-    borderRadius: 16,
+    minHeight: 44,
+    borderRadius: 13,
     alignItems: "center",
     justifyContent: "center",
     backgroundColor: "#1f6feb",
-    paddingHorizontal: 18
+    paddingHorizontal: 14
   },
   secondary: {
     backgroundColor: "#e2e8f0"
@@ -34,7 +34,7 @@ const styles = StyleSheet.create({
   },
   label: {
     color: "#ffffff",
-    fontSize: 16,
+    fontSize: 14,
     fontWeight: "800"
   },
   secondaryLabel: {

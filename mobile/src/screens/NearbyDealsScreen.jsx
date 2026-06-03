@@ -1,4 +1,4 @@
-import { Pressable, StyleSheet, Text, View } from "react-native";
+import { Pressable, ScrollView, StyleSheet, Text, View } from "react-native";
 import { MobileScreen, Section } from "../components/MobileScreen";
 import { StatusBadge } from "../components/StatusBadge";
 import { stores } from "../mock/stores";
@@ -25,10 +25,6 @@ export function NearbyDealsScreen({ navigation, appState, memberAction }) {
           <Pressable accessibilityRole="button" onPress={memberAction} style={styles.memberPill}>
             <Text style={styles.memberPillText}>會員</Text>
           </Pressable>
-        </View>
-        <View style={styles.scoreCard}>
-          <Text style={styles.scoreLabel}>個人信用評分</Text>
-          <Text style={styles.scoreValue}>98<Text style={styles.scoreUnit}> / 100</Text></Text>
         </View>
       </View>
 
@@ -65,7 +61,12 @@ export function NearbyDealsScreen({ navigation, appState, memberAction }) {
       </Pressable>
 
       <Section title="🔥 附近熱門活動推薦">
-        <View style={styles.recommendRow}>
+        <ScrollView
+          horizontal
+          showsHorizontalScrollIndicator={false}
+          contentContainerStyle={styles.recommendRow}
+          style={styles.recommendScroller}
+        >
           {recommendedDeals.map((deal) => {
             const store = getStoreById(stores, deal.storeId);
             return (
@@ -82,7 +83,7 @@ export function NearbyDealsScreen({ navigation, appState, memberAction }) {
               </Pressable>
             );
           })}
-        </View>
+        </ScrollView>
       </Section>
     </MobileScreen>
   );
@@ -90,13 +91,13 @@ export function NearbyDealsScreen({ navigation, appState, memberAction }) {
 
 const styles = StyleSheet.create({
   hero: {
-    marginHorizontal: -16,
-    marginTop: -78,
-    paddingTop: 92,
-    paddingHorizontal: 22,
-    paddingBottom: 24,
-    borderBottomLeftRadius: 28,
-    borderBottomRightRadius: 28,
+    marginHorizontal: -14,
+    marginTop: -70,
+    paddingTop: 82,
+    paddingHorizontal: 18,
+    paddingBottom: 18,
+    borderBottomLeftRadius: 24,
+    borderBottomRightRadius: 24,
     backgroundColor: "#2f6df6",
     gap: 18
   },
@@ -106,9 +107,9 @@ const styles = StyleSheet.create({
     gap: 12
   },
   avatar: {
-    width: 58,
-    height: 58,
-    borderRadius: 29,
+    width: 50,
+    height: 50,
+    borderRadius: 25,
     alignItems: "center",
     justifyContent: "center",
     backgroundColor: "#facc15",
@@ -117,7 +118,7 @@ const styles = StyleSheet.create({
   },
   avatarText: {
     color: "#1e3a8a",
-    fontSize: 26,
+    fontSize: 22,
     fontWeight: "900"
   },
   memberInfo: {
@@ -125,52 +126,27 @@ const styles = StyleSheet.create({
   },
   memberName: {
     color: "#ffffff",
-    fontSize: 24,
+    fontSize: 20,
     fontWeight: "900"
   },
   memberSubtitle: {
     color: "rgba(255,255,255,0.9)",
-    fontSize: 13,
+    fontSize: 12,
     fontWeight: "700",
     marginTop: 3
   },
   memberPill: {
-    minHeight: 42,
+    minHeight: 36,
     borderRadius: 999,
     alignItems: "center",
     justifyContent: "center",
     backgroundColor: "rgba(255,255,255,0.18)",
-    paddingHorizontal: 14
+    paddingHorizontal: 12
   },
   memberPillText: {
     color: "#ffffff",
-    fontSize: 15,
-    fontWeight: "900"
-  },
-  scoreCard: {
-    minHeight: 72,
-    borderRadius: 18,
-    borderWidth: 1,
-    borderColor: "rgba(255,255,255,0.42)",
-    backgroundColor: "rgba(255,255,255,0.18)",
-    flexDirection: "row",
-    alignItems: "center",
-    justifyContent: "space-between",
-    paddingHorizontal: 16
-  },
-  scoreLabel: {
-    color: "#ffffff",
-    fontSize: 15,
-    fontWeight: "900"
-  },
-  scoreValue: {
-    color: "#ffffff",
-    fontSize: 24,
-    fontWeight: "900"
-  },
-  scoreUnit: {
     fontSize: 13,
-    fontWeight: "700"
+    fontWeight: "900"
   },
   sectionHeader: {
     flexDirection: "row",
@@ -180,17 +156,17 @@ const styles = StyleSheet.create({
   },
   sectionTitle: {
     color: "#0f172a",
-    fontSize: 19,
+    fontSize: 17,
     fontWeight: "900"
   },
   manageLink: {
     color: "#1f6feb",
-    fontSize: 14,
+    fontSize: 12,
     fontWeight: "900"
   },
   activeCard: {
     flexDirection: "row",
-    borderRadius: 22,
+    borderRadius: 18,
     backgroundColor: "#ffffff",
     borderWidth: 1,
     borderColor: "#eef2f7",
@@ -207,8 +183,8 @@ const styles = StyleSheet.create({
   },
   activeContent: {
     flex: 1,
-    gap: 12,
-    padding: 16
+    gap: 10,
+    padding: 13
   },
   pressed: {
     opacity: 0.8
@@ -223,28 +199,28 @@ const styles = StyleSheet.create({
   },
   meta: {
     color: "#64748b",
-    fontSize: 13,
+    fontSize: 11,
     fontWeight: "700"
   },
   dealTitle: {
     color: "#0f172a",
-    fontSize: 19,
+    fontSize: 16,
     fontWeight: "900"
   },
   deadline: {
     color: "#ef4444",
-    fontSize: 13,
+    fontSize: 11,
     fontWeight: "800",
     marginTop: 5
   },
   cupCount: {
     color: "#3b64d8",
-    fontSize: 28,
+    fontSize: 23,
     fontWeight: "900"
   },
   cupUnit: {
     color: "#94a3b8",
-    fontSize: 14,
+    fontSize: 12,
     fontWeight: "800"
   },
   dealMetaRow: {
@@ -253,7 +229,7 @@ const styles = StyleSheet.create({
     gap: 10
   },
   progressTrack: {
-    height: 8,
+    height: 7,
     borderRadius: 999,
     backgroundColor: "#e5e7eb",
     overflow: "hidden"
@@ -265,36 +241,40 @@ const styles = StyleSheet.create({
   },
   storeLine: {
     color: "#475569",
-    fontSize: 13,
+    fontSize: 11,
     fontWeight: "800"
   },
+  recommendScroller: {
+    marginHorizontal: -14,
+    paddingHorizontal: 14
+  },
   recommendRow: {
-    flexDirection: "row",
-    gap: 12
+    gap: 10,
+    paddingRight: 14
   },
   recommendCard: {
-    flex: 1,
-    minHeight: 154,
-    borderRadius: 18,
+    width: 148,
+    minHeight: 132,
+    borderRadius: 15,
     backgroundColor: "#eef5ff",
     borderWidth: 1,
     borderColor: "#dbeafe",
-    gap: 10,
-    padding: 14
+    gap: 8,
+    padding: 12
   },
   recommendTitle: {
     color: "#0f172a",
-    fontSize: 15,
+    fontSize: 13,
     fontWeight: "900",
-    lineHeight: 20
+    lineHeight: 18
   },
   joinNow: {
     marginTop: "auto",
-    minHeight: 40,
-    borderRadius: 12,
+    minHeight: 34,
+    borderRadius: 10,
     backgroundColor: "#ffffff",
     color: "#1f6feb",
-    fontSize: 14,
+    fontSize: 12,
     fontWeight: "900",
     textAlign: "center",
     textAlignVertical: "center"

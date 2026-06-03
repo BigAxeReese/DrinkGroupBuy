@@ -10,15 +10,18 @@ export function DrinkSelectionScreen({ navigation, route, appState, actions, mem
   const deal = getDealById(appState.deals, route.params?.dealId);
   const store = getStoreById(stores, deal.storeId);
   const storeDrinks = drinks.filter((drink) => drink.storeId === deal.storeId);
-  const [drinkId, setDrinkId] = useState(storeDrinks[0]?.id);
+  const editOrderItem = route.params?.editOrderItem;
+  const initialDrinkId = storeDrinks.find((item) => item.id === editOrderItem?.drinkId)?.id ?? storeDrinks[0]?.id;
+  const [drinkId, setDrinkId] = useState(initialDrinkId);
   const drink = getDrinkById(storeDrinks, drinkId);
-  const [sweetness, setSweetness] = useState(drink.sweetnessOptions[0]);
-  const [ice, setIce] = useState(drink.iceOptions[0]);
-  const [toppingId, setToppingId] = useState(drink.toppings[0].id);
-  const [quantity, setQuantity] = useState(1);
+  const initialTopping = drink.toppings.find((item) => editOrderItem?.toppings?.includes(item.name));
+  const [sweetness, setSweetness] = useState(editOrderItem?.sweetness ?? drink.sweetnessOptions[0]);
+  const [ice, setIce] = useState(editOrderItem?.ice ?? drink.iceOptions[0]);
+  const [toppingId, setToppingId] = useState(initialTopping?.id ?? drink.toppings[0].id);
+  const [quantity, setQuantity] = useState(editOrderItem?.quantity ?? 1);
   const [fallbackPreference, setFallbackPreference] = useState("decline_original_price");
   const [submitted, setSubmitted] = useState(false);
-  const [customizing, setCustomizing] = useState(false);
+  const [customizing, setCustomizing] = useState(Boolean(editOrderItem));
 
   const subtotal = useMemo(() => calculateDrinkSubtotal(drink, toppingId, quantity), [drink, toppingId, quantity]);
   const categories = [
@@ -34,7 +37,7 @@ export function DrinkSelectionScreen({ navigation, route, appState, actions, mem
 
   return (
     <MobileScreen
-      title="選擇飲料"
+      title={editOrderItem ? "修改飲料" : "選擇飲料"}
       subtitle={`${store?.name} · ${deal.title}`}
       onBack={() => navigation.back()}
       onMemberPress={memberAction}
@@ -139,9 +142,25 @@ export function DrinkSelectionScreen({ navigation, route, appState, actions, mem
           <View style={styles.stickyAction}>
             <Text style={styles.stickyTotal}>{formatCurrency(subtotal)}</Text>
             <PrimaryButton
-              label="加入團購"
+              label={editOrderItem ? "儲存修改（Mock）" : "加入團購"}
               onPress={() => {
                 const selectedTopping = drink.toppings.find((item) => item.id === toppingId);
+                if (editOrderItem) {
+                  route.params?.onSaveOrderItem?.({
+                    ...editOrderItem,
+                    drinkId: drink.id,
+                    name: drink.name,
+                    quantity,
+                    sweetness,
+                    ice,
+                    toppings: selectedTopping && selectedTopping.id !== "none" ? [selectedTopping.name] : ["不加料"],
+                    unitPrice: quantity > 0 ? Math.round(subtotal / quantity) : subtotal,
+                    subtotal
+                  });
+                  setSubmitted(true);
+                  navigation.back();
+                  return;
+                }
                 const orderId = actions.joinGroupOrder({
                   dealId: deal.id,
                   storeName: store?.name ?? "Mock store",

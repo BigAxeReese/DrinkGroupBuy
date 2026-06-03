@@ -22,9 +22,9 @@ export function ProgressSummary({ currentCups, targetCups, participantCount, rem
 
 const styles = StyleSheet.create({
   card: {
-    gap: 10,
-    padding: 14,
-    borderRadius: 18,
+    gap: 8,
+    padding: 12,
+    borderRadius: 15,
     backgroundColor: "#f8fafc"
   },
   row: {
@@ -34,17 +34,17 @@ const styles = StyleSheet.create({
   },
   metric: {
     color: "#0f172a",
-    fontSize: 34,
+    fontSize: 28,
     fontWeight: "900"
   },
   label: {
     color: "#475569",
-    fontSize: 16,
+    fontSize: 13,
     fontWeight: "700",
-    marginBottom: 5
+    marginBottom: 4
   },
   track: {
-    height: 12,
+    height: 9,
     borderRadius: 999,
     backgroundColor: "#e2e8f0",
     overflow: "hidden"
@@ -60,7 +60,7 @@ const styles = StyleSheet.create({
   },
   meta: {
     color: "#64748b",
-    fontSize: 13,
+    fontSize: 11,
     fontWeight: "700"
   }
 });

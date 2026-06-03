@@ -45,7 +45,7 @@ const styles = StyleSheet.create({
   },
   item: {
     flex: 1,
-    minHeight: 54,
+    minHeight: 52,
     alignItems: "center",
     justifyContent: "center",
     gap: 3

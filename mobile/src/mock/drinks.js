@@ -43,5 +43,75 @@ export const drinks = [
       { id: "none", name: "不加料", price: 0 },
       { id: "pudding", name: "布丁", price: 15 }
     ]
+  },
+  {
+    id: "drink-004",
+    storeId: "store-001",
+    name: "白玉歐蕾",
+    category: "milk_tea",
+    description: "鮮奶香氣搭配軟Q白玉",
+    price: 60,
+    sweetnessOptions: ["微糖", "半糖", "正常"],
+    iceOptions: ["去冰", "少冰", "正常冰"],
+    toppings: [
+      { id: "none", name: "不加料", price: 0 },
+      { id: "white_boba", name: "白玉", price: 10 }
+    ]
+  },
+  {
+    id: "drink-005",
+    storeId: "store-001",
+    name: "熟成紅茶",
+    category: "tea",
+    description: "厚實紅茶香，尾韻清爽",
+    price: 35,
+    sweetnessOptions: ["無糖", "微糖", "半糖", "正常"],
+    iceOptions: ["去冰", "少冰", "正常冰"],
+    toppings: [
+      { id: "none", name: "不加料", price: 0 },
+      { id: "jelly", name: "茶凍", price: 12 }
+    ]
+  },
+  {
+    id: "drink-006",
+    storeId: "store-001",
+    name: "鮮柚綠茶",
+    category: "fruit",
+    description: "柚香果粒與清爽綠茶",
+    price: 50,
+    sweetnessOptions: ["無糖", "微糖", "半糖"],
+    iceOptions: ["少冰", "正常冰"],
+    toppings: [
+      { id: "none", name: "不加料", price: 0 },
+      { id: "aloe", name: "蘆薈", price: 15 }
+    ]
+  },
+  {
+    id: "drink-007",
+    storeId: "store-001",
+    name: "黑糖珍珠鮮奶",
+    category: "milk_tea",
+    description: "黑糖香氣與鮮奶厚度",
+    price: 70,
+    sweetnessOptions: ["固定甜"],
+    iceOptions: ["去冰", "少冰", "正常冰"],
+    toppings: [
+      { id: "none", name: "不加料", price: 0 },
+      { id: "pearl", name: "珍珠", price: 10 }
+    ]
+  },
+  {
+    id: "drink-008",
+    storeId: "store-001",
+    name: "檸檬冬瓜",
+    category: "fruit",
+    description: "冬瓜甜感搭配檸檬酸香",
+    price: 35,
+    sweetnessOptions: ["微糖", "半糖", "正常"],
+    iceOptions: ["少冰", "正常冰"],
+    toppings: [
+      { id: "none", name: "不加料", price: 0 },
+      { id: "coconut_jelly", name: "椰果", price: 10 }
+    ]
   }
 ];

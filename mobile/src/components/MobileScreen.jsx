@@ -43,81 +43,81 @@ export function Section({ title, children }) {
 
 const styles = StyleSheet.create({
   content: {
-    gap: 14,
-    paddingHorizontal: 16,
-    paddingTop: 22,
-    paddingBottom: 28
+    gap: 11,
+    paddingHorizontal: 14,
+    paddingTop: 18,
+    paddingBottom: 22
   },
   header: {
-    gap: 8
+    gap: 6
   },
   compactHeader: {
-    marginBottom: -8
+    marginBottom: -10
   },
   topRow: {
-    minHeight: 44,
+    minHeight: 38,
     flexDirection: "row",
     alignItems: "center",
     justifyContent: "space-between",
     gap: 10
   },
   topSpacer: {
-    minHeight: 44,
-    minWidth: 76
+    minHeight: 38,
+    minWidth: 66
   },
   backButton: {
     alignSelf: "flex-start",
-    minHeight: 44,
-    minWidth: 76,
+    minHeight: 38,
+    minWidth: 66,
     borderRadius: 999,
     alignItems: "center",
     justifyContent: "center",
     backgroundColor: "#e2e8f0",
-    paddingHorizontal: 14
+    paddingHorizontal: 12
   },
   backButtonPressed: {
     opacity: 0.75
   },
   backText: {
     color: "#0f172a",
-    fontSize: 15,
+    fontSize: 13,
     fontWeight: "900"
   },
   memberButton: {
-    minHeight: 44,
-    minWidth: 68,
+    minHeight: 38,
+    minWidth: 58,
     borderRadius: 999,
     alignItems: "center",
     justifyContent: "center",
     backgroundColor: "#1f6feb",
-    paddingHorizontal: 14
+    paddingHorizontal: 12
   },
   memberText: {
     color: "#ffffff",
-    fontSize: 15,
+    fontSize: 13,
     fontWeight: "900"
   },
   title: {
     color: "#0f172a",
-    fontSize: 28,
+    fontSize: 24,
     fontWeight: "900"
   },
   subtitle: {
     color: "#475569",
-    fontSize: 15,
-    lineHeight: 22
+    fontSize: 13,
+    lineHeight: 19
   },
   section: {
-    gap: 10,
-    padding: 14,
-    borderRadius: 20,
+    gap: 8,
+    padding: 12,
+    borderRadius: 16,
     backgroundColor: "#ffffff",
     borderWidth: 1,
     borderColor: "#e2e8f0"
   },
   sectionTitle: {
     color: "#0f172a",
-    fontSize: 18,
+    fontSize: 16,
     fontWeight: "800"
   }
 });

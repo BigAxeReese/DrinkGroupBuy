@@ -3,8 +3,8 @@
 export const paymentReports = [
   {
     orderId: "order-001",
-    originalAmount: 150,
-    authorizedAmount: 150,
+    originalAmount: 410,
+    authorizedAmount: 410,
     finalAmount: null,
     captureAmount: null,
     releasedAmount: null,

@@ -1,5 +1,5 @@
 import { useState } from "react";
-import { Pressable, StyleSheet, Text, View } from "react-native";
+import { Pressable, ScrollView, StyleSheet, Text, View } from "react-native";
 import { MobileScreen, Section } from "../components/MobileScreen";
 import { PrimaryButton } from "../components/PrimaryButton";
 import { StatusBadge } from "../components/StatusBadge";
@@ -10,10 +10,16 @@ import { formatCurrency } from "../utils/calculations";
 
 export function CustomerOrdersScreen({ navigation, appState, memberAction }) {
   const [tab, setTab] = useState("active");
+  const [demoItems, setDemoItems] = useState(customerOrderDemo.orderItems ?? []);
   const order = appState.orders.find((item) => item.id === customerOrderDemo.activeOrderId) ?? appState.orders[0];
   const deal = appState.deals.find((item) => item.id === order?.dealId) ?? deals[0];
   const payment = appState.paymentReports.find((item) => item.orderId === order?.id);
   const store = stores.find((item) => item.id === deal.storeId);
+  const orderItems = demoItems;
+  const demoSubtotal = orderItems.reduce((sum, item) => sum + item.subtotal, 0);
+  const displaySubtotal = orderItems.length > 0 ? demoSubtotal : order.subtotal;
+  const displayTotal = payment?.captureAmount ?? Math.max(customerOrderDemo.minimumPayableAmount, displaySubtotal - customerOrderDemo.discountAmount);
+  const authorizedTotal = orderItems.length > 0 ? displaySubtotal : payment?.authorizedAmount ?? displaySubtotal;
   const progressText = deal.currentCups >= deal.targetCups ? "100% 達標" : `${Math.round((deal.currentCups / deal.targetCups) * 100)}%`;
 
   if (!order) {
@@ -68,25 +74,67 @@ export function CustomerOrdersScreen({ navigation, appState, memberAction }) {
         </View>
 
         <Section title="訂單明細">
-          <View style={styles.detailCard}>
-            <View style={styles.detailTop}>
-              <View style={styles.flex}>
-                <Text style={styles.itemTitle}>{order.itemName}（L）</Text>
-                <View style={styles.chips}>
-                  <Text style={styles.chip}>{order.sweetness}</Text>
-                  <Text style={styles.chip}>{order.ice}</Text>
-                  {order.toppings.map((item) => <Text key={item} style={styles.chip}>{item}</Text>)}
+          <ScrollView
+            nestedScrollEnabled
+            showsVerticalScrollIndicator
+            style={styles.itemScroller}
+            contentContainerStyle={styles.itemList}
+          >
+            {(orderItems.length > 0 ? orderItems : [{
+              id: order.id,
+              name: order.itemName,
+              size: "L",
+              quantity: order.quantity,
+              sweetness: order.sweetness,
+              ice: order.ice,
+              toppings: order.toppings,
+              subtotal: order.subtotal
+            }]).map((item) => (
+              <Pressable
+                accessibilityRole="button"
+                key={item.id}
+                onPress={() => navigation.go("drinkSelection", {
+                  dealId: order.dealId,
+                  editMode: true,
+                  editOrderItem: item,
+                  onSaveOrderItem: (updatedItem) => {
+                    setDemoItems((items) => items.map((current) => (
+                      current.id === updatedItem.id ? updatedItem : current
+                    )));
+                  }
+                })}
+                style={({ pressed }) => [styles.detailCard, pressed && styles.pressed]}
+              >
+                <View style={styles.detailTop}>
+                  <View style={styles.flex}>
+                    <Text style={styles.itemTitle}>{item.name}（{item.size}） x {item.quantity}</Text>
+                    <View style={styles.chips}>
+                      <Text style={styles.chip}>{item.sweetness}</Text>
+                      <Text style={styles.chip}>{item.ice}</Text>
+                      {item.toppings.map((topping) => <Text key={`${item.id}-${topping}`} style={styles.chip}>{topping}</Text>)}
+                    </View>
+                    <Text style={styles.itemPrice}>{formatCurrency(item.subtotal)}</Text>
+                  </View>
+                  <Pressable
+                    accessibilityRole="button"
+                    onPress={(event) => {
+                      event.stopPropagation?.();
+                      setDemoItems((items) => items.filter((current) => current.id !== item.id));
+                    }}
+                    style={({ pressed }) => [styles.deleteButton, pressed && styles.pressed]}
+                  >
+                    <Text style={styles.deleteText}>刪除</Text>
+                  </Pressable>
                 </View>
-                <Text style={styles.itemPrice}>{formatCurrency(order.subtotal)}</Text>
-              </View>
-              <PrimaryButton label="修改" variant="secondary" onPress={() => navigation.go("drinkSelection", { dealId: order.dealId })} />
-            </View>
-          </View>
+              </Pressable>
+            ))}
+          </ScrollView>
+          <PrimaryButton label="修改訂單" variant="secondary" onPress={() => navigation.go("drinkSelection", { dealId: order.dealId })} />
           <View style={styles.totalRow}>
             <Text style={styles.totalLabel}>訂單金額</Text>
             <View style={styles.priceGroup}>
-              <Text style={styles.price}>{formatCurrency(payment?.captureAmount ?? Math.max(customerOrderDemo.minimumPayableAmount, order.subtotal - customerOrderDemo.discountAmount))}</Text>
-              <Text style={styles.originalPrice}>{formatCurrency(payment?.authorizedAmount ?? order.subtotal)}</Text>
+              <Text style={styles.price}>{formatCurrency(displayTotal)}</Text>
+              <Text style={styles.originalPrice}>{formatCurrency(authorizedTotal)}</Text>
             </View>
           </View>
         </Section>
@@ -109,7 +157,7 @@ export function CustomerOrdersScreen({ navigation, appState, memberAction }) {
 const styles = StyleSheet.create({
   orderCard: {
     overflow: "hidden",
-    borderRadius: 20,
+    borderRadius: 17,
     borderWidth: 1,
     borderColor: "#dbeafe",
     backgroundColor: "#ffffff",
@@ -121,17 +169,17 @@ const styles = StyleSheet.create({
   },
   tabRow: {
     flexDirection: "row",
-    gap: 10,
-    borderRadius: 18,
+    gap: 8,
+    borderRadius: 15,
     backgroundColor: "#e9eef6",
-    padding: 6
+    padding: 5
   },
   tabItem: {
     flex: 1,
-    minHeight: 42,
-    borderRadius: 14,
+    minHeight: 36,
+    borderRadius: 12,
     color: "#64748b",
-    fontSize: 15,
+    fontSize: 13,
     fontWeight: "900",
     textAlign: "center",
     textAlignVertical: "center"
@@ -141,8 +189,8 @@ const styles = StyleSheet.create({
     backgroundColor: "#ffffff"
   },
   statusBar: {
-    paddingHorizontal: 14,
-    paddingVertical: 10,
+    paddingHorizontal: 12,
+    paddingVertical: 8,
     backgroundColor: "#ecfdf5",
     borderBottomWidth: 1,
     borderBottomColor: "#bbf7d0"
@@ -155,14 +203,14 @@ const styles = StyleSheet.create({
   },
   statusText: {
     color: "#047857",
-    fontSize: 12,
+    fontSize: 11,
     fontWeight: "900"
   },
   summaryRow: {
     flexDirection: "row",
     justifyContent: "space-between",
     gap: 10,
-    padding: 16
+    padding: 12
   },
   flex: {
     flex: 1
@@ -180,30 +228,37 @@ const styles = StyleSheet.create({
   },
   storeName: {
     color: "#475569",
-    fontSize: 13,
+    fontSize: 16,
     fontWeight: "900",
     marginTop: 6
   },
   smallDetailButton: {
     alignSelf: "flex-start",
-    minHeight: 32,
+    minHeight: 28,
     borderRadius: 999,
     justifyContent: "center",
     backgroundColor: "#eaf2ff",
     marginTop: 8,
-    paddingHorizontal: 12
+    paddingHorizontal: 10
   },
   smallDetailText: {
     color: "#1f6feb",
-    fontSize: 12,
+    fontSize: 11,
     fontWeight: "900"
   },
   priceGroup: {
     alignItems: "flex-end"
   },
+  itemScroller: {
+    maxHeight: 240
+  },
+  itemList: {
+    gap: 10,
+    paddingRight: 4
+  },
   price: {
     color: "#2563eb",
-    fontSize: 24,
+    fontSize: 21,
     fontWeight: "900"
   },
   originalPrice: {
@@ -212,10 +267,13 @@ const styles = StyleSheet.create({
     textDecorationLine: "line-through"
   },
   detailCard: {
-    minHeight: 76,
-    borderRadius: 14,
+    minHeight: 66,
+    borderRadius: 12,
     backgroundColor: "#f8fafc",
-    padding: 12
+    padding: 10
+  },
+  pressed: {
+    opacity: 0.75
   },
   detailTop: {
     flexDirection: "row",
@@ -223,14 +281,28 @@ const styles = StyleSheet.create({
     alignItems: "center",
     gap: 8
   },
+  deleteButton: {
+    minWidth: 48,
+    minHeight: 34,
+    borderRadius: 10,
+    alignItems: "center",
+    justifyContent: "center",
+    backgroundColor: "#fee2e2",
+    paddingHorizontal: 10
+  },
+  deleteText: {
+    color: "#dc2626",
+    fontSize: 12,
+    fontWeight: "900"
+  },
   itemTitle: {
     color: "#0f172a",
-    fontSize: 15,
+    fontSize: 13,
     fontWeight: "900"
   },
   itemPrice: {
     color: "#1f6feb",
-    fontSize: 15,
+    fontSize: 13,
     fontWeight: "900",
     marginTop: 10
   },
@@ -246,52 +318,52 @@ const styles = StyleSheet.create({
     borderWidth: 1,
     borderColor: "#e2e8f0",
     color: "#64748b",
-    fontSize: 11,
+    fontSize: 10,
     fontWeight: "800",
-    paddingHorizontal: 8,
-    paddingVertical: 4
+    paddingHorizontal: 7,
+    paddingVertical: 3
   },
   pickupPass: {
-    margin: 14,
+    margin: 12,
     marginTop: 4,
-    minHeight: 90,
-    borderRadius: 16,
+    minHeight: 68,
+    borderRadius: 14,
     backgroundColor: "#111827",
     flexDirection: "row",
     alignItems: "center",
     justifyContent: "space-between",
-    padding: 16
+    padding: 13
   },
   totalRow: {
-    minHeight: 52,
+    minHeight: 44,
     flexDirection: "row",
     alignItems: "center",
     justifyContent: "space-between",
     borderTopWidth: 1,
     borderTopColor: "#e2e8f0",
     marginTop: 4,
-    paddingTop: 12
+    paddingTop: 10
   },
   totalLabel: {
     color: "#0f172a",
-    fontSize: 15,
+    fontSize: 13,
     fontWeight: "900"
   },
   passLabel: {
     color: "#cbd5e1",
-    fontSize: 12,
+    fontSize: 11,
     fontWeight: "800"
   },
   passCode: {
     color: "#ffffff",
-    fontSize: 28,
+    fontSize: 23,
     fontWeight: "900",
     letterSpacing: 2,
     marginTop: 8
   },
   qrBox: {
-    width: 58,
-    height: 58,
+    width: 50,
+    height: 50,
     borderRadius: 10,
     alignItems: "center",
     justifyContent: "center",
@@ -299,7 +371,7 @@ const styles = StyleSheet.create({
   },
   qrText: {
     color: "#111827",
-    fontSize: 18,
+    fontSize: 15,
     fontWeight: "900"
   }
 });
