@@ -360,3 +360,52 @@ Suggested next feature discussion:
 - Add an order review step before final submission or implement customer order editing.
 - Decide whether the shared group-buy detail page should hide other customers' submitted entries now that personal order management exists.
 - Begin nearby-shop/map browsing once the order workflow is stable.
+
+## Development Conversation Record - 2026-06-03
+
+Current project direction has shifted from the earlier browser-first prototype to an Android-first mobile app prototype.
+
+Decisions and implementation progress recorded from the current development discussion:
+
+- The active prototype target is now a mobile app experience, Android-first.
+- The recommended mobile stack is React Native + Expo.
+- `mobile/` is the active prototype implementation area.
+- `frontend/` is retained as a Web reference prototype and is not treated as the formal product frontend.
+- The old `public/` browser prototype and desktop admin files were intentionally removed after confirmation.
+- The mobile prototype uses local mock data only; no backend, database migration, real API, real Google Maps integration, real payment integration, push notification, or real login has been implemented.
+- The initial mobile navigation includes a prototype login/role entry, customer flow, merchant flow, and customer bottom navigation.
+- Customer bottom navigation includes: home, real-time map placeholder, my orders, discussion placeholder, and profile placeholder.
+- The customer order page now shows order list/history tabs, store name, group-buy detail link, order details, item-level amounts, total amount, and pickup credential mock data.
+- The drink-selection flow now shows menu items first; customization options are shown only after the user selects a drink.
+- The current payment prototype direction is Line Pay-style authorization first: the user authorizes the original amount, and final capture happens only after the group-buy discount is qualified.
+- Payment rule candidate: only orders with successful authorization count toward `authorizedCups`.
+- Discount rule candidate: `authorizedCups >= targetCups` makes the discount qualified.
+- After qualification, the prototype displays `finalAmount`, `captureAmount`, and `releasedAmount`.
+- If the group buy fails to qualify, the candidate payment outcome is `authorization_voided`.
+- Partial capture and authorization void are prototype-only screen/state simulations. No real payment provider has been integrated.
+- The docs now include mobile screen data requirements, API candidates, database candidates, status candidates, and open questions for the authorization + partial capture model.
+
+Important unresolved payment questions:
+
+- Whether Taiwanese payment providers such as LINE Pay, ECPay, NewebPay, and JKoPay support authorization plus partial capture for this use case.
+- How long authorizations remain valid.
+- Whether failed group buys always void authorization.
+- How to handle capture failure after qualification.
+- Whether webhook events are required as the source of truth for authorization/capture state.
+- How to explain released authorization differences and release timing to users.
+- Whether re-authorization is allowed if the final amount exceeds the original authorization.
+
+Current mobile prototype execution:
+
+```powershell
+cd C:\vscode\DrinkGroupBuy\mobile
+npm run web
+```
+
+Available mobile package scripts:
+
+```text
+npm run start
+npm run android
+npm run web
+```

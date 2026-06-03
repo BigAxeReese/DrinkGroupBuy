@@ -120,3 +120,24 @@ http://localhost:3000
 - Audit log for admin changes.
 - Mobile-first UI polish.
 - Deployment setup.
+
+## 2026-06-03 Mobile Prototype Update
+
+Done:
+
+- Created Android-first React Native + Expo mobile prototype under `mobile/`.
+- Added customer and merchant prototype navigation.
+- Added customer bottom navigation: 首頁, 即時地圖, 我的訂單, 討論區, 個人中心.
+- Added mobile customer order page with order list/history tabs, group-buy detail link, order details, item prices, total amount, and pickup credential mock display.
+- Updated drink menu flow so users select a drink first, then configure sweetness, ice, toppings, quantity, and fallback purchase preference.
+- Replaced manual payment-report direction in the mobile prototype with authorization-first payment screens.
+- Added mock fields for `originalAmount`, `authorizedAmount`, `finalAmount`, `captureAmount`, `releasedAmount`, `paymentStatus`, `authorizationStatus`, `authorizedCups`, `targetCups`, and `discountStatus`.
+- Updated mobile docs for screen data, API candidates, database candidates, status candidates, and open questions.
+
+Next:
+
+- Decide whether `PaymentReportScreen` should be renamed to `PaymentAuthorizationScreen`.
+- Verify payment provider support for authorization plus partial capture.
+- Define canonical payment status flow before backend design.
+- Decide whether `authorizedCups` is computed live or stored as a progress snapshot.
+- Add formal UI states for authorization expiry, void authorization, capture failure, and re-authorization.

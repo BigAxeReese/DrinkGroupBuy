@@ -1,97 +1,187 @@
-# DrinkGroupBuy Development Notes
+# AGENTS.md
 
-## Project Overview
+## Project Role
 
-DrinkGroupBuy is a B2C drink group-buying preorder platform. Shops can publish preorder discount opportunities, and consumers can create or join group buys to unlock tiered discounts such as 15 cups for 90 TWD off, 30 cups for 240 TWD off, and 50 cups for 500 TWD off.
+You are assisting with a hand-shaken drink group-buying / matching system.
 
-## Current Status
+At this stage, you are only allowed to help with the frontend prototype and related documentation.
 
-This project has a lightweight browser-testable prototype.
+This is NOT the final production frontend.
 
-Important notes are stored in:
+The purpose of this prototype is to clarify:
+1. User flows
+2. Required screens
+3. Required data displayed on each screen
+4. User actions on each screen
+5. Possible API requirements
+6. Possible database entities and fields
+7. Unclear business rules that must be resolved later
 
-- `docs/ai_notes.md`: product and architecture discussion.
-- `docs/todo.md`: current progress and next tasks.
+## Strict Development Boundary
 
-## Suggested Architecture
+Do NOT implement backend code.
+Do NOT implement database migrations.
+Do NOT create real API routes.
+Do NOT create authentication logic.
+Do NOT create payment integration.
+Do NOT create real Google Maps API integration.
+Do NOT create real notification service.
+Do NOT create production business logic.
 
-- Backend: Node.js HTTP server in `server.js` for the prototype; Express can be introduced later.
-- Database: JSON files for the prototype; SQLite/PostgreSQL later.
-- Frontend: plain HTML/CSS/JavaScript in `public/` for the prototype; React can be introduced later.
-- API style: REST.
-- Mobile direction: Web App first, then package with Capacitor for Android/iOS.
+Frontend prototype may use mock data only.
 
-## Development Principles
+Mock data must be clearly marked as prototype mock data.
+Mock data must NOT be treated as final API response format.
+If you need data not yet defined, add it to docs/open-questions.md instead of silently assuming it.
 
-- Keep the first version small and useful.
-- Prefer simple, maintainable code over premature abstractions.
-- Do not require participant login unless the product direction changes.
-- Keep organizer workflows fast: create, share, review, close, export.
-- Record important architecture decisions in `docs/ai_notes.md`.
-- Track implementation work in `docs/todo.md`.
+## Folder Structure
 
-## Expected First Workflow
+Use this structure:
 
-```text
-Organizer creates group buy
-  -> organizer defines custom discount tiers
-  -> participant opens shared link
-  -> participant submits drink order
-  -> organizer reviews list and summary
-  -> organizer marks payment status
-  -> organizer closes group buy
-  -> organizer exports final order text
-```
+project-root/
+├── frontend/
+├── backend/
+├── database/
+├── docs/
+└── AGENTS.md
 
-Implemented prototype flows:
+At the current stage, you may only create or modify:
 
-- Merchant/customer view switcher in the browser UI.
-- Merchant creates a group buy with custom promotion tiers.
-- A blank merchant group-buy name is stored as `飲料團購`.
-- Customer opens the dedicated join screen, selects an open group buy, and sees menu items loaded from the associated shop record.
-- Customer joins by selecting a drink and entering sugar, ice, quantity, and optional notes; these customization fields are stored on the participant entry.
-- Customer tapping an activity in the browse list first sees its information; open activities provide a join button that opens the shop menu.
-- The customer browse list contains only group buys whose API payload reports `isJoinable: true`.
-- Drink selection opens a customization dialog for sugar, ice, quantity, and optional notes.
-- Customer leaves an open group buy entry.
-- Join/leave recalculates total cups, amount, participants, and promotion progress.
-- Expired group buys cannot be joined or left.
-- Merchant can cancel a still-open group buy with a recorded reason; cancelled group buys cannot accept further changes.
-- Merchant mode includes a simulated merchant selector populated from `data/shops/shops.json`; it filters merchant activities and sets the shop for newly created group buys.
-- Customer mode includes simulated `test1`, `test2`, and `test3` accounts; the selected account supplies `customerName` when submitting an order.
-- Once a deadline is reached, an open group buy is surfaced as receiving orders; the merchant can complete it and it moves into the historical-order view.
-- Prototype merchant detail includes a simulate-deadline button which sets an open activity deadline to now so the receiving/completion flow can be tested quickly.
-- The browser preview uses a phone-frame shell on desktop and switches to full-screen mobile presentation at small viewports.
+frontend/
+docs/frontend-prototype.md
+docs/screen-data-requirements.md
+docs/api-candidates.md
+docs/database-candidates.md
+docs/open-questions.md
 
-The merchant and customer selectors are prototype conveniences, not authentication or authorization.
+You must NOT modify:
 
-## Local Execution
+backend/
+database/
 
-Run the current prototype with:
+unless I explicitly allow it later.
 
-```powershell
-node C:\vscode\DrinkGroupBuy\server.js
-```
+## Frontend Prototype Rules
 
-Then open:
+The frontend prototype should focus on user flow and screen clarity.
 
-```text
-http://localhost:3000
-```
+Allowed:
+- Static pages
+- Page navigation
+- Mock data display
+- Form layout
+- Status display
+- Empty states
+- Error states
+- Loading states
+- Confirmation screens
+- Basic local state for prototype interaction
 
-Useful verification commands:
+Not allowed:
+- Real API calls
+- Real database connection
+- Real login
+- Real payment
+- Real map service
+- Real push notifications
+- Production-level state management unless necessary
 
-```powershell
-node C:\vscode\DrinkGroupBuy\scripts\verifyPromotions.js
-```
+## Documentation Rules
 
-No package install is currently required.
+For every screen you create, also document:
 
-## Notes For Future Codex Sessions
+1. Screen purpose
+2. User role
+3. Required displayed data
+4. User actions
+5. Possible API endpoints needed later
+6. Possible database entities and fields needed later
+7. Status values shown on the screen
+8. Edge cases
+9. Open questions
 
-- Start by reading `AGENTS.md`, `docs/ai_notes.md`, and `docs/todo.md`.
-- Check the current git state before editing files.
-- Do not overwrite user changes.
-- If the project has already been scaffolded, follow the existing stack and patterns.
-- Preserve existing user data in `data/*.json` unless the user explicitly asks to reset test data.
-- Read `docs/ai_notes.md` section `Development Conversation Record - 2026-05-26` for the current feature-decision history.
+## Naming Rules
+
+Use consistent naming:
+
+Database-style names:
+- snake_case
+- Example: group_order_id, payment_status
+
+Frontend variable names:
+- camelCase
+- Example: groupOrderId, paymentStatus
+
+API JSON candidate names:
+- camelCase
+- Example: currentCups, targetCups, joinedByCurrentUser
+
+Do not introduce multiple names for the same concept.
+If naming is uncertain, document it in docs/open-questions.md.
+
+## Status Rules
+
+Do not invent status values casually.
+
+If a screen needs status, propose the status values in docs/frontend-prototype.md and docs/open-questions.md.
+
+Possible preliminary statuses may include:
+
+Group order status:
+- recruiting
+- confirmed
+- failed
+- ordering
+- readyForPickup
+- completed
+- cancelled
+
+Payment status:
+- pending
+- submitted
+- verified
+- rejected
+- refunded
+
+Order status:
+- draft
+- submitted
+- locked
+- cancelled
+- completed
+
+Pickup status:
+- notAnnounced
+- announced
+- changed
+- pickedUp
+
+These are provisional and must be reviewed later.
+
+## Modification Rules
+
+Before modifying files, first output:
+
+1. Planned files to create or modify
+2. Reason for each file
+3. What will NOT be touched
+
+After modifying files, output:
+
+1. Actual files changed
+2. Summary of changes
+3. Any assumptions made
+4. Any open questions
+5. Suggested next step
+
+## Quality Rules
+
+Do not overbuild.
+
+This prototype is for system analysis, not final deployment.
+
+Prefer clarity over visual complexity.
+Prefer explicit data requirements over beautiful UI.
+Prefer traceable screen logic over clever implementation.
+
+If a requirement is unclear, document the uncertainty instead of guessing.

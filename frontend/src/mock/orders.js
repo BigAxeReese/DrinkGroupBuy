@@ -1,0 +1,31 @@
+﻿// prototype only, not final API contract
+export const orders = [
+  {
+    id: "order-001",
+    dealId: "deal-001",
+    customerSurname: "??,
+    itemName: "??憟嗉",
+    sweetness: "敺桃?",
+    ice: "撠",
+    toppings: ["??"],
+    quantity: 2,
+    subtotal: 150,
+    fallbackPurchasePreference: "decline_original_price",
+    paymentStatus: "pending",
+    pickupStatus: "pending",
+  },
+  {
+    id: "order-002",
+    dealId: "deal-002",
+    customerSurname: "??,
+    itemName: "憭扳迤蝝?輸",
+    sweetness: "敺桃?",
+    ice: "?餃",
+    toppings: ["?賜?"],
+    quantity: 1,
+    subtotal: 85,
+    fallbackPurchasePreference: "accept_original_price",
+    paymentStatus: "submitted",
+    pickupStatus: "ready",
+  },
+];

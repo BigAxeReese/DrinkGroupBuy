@@ -1,0 +1,16 @@
+{
+  "expo": {
+    "name": "DrinkGroupBuy Prototype",
+    "slug": "drink-group-buy-mobile-prototype",
+    "version": "0.1.0",
+    "orientation": "portrait",
+    "userInterfaceStyle": "light",
+    "platforms": ["android", "web"],
+    "android": {
+      "package": "com.drinkgroupbuy.prototype"
+    },
+    "extra": {
+      "prototypeOnly": true
+    }
+  }
+}
