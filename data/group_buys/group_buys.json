@@ -7,7 +7,7 @@
     "promotionId": "promo_005",
     "promotionTitle": "50 杯折 500 元",
     "createdBy": "google_user_demo",
-    "status": "open",
+    "status": "completed",
     "deadline": "2026-05-22T07:00:00.000Z",
     "note": "測試建立團購功能",
     "totals": {
@@ -16,7 +16,8 @@
       "participants": 0
     },
     "createdAt": "2026-05-21T04:00:00.000Z",
-    "updatedAt": "2026-05-21T04:00:00.000Z"
+    "updatedAt": "2026-05-26T09:24:56.919Z",
+    "completedAt": "2026-05-26T09:24:56.919Z"
   },
   {
     "id": "gb_mpf9jook_p9icqc",
@@ -162,7 +163,7 @@
       }
     ],
     "createdBy": "google_user_demo",
-    "status": "open",
+    "status": "completed",
     "deadline": "2026-05-26T02:21:00.000Z",
     "note": "",
     "participants": [],
@@ -172,7 +173,8 @@
       "participants": 0
     },
     "createdAt": "2026-05-26T02:19:48.077Z",
-    "updatedAt": "2026-05-26T02:19:48.077Z"
+    "updatedAt": "2026-05-26T08:51:14.558Z",
+    "completedAt": "2026-05-26T08:51:14.558Z"
   },
   {
     "id": "gb_mpm2pa9p_ph2smw",
@@ -217,7 +219,7 @@
       }
     ],
     "createdBy": "google_user_demo",
-    "status": "open",
+    "status": "cancelled",
     "deadline": "2026-05-26T23:00:00.000Z",
     "note": "",
     "participants": [
@@ -246,14 +248,108 @@
         "ice": "微冰",
         "note": "",
         "joinedAt": "2026-05-26T04:10:16.994Z"
+      },
+      {
+        "id": "entry_mpmdd2g0_isqc05",
+        "customerName": "test2",
+        "menuItemId": "item_001",
+        "itemName": "烏龍綠茶",
+        "unitPrice": 35,
+        "quantity": 1,
+        "subtotal": 35,
+        "sugar": "半糖",
+        "ice": "微冰",
+        "note": "",
+        "joinedAt": "2026-05-26T08:24:29.087Z"
+      },
+      {
+        "id": "entry_mpmddh1a_hai3qm",
+        "customerName": "test2",
+        "menuItemId": "item_001",
+        "itemName": "烏龍綠茶",
+        "unitPrice": 35,
+        "quantity": 11,
+        "subtotal": 385,
+        "sugar": "半糖",
+        "ice": "微冰",
+        "note": "",
+        "joinedAt": "2026-05-26T08:24:47.994Z"
       }
     ],
     "totals": {
-      "cups": 4,
-      "amount": 200,
-      "participants": 2
+      "cups": 16,
+      "amount": 620,
+      "participants": 4
     },
     "createdAt": "2026-05-26T03:26:03.324Z",
-    "updatedAt": "2026-05-26T04:10:16.994Z"
+    "updatedAt": "2026-05-26T08:50:34.183Z",
+    "cancelReason": "s",
+    "cancelledAt": "2026-05-26T08:50:34.183Z"
+  },
+  {
+    "id": "gb_mpmfijr2_tqnp1n",
+    "title": "飲料團購",
+    "shopId": "shop_006",
+    "shopName": "測試店家",
+    "promotionId": "promo_custom_3",
+    "promotionTitle": "自訂優惠矩陣",
+    "promotions": [
+      {
+        "id": "promo_custom_1",
+        "title": "5 杯折 90 元",
+        "description": "預購團購累積達 5 杯，整筆訂單可折抵 90 元，平均每杯折 18.0 元。",
+        "targetType": "cups",
+        "targetValue": 5,
+        "rewardType": "fixed_amount",
+        "rewardValue": 90,
+        "currency": "TWD",
+        "status": "active"
+      },
+      {
+        "id": "promo_custom_2",
+        "title": "15 杯折 240 元",
+        "description": "預購團購累積達 15 杯，整筆訂單可折抵 240 元，平均每杯折 16.0 元。",
+        "targetType": "cups",
+        "targetValue": 15,
+        "rewardType": "fixed_amount",
+        "rewardValue": 240,
+        "currency": "TWD",
+        "status": "active"
+      },
+      {
+        "id": "promo_custom_4",
+        "title": "40 杯折 350 元",
+        "description": "預購團購累積達 40 杯，整筆訂單可折抵 350 元，平均每杯折 8.8 元。",
+        "targetType": "cups",
+        "targetValue": 40,
+        "rewardType": "fixed_amount",
+        "rewardValue": 350,
+        "currency": "TWD",
+        "status": "active"
+      },
+      {
+        "id": "promo_custom_3",
+        "title": "50 杯折 500 元",
+        "description": "預購團購累積達 50 杯，整筆訂單可折抵 500 元，平均每杯折 10.0 元。",
+        "targetType": "cups",
+        "targetValue": 50,
+        "rewardType": "fixed_amount",
+        "rewardValue": 500,
+        "currency": "TWD",
+        "status": "active"
+      }
+    ],
+    "createdBy": "google_user_demo",
+    "status": "open",
+    "deadline": "2026-05-26T23:00:00.000Z",
+    "note": "",
+    "participants": [],
+    "totals": {
+      "cups": 0,
+      "amount": 0,
+      "participants": 0
+    },
+    "createdAt": "2026-05-26T09:24:44.029Z",
+    "updatedAt": "2026-05-26T09:24:44.029Z"
   }
 ]
