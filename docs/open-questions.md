@@ -202,3 +202,5 @@
 | 正式地圖是否以使用者目前位置或台中科技大學作為預設中心？ | Determines initial viewport and permission prompts | Location/map service request rules differ | User location preferences or last viewport may be stored | Medium |
 | 目前台中科技大學周邊店家地址與座標皆為 prototype mock，何時改由正式商家註冊資料提供？ | Determines when mock markers can be replaced | Store registration and nearby search APIs are required | Store address and coordinates must become managed data | High |
 | 正式 Android build 的 Google Maps API key 應由哪個 Google Cloud 專案管理，並限制哪些 package name 與 SHA-1？ | Determines whether map renders outside Expo Go | Deployment configuration and secret management are required | No business entity change, but configuration ownership must be documented | High |
+| 商家登入後可管理多間店家時，是否先進入店家選擇頁或直接進入預設店家？ | Affects login and merchant dashboard navigation | Auth API must return merchant-store memberships and default store | User-store membership and default store fields may be required | High |
+| 同一台手機切換不同顧客帳號時，購物車、訂單草稿與付款流程是否需要清空或保留？ | Affects account switching UX and local state reset | Session change must invalidate user-specific drafts | Cart/order draft rows need user ownership and cleanup rules | High |

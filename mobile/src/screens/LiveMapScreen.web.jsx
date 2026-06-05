@@ -5,11 +5,21 @@ import { Pressable, StyleSheet, Text, View } from "react-native";
 import { databaseMapStores } from "../mock/databaseMapStores";
 import { mapCenter, mapDefaults } from "../mock/mapConfig";
 
-export function LiveMapScreen({ navigation }) {
+export function LiveMapScreen({ navigation, appState }) {
   const mapElementRef = useRef(null);
   const [selectedStoreId, setSelectedStoreId] = useState(null);
   const [mapError, setMapError] = useState("");
-  const selectedStore = databaseMapStores.find((store) => store.id === selectedStoreId);
+  const mapStores = databaseMapStores.map((store) => {
+    const runtimeDeal = appState?.deals?.find((deal) => deal.storeId === store.id && deal.status === "recruiting");
+    const progressText = runtimeDeal ? getDealProgressText(runtimeDeal) : "";
+    return {
+      ...store,
+      hasRecruitingDeal: store.hasRecruitingDeal || Boolean(runtimeDeal),
+      recruitingDealId: store.recruitingDealId || runtimeDeal?.id || null,
+      progressText
+    };
+  });
+  const selectedStore = mapStores.find((store) => store.id === selectedStoreId);
   const apiKey = process.env.EXPO_PUBLIC_GOOGLE_MAPS_API_KEY
     || Constants.expoConfig?.extra?.googleMapsWebApiKey
     || Constants.manifest2?.extra?.expoClient?.extra?.googleMapsWebApiKey;
@@ -52,14 +62,14 @@ export function LiveMapScreen({ navigation }) {
         });
         markers.push(campusMarker);
 
-        databaseMapStores.forEach((store) => {
+        mapStores.forEach((store) => {
           const marker = new window.google.maps.Marker({
             map,
             position: { lat: store.latitude, lng: store.longitude },
             title: store.name,
             icon: createMarkerIcon(store.hasRecruitingDeal ? "#facc15" : "#2563eb", "店"),
             label: {
-              text: store.name,
+              text: store.hasRecruitingDeal && store.progressText ? `${store.name} ${store.progressText}` : store.name,
               color: "#1f2937",
               fontSize: "10px",
               fontWeight: "700",
@@ -78,7 +88,7 @@ export function LiveMapScreen({ navigation }) {
       active = false;
       markers.forEach((marker) => marker.setMap(null));
     };
-  }, [apiKey]);
+  }, [apiKey, appState?.deals]);
 
   return (
     <View style={styles.screen}>
@@ -103,7 +113,9 @@ export function LiveMapScreen({ navigation }) {
         <View style={styles.storeCard}>
           <View style={styles.storeInfo}>
             <Text style={styles.storeName}>{selectedStore.name}</Text>
-            <Text style={styles.storeMeta}>{selectedStore.distanceText} · {selectedStore.hasRecruitingDeal ? "團購進行中" : "目前沒有招募中團購"}</Text>
+            <Text style={styles.storeMeta}>
+              {selectedStore.distanceText} · {selectedStore.hasRecruitingDeal ? `團購進行中 ${selectedStore.progressText}` : "目前沒有招募中團購"}
+            </Text>
           </View>
           <Pressable
             accessibilityRole="button"
@@ -118,6 +130,18 @@ export function LiveMapScreen({ navigation }) {
       ) : null}
     </View>
   );
+}
+
+function getDealProgressText(deal) {
+  const tierTargets = (deal.tiers ?? [])
+    .map((tier) => Number(tier.cups))
+    .filter((cups) => Number.isFinite(cups) && cups > 0)
+    .sort((left, right) => left - right);
+  const nextTarget = tierTargets.find((cups) => deal.currentCups < cups)
+    ?? deal.targetCups
+    ?? tierTargets[tierTargets.length - 1]
+    ?? 0;
+  return `${deal.currentCups}/${nextTarget}杯`;
 }
 
 function createMarkerIcon(color, label) {

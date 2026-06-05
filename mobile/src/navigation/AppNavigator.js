@@ -1,4 +1,4 @@
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { View, StyleSheet } from "react-native";
 import { BottomNav } from "../components/BottomNav";
 import { deals as initialDeals } from "../mock/deals";
@@ -18,22 +18,53 @@ import { CustomerOrdersScreen } from "../screens/CustomerOrdersScreen";
 import { AdminDashboardScreen } from "../screens/AdminDashboardScreen";
 import { CartScreen } from "../screens/CartScreen";
 import { LiveMapScreen } from "../screens/LiveMapScreen";
+import { loadPrototypeState, savePrototypeState } from "../utils/prototypeStorage";
 
 const initialRoute = { name: "roleSelect", params: {} };
 
 export function AppNavigator() {
   const [stack, setStack] = useState([initialRoute]);
   const [currentRole, setCurrentRole] = useState(null);
+  const [selectedCustomerId, setSelectedCustomerId] = useState("customer-yinji");
+  const [selectedMerchantStoreId, setSelectedMerchantStoreId] = useState("store-001");
   const [deals, setDeals] = useState(initialDeals);
   const [orders, setOrders] = useState(initialOrders);
   const [paymentReports, setPaymentReports] = useState(initialPaymentReports);
-  // Prototype only, not final API contract. Cart contents exist only in local runtime state.
+  // Prototype only, not final API contract. Cart contents are saved locally when available.
   const [cartItems, setCartItems] = useState([]);
+  const [storageLoaded, setStorageLoaded] = useState(false);
   const current = stack[stack.length - 1];
 
+  useEffect(() => {
+    const storedState = loadPrototypeState();
+    if (storedState) {
+      setDeals(Array.isArray(storedState.deals) ? storedState.deals : initialDeals);
+      setOrders(Array.isArray(storedState.orders) ? storedState.orders : initialOrders);
+      setPaymentReports(Array.isArray(storedState.paymentReports) ? storedState.paymentReports : initialPaymentReports);
+      setCartItems(Array.isArray(storedState.cartItems) ? storedState.cartItems : []);
+    }
+    setStorageLoaded(true);
+  }, []);
+
+  useEffect(() => {
+    if (!storageLoaded) return;
+    savePrototypeState({
+      deals,
+      orders,
+      paymentReports,
+      cartItems
+    });
+  }, [cartItems, deals, orders, paymentReports, storageLoaded]);
+
   const navigation = useMemo(() => ({
-    selectRole(role, routeName) {
+    selectRole(role, routeName, params = {}) {
       setCurrentRole(role);
+      if (role === "merchant" && params.storeId) {
+        setSelectedMerchantStoreId(params.storeId);
+      }
+      if (role === "customer" && params.userId) {
+        setSelectedCustomerId(params.userId);
+      }
       setStack([{ name: routeName, params: {} }]);
     },
     go(name, params = {}) {
@@ -53,6 +84,7 @@ export function AppNavigator() {
         ...items,
         {
           ...cartItem,
+          customerId: selectedCustomerId,
           id: `cart-item-${Date.now()}-${items.length + 1}`
         }
       ]);
@@ -60,20 +92,22 @@ export function AppNavigator() {
     removeCartItem(cartItemId) {
       setCartItems((items) => items.filter((item) => item.id !== cartItemId));
     },
-    submitCart(dealId) {
-      const submittedItems = cartItems.filter((item) => item.dealId === dealId);
+    submitCart(dealId, fallbackPurchasePreference = "decline_original_price") {
+      const submittedItems = cartItems.filter((item) => item.dealId === dealId && item.customerId === selectedCustomerId);
       if (submittedItems.length === 0) return null;
 
       const orderId = `order-mock-${Date.now()}`;
       const quantity = submittedItems.reduce((sum, item) => sum + item.quantity, 0);
       const subtotal = submittedItems.reduce((sum, item) => sum + item.subtotal, 0);
       const firstItem = submittedItems[0];
+      const orderItems = submittedItems.map((item) => normalizeOrderItem(item));
       const newOrder = {
         id: orderId,
+        customerId: selectedCustomerId,
         dealId,
         customerSurname: "測",
         itemName: submittedItems.length > 1 ? `${firstItem.itemName} 等 ${submittedItems.length} 項` : firstItem.itemName,
-        items: submittedItems,
+        items: orderItems,
         quantity,
         sweetness: firstItem.sweetness,
         ice: firstItem.ice,
@@ -84,7 +118,7 @@ export function AppNavigator() {
         finalAmount: null,
         captureAmount: null,
         releasedAmount: null,
-        fallbackPurchasePreference: firstItem.fallbackPurchasePreference,
+        fallbackPurchasePreference,
         paymentStatus: "pending",
         authorizationStatus: "pending",
         merchantAcceptanceStatus: "pending",
@@ -110,8 +144,127 @@ export function AppNavigator() {
           note: "Line Pay authorization prototype."
         }
       ]);
-      setCartItems((items) => items.filter((item) => item.dealId !== dealId));
+      setCartItems((items) => items.filter((item) => item.dealId !== dealId || item.customerId !== selectedCustomerId));
       return orderId;
+    },
+    updateOrderItems(orderId, nextItems) {
+      const orderToUpdate = orders.find((order) => order.id === orderId);
+      if (!orderToUpdate) return;
+
+      const normalizedItems = nextItems.map((item) => normalizeOrderItem(item));
+      const nextOriginalAmount = normalizedItems.reduce((sum, item) => sum + item.subtotal, 0);
+      const nextQuantity = normalizedItems.reduce((sum, item) => sum + item.quantity, 0);
+      const firstItem = normalizedItems[0];
+      const wasCounted = ["authorized", "captured"].includes(orderToUpdate.paymentStatus);
+
+      setOrders((items) => items.map((order) => (
+        order.id === orderId
+          ? {
+              ...order,
+              itemName: firstItem ? (normalizedItems.length > 1 ? `${firstItem.itemName} 等 ${normalizedItems.length} 項` : firstItem.itemName) : "",
+              items: normalizedItems,
+              quantity: nextQuantity,
+              subtotal: nextOriginalAmount,
+              originalAmount: nextOriginalAmount,
+              authorizedAmount: 0,
+              finalAmount: null,
+              captureAmount: null,
+              releasedAmount: null,
+              paymentStatus: "pending",
+              authorizationStatus: "pending",
+              merchantAcceptanceStatus: "pending",
+              reauthorizationReason: "order_amount_changed"
+            }
+          : order
+      )));
+      setPaymentReports((items) => items.map((report) => (
+        report.orderId === orderId
+          ? {
+              ...report,
+              originalAmount: nextOriginalAmount,
+              authorizedAmount: 0,
+              finalAmount: null,
+              captureAmount: null,
+              releasedAmount: null,
+              status: "pending",
+              paymentStatus: "pending",
+              authorizationStatus: "pending",
+              discountStatus: "not_yet_qualified",
+              note: "Order amount changed. Reauthorization required."
+            }
+          : report
+      )));
+      if (wasCounted) {
+        setDeals((items) => items.map((deal) => (
+          deal.id === orderToUpdate.dealId
+            ? {
+                ...deal,
+                currentCups: Math.max(0, deal.currentCups - orderToUpdate.quantity),
+                participantCount: Math.max(0, deal.participantCount - 1),
+                status: "recruiting"
+              }
+            : deal
+        )));
+      }
+    },
+    addItemToOrder(orderId, orderItem) {
+      const orderToUpdate = orders.find((order) => order.id === orderId);
+      if (!orderToUpdate) return;
+      const normalizedItems = [...(orderToUpdate.items ?? []), normalizeOrderItem(orderItem)];
+      const nextOriginalAmount = normalizedItems.reduce((sum, item) => sum + item.subtotal, 0);
+      const nextQuantity = normalizedItems.reduce((sum, item) => sum + item.quantity, 0);
+      const firstItem = normalizedItems[0];
+      const wasCounted = ["authorized", "captured"].includes(orderToUpdate.paymentStatus);
+
+      setOrders((items) => items.map((order) => (
+        order.id === orderId
+          ? {
+              ...order,
+              itemName: firstItem ? (normalizedItems.length > 1 ? `${firstItem.itemName} 等 ${normalizedItems.length} 項` : firstItem.itemName) : "",
+              items: normalizedItems,
+              quantity: nextQuantity,
+              subtotal: nextOriginalAmount,
+              originalAmount: nextOriginalAmount,
+              authorizedAmount: 0,
+              finalAmount: null,
+              captureAmount: null,
+              releasedAmount: null,
+              paymentStatus: "pending",
+              authorizationStatus: "pending",
+              merchantAcceptanceStatus: "pending",
+              reauthorizationReason: "order_amount_changed"
+            }
+          : order
+      )));
+      setPaymentReports((items) => items.map((report) => (
+        report.orderId === orderId
+          ? {
+              ...report,
+              originalAmount: nextOriginalAmount,
+              authorizedAmount: 0,
+              finalAmount: null,
+              captureAmount: null,
+              releasedAmount: null,
+              status: "pending",
+              paymentStatus: "pending",
+              authorizationStatus: "pending",
+              discountStatus: "not_yet_qualified",
+              note: "Order amount changed. Reauthorization required."
+            }
+          : report
+      )));
+      if (wasCounted) {
+        setDeals((items) => items.map((deal) => (
+          deal.id === orderToUpdate.dealId
+            ? {
+                ...deal,
+                currentCups: Math.max(0, deal.currentCups - orderToUpdate.quantity),
+                participantCount: Math.max(0, deal.participantCount - 1),
+                status: "recruiting"
+              }
+            : deal
+        )));
+      }
     },
     authorizeLinePayPayment(orderId, providerReference = "linepay-auth") {
       const orderToAuthorize = orders.find((order) => order.id === orderId);
@@ -283,7 +436,7 @@ export function AppNavigator() {
       setDeals((items) => [newDeal, ...items]);
       return dealId;
     }
-  }), [cartItems, deals, orders]);
+  }), [cartItems, deals, orders, selectedCustomerId]);
 
   const appState = { deals, orders, paymentReports, cartItems };
   const screenProps = {
@@ -292,6 +445,8 @@ export function AppNavigator() {
     appState,
     actions,
     currentRole,
+    selectedCustomerId,
+    selectedMerchantStoreId,
     memberAction: current.name !== "roleSelect" ? () => navigation.replace("roleSelect") : undefined
   };
 
@@ -333,3 +488,16 @@ const styles = StyleSheet.create({
     flex: 1
   }
 });
+
+function normalizeOrderItem(item) {
+  const itemName = item.itemName ?? item.name ?? "";
+  return {
+    ...item,
+    drinkId: item.drinkId ?? item.menuItemId ?? item.id,
+    name: item.name ?? itemName,
+    itemName,
+    size: item.size ?? "L",
+    unitPrice: item.unitPrice ?? (item.quantity > 0 ? Math.round(item.subtotal / item.quantity) : item.subtotal),
+    toppings: item.toppings ?? []
+  };
+}

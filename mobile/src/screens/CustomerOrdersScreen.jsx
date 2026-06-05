@@ -8,32 +8,50 @@ import { deals } from "../mock/deals";
 import { stores } from "../mock/stores";
 import { formatCurrency, isWithdrawalLocked } from "../utils/calculations";
 
-export function CustomerOrdersScreen({ navigation, appState, actions, memberAction }) {
+export function CustomerOrdersScreen({ navigation, appState, actions, memberAction, selectedCustomerId }) {
   const [tab, setTab] = useState("active");
   const [demoItems, setDemoItems] = useState(customerOrderDemo.orderItems ?? []);
-  const order = appState.orders.find((item) => item.id === customerOrderDemo.activeOrderId) ?? appState.orders[0];
-  const deal = appState.deals.find((item) => item.id === order?.dealId) ?? deals[0];
-  const payment = appState.paymentReports.find((item) => item.orderId === order?.id);
-  const store = stores.find((item) => item.id === deal.storeId);
-  const orderItems = demoItems;
-  const demoSubtotal = orderItems.reduce((sum, item) => sum + item.subtotal, 0);
-  const displaySubtotal = orderItems.length > 0 ? demoSubtotal : order.subtotal;
-  const displayTotal = payment?.captureAmount ?? Math.max(customerOrderDemo.minimumPayableAmount, displaySubtotal - customerOrderDemo.discountAmount);
-  const authorizedTotal = orderItems.length > 0 ? displaySubtotal : payment?.authorizedAmount ?? displaySubtotal;
-  const merchantAccepted = order.merchantAcceptanceStatus === "accepted";
-  const withdrawalLocked = isWithdrawalLocked(deal);
-  const progressText = `${deal.currentCups} / ${deal.targetCups} 杯`;
+  const customerOrders = appState.orders.filter((item) => item.customerId === selectedCustomerId);
+  const order = customerOrders.find((item) => item.id === customerOrderDemo.activeOrderId) ?? customerOrders[0];
+  const cartItems = appState.cartItems.filter((item) => item.customerId === selectedCustomerId);
+  const cartDeal = cartItems.length > 0
+    ? appState.deals.find((item) => item.id === cartItems[0].dealId) ?? null
+    : null;
+  const cartTotalQuantity = cartItems.reduce((sum, item) => sum + item.quantity, 0);
+  const cartTotalAmount = cartItems.reduce((sum, item) => sum + item.subtotal, 0);
 
   if (!order) {
     return (
       <MobileScreen title="我的訂單" onMemberPress={memberAction}>
-        <Section title="目前沒有訂單">
-          <Text style={styles.meta}>加入團購後，訂單明細與取貨憑證會顯示在這裡。</Text>
-          <PrimaryButton label="去逛逛" onPress={() => navigation.replace("nearby")} />
-        </Section>
+        {cartItems.length > 0 ? (
+          <CartDraftSection
+            cartDeal={cartDeal}
+            cartItems={cartItems}
+            cartTotalQuantity={cartTotalQuantity}
+            cartTotalAmount={cartTotalAmount}
+            navigation={navigation}
+          />
+        ) : (
+          <Section title="目前沒有訂單">
+            <Text style={styles.meta}>加入團購後，訂單明細與取貨憑證會顯示在這裡。</Text>
+            <PrimaryButton label="去逛逛" onPress={() => navigation.replace("liveMap")} />
+          </Section>
+        )}
       </MobileScreen>
     );
   }
+
+  const deal = appState.deals.find((item) => item.id === order.dealId) ?? deals[0];
+  const payment = appState.paymentReports.find((item) => item.orderId === order.id);
+  const store = deal ? stores.find((item) => item.id === deal.storeId) : null;
+  const orderItems = (order.items ?? (order.id === customerOrderDemo.activeOrderId ? demoItems : [])).map(normalizeOrderItem);
+  const demoSubtotal = orderItems.reduce((sum, item) => sum + item.subtotal, 0);
+  const displaySubtotal = orderItems.length > 0 ? demoSubtotal : order.subtotal ?? 0;
+  const displayTotal = payment?.captureAmount ?? Math.max(customerOrderDemo.minimumPayableAmount, displaySubtotal - customerOrderDemo.discountAmount);
+  const authorizedTotal = orderItems.length > 0 ? displaySubtotal : payment?.authorizedAmount ?? displaySubtotal;
+  const merchantAccepted = order.merchantAcceptanceStatus === "accepted";
+  const withdrawalLocked = isWithdrawalLocked(deal);
+  const progressText = deal ? `${deal.currentCups} / ${deal.targetCups} 杯` : "團購資料已移除";
 
   return (
     <MobileScreen title="我的訂單" onMemberPress={memberAction}>
@@ -54,10 +72,20 @@ export function CustomerOrdersScreen({ navigation, appState, actions, memberActi
 
       {tab === "history" ? (
         <Section title="歷史訂單">
-          <Text style={styles.meta}>目前沒有歷史訂單。</Text>
+            <Text style={styles.meta}>目前沒有歷史訂單。每個顧客帳號會分開顯示訂單。</Text>
           <PrimaryButton label="返回訂單列表" variant="secondary" onPress={() => setTab("active")} />
         </Section>
       ) : (
+      <>
+      {cartItems.length > 0 ? (
+        <CartDraftSection
+          cartDeal={cartDeal}
+          cartItems={cartItems}
+          cartTotalQuantity={cartTotalQuantity}
+          cartTotalAmount={cartTotalAmount}
+          navigation={navigation}
+        />
+      ) : null}
       <View style={styles.orderCard}>
         <View style={styles.statusBar}>
           <View style={styles.statusGroup}>
@@ -92,13 +120,10 @@ export function CustomerOrdersScreen({ navigation, appState, actions, memberActi
                   editMode: true,
                   editOrderItem: item,
                   onSaveOrderItem: (updatedItem) => {
-                    const nextItems = demoItems.map((current) => (
+                    const nextItems = orderItems.map((current) => (
                       current.id === updatedItem.id ? updatedItem : current
                     ));
-                    const nextSubtotal = nextItems.reduce((sum, current) => sum + current.subtotal, 0);
-                    const nextQuantity = nextItems.reduce((sum, current) => sum + current.quantity, 0);
-                    setDemoItems(nextItems);
-                    actions.requireReauthorization(order.id, nextSubtotal, nextQuantity);
+                    actions.updateOrderItems(order.id, nextItems);
                   }
                 })}
                 style={({ pressed }) => [
@@ -122,11 +147,8 @@ export function CustomerOrdersScreen({ navigation, appState, actions, memberActi
                     disabled={withdrawalLocked}
                     onPress={(event) => {
                       event.stopPropagation?.();
-                      const nextItems = demoItems.filter((current) => current.id !== item.id);
-                      const nextSubtotal = nextItems.reduce((sum, current) => sum + current.subtotal, 0);
-                      const nextQuantity = nextItems.reduce((sum, current) => sum + current.quantity, 0);
-                      setDemoItems(nextItems);
-                      actions.requireReauthorization(order.id, nextSubtotal, nextQuantity);
+                      const nextItems = orderItems.filter((current) => current.id !== item.id);
+                      actions.updateOrderItems(order.id, nextItems);
                     }}
                     style={({ pressed }) => [
                       styles.deleteButton,
@@ -149,7 +171,7 @@ export function CustomerOrdersScreen({ navigation, appState, actions, memberActi
           <PrimaryButton
             label={withdrawalLocked ? "訂單已鎖定，無法修改" : "修改訂單"}
             variant="secondary"
-            onPress={() => !withdrawalLocked && navigation.go("drinkSelection", { dealId: order.dealId })}
+            onPress={() => !withdrawalLocked && navigation.go("drinkSelection", { dealId: order.dealId, editOrderId: order.id })}
           />
           <View style={styles.totalRow}>
             <Text style={styles.totalLabel}>訂單金額</Text>
@@ -187,8 +209,35 @@ export function CustomerOrdersScreen({ navigation, appState, actions, memberActi
           </View>
         )}
       </View>
+      </>
       )}
     </MobileScreen>
+  );
+}
+
+function CartDraftSection({ cartDeal, cartItems, cartTotalQuantity, cartTotalAmount, navigation }) {
+  return (
+    <Section title={`購物車草稿（${cartTotalQuantity} 杯）`}>
+      <View style={styles.cartDraftHeader}>
+        <View style={styles.flex}>
+          <Text style={styles.cartDraftTitle}>{cartDeal?.title ?? "尚未選定團購"}</Text>
+          <Text style={styles.meta}>這些飲料尚未送出訂單，送出後才會進入 LINE Pay 預授權。</Text>
+        </View>
+        <Text style={styles.cartDraftAmount}>{formatCurrency(cartTotalAmount)}</Text>
+      </View>
+      <View style={styles.cartDraftList}>
+        {cartItems.map((item) => (
+          <View key={item.id} style={styles.cartDraftItem}>
+            <Text style={styles.cartDraftItemName}>{item.itemName} x {item.quantity}</Text>
+            <Text style={styles.cartDraftItemMeta}>{item.sweetness} · {item.ice} · {item.toppings.join("、")}</Text>
+          </View>
+        ))}
+      </View>
+      <PrimaryButton
+        label="前往購物車送出"
+        onPress={() => cartDeal && navigation.go("cart", { dealId: cartDeal.id })}
+      />
+    </Section>
   );
 }
 
@@ -286,6 +335,41 @@ const styles = StyleSheet.create({
   },
   priceGroup: {
     alignItems: "flex-end"
+  },
+  cartDraftHeader: {
+    flexDirection: "row",
+    alignItems: "flex-start",
+    justifyContent: "space-between",
+    gap: 10
+  },
+  cartDraftTitle: {
+    color: "#0f172a",
+    fontSize: 15,
+    fontWeight: "900"
+  },
+  cartDraftAmount: {
+    color: "#2563eb",
+    fontSize: 20,
+    fontWeight: "900"
+  },
+  cartDraftList: {
+    gap: 7
+  },
+  cartDraftItem: {
+    gap: 3,
+    borderRadius: 10,
+    backgroundColor: "#f8fafc",
+    padding: 9
+  },
+  cartDraftItemName: {
+    color: "#0f172a",
+    fontSize: 13,
+    fontWeight: "900"
+  },
+  cartDraftItemMeta: {
+    color: "#64748b",
+    fontSize: 11,
+    lineHeight: 16
   },
   itemScroller: {
     maxHeight: 240
@@ -472,3 +556,16 @@ const styles = StyleSheet.create({
     fontWeight: "900"
   }
 });
+
+function normalizeOrderItem(item) {
+  const itemName = item.itemName ?? item.name ?? "";
+  return {
+    ...item,
+    drinkId: item.drinkId ?? item.menuItemId ?? item.id,
+    name: item.name ?? itemName,
+    itemName,
+    size: item.size ?? "L",
+    unitPrice: item.unitPrice ?? (item.quantity > 0 ? Math.round(item.subtotal / item.quantity) : item.subtotal),
+    toppings: item.toppings ?? []
+  };
+}

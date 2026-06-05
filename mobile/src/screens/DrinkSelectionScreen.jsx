@@ -8,9 +8,40 @@ import { calculateDrinkSubtotal, formatCurrency, getDealById, getDrinkById, getS
 
 export function DrinkSelectionScreen({ navigation, route, appState, actions, memberAction }) {
   const deal = getDealById(appState.deals, route.params?.dealId);
+  if (!deal) {
+    return (
+      <MobileScreen
+        title="選擇飲料"
+        onBack={() => navigation.back()}
+        onMemberPress={memberAction}
+      >
+        <Section title="目前沒有可加入的團購">
+          <Text style={styles.meta}>團購已清空，或目前尚未有商家建立活動。</Text>
+          <PrimaryButton label="返回首頁" variant="secondary" onPress={() => navigation.replace("nearby")} />
+        </Section>
+      </MobileScreen>
+    );
+  }
+
   const store = getStoreById(stores, deal.storeId);
   const storeDrinks = drinks.filter((drink) => drink.storeId === deal.storeId);
+  if (storeDrinks.length === 0) {
+    return (
+      <MobileScreen
+        title="選擇飲料"
+        subtitle={store?.name}
+        onBack={() => navigation.back()}
+        onMemberPress={memberAction}
+      >
+        <Section title="目前沒有菜單">
+          <Text style={styles.meta}>這間店尚未建立 prototype 菜單資料。</Text>
+        </Section>
+      </MobileScreen>
+    );
+  }
+
   const editOrderItem = route.params?.editOrderItem;
+  const editOrderId = route.params?.editOrderId;
   const initialDrinkId = storeDrinks.find((item) => item.id === editOrderItem?.drinkId)?.id ?? storeDrinks[0]?.id;
   const [drinkId, setDrinkId] = useState(initialDrinkId);
   const drink = getDrinkById(storeDrinks, drinkId);
@@ -19,7 +50,6 @@ export function DrinkSelectionScreen({ navigation, route, appState, actions, mem
   const [ice, setIce] = useState(editOrderItem?.ice ?? drink.iceOptions[0]);
   const [toppingId, setToppingId] = useState(initialTopping?.id ?? drink.toppings[0].id);
   const [quantity, setQuantity] = useState(editOrderItem?.quantity ?? 1);
-  const [fallbackPreference, setFallbackPreference] = useState("decline_original_price");
   const [submitted, setSubmitted] = useState(false);
   const [customizing, setCustomizing] = useState(Boolean(editOrderItem));
 
@@ -117,22 +147,12 @@ export function DrinkSelectionScreen({ navigation, route, appState, actions, mem
             ))}
           </Section>
 
-          <Section title="數量與流團偏好">
+          <Section title="數量">
             <View style={styles.quantityRow}>
               <PrimaryButton label="-" variant="secondary" onPress={() => setQuantity((value) => Math.max(1, value - 1))} />
               <Text style={styles.quantity}>{quantity}</Text>
               <PrimaryButton label="+" variant="secondary" onPress={() => setQuantity((value) => value + 1)} />
             </View>
-            <OptionButton
-              active={fallbackPreference === "decline_original_price"}
-              label="流團時不原價購買，不付款"
-              onPress={() => setFallbackPreference("decline_original_price")}
-            />
-            <OptionButton
-              active={fallbackPreference === "accept_original_price"}
-              label="流團時接受原價購買"
-              onPress={() => setFallbackPreference("accept_original_price")}
-            />
           </Section>
 
           <Section title="小計">
@@ -142,7 +162,7 @@ export function DrinkSelectionScreen({ navigation, route, appState, actions, mem
           <View style={styles.stickyAction}>
             <Text style={styles.stickyTotal}>{formatCurrency(subtotal)}</Text>
             <PrimaryButton
-              label={editOrderItem ? "儲存修改（Mock）" : "加入購物車"}
+              label={editOrderItem ? "儲存修改（Mock）" : editOrderId ? "加入訂單並重新預授權" : "加入購物車"}
               onPress={() => {
                 const selectedTopping = drink.toppings.find((item) => item.id === toppingId);
                 if (editOrderItem) {
@@ -161,16 +181,37 @@ export function DrinkSelectionScreen({ navigation, route, appState, actions, mem
                   navigation.back();
                   return;
                 }
+                if (editOrderId) {
+                  actions.addItemToOrder(editOrderId, {
+                    id: `order-item-${Date.now()}`,
+                    dealId: deal.id,
+                    drinkId: drink.id,
+                    name: drink.name,
+                    itemName: drink.name,
+                    size: "L",
+                    quantity,
+                    sweetness,
+                    ice,
+                    toppings: selectedTopping && selectedTopping.id !== "none" ? [selectedTopping.name] : ["不加料"],
+                    unitPrice: quantity > 0 ? Math.round(subtotal / quantity) : subtotal,
+                    subtotal
+                  });
+                  setSubmitted(true);
+                  navigation.back();
+                  return;
+                }
                 actions.addToCart({
                   dealId: deal.id,
+                  drinkId: drink.id,
                   storeName: store?.name ?? "Mock store",
+                  name: drink.name,
                   itemName: drink.name,
+                  size: "L",
                   quantity,
                   sweetness,
                   ice,
                   toppings: selectedTopping && selectedTopping.id !== "none" ? [selectedTopping.name] : ["不加料"],
-                  subtotal,
-                  fallbackPurchasePreference: fallbackPreference
+                  subtotal
                 });
                 setSubmitted(true);
                 navigation.go("cart", { dealId: deal.id });

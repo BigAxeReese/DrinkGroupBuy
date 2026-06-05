@@ -4,8 +4,8 @@ import { MobileScreen, Section } from "../components/MobileScreen";
 import { PrimaryButton } from "../components/PrimaryButton";
 import { stores } from "../mock/stores";
 
-export function MerchantDealCreateScreen({ navigation, actions, memberAction }) {
-  const merchantStore = stores[0];
+export function MerchantDealCreateScreen({ navigation, actions, memberAction, selectedMerchantStoreId }) {
+  const merchantStore = stores.find((store) => store.id === selectedMerchantStoreId) ?? stores[0];
   const [title, setTitle] = useState("離峰優惠團購");
   const [tiers, setTiers] = useState([
     { id: "tier-draft-1", cups: "20", discountAmount: "200" }
@@ -49,7 +49,7 @@ export function MerchantDealCreateScreen({ navigation, actions, memberAction }) 
       <Section title="目前商家">
         <View style={styles.merchantStore}>
           <Text style={styles.merchantStoreName}>{merchantStore.name}</Text>
-          <Text style={styles.merchantStoreNote}>測試階段固定使用此商家；未來將由登入帳號決定。</Text>
+          <Text style={styles.merchantStoreNote}>測試階段由登入頁選擇商家身分；未來將由登入帳號決定。</Text>
         </View>
       </Section>
 

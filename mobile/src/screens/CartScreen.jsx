@@ -1,11 +1,30 @@
+import { useState } from "react";
 import { Pressable, StyleSheet, Text, View } from "react-native";
 import { MobileScreen, Section } from "../components/MobileScreen";
 import { PrimaryButton } from "../components/PrimaryButton";
 import { formatCurrency, getDealById } from "../utils/calculations";
 
-export function CartScreen({ navigation, route, appState, actions, memberAction }) {
+export function CartScreen({ navigation, route, appState, actions, memberAction, selectedCustomerId }) {
+  const [acceptOriginalPrice, setAcceptOriginalPrice] = useState(false);
   const deal = getDealById(appState.deals, route.params?.dealId);
-  const cartItems = appState.cartItems.filter((item) => item.dealId === deal.id);
+  if (!deal) {
+    return (
+      <MobileScreen
+        title="購物車"
+        onBack={() => navigation.back()}
+        onMemberPress={memberAction}
+      >
+        <Section title="目前沒有團購資料">
+          <Text style={styles.emptyText}>團購已清空，購物車暫時不能送出。</Text>
+          <PrimaryButton label="返回首頁" variant="secondary" onPress={() => navigation.replace("nearby")} />
+        </Section>
+      </MobileScreen>
+    );
+  }
+
+  const cartItems = appState.cartItems.filter((item) => (
+    item.dealId === deal.id && (!item.customerId || item.customerId === selectedCustomerId)
+  ));
   const totalQuantity = cartItems.reduce((sum, item) => sum + item.quantity, 0);
   const totalAmount = cartItems.reduce((sum, item) => sum + item.subtotal, 0);
 
@@ -53,11 +72,29 @@ export function CartScreen({ navigation, route, appState, actions, memberAction 
         <Text style={styles.notice}>送出訂單後才會進入 LINE Pay 預授權；目前仍是 prototype，不會真實扣款。</Text>
       </Section>
 
+      <Section title="流團偏好">
+        <Pressable
+          accessibilityRole="checkbox"
+          accessibilityState={{ checked: acceptOriginalPrice }}
+          onPress={() => setAcceptOriginalPrice((value) => !value)}
+          style={({ pressed }) => [styles.checkboxRow, acceptOriginalPrice && styles.checkboxRowActive, pressed && styles.pressed]}
+        >
+          <View style={[styles.checkbox, acceptOriginalPrice && styles.checkboxActive]}>
+            <Text style={styles.checkboxMark}>{acceptOriginalPrice ? "✓" : ""}</Text>
+          </View>
+          <View style={styles.checkboxTextGroup}>
+            <Text style={styles.checkboxTitle}>流團時接受原價購買</Text>
+            <Text style={styles.checkboxHint}>未勾選時，流團不原價購買、不請款。</Text>
+          </View>
+        </Pressable>
+      </Section>
+
       <PrimaryButton
         label="送出訂單並前往 LINE Pay"
         onPress={() => {
           if (cartItems.length === 0) return;
-          const orderId = actions.submitCart(deal.id);
+          const fallbackPreference = acceptOriginalPrice ? "accept_original_price" : "decline_original_price";
+          const orderId = actions.submitCart(deal.id, fallbackPreference);
           if (orderId) navigation.go("paymentReport", { dealId: deal.id, orderId });
         }}
       />
@@ -130,6 +167,55 @@ const styles = StyleSheet.create({
     color: "#475569",
     fontSize: 12,
     lineHeight: 18
+  },
+  checkboxRow: {
+    minHeight: 64,
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 11,
+    borderRadius: 14,
+    borderWidth: 1,
+    borderColor: "#cbd5e1",
+    backgroundColor: "#ffffff",
+    paddingHorizontal: 12,
+    paddingVertical: 10
+  },
+  checkboxRowActive: {
+    borderColor: "#1f6feb",
+    backgroundColor: "#eff6ff"
+  },
+  checkbox: {
+    width: 24,
+    height: 24,
+    borderRadius: 7,
+    alignItems: "center",
+    justifyContent: "center",
+    borderWidth: 2,
+    borderColor: "#94a3b8",
+    backgroundColor: "#ffffff"
+  },
+  checkboxActive: {
+    borderColor: "#1f6feb",
+    backgroundColor: "#1f6feb"
+  },
+  checkboxMark: {
+    color: "#ffffff",
+    fontSize: 15,
+    fontWeight: "900"
+  },
+  checkboxTextGroup: {
+    flex: 1,
+    gap: 3
+  },
+  checkboxTitle: {
+    color: "#0f172a",
+    fontSize: 14,
+    fontWeight: "900"
+  },
+  checkboxHint: {
+    color: "#64748b",
+    fontSize: 11,
+    lineHeight: 16
   },
   emptyText: {
     color: "#64748b",

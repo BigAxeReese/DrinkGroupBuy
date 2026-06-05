@@ -5,9 +5,23 @@ import { StatusBadge } from "../components/StatusBadge";
 import { pickupInfo } from "../mock/pickupInfo";
 import { formatCurrency } from "../utils/calculations";
 
-export function PickupInfoScreen({ navigation, route, appState, memberAction }) {
-  const pickup = pickupInfo.find((item) => item.orderId === route.params?.orderId) ?? pickupInfo[0];
-  const order = appState.orders.find((item) => item.id === route.params?.orderId);
+export function PickupInfoScreen({ navigation, route, appState, memberAction, selectedCustomerId }) {
+  const order = appState.orders.find((item) => item.id === route.params?.orderId && item.customerId === selectedCustomerId)
+    ?? appState.orders.find((item) => item.customerId === selectedCustomerId);
+  const pickup = pickupInfo.find((item) => item.orderId === order?.id) ?? pickupInfo[0];
+  if (!order || !pickup) {
+    return (
+      <MobileScreen
+        title="取貨資訊"
+        onBack={() => navigation.back()}
+        onMemberPress={memberAction}
+      >
+        <Section title="目前沒有取貨資料">
+          <Text style={styles.meta}>訂單已清空。送出訂單並由店家確認接單後，才會顯示取貨資訊與取貨憑證。</Text>
+        </Section>
+      </MobileScreen>
+    );
+  }
 
   return (
     <MobileScreen

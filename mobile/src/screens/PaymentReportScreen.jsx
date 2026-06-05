@@ -5,8 +5,24 @@ import { PrimaryButton } from "../components/PrimaryButton";
 import { StatusBadge } from "../components/StatusBadge";
 import { formatCurrency } from "../utils/calculations";
 
-export function PaymentReportScreen({ navigation, route, appState, actions, memberAction }) {
-  const payment = appState.paymentReports.find((item) => item.orderId === route.params?.orderId) ?? appState.paymentReports[0];
+export function PaymentReportScreen({ navigation, route, appState, actions, memberAction, selectedCustomerId }) {
+  const allowedOrderIds = new Set(appState.orders.filter((order) => order.customerId === selectedCustomerId).map((order) => order.id));
+  const payment = appState.paymentReports.find((item) => item.orderId === route.params?.orderId && allowedOrderIds.has(item.orderId))
+    ?? appState.paymentReports.find((item) => allowedOrderIds.has(item.orderId));
+  if (!payment) {
+    return (
+      <MobileScreen
+        title="付款預授權"
+        onBack={() => navigation.back()}
+        onMemberPress={memberAction}
+      >
+        <Section title="目前沒有付款資料">
+          <Text style={styles.meta}>訂單已清空，送出購物車後才會建立 LINE Pay 預授權 mock。</Text>
+        </Section>
+      </MobileScreen>
+    );
+  }
+
   const isAuthorized = payment.paymentStatus === "authorized" || payment.status === "authorized";
   const isCaptured = payment.paymentStatus === "captured" || payment.status === "captured";
   const canCapture = payment.discountStatus === "qualified";

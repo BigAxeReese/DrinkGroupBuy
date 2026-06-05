@@ -6,10 +6,26 @@ import { StatusBadge } from "../components/StatusBadge";
 import { groupOrders } from "../mock/groupOrders";
 import { getDealById, formatCurrency } from "../utils/calculations";
 
-export function GroupProgressScreen({ navigation, route, appState, memberAction }) {
+export function GroupProgressScreen({ navigation, route, appState, memberAction, selectedCustomerId }) {
   const deal = getDealById(appState.deals, route.params?.dealId);
+  if (!deal) {
+    return (
+      <MobileScreen
+        title="團購進度"
+        onBack={() => navigation.back()}
+        onMemberPress={memberAction}
+      >
+        <Section title="目前沒有團購資料">
+          <Text style={styles.meta}>團購已清空，或目前尚未有商家建立活動。</Text>
+          <PrimaryButton label="返回首頁" variant="secondary" onPress={() => navigation.replace("nearby")} />
+        </Section>
+      </MobileScreen>
+    );
+  }
+
   const groupOrder = groupOrders.find((item) => item.dealId === deal.id);
-  const order = appState.orders.find((item) => item.id === route.params?.orderId) ?? appState.orders.find((item) => item.dealId === deal.id);
+  const order = appState.orders.find((item) => item.id === route.params?.orderId && item.customerId === selectedCustomerId)
+    ?? appState.orders.find((item) => item.dealId === deal.id && item.customerId === selectedCustomerId);
   const payment = appState.paymentReports.find((item) => item.orderId === order?.id);
   const authorizedCups = deal.currentCups;
   const targetCups = groupOrder?.targetCups ?? deal.targetCups;
@@ -62,8 +78,14 @@ export function GroupProgressScreen({ navigation, route, appState, memberAction 
       ) : null}
 
       <View style={styles.actions}>
-        <PrimaryButton label="Line Pay 預授權" onPress={() => navigation.go("paymentReport", { dealId: deal.id, orderId: order?.id ?? "order-001" })} />
-        <PrimaryButton label="取貨資訊" variant="secondary" onPress={() => navigation.go("pickupInfo", { dealId: deal.id, orderId: order?.id ?? "order-001" })} />
+        {order ? (
+          <>
+            <PrimaryButton label="Line Pay 預授權" onPress={() => navigation.go("paymentReport", { dealId: deal.id, orderId: order.id })} />
+            <PrimaryButton label="取貨資訊" variant="secondary" onPress={() => navigation.go("pickupInfo", { dealId: deal.id, orderId: order.id })} />
+          </>
+        ) : (
+          <PrimaryButton label="先選擇飲料" variant="secondary" onPress={() => navigation.go("drinkSelection", { dealId: deal.id })} />
+        )}
       </View>
     </MobileScreen>
   );

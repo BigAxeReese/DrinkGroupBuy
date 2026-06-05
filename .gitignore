@@ -1,0 +1,21 @@
+# Local dependencies
+node_modules/
+mobile/node_modules/
+
+# Local environment files
+.env
+.env.*
+!.env.example
+mobile/.env
+mobile/.env.*
+!mobile/.env.example
+
+# Generated local databases
+*.sqlite
+*.sqlite3
+*.db
+
+# Expo / build outputs
+.expo/
+dist/
+build/

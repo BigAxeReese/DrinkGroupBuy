@@ -1,25 +1,27 @@
 import { Pressable, StyleSheet, Text, View } from "react-native";
 import { MobileScreen, Section } from "../components/MobileScreen";
+import { customerUsers } from "../mock/customerUsers";
 import { stores } from "../mock/stores";
 import { getStoreById } from "../utils/calculations";
 
-export function NearbyDealsScreen({ navigation, appState, memberAction }) {
+export function NearbyDealsScreen({ navigation, appState, memberAction, selectedCustomerId }) {
   const { deals } = appState;
-  const activeDeal = deals.find((deal) => deal.status === "recruiting") ?? deals[0];
-  const activeStore = getStoreById(stores, activeDeal.storeId);
-  const recommendedDeals = deals.filter((deal) => deal.status === "recruiting");
-  const cupsLeft = Math.max(0, activeDeal.targetCups - activeDeal.currentCups);
+  const currentCustomer = customerUsers.find((user) => user.id === selectedCustomerId) ?? customerUsers[0];
+  const recruitingDeals = deals.filter((deal) => deal.status === "recruiting");
+  const activeDeal = recruitingDeals[0] ?? deals[0];
+  const activeStore = activeDeal ? getStoreById(stores, activeDeal.storeId) : null;
+  const cupsLeft = activeDeal ? Math.max(0, activeDeal.targetCups - activeDeal.currentCups) : 0;
 
   return (
     <MobileScreen title="" compactHeader>
       <View style={styles.hero}>
         <View style={styles.heroTop}>
           <View style={styles.avatar}>
-            <Text style={styles.avatarText}>A</Text>
+            <Text style={styles.avatarText}>{currentCustomer.avatarText}</Text>
           </View>
           <View style={styles.memberInfo}>
-            <Text style={styles.memberName}>Alice Wang</Text>
-            <Text style={styles.memberSubtitle}>珍奶控 · 今天要喝一杯</Text>
+            <Text style={styles.memberName}>{currentCustomer.name}</Text>
+            <Text style={styles.memberSubtitle}>{currentCustomer.subtitle}</Text>
           </View>
           <Pressable accessibilityRole="button" onPress={memberAction} style={styles.memberPill}>
             <Text style={styles.memberPillText}>會員</Text>
@@ -29,39 +31,51 @@ export function NearbyDealsScreen({ navigation, appState, memberAction }) {
 
       <View style={styles.sectionHeader}>
         <Text style={styles.sectionTitle}>進行中的團購</Text>
-        <Pressable accessibilityRole="button" onPress={() => navigation.go("groupProgress", { dealId: activeDeal.id, orderId: "order-001" })}>
-          <Text style={styles.manageLink}>管理 ›</Text>
-        </Pressable>
+        {activeDeal ? (
+          <Pressable accessibilityRole="button" onPress={() => navigation.go("groupProgress", { dealId: activeDeal.id })}>
+            <Text style={styles.manageLink}>管理 &gt;</Text>
+          </Pressable>
+        ) : null}
       </View>
 
-      <Pressable
-        accessibilityRole="button"
-        onPress={() => navigation.go("dealDetail", { dealId: activeDeal.id })}
-        style={({ pressed }) => [styles.activeCard, pressed && styles.pressed]}
-      >
-        <View style={styles.orangeRail} />
-        <View style={styles.activeContent}>
-          <View style={styles.cardHeader}>
-            <View style={styles.cardTitleGroup}>
-              <Text style={styles.dealTitle}>{activeDeal.title}</Text>
-              <Text style={styles.deadline}>⏰ 倒數 {activeDeal.remainingTimeText.replace("剩 ", "")}</Text>
+      {activeDeal ? (
+        <Pressable
+          accessibilityRole="button"
+          onPress={() => navigation.go("dealDetail", { dealId: activeDeal.id })}
+          style={({ pressed }) => [styles.activeCard, pressed && styles.pressed]}
+        >
+          <View style={styles.orangeRail} />
+          <View style={styles.activeContent}>
+            <View style={styles.cardHeader}>
+              <View style={styles.cardTitleGroup}>
+                <Text style={styles.dealTitle}>{activeDeal.title}</Text>
+                <Text style={styles.deadline}>剩餘 {activeDeal.remainingTimeText}</Text>
+              </View>
+              <Text style={styles.cupCount}>
+                {activeDeal.currentCups} / {activeDeal.targetCups}
+                <Text style={styles.cupUnit}> 杯</Text>
+              </Text>
             </View>
-            <Text style={styles.cupCount}>{activeDeal.currentCups} / {activeDeal.targetCups}<Text style={styles.cupUnit}> 杯</Text></Text>
+            <View style={styles.dealMetaRow}>
+              <Text style={styles.meta}>目標：滿 {activeDeal.targetCups} 杯折 {activeDeal.tiers[0]?.discountAmount ?? 0}</Text>
+              <Text style={styles.meta}>剩餘 {cupsLeft} 杯</Text>
+            </View>
+            <View style={styles.progressTrack}>
+              <View style={[styles.progressFill, { width: `${Math.min(100, Math.round((activeDeal.currentCups / activeDeal.targetCups) * 100))}%` }]} />
+            </View>
+            <Text style={styles.storeLine}>{activeStore?.name} · {activeStore?.distanceText}</Text>
           </View>
-          <View style={styles.dealMetaRow}>
-            <Text style={styles.meta}>優惠：滿 {activeDeal.targetCups} 杯折 {activeDeal.tiers[0]?.discountAmount}</Text>
-            <Text style={styles.meta}>剩餘 {cupsLeft} 杯</Text>
-          </View>
-          <View style={styles.progressTrack}>
-            <View style={[styles.progressFill, { width: `${Math.min(100, Math.round((activeDeal.currentCups / activeDeal.targetCups) * 100))}%` }]} />
-          </View>
-          <Text style={styles.storeLine}>{activeStore?.name} · {activeStore?.distanceText}</Text>
+        </Pressable>
+      ) : (
+        <View style={styles.emptyCard}>
+          <Text style={styles.emptyTitle}>目前沒有進行中的團購</Text>
+          <Text style={styles.emptyText}>商家建立活動後，會先出現在這裡。</Text>
         </View>
-      </Pressable>
+      )}
 
-      <Section title="🔥 附近熱門活動推薦">
+      <Section title="附近熱門活動推薦">
         <View style={styles.recommendList}>
-          {recommendedDeals.map((deal) => {
+          {recruitingDeals.map((deal) => {
             const store = getStoreById(stores, deal.storeId);
             return (
               <Pressable
@@ -75,9 +89,9 @@ export function NearbyDealsScreen({ navigation, appState, memberAction }) {
               </Pressable>
             );
           })}
-          {recommendedDeals.length === 0 ? (
+          {recruitingDeals.length === 0 ? (
             <View style={styles.emptyRecommendCard}>
-              <Text style={styles.emptyRecommendText}>目前沒有招募中的團購</Text>
+              <Text style={styles.emptyRecommendText}>目前沒有招募中的團購。</Text>
             </View>
           ) : null}
         </View>
@@ -240,6 +254,24 @@ const styles = StyleSheet.create({
     color: "#475569",
     fontSize: 11,
     fontWeight: "800"
+  },
+  emptyCard: {
+    gap: 6,
+    borderRadius: 18,
+    borderWidth: 1,
+    borderColor: "#e2e8f0",
+    backgroundColor: "#ffffff",
+    padding: 16
+  },
+  emptyTitle: {
+    color: "#0f172a",
+    fontSize: 16,
+    fontWeight: "900"
+  },
+  emptyText: {
+    color: "#64748b",
+    fontSize: 13,
+    lineHeight: 19
   },
   recommendList: {
     gap: 8

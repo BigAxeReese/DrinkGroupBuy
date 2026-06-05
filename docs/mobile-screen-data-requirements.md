@@ -241,6 +241,18 @@ The mobile prototype now treats the payment step as authorization-first, not man
 | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |
 | CartScreen | Customized cart items, quantities, item subtotals, total cups, original amount total, LINE Pay next-step notice | None currently | Remove item, continue shopping, submit order and proceed to LINE Pay | Runtime `cartItems` in `mobile/src/navigation/AppNavigator.js`; prototype only, not final API contract | Future order submit and payment handoff loading | Empty cart | Item unavailable, deal closed, price changed, order submit failed | Customer can only access their own cart | Whether carts persist across app restarts and whether one cart may contain multiple deals |
 
+## Merchant Login Prototype Update
+
+| Screen | Display data | User input | User actions | Mock data source | Loading state | Empty state | Error state | Permission needs | Open questions |
+| --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |
+| RoleSelectScreen merchant login section | Merchant store dropdown, selected store name and address | Selected prototype store | Open dropdown, select merchant store, enter merchant dashboard as selected store | `mobile/src/mock/stores.js`; prototype only, not final API contract | Future login loading | No merchant stores | Unauthorized store or inactive merchant account | Real auth not implemented; this is role simulation | Whether one merchant account can manage multiple stores and how default store is selected |
+
+## Prototype Account Isolation Update
+
+| Screen | Display data | User input | User actions | Mock data source | Loading state | Empty state | Error state | Permission needs | Open questions |
+| --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |
+| CustomerOrdersScreen | Only orders belonging to the selected prototype customer account | None | View own order, edit own mock order, reauthorize own payment | `orders.customerId`, runtime orders in `AppNavigator`; prototype only, not final auth model | Future account order loading | Selected customer has no orders | Order belongs to another customer or no longer exists | Real auth/session required later | Whether users can switch accounts on the same device without clearing local cart |
+
 ## LiveMapScreen Update
 
 | Screen | Display data | User input | User actions | Mock data source | Loading state | Empty state | Error state | Permission needs | Open questions |

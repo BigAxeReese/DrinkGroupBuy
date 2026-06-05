@@ -6,8 +6,8 @@ import { StatusBadge } from "../components/StatusBadge";
 import { stores } from "../mock/stores";
 import { getStoreById } from "../utils/calculations";
 
-export function MerchantDashboardScreen({ navigation, appState, actions, memberAction }) {
-  const merchantStore = stores[0];
+export function MerchantDashboardScreen({ navigation, appState, actions, memberAction, selectedMerchantStoreId }) {
+  const merchantStore = stores.find((store) => store.id === selectedMerchantStoreId) ?? stores[0];
   const merchantDeals = appState.deals.filter((deal) => deal.storeId === merchantStore.id);
   const activeDeals = merchantDeals.filter((deal) => deal.status === "recruiting" || deal.status === "confirmed");
   const merchantDealIds = new Set(merchantDeals.map((deal) => deal.id));
@@ -24,7 +24,7 @@ export function MerchantDashboardScreen({ navigation, appState, actions, memberA
           </View>
           <View style={styles.flex}>
             <Text style={styles.storeName}>{merchantStore.name}</Text>
-            <Text style={styles.storeSubtitle}>商家首頁 · 今日營運摘要</Text>
+            <Text style={styles.storeSubtitle}>商家首頁 · Prototype 身分：{merchantStore.id}</Text>
           </View>
           <Pressable accessibilityRole="button" onPress={memberAction} style={styles.memberPill}>
             <Text style={styles.memberPillText}>會員</Text>
@@ -45,6 +45,9 @@ export function MerchantDashboardScreen({ navigation, appState, actions, memberA
       </View>
 
       <Section title="活動清單">
+        {activeDeals.length === 0 ? (
+          <Text style={styles.emptyText}>目前沒有進行中的團購。點右上「＋ 開團」建立測試活動。</Text>
+        ) : null}
         {activeDeals.map((deal) => {
           const store = getStoreById(stores, deal.storeId);
           const relatedOrders = appState.orders.filter((order) => order.dealId === deal.id);
@@ -233,6 +236,11 @@ const styles = StyleSheet.create({
     color: "#047857",
     fontSize: 12,
     fontWeight: "900"
+  },
+  emptyText: {
+    color: "#64748b",
+    fontSize: 13,
+    lineHeight: 19
   }
 });
 

@@ -8,6 +8,21 @@ import { getDealById, getStoreById, formatCurrency, isWithdrawalLocked } from ".
 
 export function DealDetailScreen({ navigation, route, appState, memberAction }) {
   const deal = getDealById(appState.deals, route.params?.dealId);
+  if (!deal) {
+    return (
+      <MobileScreen
+        title="團購詳情"
+        onBack={() => navigation.back()}
+        onMemberPress={memberAction}
+      >
+        <Section title="目前沒有團購資料">
+          <Text style={styles.meta}>團購已清空，或目前尚未有商家建立活動。</Text>
+          <PrimaryButton label="返回首頁" variant="secondary" onPress={() => navigation.replace("nearby")} />
+        </Section>
+      </MobileScreen>
+    );
+  }
+
   const store = getStoreById(stores, deal.storeId);
   const withdrawalLocked = isWithdrawalLocked(deal);
 
@@ -62,7 +77,7 @@ export function DealDetailScreen({ navigation, route, appState, memberAction }) 
       <PrimaryButton
         label="查看團購進度"
         variant="secondary"
-        onPress={() => navigation.go("groupProgress", { dealId: deal.id, orderId: deal.id === "deal-002" ? "order-002" : "order-001" })}
+        onPress={() => navigation.go("groupProgress", { dealId: deal.id })}
       />
     </MobileScreen>
   );

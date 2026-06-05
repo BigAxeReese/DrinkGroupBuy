@@ -4,11 +4,21 @@ import MapView, { Marker, PROVIDER_GOOGLE } from "react-native-maps";
 import { databaseMapStores } from "../mock/databaseMapStores";
 import { mapCenter, mapDefaults } from "../mock/mapConfig";
 
-export function LiveMapScreen({ navigation }) {
+export function LiveMapScreen({ navigation, appState }) {
   const mapRef = useRef(null);
   const [zoom, setZoom] = useState(mapDefaults.zoom);
   const [selectedStoreId, setSelectedStoreId] = useState(null);
-  const selectedStore = databaseMapStores.find((store) => store.id === selectedStoreId);
+  const mapStores = databaseMapStores.map((store) => {
+    const runtimeDeal = appState?.deals?.find((deal) => deal.storeId === store.id && deal.status === "recruiting");
+    const progressText = runtimeDeal ? getDealProgressText(runtimeDeal) : "";
+    return {
+      ...store,
+      hasRecruitingDeal: store.hasRecruitingDeal || Boolean(runtimeDeal),
+      recruitingDealId: store.recruitingDealId || runtimeDeal?.id || null,
+      progressText
+    };
+  });
+  const selectedStore = mapStores.find((store) => store.id === selectedStoreId);
 
   const changeZoom = (amount) => {
     const nextZoom = Math.min(mapDefaults.maximumZoom, Math.max(mapDefaults.minimumZoom, zoom + amount));
@@ -41,7 +51,7 @@ export function LiveMapScreen({ navigation }) {
           description="即時地圖預設中心點"
           pinColor="#2563eb"
         />
-        {databaseMapStores.map((store) => {
+        {mapStores.map((store) => {
           const hasRecruitingDeal = store.hasRecruitingDeal;
           return (
             <Marker
@@ -62,6 +72,9 @@ export function LiveMapScreen({ navigation }) {
                 </View>
                 <View style={styles.storeMarkerLabel}>
                   <Text numberOfLines={1} style={styles.storeMarkerLabelText}>{store.name}</Text>
+                  {hasRecruitingDeal && store.progressText ? (
+                    <Text numberOfLines={1} style={styles.storeMarkerProgressText}>{store.progressText}</Text>
+                  ) : null}
                 </View>
               </View>
             </Marker>
@@ -92,7 +105,9 @@ export function LiveMapScreen({ navigation }) {
         <View style={styles.storeCard}>
           <View style={styles.storeInfo}>
             <Text style={styles.storeName}>{selectedStore.name}</Text>
-            <Text style={styles.storeMeta}>{selectedStore.distanceText} · 招募中的團購</Text>
+            <Text style={styles.storeMeta}>
+              {selectedStore.distanceText} · {selectedStore.hasRecruitingDeal ? `招募中的團購 ${selectedStore.progressText}` : "目前沒有招募中團購"}
+            </Text>
           </View>
           <Pressable
             accessibilityRole="button"
@@ -107,6 +122,18 @@ export function LiveMapScreen({ navigation }) {
       ) : null}
     </View>
   );
+}
+
+function getDealProgressText(deal) {
+  const tierTargets = (deal.tiers ?? [])
+    .map((tier) => Number(tier.cups))
+    .filter((cups) => Number.isFinite(cups) && cups > 0)
+    .sort((left, right) => left - right);
+  const nextTarget = tierTargets.find((cups) => deal.currentCups < cups)
+    ?? deal.targetCups
+    ?? tierTargets[tierTargets.length - 1]
+    ?? 0;
+  return `${deal.currentCups}/${nextTarget}杯`;
 }
 
 function LegendDot({ color, label }) {
@@ -201,6 +228,12 @@ const styles = StyleSheet.create({
     color: "#1f2937",
     fontSize: 9,
     fontWeight: "800",
+    textAlign: "center"
+  },
+  storeMarkerProgressText: {
+    color: "#b45309",
+    fontSize: 8,
+    fontWeight: "900",
     textAlign: "center"
   },
   zoomControls: {
