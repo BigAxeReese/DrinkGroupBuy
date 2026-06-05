@@ -27,6 +27,13 @@ export const discountStatusLabels = {
   failed: "未達標"
 };
 
+export const merchantAcceptanceStatusLabels = {
+  pending: "等待店家確認接單",
+  accepted: "店家已確認接單",
+  rejected: "店家未接單",
+  cancelled: "訂單已取消"
+};
+
 export const pickupStatusLabels = {
   not_ready: "尚未可取貨",
   ready: "可取貨",

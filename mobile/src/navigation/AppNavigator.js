@@ -15,6 +15,9 @@ import { MerchantDealCreateScreen } from "../screens/MerchantDealCreateScreen";
 import { MerchantDashboardScreen } from "../screens/MerchantDashboardScreen";
 import { CustomerPlaceholderScreen } from "../screens/CustomerPlaceholderScreen";
 import { CustomerOrdersScreen } from "../screens/CustomerOrdersScreen";
+import { AdminDashboardScreen } from "../screens/AdminDashboardScreen";
+import { CartScreen } from "../screens/CartScreen";
+import { LiveMapScreen } from "../screens/LiveMapScreen";
 
 const initialRoute = { name: "roleSelect", params: {} };
 
@@ -24,6 +27,8 @@ export function AppNavigator() {
   const [deals, setDeals] = useState(initialDeals);
   const [orders, setOrders] = useState(initialOrders);
   const [paymentReports, setPaymentReports] = useState(initialPaymentReports);
+  // Prototype only, not final API contract. Cart contents exist only in local runtime state.
+  const [cartItems, setCartItems] = useState([]);
   const current = stack[stack.length - 1];
 
   const navigation = useMemo(() => ({
@@ -43,26 +48,46 @@ export function AppNavigator() {
   }), []);
 
   const actions = useMemo(() => ({
-    joinGroupOrder(orderDraft) {
+    addToCart(cartItem) {
+      setCartItems((items) => [
+        ...items,
+        {
+          ...cartItem,
+          id: `cart-item-${Date.now()}-${items.length + 1}`
+        }
+      ]);
+    },
+    removeCartItem(cartItemId) {
+      setCartItems((items) => items.filter((item) => item.id !== cartItemId));
+    },
+    submitCart(dealId) {
+      const submittedItems = cartItems.filter((item) => item.dealId === dealId);
+      if (submittedItems.length === 0) return null;
+
       const orderId = `order-mock-${Date.now()}`;
+      const quantity = submittedItems.reduce((sum, item) => sum + item.quantity, 0);
+      const subtotal = submittedItems.reduce((sum, item) => sum + item.subtotal, 0);
+      const firstItem = submittedItems[0];
       const newOrder = {
         id: orderId,
-        dealId: orderDraft.dealId,
+        dealId,
         customerSurname: "測",
-        itemName: orderDraft.itemName,
-        quantity: orderDraft.quantity,
-        sweetness: orderDraft.sweetness,
-        ice: orderDraft.ice,
-        toppings: orderDraft.toppings,
-        subtotal: orderDraft.subtotal,
-        originalAmount: orderDraft.subtotal,
+        itemName: submittedItems.length > 1 ? `${firstItem.itemName} 等 ${submittedItems.length} 項` : firstItem.itemName,
+        items: submittedItems,
+        quantity,
+        sweetness: firstItem.sweetness,
+        ice: firstItem.ice,
+        toppings: firstItem.toppings,
+        subtotal,
+        originalAmount: subtotal,
         authorizedAmount: 0,
         finalAmount: null,
         captureAmount: null,
         releasedAmount: null,
-        fallbackPurchasePreference: orderDraft.fallbackPurchasePreference,
+        fallbackPurchasePreference: firstItem.fallbackPurchasePreference,
         paymentStatus: "pending",
         authorizationStatus: "pending",
+        merchantAcceptanceStatus: "pending",
         pickupStatus: "not_ready"
       };
 
@@ -71,12 +96,12 @@ export function AppNavigator() {
         ...items,
         {
           orderId,
-          originalAmount: orderDraft.subtotal,
+          originalAmount: subtotal,
           authorizedAmount: 0,
           finalAmount: null,
           captureAmount: null,
           releasedAmount: null,
-          recipientName: orderDraft.storeName,
+          recipientName: firstItem.storeName,
           qrCodeLabel: "Line Pay QR code",
           status: "pending",
           paymentStatus: "pending",
@@ -85,6 +110,7 @@ export function AppNavigator() {
           note: "Line Pay authorization prototype."
         }
       ]);
+      setCartItems((items) => items.filter((item) => item.dealId !== dealId));
       return orderId;
     },
     authorizeLinePayPayment(orderId, providerReference = "linepay-auth") {
@@ -115,7 +141,8 @@ export function AppNavigator() {
               ...order,
               paymentStatus: "authorized",
               authorizationStatus: "authorized",
-              authorizedAmount: order.originalAmount ?? order.subtotal
+              authorizedAmount: order.originalAmount ?? order.subtotal,
+              reauthorizationReason: null
             }
           : order
       )));
@@ -161,35 +188,104 @@ export function AppNavigator() {
           : order
       )));
     },
+    requireReauthorization(orderId, nextOriginalAmount, nextQuantity) {
+      const orderToUpdate = orders.find((order) => order.id === orderId);
+      if (!orderToUpdate || orderToUpdate.originalAmount === nextOriginalAmount) return;
+
+      const wasCounted = ["authorized", "captured"].includes(orderToUpdate.paymentStatus);
+
+      setOrders((items) => items.map((order) => (
+        order.id === orderId
+          ? {
+              ...order,
+              quantity: nextQuantity,
+              subtotal: nextOriginalAmount,
+              originalAmount: nextOriginalAmount,
+              authorizedAmount: 0,
+              finalAmount: null,
+              captureAmount: null,
+              releasedAmount: null,
+              paymentStatus: "pending",
+              authorizationStatus: "pending",
+              merchantAcceptanceStatus: "pending",
+              reauthorizationReason: "order_amount_changed"
+            }
+          : order
+      )));
+      setPaymentReports((items) => items.map((report) => (
+        report.orderId === orderId
+          ? {
+              ...report,
+              originalAmount: nextOriginalAmount,
+              authorizedAmount: 0,
+              finalAmount: null,
+              captureAmount: null,
+              releasedAmount: null,
+              status: "pending",
+              paymentStatus: "pending",
+              authorizationStatus: "pending",
+              discountStatus: "not_yet_qualified",
+              note: "Order amount changed. Reauthorization required."
+            }
+          : report
+      )));
+      if (wasCounted) {
+        setDeals((items) => items.map((deal) => (
+          deal.id === orderToUpdate.dealId
+            ? {
+                ...deal,
+                currentCups: Math.max(0, deal.currentCups - orderToUpdate.quantity),
+                participantCount: Math.max(0, deal.participantCount - 1),
+                status: "recruiting"
+              }
+            : deal
+        )));
+      }
+    },
+    acceptMerchantOrdersForDeal(dealId) {
+      setOrders((items) => items.map((order) => (
+        order.dealId === dealId && order.merchantAcceptanceStatus === "pending"
+          ? { ...order, merchantAcceptanceStatus: "accepted" }
+          : order
+      )));
+    },
     createMerchantDeal(form) {
       const dealId = `deal-merchant-${Date.now()}`;
+      const normalizedTiers = (form.tiers || [])
+        .map((tier) => ({
+          cups: Number(tier.cups),
+          discountAmount: Number(tier.discountAmount)
+        }))
+        .filter((tier) => tier.cups > 0 && tier.discountAmount > 0)
+        .sort((left, right) => left.cups - right.cups);
+      const promotionTiers = normalizedTiers.length > 0
+        ? normalizedTiers
+        : [{ cups: 20, discountAmount: 200 }];
       const newDeal = {
         id: dealId,
         storeId: form.storeId,
         title: form.title || "商家優惠活動",
         status: "recruiting",
         currentCups: 0,
-        targetCups: Number(form.targetCups) || 20,
-        maximumCups: Number(form.maximumCups) || 50,
+        targetCups: promotionTiers[0].cups,
+        maximumCups: promotionTiers[promotionTiers.length - 1].cups,
         participantCount: 0,
         remainingTimeText: "剛建立",
+        minutesUntilDeadline: 120,
+        withdrawalLockMinutes: 30,
+        startTime: form.startTime || "今日 14:00",
         endTime: form.endTime || "今日 15:30",
         pickupTime: form.pickupTime || "今日 16:30 - 17:00",
         canJoin: true,
-        tiers: [
-          {
-            cups: Number(form.targetCups) || 20,
-            discountAmount: Number(form.discountAmount) || 400
-          }
-        ],
+        tiers: promotionTiers,
         notices: [form.notices || "Prototype 建立活動，不會寫入後端。"]
       };
       setDeals((items) => [newDeal, ...items]);
       return dealId;
     }
-  }), [deals, orders]);
+  }), [cartItems, deals, orders]);
 
-  const appState = { deals, orders, paymentReports };
+  const appState = { deals, orders, paymentReports, cartItems };
   const screenProps = {
     navigation,
     route: current,
@@ -204,8 +300,10 @@ export function AppNavigator() {
       <View style={styles.screen}>
         {current.name === "roleSelect" && <RoleSelectScreen {...screenProps} />}
         {current.name === "nearby" && <NearbyDealsScreen {...screenProps} />}
+        {current.name === "liveMap" && <LiveMapScreen {...screenProps} />}
         {current.name === "dealDetail" && <DealDetailScreen {...screenProps} />}
         {current.name === "drinkSelection" && <DrinkSelectionScreen {...screenProps} />}
+        {current.name === "cart" && <CartScreen {...screenProps} />}
         {current.name === "groupProgress" && <GroupProgressScreen {...screenProps} />}
         {current.name === "paymentReport" && <PaymentReportScreen {...screenProps} />}
         {current.name === "pickupInfo" && <PickupInfoScreen {...screenProps} />}
@@ -213,6 +311,7 @@ export function AppNavigator() {
         {current.name === "merchantDashboard" && <MerchantDashboardScreen {...screenProps} />}
         {current.name === "customerPlaceholder" && <CustomerPlaceholderScreen {...screenProps} />}
         {current.name === "customerOrders" && <CustomerOrdersScreen {...screenProps} />}
+        {current.name === "adminDashboard" && <AdminDashboardScreen {...screenProps} />}
       </View>
       {current.name !== "roleSelect" ? (
         <BottomNav

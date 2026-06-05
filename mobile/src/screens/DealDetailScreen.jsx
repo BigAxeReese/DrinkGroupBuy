@@ -4,11 +4,12 @@ import { PrimaryButton } from "../components/PrimaryButton";
 import { ProgressSummary } from "../components/ProgressSummary";
 import { StatusBadge } from "../components/StatusBadge";
 import { stores } from "../mock/stores";
-import { getDealById, getStoreById, formatCurrency } from "../utils/calculations";
+import { getDealById, getStoreById, formatCurrency, isWithdrawalLocked } from "../utils/calculations";
 
 export function DealDetailScreen({ navigation, route, appState, memberAction }) {
   const deal = getDealById(appState.deals, route.params?.dealId);
   const store = getStoreById(stores, deal.storeId);
+  const withdrawalLocked = isWithdrawalLocked(deal);
 
   return (
     <MobileScreen
@@ -49,6 +50,7 @@ export function DealDetailScreen({ navigation, route, appState, memberAction }) 
       </Section>
 
       <Section title="注意事項">
+        {withdrawalLocked ? <Text style={styles.lockNotice}>目前距截止時間 30 分鐘內：仍可加入，但既有訂單不可修改或退出。</Text> : null}
         {deal.cancellationReason ? <Text style={styles.warning}>取消原因：{deal.cancellationReason}</Text> : null}
         {deal.notices.map((notice) => <Text key={notice} style={styles.meta}>· {notice}</Text>)}
       </Section>
@@ -89,6 +91,11 @@ const styles = StyleSheet.create({
     color: "#b42318",
     fontSize: 14,
     fontWeight: "800"
+  },
+  lockNotice: {
+    color: "#b45309",
+    fontSize: 13,
+    fontWeight: "900"
   },
   tierRow: {
     minHeight: 48,

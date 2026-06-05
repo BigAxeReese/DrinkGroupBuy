@@ -19,6 +19,7 @@ export const orders = [
     releasedAmount: null,
     paymentStatus: "authorized",
     authorizationStatus: "authorized",
+    merchantAcceptanceStatus: "pending",
     pickupStatus: "not_ready"
   },
   {
@@ -39,6 +40,7 @@ export const orders = [
     releasedAmount: 22,
     paymentStatus: "captured",
     authorizationStatus: "captured",
+    merchantAcceptanceStatus: "accepted",
     pickupStatus: "ready"
   }
 ];

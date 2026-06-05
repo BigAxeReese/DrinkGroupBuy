@@ -99,3 +99,18 @@ These are candidate entities only. They are not a formal schema and no migration
 | `discount_snapshots` | Preserve exact discount calculation used for capture | `id`, `activity_id`, `target_cups`, `authorized_cups`, `discount_status`, `discount_amount`, `computed_at` | GroupProgressScreen, PaymentReportScreen | progress/capture candidates | activity 1:N snapshots; capture N:1 snapshot | Yes | Whether discount is per-cup, average split, or tier-based |
 | `activity_settlement_events` | Record deadline settlement and authorization/capture decisions | `id`, `activity_id`, `event_type`, `authorized_cups`, `target_cups`, `created_at`, `metadata` | GroupProgressScreen, MerchantDashboardScreen | settlement candidates | activity 1:N events | Yes | Who or what triggers final settlement |
 | `order_payment_state_history` | Audit payment state transitions per order | `id`, `order_id`, `from_status`, `to_status`, `reason`, `created_at`, `provider_event_id` | PaymentReportScreen, CustomerOrdersScreen, MerchantDashboardScreen | payment candidates | order 1:N history | Yes | Whether this can be derived from provider events |
+| `order_reauthorization_requests` | Record why an order requires a new authorization after modification | `id`, `order_id`, `previous_amount`, `next_amount`, `previous_authorization_id`, `status`, `reason`, `created_at`, `resolved_at` | CustomerOrdersScreen, PaymentReportScreen | order update/authorization candidates | order 1:N requests; request N:1 previous authorization | Yes | Whether this should be an entity or payment event only |
+
+## Merchant Multi-tier Activity Addendum
+
+The merchant create screen now uses multiple prototype promotion tier cards. This remains a candidate model, not a formal schema.
+
+| Entity name | Purpose | Possible fields | Related screens | Related API candidates | Possible relationships | Whether history is needed | Uncertainty |
+| --- | --- | --- | --- | --- | --- | --- | --- |
+| `promotion_tiers` | Store each cup threshold and whole-group discount configured by a merchant | `id`, `activity_id`, `target_cups`, `discount_amount`, `sort_order`, `created_at`, `updated_at` | MerchantDealCreateScreen, DealDetailScreen, GroupProgressScreen | Create/read merchant deal candidates | activity 1:N promotion tiers | Yes, if published tiers may be edited | Whether highest tier is a hard cup cap and whether duplicate thresholds are allowed |
+| `cart_drafts` candidate | Optionally persist a customer's unsubmitted cart for one deal | `id`, `user_id`, `activity_id`, `status`, `created_at`, `updated_at`, `expires_at` | DrinkSelectionScreen, CartScreen | Future cart/read/submit candidates | user 1:N carts; activity 1:N carts; cart 1:N cart items | Maybe | Prototype currently keeps cart only in memory |
+| `cart_draft_items` candidate | Preserve customized drinks before order submission | `id`, `cart_draft_id`, `menu_item_id`, `quantity`, `sweetness`, `ice`, `toppings_snapshot`, `unit_price_snapshot`, `subtotal` | DrinkSelectionScreen, CartScreen | Future cart item candidates | cart N:1; menu item N:1 | Maybe | Whether a server-side cart is needed or order draft items are sufficient |
+
+## Prototype SQLite Map Data Note
+
+The test SQLite database now stores seven prototype stores with coordinates and menu items. `database/test/export-mobile-map-data.js` derives mobile map marker data from SQLite. A store is exported with `hasRecruitingDeal = true` when at least one related deal has `status = recruiting`; the map renders those markers yellow and all other store markers blue. This is a test synchronization flow, not a formal API or production persistence design.

@@ -162,7 +162,7 @@
 | Should quantity changes after joining update the same order or create a new order version? | Progress and edit UI differ | Update order endpoint and validations differ | Order events/history required | High |
 | Should `confirmed` replace `formed` everywhere? | Status badges and labels need one value | API enum must be stable | Database enum/check constraints affected | High |
 | Should Line Pay payment status live on `orders`, provider transaction, or both? | Dashboard summary may show conflicting data | Payment endpoints and callback logic differ | Normalization and history design differ | High |
-| Should merchant-created mock deals support multiple tiers in first mobile prototype? | Create form may become more complex | Create API needs nested tier validation | `discount_tiers` required from first release | Medium |
+| 商家建立活動時，多個優惠級距是否必須嚴格遞增且杯數不可重複？ | 表單需要即時驗證與錯誤提示 | Create API needs nested tier validation | `promotion_tiers` needs uniqueness/order constraints | High |
 | Should merchant dashboard summaries be computed live from orders or stored as summary rows? | Refresh behavior and loading states differ | Query complexity and caching differ | Materialized summary entity may be needed | Medium |
 | Should pickup info show before payment is confirmed? | Pickup screen may need locked state | Pickup API gating required | Pickup state may depend on settlement/payment | High |
 | How should failed deals handle customers who accepted original price? | Progress/payment/pickup screens need branch states | Settlement endpoint must split outcomes | Order settlement records required | High |
@@ -191,3 +191,14 @@
 | `authorizedCups` 要即時計算還是儲存快照？ | Progress UI freshness and loading behavior differ | Backend query/aggregation complexity differs | Summary cache or snapshot table may be needed | Medium |
 | 達標後是否立即 capture，或等商家確認後 capture？ | UI needs waiting-for-merchant state if manual confirmation exists | Backend settlement trigger differs | Settlement event actor/source must be recorded | High |
 | 使用者截止前退出時，已授權款項是否立即 void？ | Exit UI needs void confirmation and timing | Backend must call provider void and handle failure | Order/payment history must record exit-triggered void | High |
+| 修改訂單造成金額變動時，舊預授權應立即 void，還是等新預授權成功後再 void？ | UI needs clear pending/retry messaging | Backend must sequence authorization replacement safely | Multiple authorization attempts and transition history are required | High |
+| 只修改甜度或冰塊但金額不變時，是否需要重新預授權？ | Determines whether every edit shows reauthorization flow | Backend validation differs by changed fields | Order change history may need field-level diff | Medium |
+| 截止前 30 分鐘訂單鎖定後，是否有客服或管理員例外修改流程？ | Determines whether locked-order override UI exists | Backend needs privileged override and audit rules | Override actor, reason, and change history are required | High |
+| 截止前 30 分鐘仍可加入時，新加入訂單若預授權尚未完成但時間截止，是否有效？ | UI needs cutoff/error messaging | Backend must define ordering between join, authorization, and cutoff | Event timestamps and transaction ordering are required | High |
+| 未來一個商家帳號可管理一間或多間門市？ | Determines whether store selector returns to merchant create flow | Backend authorization scope differs | Merchant-to-store relationship may be 1:N or M:N | High |
+| 購物車是否只允許同一個團購活動的飲料？ | Determines whether cart needs grouping and multiple checkout sections | Order submit and payment handoff rules differ | Cart-to-activity relationship may be 1:1 or N:M | High |
+| 購物車是否需要跨裝置或重新開啟 App 後保留？ | Determines whether local cart loss is acceptable | May require cart draft APIs | Persistent cart and cart item entities may be required | Medium |
+| 送出訂單成功但啟動 LINE Pay 預授權失敗時，訂單應保留多久？ | UI needs retry/cancel state | Backend needs expiry and retry behavior | Order/payment attempt history and expiration fields are required | High |
+| 正式地圖是否以使用者目前位置或台中科技大學作為預設中心？ | Determines initial viewport and permission prompts | Location/map service request rules differ | User location preferences or last viewport may be stored | Medium |
+| 目前台中科技大學周邊店家地址與座標皆為 prototype mock，何時改由正式商家註冊資料提供？ | Determines when mock markers can be replaced | Store registration and nearby search APIs are required | Store address and coordinates must become managed data | High |
+| 正式 Android build 的 Google Maps API key 應由哪個 Google Cloud 專案管理，並限制哪些 package name 與 SHA-1？ | Determines whether map renders outside Expo Go | Deployment configuration and secret management are required | No business entity change, but configuration ownership must be documented | High |

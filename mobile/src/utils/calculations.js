@@ -18,3 +18,9 @@ export function calculateDrinkSubtotal(drink, toppingId, quantity) {
 export function formatCurrency(amount) {
   return `$${amount}`;
 }
+
+export function isWithdrawalLocked(deal) {
+  return deal.status === "recruiting"
+    && deal.minutesUntilDeadline != null
+    && deal.minutesUntilDeadline <= (deal.withdrawalLockMinutes ?? 30);
+}

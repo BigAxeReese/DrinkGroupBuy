@@ -142,7 +142,7 @@ export function DrinkSelectionScreen({ navigation, route, appState, actions, mem
           <View style={styles.stickyAction}>
             <Text style={styles.stickyTotal}>{formatCurrency(subtotal)}</Text>
             <PrimaryButton
-              label={editOrderItem ? "儲存修改（Mock）" : "加入團購"}
+              label={editOrderItem ? "儲存修改（Mock）" : "加入購物車"}
               onPress={() => {
                 const selectedTopping = drink.toppings.find((item) => item.id === toppingId);
                 if (editOrderItem) {
@@ -161,7 +161,7 @@ export function DrinkSelectionScreen({ navigation, route, appState, actions, mem
                   navigation.back();
                   return;
                 }
-                const orderId = actions.joinGroupOrder({
+                actions.addToCart({
                   dealId: deal.id,
                   storeName: store?.name ?? "Mock store",
                   itemName: drink.name,
@@ -173,11 +173,11 @@ export function DrinkSelectionScreen({ navigation, route, appState, actions, mem
                   fallbackPurchasePreference: fallbackPreference
                 });
                 setSubmitted(true);
-                navigation.go("groupProgress", { dealId: deal.id, orderId });
+                navigation.go("cart", { dealId: deal.id });
               }}
             />
           </View>
-          {submitted ? <Text style={styles.success}>已加入團購。</Text> : null}
+          {submitted ? <Text style={styles.success}>已加入購物車。</Text> : null}
         </>
       ) : (
         <Text style={styles.selectHint}>請先選擇飲料，再設定甜度、冰塊與加料。</Text>

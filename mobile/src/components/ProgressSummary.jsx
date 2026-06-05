@@ -6,8 +6,8 @@ export function ProgressSummary({ currentCups, targetCups, participantCount, rem
   return (
     <View style={styles.card}>
       <View style={styles.row}>
-        <Text style={styles.metric}>{currentCups}</Text>
-        <Text style={styles.label}>/ {targetCups} 杯</Text>
+        <Text style={styles.metric}>{currentCups} / {targetCups}</Text>
+        <Text style={styles.label}>杯</Text>
       </View>
       <View style={styles.track}>
         <View style={[styles.bar, { width: `${progress}%` }]} />

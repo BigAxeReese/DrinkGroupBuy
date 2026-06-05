@@ -11,7 +11,7 @@ This document records the first Android-first mobile prototype screens under `mo
 - Large tap targets.
 - Lists should avoid dense desktop-style tables.
 - Forms should use mobile-friendly grouping.
-- Google Maps, QR code, image upload, payment, login, and push notification are placeholders only.
+- QR code, image upload, payment, login, and push notification remain placeholders only. Google Maps base-map rendering is connected, while store/activity markers remain prototype mock data.
 - All mock data must remain marked `prototype only, not final API contract`.
 
 ## Screens
@@ -134,15 +134,15 @@ This document records the first Android-first mobile prototype screens under `mo
 | --- | --- |
 | Purpose | Let merchants create a mock discount activity from mobile. |
 | Role | Merchant |
-| Display data | Store selector, title, target cups, discount amount, time placeholders, notes |
-| User input | `storeId`, `title`, `targetCups`, `discountAmount` |
-| User actions | Select store, edit form, submit mock create |
+| Display data | Fixed prototype merchant store, title, promotion tier cards, pickup time, notes, start time, end time |
+| User input | `title`, `tiers[].cups`, `tiers[].discountAmount`, `pickupTime`, `notices`, `startTime`, `endTime`; `storeId` 目前由測試商家身分固定帶入，不由畫面選擇 |
+| User actions | Edit form, add/remove promotion tier cards, submit mock create |
 | Mock data | `stores`, local form state |
 | Loading state | Creating activity |
 | Empty state | No authorized store |
-| Error state | Invalid time or discount rules |
+| Error state | Invalid time, empty tiers, duplicate thresholds, or invalid discount rules |
 | Permission needs | Merchant can only manage authorized stores; not implemented |
-| Open questions | Multi-tier form design? Can merchants edit published deals? |
+| Open questions | How should duplicate or descending tiers be validated? Can merchants edit published deals? |
 
 ### 9. MerchantDashboardScreen
 
@@ -164,7 +164,7 @@ This document records the first Android-first mobile prototype screens under `mo
 
 - Current navigation is prototype local state stack navigation, not formal navigation architecture.
 - Initial route is `RoleSelectScreen`, currently displayed as a login page.
-- Customer flow: `RoleSelectScreen -> NearbyDealsScreen -> DealDetailScreen -> DrinkSelectionScreen -> GroupProgressScreen -> PaymentReportScreen -> PickupInfoScreen`.
+- Customer purchase flow: `RoleSelectScreen -> NearbyDealsScreen -> DealDetailScreen -> DrinkSelectionScreen -> CartScreen -> PaymentReportScreen -> GroupProgressScreen / PickupInfoScreen`.
 - Merchant flow: `RoleSelectScreen -> MerchantDashboardScreen -> MerchantDealCreateScreen -> MerchantDashboardScreen`.
 - Bottom navigation contains key entry points for fast prototype testing after role selection.
 - Screens should later move to Expo Router or React Navigation if prototype grows.
@@ -180,7 +180,8 @@ The current `mobile/` prototype now includes runtime mock interactions. These in
 | NearbyDealsScreen | Tap deal card to open detail | Navigation stack only | Requires future deal detail route/API |
 | DealDetailScreen | Tap join to open drink selection; tap progress | Navigation stack only | Requires eligibility and progress APIs |
 | DrinkSelectionScreen | Select drink, sweetness, ice, topping, quantity, fallback preference | Local form state | Requires menu/options schema and order draft rules |
-| DrinkSelectionScreen | Confirm join group buy | Adds runtime mock order, payment placeholder, increments deal cups and participants | Requires transactional order create and progress recalculation |
+| DrinkSelectionScreen | Add customized drink to cart | Adds runtime mock cart item only; does not create an order or payment yet | Requires cart/draft ownership and validation rules |
+| CartScreen | Review cart and submit order | Creates runtime mock order and payment authorization candidate, then clears that deal's cart | Requires transactional order creation before starting Line Pay authorization |
 | GroupProgressScreen | Show recruiting/confirmed/failed/cancelled status and my order summary | Reads runtime deals/orders state | Requires status flow and private/public response split |
 | PaymentReportScreen | Simulate Line Pay payment completion | Changes runtime payment status from `pending` to `confirmed` | Requires future payment provider authorization/capture flow |
 | PaymentReportScreen | Continue to pickup info | Navigation stack only | Requires payment/pickup gating rules |
@@ -222,9 +223,26 @@ The mobile prototype now treats the payment step as authorization-first, not man
 
 ### Authorization Flow Notes
 
-- 使用者選擇飲料後，mock order 先以 `originalAmount` 建立預授權候選。
+- 使用者選擇並完成客製化後，只加入本機 mock 購物車，不建立訂單也不啟動付款。
+- 使用者在 `CartScreen` 送出後，才建立 mock order，並以訂單 `originalAmount` 建立 LINE Pay 預授權候選。
 - 預授權成功後，`paymentStatus = authorized` 且 `authorizationStatus = authorized`。
 - 只有 `paymentStatus = authorized` 或後續 `captured` 的訂單杯數可計入 `authorizedCups`。
 - 當 `authorizedCups >= targetCups`，`discountStatus = qualified`。
 - 達標後顯示 `finalAmount` / `captureAmount` / `releasedAmount`。
 - 未達標的未來候選狀態為 `paymentStatus = authorization_voided`，目前畫面只記錄規則，尚未做真金流或 provider callback。
+- 修改或刪除訂單品項後，若訂單總額變動，mock flow 將付款狀態重設為 `pending`，顯示「重新預授權」，並暫時從 `authorizedCups` 移除該訂單杯數。
+- 團購截止前 30 分鐘為訂單鎖定期：仍可新增訂單加入團購，但既有訂單不可修改、退出或刪除品項。
+- 商家流程使用商家首頁與底部導覽；商家底部導覽目前只包含「首頁」與「開團」，開團頁返回目標固定為商家首頁。
+- 商家開團頁目前固定使用一間測試商家，不提供門市選擇；未來應由商家登入帳號及其授權門市決定 `storeId`。
+
+## CartScreen Update
+
+| Screen | Display data | User input | User actions | Mock data source | Loading state | Empty state | Error state | Permission needs | Open questions |
+| --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |
+| CartScreen | Customized cart items, quantities, item subtotals, total cups, original amount total, LINE Pay next-step notice | None currently | Remove item, continue shopping, submit order and proceed to LINE Pay | Runtime `cartItems` in `mobile/src/navigation/AppNavigator.js`; prototype only, not final API contract | Future order submit and payment handoff loading | Empty cart | Item unavailable, deal closed, price changed, order submit failed | Customer can only access their own cart | Whether carts persist across app restarts and whether one cart may contain multiple deals |
+
+## LiveMapScreen Update
+
+| Screen | Display data | User input | User actions | Mock data source | Loading state | Empty state | Error state | Permission needs | Open questions |
+| --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |
+| LiveMapScreen | Full-page Google Maps view, National Taichung University of Science and Technology center marker, seven prototype store markers with store names shown below, selected store card, zoom level, marker legend; normal test stores use blue markers and stores with `recruiting` deals use yellow markers; Google Maps built-in POI clicks are disabled | None | Pan/pinch zoom, use zoom buttons, select prototype store marker, open that store's recruiting deal | Native Google Maps / Maps JavaScript API plus generated `mobile/src/mock/databaseMapStores.js`; this file is exported from the prototype SQLite database and is not a final API contract | Map API loading | No prototype store markers | Google Maps unavailable, missing Android/Web API key, database export missing | Customer only in current bottom navigation | A future API or local SQLite adapter is required for live map updates without rerunning the export script |

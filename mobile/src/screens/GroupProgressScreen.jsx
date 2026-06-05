@@ -11,14 +11,10 @@ export function GroupProgressScreen({ navigation, route, appState, memberAction 
   const groupOrder = groupOrders.find((item) => item.dealId === deal.id);
   const order = appState.orders.find((item) => item.id === route.params?.orderId) ?? appState.orders.find((item) => item.dealId === deal.id);
   const payment = appState.paymentReports.find((item) => item.orderId === order?.id);
-  const runtimeAuthorizedCups = appState.orders
-    .filter((item) => item.dealId === deal.id && ["authorized", "captured"].includes(item.paymentStatus))
-    .filter((item) => !groupOrder || item.id.startsWith("order-mock-"))
-    .reduce((sum, item) => sum + item.quantity, 0);
-  const authorizedCups = (groupOrder?.authorizedCups ?? 0) + runtimeAuthorizedCups;
+  const authorizedCups = deal.currentCups;
   const targetCups = groupOrder?.targetCups ?? deal.targetCups;
   const remainingAuthorizedCups = Math.max(0, targetCups - authorizedCups);
-  const discountStatus = groupOrder?.discountStatus ?? (authorizedCups >= targetCups ? "qualified" : "not_yet_qualified");
+  const discountStatus = authorizedCups >= targetCups ? "qualified" : "not_yet_qualified";
 
   return (
     <MobileScreen

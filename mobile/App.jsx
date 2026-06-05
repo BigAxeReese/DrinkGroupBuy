@@ -13,6 +13,16 @@ export default function App() {
   if (Platform.OS === "web") {
     return (
       <View style={styles.webPreview}>
+        <style>{`
+          .drink-group-buy-map-label {
+            margin-top: 10px;
+            padding: 3px 6px;
+            border-radius: 6px;
+            background: rgba(255, 255, 255, 0.96);
+            box-shadow: 0 2px 6px rgba(15, 23, 42, 0.22);
+            white-space: nowrap;
+          }
+        `}</style>
         <View style={styles.phoneFrame}>
           {app}
         </View>

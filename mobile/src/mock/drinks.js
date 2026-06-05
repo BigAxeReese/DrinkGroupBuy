@@ -113,5 +113,75 @@ export const drinks = [
       { id: "none", name: "不加料", price: 0 },
       { id: "coconut_jelly", name: "椰果", price: 10 }
     ]
+  },
+  {
+    id: "drink-009",
+    storeId: "store-004",
+    name: "黑糖珍珠鮮奶",
+    category: "milk_tea",
+    description: "黑糖香氣搭配鮮奶與珍珠",
+    price: 70,
+    sweetnessOptions: ["固定甜"],
+    iceOptions: ["去冰", "少冰", "正常冰"],
+    toppings: [
+      { id: "none", name: "不加料", price: 0 },
+      { id: "pearl", name: "珍珠", price: 10 }
+    ]
+  },
+  {
+    id: "drink-010",
+    storeId: "store-005",
+    name: "高山四季春",
+    category: "tea",
+    description: "清香回甘的純茶",
+    price: 40,
+    sweetnessOptions: ["無糖", "微糖", "半糖"],
+    iceOptions: ["去冰", "少冰", "正常冰"],
+    toppings: [
+      { id: "none", name: "不加料", price: 0 },
+      { id: "jelly", name: "茶凍", price: 12 }
+    ]
+  },
+  {
+    id: "drink-011",
+    storeId: "store-006",
+    name: "柳橙百香綠",
+    category: "fruit",
+    description: "柳橙與百香果搭配清爽綠茶",
+    price: 60,
+    sweetnessOptions: ["微糖", "半糖", "正常"],
+    iceOptions: ["少冰", "正常冰"],
+    toppings: [
+      { id: "none", name: "不加料", price: 0 },
+      { id: "aloe", name: "蘆薈", price: 15 }
+    ]
+  },
+  {
+    id: "drink-012",
+    storeId: "store-007",
+    name: "雙十鮮乳茶",
+    category: "milk_tea",
+    description: "濃郁鮮乳與熟香紅茶",
+    price: 65,
+    sweetnessOptions: ["無糖", "微糖", "半糖"],
+    iceOptions: ["去冰", "少冰", "正常冰"],
+    toppings: [
+      { id: "none", name: "不加料", price: 0 },
+      { id: "pudding", name: "布丁", price: 15 }
+    ]
+  },
+  {
+    id: "drink-013",
+    storeId: "store-003",
+    name: "午後百香果茶",
+    category: "fruit",
+    description: "百香果酸甜搭配清香綠茶",
+    price: 55,
+    sweetnessOptions: ["微糖", "半糖", "正常"],
+    iceOptions: ["少冰", "正常冰"],
+    toppings: [
+      { id: "none", name: "不加料", price: 0 },
+      { id: "coconut_jelly", name: "椰果", price: 10 }
+    ]
   }
 ];

@@ -20,7 +20,7 @@ The first mobile prototype should focus on:
 
 The first mobile prototype should not implement:
 
-- Real Google Maps API.
+- Real nearby-store search, geocoding, directions, and production location tracking. Google Maps base-map rendering is allowed.
 - Real GPS lookup.
 - Real Google login.
 - Real payment authorization or capture.
@@ -41,7 +41,7 @@ The first mobile prototype should not implement:
 | Data to display | Store name, distance text, business status, deal title, deal status, current cups, target cups, next discount tier, remaining time, pickup time summary. |
 | User actions | Open deal detail, switch between list mock and map mock, refresh mock list, view location permission placeholder. |
 | Mock data | `stores`, `deals` |
-| Real features not included | Real Google Maps API, real GPS lookup, real search ranking, real push notification. |
+| Real features not included | Real nearby-store API, geocoding, directions, GPS-based ranking, and push notification. Google Maps base-map rendering is connected. |
 | Future API | `GET /mobile/deals/nearby`, `GET /mobile/stores/nearby` |
 | Future database entity | `stores`, `store_locations`, `deals` or `group_buy_activities`, `discount_tiers` |
 | Open questions | Should the home screen show only joinable deals? How should denied location permission be displayed? Should cancelled or full deals appear? Is `targetCups` the first tier, next tier, or maximum tier? |

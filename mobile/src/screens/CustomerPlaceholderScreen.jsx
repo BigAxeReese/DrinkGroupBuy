@@ -4,14 +4,6 @@ import { PlaceholderBox } from "../components/PlaceholderBox";
 import { PrimaryButton } from "../components/PrimaryButton";
 
 const screenContent = {
-  liveMap: {
-    title: "即時地圖",
-    section: "附近店家地圖",
-    placeholder: "地圖區域",
-    description: "顯示附近店家與優惠活動。",
-    actionLabel: "查看附近優惠",
-    actionRoute: "nearby"
-  },
   discussion: {
     title: "討論區",
     section: "團購討論",

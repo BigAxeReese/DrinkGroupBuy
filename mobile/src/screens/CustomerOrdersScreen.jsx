@@ -6,9 +6,9 @@ import { StatusBadge } from "../components/StatusBadge";
 import { customerOrderDemo } from "../mock/customerOrderDemo";
 import { deals } from "../mock/deals";
 import { stores } from "../mock/stores";
-import { formatCurrency } from "../utils/calculations";
+import { formatCurrency, isWithdrawalLocked } from "../utils/calculations";
 
-export function CustomerOrdersScreen({ navigation, appState, memberAction }) {
+export function CustomerOrdersScreen({ navigation, appState, actions, memberAction }) {
   const [tab, setTab] = useState("active");
   const [demoItems, setDemoItems] = useState(customerOrderDemo.orderItems ?? []);
   const order = appState.orders.find((item) => item.id === customerOrderDemo.activeOrderId) ?? appState.orders[0];
@@ -20,7 +20,9 @@ export function CustomerOrdersScreen({ navigation, appState, memberAction }) {
   const displaySubtotal = orderItems.length > 0 ? demoSubtotal : order.subtotal;
   const displayTotal = payment?.captureAmount ?? Math.max(customerOrderDemo.minimumPayableAmount, displaySubtotal - customerOrderDemo.discountAmount);
   const authorizedTotal = orderItems.length > 0 ? displaySubtotal : payment?.authorizedAmount ?? displaySubtotal;
-  const progressText = deal.currentCups >= deal.targetCups ? "100% 達標" : `${Math.round((deal.currentCups / deal.targetCups) * 100)}%`;
+  const merchantAccepted = order.merchantAcceptanceStatus === "accepted";
+  const withdrawalLocked = isWithdrawalLocked(deal);
+  const progressText = `${deal.currentCups} / ${deal.targetCups} 杯`;
 
   if (!order) {
     return (
@@ -80,30 +82,30 @@ export function CustomerOrdersScreen({ navigation, appState, memberAction }) {
             style={styles.itemScroller}
             contentContainerStyle={styles.itemList}
           >
-            {(orderItems.length > 0 ? orderItems : [{
-              id: order.id,
-              name: order.itemName,
-              size: "L",
-              quantity: order.quantity,
-              sweetness: order.sweetness,
-              ice: order.ice,
-              toppings: order.toppings,
-              subtotal: order.subtotal
-            }]).map((item) => (
+            {orderItems.map((item) => (
               <Pressable
                 accessibilityRole="button"
                 key={item.id}
+                disabled={withdrawalLocked}
                 onPress={() => navigation.go("drinkSelection", {
                   dealId: order.dealId,
                   editMode: true,
                   editOrderItem: item,
                   onSaveOrderItem: (updatedItem) => {
-                    setDemoItems((items) => items.map((current) => (
+                    const nextItems = demoItems.map((current) => (
                       current.id === updatedItem.id ? updatedItem : current
-                    )));
+                    ));
+                    const nextSubtotal = nextItems.reduce((sum, current) => sum + current.subtotal, 0);
+                    const nextQuantity = nextItems.reduce((sum, current) => sum + current.quantity, 0);
+                    setDemoItems(nextItems);
+                    actions.requireReauthorization(order.id, nextSubtotal, nextQuantity);
                   }
                 })}
-                style={({ pressed }) => [styles.detailCard, pressed && styles.pressed]}
+                style={({ pressed }) => [
+                  styles.detailCard,
+                  withdrawalLocked && styles.detailCardLocked,
+                  pressed && styles.pressed
+                ]}
               >
                 <View style={styles.detailTop}>
                   <View style={styles.flex}>
@@ -117,19 +119,38 @@ export function CustomerOrdersScreen({ navigation, appState, memberAction }) {
                   </View>
                   <Pressable
                     accessibilityRole="button"
+                    disabled={withdrawalLocked}
                     onPress={(event) => {
                       event.stopPropagation?.();
-                      setDemoItems((items) => items.filter((current) => current.id !== item.id));
+                      const nextItems = demoItems.filter((current) => current.id !== item.id);
+                      const nextSubtotal = nextItems.reduce((sum, current) => sum + current.subtotal, 0);
+                      const nextQuantity = nextItems.reduce((sum, current) => sum + current.quantity, 0);
+                      setDemoItems(nextItems);
+                      actions.requireReauthorization(order.id, nextSubtotal, nextQuantity);
                     }}
-                    style={({ pressed }) => [styles.deleteButton, pressed && styles.pressed]}
+                    style={({ pressed }) => [
+                      styles.deleteButton,
+                      withdrawalLocked && styles.deleteButtonDisabled,
+                      pressed && styles.pressed
+                    ]}
                   >
-                    <Text style={styles.deleteText}>刪除</Text>
+                    <Text style={[styles.deleteText, withdrawalLocked && styles.deleteTextDisabled]}>
+                      {withdrawalLocked ? "已鎖定" : "刪除"}
+                    </Text>
                   </Pressable>
                 </View>
               </Pressable>
             ))}
+            {orderItems.length === 0 ? <Text style={styles.emptyItems}>目前沒有飲品品項。</Text> : null}
           </ScrollView>
-          <PrimaryButton label="修改訂單" variant="secondary" onPress={() => navigation.go("drinkSelection", { dealId: order.dealId })} />
+          {withdrawalLocked ? (
+            <Text style={styles.withdrawalLockNotice}>距截止時間 30 分鐘內只能加入，既有訂單不可修改或退出。</Text>
+          ) : null}
+          <PrimaryButton
+            label={withdrawalLocked ? "訂單已鎖定，無法修改" : "修改訂單"}
+            variant="secondary"
+            onPress={() => !withdrawalLocked && navigation.go("drinkSelection", { dealId: order.dealId })}
+          />
           <View style={styles.totalRow}>
             <Text style={styles.totalLabel}>訂單金額</Text>
             <View style={styles.priceGroup}>
@@ -137,17 +158,34 @@ export function CustomerOrdersScreen({ navigation, appState, memberAction }) {
               <Text style={styles.originalPrice}>{formatCurrency(authorizedTotal)}</Text>
             </View>
           </View>
+          {order.reauthorizationReason === "order_amount_changed" ? (
+            <View style={styles.reauthorizationNotice}>
+              <Text style={styles.reauthorizationTitle}>訂單金額已變動</Text>
+              <Text style={styles.reauthorizationText}>原預授權已失效，請依新訂單金額重新預授權。</Text>
+              <PrimaryButton
+                label="重新預授權"
+                onPress={() => navigation.go("paymentReport", { dealId: order.dealId, orderId: order.id })}
+              />
+            </View>
+          ) : null}
         </Section>
 
-        <View style={styles.pickupPass}>
-          <View>
-            <Text style={styles.passLabel}>{customerOrderDemo.pickupPass.label}</Text>
-            <Text style={styles.passCode}>{customerOrderDemo.pickupPass.code}</Text>
+        {merchantAccepted ? (
+          <View style={styles.pickupPass}>
+            <View>
+              <Text style={styles.passLabel}>{customerOrderDemo.pickupPass.label}</Text>
+              <Text style={styles.passCode}>{customerOrderDemo.pickupPass.code}</Text>
+            </View>
+            <View style={styles.qrBox}>
+              <Text style={styles.qrText}>{customerOrderDemo.pickupPass.qrLabel}</Text>
+            </View>
           </View>
-          <View style={styles.qrBox}>
-            <Text style={styles.qrText}>{customerOrderDemo.pickupPass.qrLabel}</Text>
+        ) : (
+          <View style={styles.pickupPending}>
+            <Text style={styles.pickupPendingTitle}>等待店家確認接單</Text>
+            <Text style={styles.pickupPendingText}>店家確認接單後，取貨憑證才會顯示。</Text>
           </View>
-        </View>
+        )}
       </View>
       )}
     </MobileScreen>
@@ -227,8 +265,8 @@ const styles = StyleSheet.create({
     marginTop: 6
   },
   storeName: {
-    color: "#475569",
-    fontSize: 16,
+    color: "#0f172a",
+    fontSize: 20,
     fontWeight: "900",
     marginTop: 6
   },
@@ -256,6 +294,12 @@ const styles = StyleSheet.create({
     gap: 10,
     paddingRight: 4
   },
+  emptyItems: {
+    color: "#64748b",
+    fontSize: 12,
+    textAlign: "center",
+    paddingVertical: 20
+  },
   price: {
     color: "#2563eb",
     fontSize: 21,
@@ -271,6 +315,9 @@ const styles = StyleSheet.create({
     borderRadius: 12,
     backgroundColor: "#f8fafc",
     padding: 10
+  },
+  detailCardLocked: {
+    opacity: 0.72
   },
   pressed: {
     opacity: 0.75
@@ -294,6 +341,18 @@ const styles = StyleSheet.create({
     color: "#dc2626",
     fontSize: 12,
     fontWeight: "900"
+  },
+  deleteButtonDisabled: {
+    backgroundColor: "#e2e8f0"
+  },
+  deleteTextDisabled: {
+    color: "#64748b"
+  },
+  withdrawalLockNotice: {
+    color: "#b45309",
+    fontSize: 11,
+    fontWeight: "800",
+    lineHeight: 17
   },
   itemTitle: {
     color: "#0f172a",
@@ -334,6 +393,26 @@ const styles = StyleSheet.create({
     justifyContent: "space-between",
     padding: 13
   },
+  pickupPending: {
+    gap: 5,
+    margin: 12,
+    marginTop: 4,
+    borderRadius: 14,
+    borderWidth: 1,
+    borderColor: "#fde68a",
+    backgroundColor: "#fffbeb",
+    padding: 13
+  },
+  pickupPendingTitle: {
+    color: "#92400e",
+    fontSize: 13,
+    fontWeight: "900"
+  },
+  pickupPendingText: {
+    color: "#a16207",
+    fontSize: 11,
+    lineHeight: 17
+  },
   totalRow: {
     minHeight: 44,
     flexDirection: "row",
@@ -348,6 +427,24 @@ const styles = StyleSheet.create({
     color: "#0f172a",
     fontSize: 13,
     fontWeight: "900"
+  },
+  reauthorizationNotice: {
+    gap: 7,
+    borderRadius: 12,
+    borderWidth: 1,
+    borderColor: "#fed7aa",
+    backgroundColor: "#fff7ed",
+    padding: 10
+  },
+  reauthorizationTitle: {
+    color: "#9a3412",
+    fontSize: 13,
+    fontWeight: "900"
+  },
+  reauthorizationText: {
+    color: "#c2410c",
+    fontSize: 11,
+    lineHeight: 17
   },
   passLabel: {
     color: "#cbd5e1",

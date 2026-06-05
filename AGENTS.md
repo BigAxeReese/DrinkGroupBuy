@@ -24,11 +24,15 @@ Do NOT implement database migrations.
 Do NOT create real API routes.
 Do NOT create authentication logic.
 Do NOT create payment integration.
-Do NOT create real Google Maps API integration.
 Do NOT create real notification service.
 Do NOT create production business logic.
 
 Frontend prototype may use mock data only.
+
+Exception:
+- Google Maps may use the real Google Maps SDK/API for map rendering and prototype interaction.
+- Store markers, locations, nearby search results, and business data must remain clearly marked prototype mock data until a formal backend/API contract exists.
+- Google Maps API keys must be provided through local environment configuration and must not be committed to Git.
 
 Mock data must be clearly marked as prototype mock data.
 Mock data must NOT be treated as final API response format.
@@ -82,9 +86,11 @@ Not allowed:
 - Real database connection
 - Real login
 - Real payment
-- Real map service
 - Real push notifications
 - Production-level state management unless necessary
+
+Allowed external prototype service:
+- Google Maps SDK/API for map display and map interaction only
 
 ## Documentation Rules
 

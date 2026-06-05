@@ -11,7 +11,7 @@ This project is not currently aiming to become a general Web frontend product. T
 - Recommended mobile technology: React Native + Expo.
 - Primary target platform for the first mobile prototype: Android.
 - iOS support is not a first-phase goal, but React Native + Expo keeps a future iOS path open.
-- The first mobile prototype should continue using mock data and should not connect to real backend, database, Google Maps, payment, notification, or login services.
+- The first mobile prototype should continue using mock business data and should not connect to real backend, database, payment, notification, or login services. Google Maps is allowed for map rendering only.
 
 ## Intended Project Roles
 
@@ -70,7 +70,7 @@ Existing JSON data and mock data should be interpreted as prototype inputs only:
 - Do not build database schema yet.
 - Do not write SQL or migrations yet.
 - Do not create real API endpoints yet.
-- Do not connect real Google Maps API yet.
+- Google Maps SDK/API may be connected for map display; store markers and nearby activity results remain prototype mock data.
 - Do not connect real payment services yet.
 - Do not connect real push notifications yet.
 - Do not optimize for iOS in the first phase.

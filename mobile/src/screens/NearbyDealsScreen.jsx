@@ -1,6 +1,5 @@
-import { Pressable, ScrollView, StyleSheet, Text, View } from "react-native";
+import { Pressable, StyleSheet, Text, View } from "react-native";
 import { MobileScreen, Section } from "../components/MobileScreen";
-import { StatusBadge } from "../components/StatusBadge";
 import { stores } from "../mock/stores";
 import { getStoreById } from "../utils/calculations";
 
@@ -8,7 +7,7 @@ export function NearbyDealsScreen({ navigation, appState, memberAction }) {
   const { deals } = appState;
   const activeDeal = deals.find((deal) => deal.status === "recruiting") ?? deals[0];
   const activeStore = getStoreById(stores, activeDeal.storeId);
-  const recommendedDeals = deals.filter((deal) => deal.id !== activeDeal.id).slice(0, 3);
+  const recommendedDeals = deals.filter((deal) => deal.status === "recruiting");
   const cupsLeft = Math.max(0, activeDeal.targetCups - activeDeal.currentCups);
 
   return (
@@ -47,7 +46,7 @@ export function NearbyDealsScreen({ navigation, appState, memberAction }) {
               <Text style={styles.dealTitle}>{activeDeal.title}</Text>
               <Text style={styles.deadline}>⏰ 倒數 {activeDeal.remainingTimeText.replace("剩 ", "")}</Text>
             </View>
-            <Text style={styles.cupCount}>{activeDeal.currentCups}<Text style={styles.cupUnit}>/{activeDeal.targetCups}杯</Text></Text>
+            <Text style={styles.cupCount}>{activeDeal.currentCups} / {activeDeal.targetCups}<Text style={styles.cupUnit}> 杯</Text></Text>
           </View>
           <View style={styles.dealMetaRow}>
             <Text style={styles.meta}>優惠：滿 {activeDeal.targetCups} 杯折 {activeDeal.tiers[0]?.discountAmount}</Text>
@@ -61,12 +60,7 @@ export function NearbyDealsScreen({ navigation, appState, memberAction }) {
       </Pressable>
 
       <Section title="🔥 附近熱門活動推薦">
-        <ScrollView
-          horizontal
-          showsHorizontalScrollIndicator={false}
-          contentContainerStyle={styles.recommendRow}
-          style={styles.recommendScroller}
-        >
+        <View style={styles.recommendList}>
           {recommendedDeals.map((deal) => {
             const store = getStoreById(stores, deal.storeId);
             return (
@@ -74,16 +68,19 @@ export function NearbyDealsScreen({ navigation, appState, memberAction }) {
                 accessibilityRole="button"
                 key={deal.id}
                 onPress={() => navigation.go("dealDetail", { dealId: deal.id })}
-                style={({ pressed }) => [styles.recommendCard, pressed && styles.pressed]}
+                style={({ pressed }) => [styles.recommendRow, pressed && styles.pressed]}
               >
-                <StatusBadge value={deal.status} />
-                <Text style={styles.recommendTitle}>{deal.title}</Text>
-                <Text style={styles.meta}>{store?.name}</Text>
-                <Text style={styles.joinNow}>立即跟團</Text>
+                <Text style={styles.recommendStore}>{store?.name}</Text>
+                <Text style={styles.recommendCups}>{deal.currentCups} / {deal.targetCups} 杯</Text>
               </Pressable>
             );
           })}
-        </ScrollView>
+          {recommendedDeals.length === 0 ? (
+            <View style={styles.emptyRecommendCard}>
+              <Text style={styles.emptyRecommendText}>目前沒有招募中的團購</Text>
+            </View>
+          ) : null}
+        </View>
       </Section>
     </MobileScreen>
   );
@@ -244,39 +241,46 @@ const styles = StyleSheet.create({
     fontSize: 11,
     fontWeight: "800"
   },
-  recommendScroller: {
-    marginHorizontal: -14,
-    paddingHorizontal: 14
+  recommendList: {
+    gap: 8
   },
   recommendRow: {
-    gap: 10,
-    paddingRight: 14
-  },
-  recommendCard: {
-    width: 148,
-    minHeight: 132,
-    borderRadius: 15,
-    backgroundColor: "#eef5ff",
+    minHeight: 54,
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "space-between",
+    gap: 12,
+    borderRadius: 13,
+    backgroundColor: "#f8fafc",
     borderWidth: 1,
-    borderColor: "#dbeafe",
-    gap: 8,
-    padding: 12
+    borderColor: "#e2e8f0",
+    paddingHorizontal: 13,
+    paddingVertical: 10
   },
-  recommendTitle: {
-    color: "#0f172a",
-    fontSize: 13,
-    fontWeight: "900",
-    lineHeight: 18
+  emptyRecommendCard: {
+    minHeight: 70,
+    borderRadius: 15,
+    alignItems: "center",
+    justifyContent: "center",
+    backgroundColor: "#f8fafc",
+    borderWidth: 1,
+    borderColor: "#e2e8f0",
+    padding: 14
   },
-  joinNow: {
-    marginTop: "auto",
-    minHeight: 34,
-    borderRadius: 10,
-    backgroundColor: "#ffffff",
-    color: "#1f6feb",
+  emptyRecommendText: {
+    color: "#64748b",
     fontSize: 12,
+    fontWeight: "800"
+  },
+  recommendStore: {
+    color: "#0f172a",
+    fontSize: 14,
+    fontWeight: "900"
+  },
+  recommendCups: {
+    color: "#1f6feb",
+    fontSize: 14,
     fontWeight: "900",
-    textAlign: "center",
-    textAlignVertical: "center"
+    textAlign: "right"
   }
 });

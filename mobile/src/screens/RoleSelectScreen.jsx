@@ -18,6 +18,13 @@ export function RoleSelectScreen({ navigation }) {
         </Text>
         <PrimaryButton label="以商家身分進入" onPress={() => navigation.selectRole("merchant", "merchantDashboard")} />
       </Section>
+
+      <Section title="管理員登入">
+        <Text style={styles.description}>
+          查看全平台團購、訂單與付款狀態。此入口僅供原型展示。
+        </Text>
+        <PrimaryButton label="以管理員身分進入" variant="secondary" onPress={() => navigation.selectRole("admin", "adminDashboard")} />
+      </Section>
     </MobileScreen>
   );
 }

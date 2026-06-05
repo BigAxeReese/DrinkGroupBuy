@@ -2,11 +2,13 @@ import { Pressable, StyleSheet, Text, View } from "react-native";
 
 const navItems = [
   { id: "home", route: "nearby", icon: "⌂", label: "首頁", roles: ["customer"] },
-  { id: "liveMap", route: "customerPlaceholder", icon: "⌖", label: "即時地圖", params: { type: "liveMap" }, roles: ["customer"] },
+  { id: "liveMap", route: "liveMap", icon: "⌖", label: "即時地圖", roles: ["customer"] },
   { id: "orders", route: "customerOrders", icon: "＄", label: "我的訂單", roles: ["customer"] },
   { id: "discussion", route: "customerPlaceholder", icon: "○", label: "討論區", params: { type: "discussion" }, roles: ["customer"] },
   { id: "profile", route: "customerPlaceholder", icon: "⌔", label: "個人中心", params: { type: "profile" }, roles: ["customer"] },
-  { id: "merchantDashboard", route: "merchantDashboard", icon: "▣", label: "商家", roles: ["merchant"] }
+  { id: "merchantDashboard", route: "merchantDashboard", icon: "⌂", label: "首頁", roles: ["merchant"] },
+  { id: "merchantCreate", route: "merchantCreate", icon: "＋", label: "開團", roles: ["merchant"] },
+  { id: "adminDashboard", route: "adminDashboard", icon: "▦", label: "管理後台", roles: ["admin"] }
 ];
 
 export function BottomNav({ current, currentParams, currentRole, navigation }) {
