@@ -3,7 +3,6 @@ import { MobileScreen, Section } from "../components/MobileScreen";
 import { PrimaryButton } from "../components/PrimaryButton";
 import { ProgressSummary } from "../components/ProgressSummary";
 import { StatusBadge } from "../components/StatusBadge";
-import { groupOrders } from "../mock/groupOrders";
 import { getDealById, formatCurrency } from "../utils/calculations";
 
 export function GroupProgressScreen({ navigation, route, appState, memberAction, selectedCustomerId }) {
@@ -23,14 +22,27 @@ export function GroupProgressScreen({ navigation, route, appState, memberAction,
     );
   }
 
-  const groupOrder = groupOrders.find((item) => item.dealId === deal.id);
   const order = appState.orders.find((item) => item.id === route.params?.orderId && item.customerId === selectedCustomerId)
     ?? appState.orders.find((item) => item.dealId === deal.id && item.customerId === selectedCustomerId);
   const payment = appState.paymentReports.find((item) => item.orderId === order?.id);
   const authorizedCups = deal.currentCups;
-  const targetCups = groupOrder?.targetCups ?? deal.targetCups;
+  const tierTargets = (deal.tiers ?? [])
+    .map((tier) => Number(tier.cups))
+    .filter((cups) => Number.isFinite(cups) && cups > 0)
+    .sort((left, right) => left - right);
+  const targetCups = tierTargets.find((cups) => authorizedCups < cups)
+    ?? deal.targetCups
+    ?? tierTargets[tierTargets.length - 1]
+    ?? 0;
+  const reachedTiers = tierTargets.filter((cups) => authorizedCups >= cups);
+  const reachedTier = reachedTiers[reachedTiers.length - 1];
+  const nextTierText = targetCups > 0 && authorizedCups < targetCups
+    ? `下一級距：還差 ${targetCups - authorizedCups} 杯達到 ${targetCups} 杯`
+    : reachedTier
+      ? `已達目前最高級距：${reachedTier} 杯`
+      : "目前沒有下一級距資料";
   const remainingAuthorizedCups = Math.max(0, targetCups - authorizedCups);
-  const discountStatus = authorizedCups >= targetCups ? "qualified" : "not_yet_qualified";
+  const discountStatus = reachedTier ? "qualified" : "not_yet_qualified";
 
   return (
     <MobileScreen
@@ -51,7 +63,7 @@ export function GroupProgressScreen({ navigation, route, appState, memberAction,
         <Text style={styles.meta}>remainingAuthorizedCups：{remainingAuthorizedCups} 杯</Text>
         <Text style={styles.meta}>discountStatus：{discountStatus === "qualified" ? "優惠成立" : "尚未達標"}</Text>
         <Text style={styles.explain}>只有預授權成功的杯數才計入優惠門檻。</Text>
-        <Text style={styles.meta}>{groupOrder?.nextTierText ?? "目前沒有下一級距資料"}</Text>
+        <Text style={styles.meta}>{nextTierText}</Text>
         <Text style={styles.meta}>最高優惠上限：{deal.maximumCups} 杯</Text>
       </Section>
 

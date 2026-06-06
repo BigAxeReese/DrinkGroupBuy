@@ -25,11 +25,11 @@ The old Web / Node prototype has been deleted by user confirmation:
 
 Do not restore these unless the user explicitly asks.
 
-Known cleanup remaining:
+Cleanup completed:
 
-- Root `package.json` still has `"start": "node server.js"` and should be updated later.
-- `scripts/verifyPromotions.js` still references deleted `src/services/promotionCalculator.js`.
-- Some old docs still mention `frontend/`, `server.js`, `src/`, or `data/`.
+- Root `package.json` no longer points to deleted `server.js`.
+- Deleted legacy `scripts/verifyPromotions.js`.
+- Archived old Web prototype docs that referenced deleted files.
 
 ## Mobile App Prototype
 
@@ -139,7 +139,19 @@ Admin prototype screen:
 mobile/src/screens/AdminDashboardScreen.jsx
 ```
 
-It is only a prototype display and not a real backend admin system.
+Current admin behavior:
+
+- Shows all prototype group-buy activities.
+- Admin can delete a group-buy activity from the admin dashboard.
+- Delete currently means soft cancel: activity status becomes `cancelled`.
+- Backend writes `status_history` and `audit_logs` for the cancel action.
+- The mobile state also marks the activity `cancelled` and disables joining.
+
+Related prototype API:
+
+```text
+DELETE /api/admin/group-buy-activities/:activityId
+```
 
 ## Current Payment Prototype
 
@@ -365,9 +377,9 @@ Do not commit `.env`.
 
 ## Suggested Next Steps
 
-1. Update root `package.json` because `server.js` was deleted.
-2. Remove or update `scripts/verifyPromotions.js`.
-3. Clean old docs that still refer to deleted Web prototype files.
-4. Add `database/seed-dev.sql` for dev database users, stores, menu items.
-5. Decide backend direction before connecting mobile to database.
-6. Design first backend API for merchant creating group-buy activities.
+1. Add `database/seed-dev.sql` for dev database users, stores, menu items.
+2. Create `backend/` scaffold.
+3. Design first backend API for merchant creating group-buy activities.
+4. Connect merchant create screen to backend API.
+5. Connect customer nearby/map data to backend API.
+6. Replace prototype localStorage persistence step by step.

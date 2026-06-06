@@ -2,7 +2,7 @@
 
 ## 重要聲明
 
-本文件僅從 `frontend/` 畫面與 mock data 反向整理未來可能需要的 API。以下 method、path、request 與 response 都是 candidate，不是正式 API contract，也不代表現在要建立 backend。
+本文件整理 mobile prototype 與目前資料庫規劃推導出的 API candidates。以下 method、path、request 與 response 都是 candidate，仍需在正式 backend 實作前確認。
 
 - Candidate JSON 欄位暫以 `camelCase` 表示。
 - 目前 prototype 不呼叫 API、不做登入授權、不串地圖、通知或金流。

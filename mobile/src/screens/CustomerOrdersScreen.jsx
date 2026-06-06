@@ -1,227 +1,354 @@
-import { useState } from "react";
+import { useMemo, useState } from "react";
 import { Pressable, ScrollView, StyleSheet, Text, View } from "react-native";
 import { MobileScreen, Section } from "../components/MobileScreen";
 import { PrimaryButton } from "../components/PrimaryButton";
 import { StatusBadge } from "../components/StatusBadge";
-import { customerOrderDemo } from "../mock/customerOrderDemo";
-import { deals } from "../mock/deals";
 import { stores } from "../mock/stores";
 import { formatCurrency, isWithdrawalLocked } from "../utils/calculations";
+import { getDealProgress } from "../utils/dealProgress";
+import { normalizeOrderItem } from "../utils/orderItems";
 
 export function CustomerOrdersScreen({ navigation, appState, actions, memberAction, selectedCustomerId }) {
   const [tab, setTab] = useState("active");
-  const [demoItems, setDemoItems] = useState(customerOrderDemo.orderItems ?? []);
-  const customerOrders = appState.orders.filter((item) => item.customerId === selectedCustomerId);
-  const order = customerOrders.find((item) => item.id === customerOrderDemo.activeOrderId) ?? customerOrders[0];
+  const [selectedOrderId, setSelectedOrderId] = useState(null);
+  const customerOrders = appState.orders.filter((order) => order.customerId === selectedCustomerId);
   const cartItems = appState.cartItems.filter((item) => item.customerId === selectedCustomerId);
+  const activeOrders = customerOrders.filter((order) => !isHistoryOrder(order, appState.deals));
+  const historyOrders = customerOrders.filter((order) => isHistoryOrder(order, appState.deals));
+  const displayTab = tab;
+  const visibleOrders = displayTab === "history" ? historyOrders : activeOrders;
+  const selectedOrder = useMemo(
+    () => visibleOrders.find((order) => order.id === selectedOrderId) ?? null,
+    [selectedOrderId, visibleOrders]
+  );
   const cartDeal = cartItems.length > 0
-    ? appState.deals.find((item) => item.id === cartItems[0].dealId) ?? null
+    ? appState.deals.find((deal) => deal.id === cartItems[0].dealId) ?? null
     : null;
   const cartTotalQuantity = cartItems.reduce((sum, item) => sum + item.quantity, 0);
   const cartTotalAmount = cartItems.reduce((sum, item) => sum + item.subtotal, 0);
 
-  if (!order) {
+  function handleTabChange(nextTab) {
+    setSelectedOrderId(null);
+    setTab(nextTab);
+  }
+
+  if (selectedOrder) {
     return (
-      <MobileScreen title="我的訂單" onMemberPress={memberAction}>
-        {cartItems.length > 0 ? (
-          <CartDraftSection
-            cartDeal={cartDeal}
-            cartItems={cartItems}
-            cartTotalQuantity={cartTotalQuantity}
-            cartTotalAmount={cartTotalAmount}
-            navigation={navigation}
-          />
-        ) : (
-          <Section title="目前沒有訂單">
-            <Text style={styles.meta}>加入團購後，訂單明細與取貨憑證會顯示在這裡。</Text>
-            <PrimaryButton label="去逛逛" onPress={() => navigation.replace("liveMap")} />
-          </Section>
-        )}
+      <MobileScreen
+        title="訂單明細"
+        onBack={() => setSelectedOrderId(null)}
+        backLabel="返回"
+        onMemberPress={memberAction}
+      >
+        <OrderDetailCard
+          order={selectedOrder}
+          deals={appState.deals}
+          payments={appState.paymentReports}
+          actions={actions}
+          navigation={navigation}
+          historical={displayTab === "history"}
+        />
       </MobileScreen>
     );
   }
 
-  const deal = appState.deals.find((item) => item.id === order.dealId) ?? deals[0];
-  const payment = appState.paymentReports.find((item) => item.orderId === order.id);
-  const store = deal ? stores.find((item) => item.id === deal.storeId) : null;
-  const orderItems = (order.items ?? (order.id === customerOrderDemo.activeOrderId ? demoItems : [])).map(normalizeOrderItem);
-  const demoSubtotal = orderItems.reduce((sum, item) => sum + item.subtotal, 0);
-  const displaySubtotal = orderItems.length > 0 ? demoSubtotal : order.subtotal ?? 0;
-  const displayTotal = payment?.captureAmount ?? Math.max(customerOrderDemo.minimumPayableAmount, displaySubtotal - customerOrderDemo.discountAmount);
-  const authorizedTotal = orderItems.length > 0 ? displaySubtotal : payment?.authorizedAmount ?? displaySubtotal;
-  const merchantAccepted = order.merchantAcceptanceStatus === "accepted";
-  const withdrawalLocked = isWithdrawalLocked(deal);
-  const progressText = deal ? `${deal.currentCups} / ${deal.targetCups} 杯` : "團購資料已移除";
-
   return (
     <MobileScreen title="我的訂單" onMemberPress={memberAction}>
-      <View style={styles.tabRow}>
-        <Text
-          onPress={() => setTab("active")}
-          style={[styles.tabItem, tab === "active" && styles.activeTabItem]}
-        >
-          訂單列表
-        </Text>
-        <Text
-          onPress={() => setTab("history")}
-          style={[styles.tabItem, tab === "history" && styles.activeTabItem]}
-        >
-          歷史訂單
-        </Text>
-      </View>
-
-      {tab === "history" ? (
-        <Section title="歷史訂單">
-            <Text style={styles.meta}>目前沒有歷史訂單。每個顧客帳號會分開顯示訂單。</Text>
-          <PrimaryButton label="返回訂單列表" variant="secondary" onPress={() => setTab("active")} />
-        </Section>
-      ) : (
-      <>
-      {cartItems.length > 0 ? (
-        <CartDraftSection
-          cartDeal={cartDeal}
-          cartItems={cartItems}
-          cartTotalQuantity={cartTotalQuantity}
-          cartTotalAmount={cartTotalAmount}
-          navigation={navigation}
-        />
+      {(customerOrders.length > 0 || cartItems.length > 0) ? (
+        <OrderTabs tab={displayTab} setTab={handleTabChange} />
       ) : null}
-      <View style={styles.orderCard}>
-        <View style={styles.statusBar}>
-          <View style={styles.statusGroup}>
-            <StatusBadge owner="payment" value={order.paymentStatus} />
-            <Text style={styles.statusText}>團購進度：{progressText}</Text>
-          </View>
-        </View>
 
-        <View style={styles.summaryRow}>
-          <View style={styles.flex}>
-            <Text style={styles.storeName}>{store?.name}</Text>
-            <Pressable accessibilityRole="button" onPress={() => navigation.go("dealDetail", { dealId: order.dealId })} style={styles.smallDetailButton}>
-              <Text style={styles.smallDetailText}>團購詳情</Text>
-            </Pressable>
-          </View>
-        </View>
-
-        <Section title="訂單明細">
-          <ScrollView
-            nestedScrollEnabled
-            showsVerticalScrollIndicator
-            style={styles.itemScroller}
-            contentContainerStyle={styles.itemList}
-          >
-            {orderItems.map((item) => (
-              <Pressable
-                accessibilityRole="button"
-                key={item.id}
-                disabled={withdrawalLocked}
-                onPress={() => navigation.go("drinkSelection", {
-                  dealId: order.dealId,
-                  editMode: true,
-                  editOrderItem: item,
-                  onSaveOrderItem: (updatedItem) => {
-                    const nextItems = orderItems.map((current) => (
-                      current.id === updatedItem.id ? updatedItem : current
-                    ));
-                    actions.updateOrderItems(order.id, nextItems);
-                  }
-                })}
-                style={({ pressed }) => [
-                  styles.detailCard,
-                  withdrawalLocked && styles.detailCardLocked,
-                  pressed && styles.pressed
-                ]}
-              >
-                <View style={styles.detailTop}>
-                  <View style={styles.flex}>
-                    <Text style={styles.itemTitle}>{item.name}（{item.size}） x {item.quantity}</Text>
-                    <View style={styles.chips}>
-                      <Text style={styles.chip}>{item.sweetness}</Text>
-                      <Text style={styles.chip}>{item.ice}</Text>
-                      {item.toppings.map((topping) => <Text key={`${item.id}-${topping}`} style={styles.chip}>{topping}</Text>)}
-                    </View>
-                    <Text style={styles.itemPrice}>{formatCurrency(item.subtotal)}</Text>
-                  </View>
-                  <Pressable
-                    accessibilityRole="button"
-                    disabled={withdrawalLocked}
-                    onPress={(event) => {
-                      event.stopPropagation?.();
-                      const nextItems = orderItems.filter((current) => current.id !== item.id);
-                      actions.updateOrderItems(order.id, nextItems);
-                    }}
-                    style={({ pressed }) => [
-                      styles.deleteButton,
-                      withdrawalLocked && styles.deleteButtonDisabled,
-                      pressed && styles.pressed
-                    ]}
-                  >
-                    <Text style={[styles.deleteText, withdrawalLocked && styles.deleteTextDisabled]}>
-                      {withdrawalLocked ? "已鎖定" : "刪除"}
-                    </Text>
-                  </Pressable>
-                </View>
-              </Pressable>
-            ))}
-            {orderItems.length === 0 ? <Text style={styles.emptyItems}>目前沒有飲品品項。</Text> : null}
-          </ScrollView>
-          {withdrawalLocked ? (
-            <Text style={styles.withdrawalLockNotice}>距截止時間 30 分鐘內只能加入，既有訂單不可修改或退出。</Text>
+      {displayTab === "active" ? (
+        <>
+          {cartItems.length > 0 ? (
+            <CartDraftSection
+              cartDeal={cartDeal}
+              cartItems={cartItems}
+              cartTotalQuantity={cartTotalQuantity}
+              cartTotalAmount={cartTotalAmount}
+              navigation={navigation}
+            />
           ) : null}
-          <PrimaryButton
-            label={withdrawalLocked ? "訂單已鎖定，無法修改" : "修改訂單"}
-            variant="secondary"
-            onPress={() => !withdrawalLocked && navigation.go("drinkSelection", { dealId: order.dealId, editOrderId: order.id })}
+          <OrderListSection
+            title="訂單列表"
+            orders={activeOrders}
+            deals={appState.deals}
+            payments={appState.paymentReports}
+            emptyText="目前沒有進行中的訂單。加入團購後會顯示在這裡。"
+            onSelectOrder={setSelectedOrderId}
           />
-          <View style={styles.totalRow}>
-            <Text style={styles.totalLabel}>訂單金額</Text>
-            <View style={styles.priceGroup}>
-              <Text style={styles.price}>{formatCurrency(displayTotal)}</Text>
-              <Text style={styles.originalPrice}>{formatCurrency(authorizedTotal)}</Text>
-            </View>
-          </View>
-          {order.reauthorizationReason === "order_amount_changed" ? (
-            <View style={styles.reauthorizationNotice}>
-              <Text style={styles.reauthorizationTitle}>訂單金額已變動</Text>
-              <Text style={styles.reauthorizationText}>原預授權已失效，請依新訂單金額重新預授權。</Text>
-              <PrimaryButton
-                label="重新預授權"
-                onPress={() => navigation.go("paymentReport", { dealId: order.dealId, orderId: order.id })}
-              />
+          {activeOrders.length === 0 && cartItems.length === 0 ? (
+            <View style={styles.emptyActions}>
+              {historyOrders.length > 0 ? (
+                <PrimaryButton label="查看歷史訂單" variant="secondary" onPress={() => handleTabChange("history")} />
+              ) : null}
+              <PrimaryButton label="去逛逛" onPress={() => navigation.replace("liveMap")} />
             </View>
           ) : null}
-        </Section>
-
-        {merchantAccepted ? (
-          <View style={styles.pickupPass}>
-            <View>
-              <Text style={styles.passLabel}>{customerOrderDemo.pickupPass.label}</Text>
-              <Text style={styles.passCode}>{customerOrderDemo.pickupPass.code}</Text>
-            </View>
-            <View style={styles.qrBox}>
-              <Text style={styles.qrText}>{customerOrderDemo.pickupPass.qrLabel}</Text>
-            </View>
-          </View>
-        ) : (
-          <View style={styles.pickupPending}>
-            <Text style={styles.pickupPendingTitle}>等待店家確認接單</Text>
-            <Text style={styles.pickupPendingText}>店家確認接單後，取貨憑證才會顯示。</Text>
-          </View>
-        )}
-      </View>
-      </>
+        </>
+      ) : (
+        <OrderListSection
+          title={`歷史訂單 ${historyOrders.length} 筆`}
+          orders={historyOrders}
+          deals={appState.deals}
+          payments={appState.paymentReports}
+          emptyText="目前沒有歷史訂單。管理員刪除團購、流團、完成或取消的訂單會顯示在這裡。"
+          onSelectOrder={setSelectedOrderId}
+          historical
+        />
       )}
     </MobileScreen>
   );
 }
 
+function OrderListSection({ title, orders, deals, payments, emptyText, onSelectOrder, historical = false }) {
+  return (
+    <Section title={title}>
+      {orders.length === 0 ? (
+        <Text style={styles.meta}>{emptyText}</Text>
+      ) : (
+        <View style={styles.orderList}>
+          {orders.map((order) => (
+            <OrderListCard
+              key={order.id}
+              order={order}
+              deals={deals}
+              payments={payments}
+              historical={historical}
+              onPress={() => onSelectOrder(order.id)}
+            />
+          ))}
+        </View>
+      )}
+    </Section>
+  );
+}
+
+function OrderListCard({ order, deals, payments, historical, onPress }) {
+  const deal = deals.find((item) => item.id === order.dealId) ?? null;
+  const store = deal ? stores.find((item) => item.id === deal.storeId) : null;
+  const payment = payments.find((item) => item.orderId === order.id);
+  const orderItems = (order.items ?? []).map(normalizeOrderItem);
+  const total = payment?.captureAmount ?? getOrderSubtotal(order);
+  const progress = deal ? getDealProgress(deal) : null;
+  const progressText = progress ? `${progress.currentCups} / ${progress.nextTarget} 杯` : "團購資料已不存在";
+
+  return (
+    <Pressable
+      accessibilityRole="button"
+      onPress={onPress}
+      style={({ pressed }) => [styles.orderListCard, pressed && styles.pressed]}
+    >
+      <View style={styles.listTop}>
+        <View style={styles.flex}>
+          <Text style={styles.storeNameSmall}>{store?.name ?? "店家資料"}</Text>
+          <Text style={styles.orderSubtitle}>
+            {historical ? getHistoryReason(order, deal) : `團購進度：${progressText}`}
+          </Text>
+        </View>
+        <Text style={styles.listAmount}>{formatCurrency(total)}</Text>
+      </View>
+      <View style={styles.orderPreview}>
+        {orderItems.slice(0, 2).map((item) => (
+          <Text key={item.id} style={styles.previewText}>
+            {item.name} x {item.quantity}
+          </Text>
+        ))}
+        {orderItems.length > 2 ? <Text style={styles.previewText}>另有 {orderItems.length - 2} 項</Text> : null}
+      </View>
+      <Text style={styles.openHint}>點擊查看訂單明細</Text>
+    </Pressable>
+  );
+}
+
+function OrderDetailCard({ order, deals, payments, actions, navigation, historical }) {
+  const deal = deals.find((item) => item.id === order.dealId) ?? null;
+  const payment = payments.find((item) => item.orderId === order.id);
+  const store = deal ? stores.find((item) => item.id === deal.storeId) : null;
+  const orderItems = (order.items ?? []).map(normalizeOrderItem);
+  const displaySubtotal = getOrderSubtotal(order);
+  const displayTotal = payment?.captureAmount ?? displaySubtotal;
+  const authorizedTotal = payment?.authorizedAmount ?? displaySubtotal;
+  const merchantAccepted = order.merchantAcceptanceStatus === "accepted";
+  const orderLocked = order.status === "locked";
+  const withdrawalLocked = !historical && (orderLocked || isWithdrawalLocked(deal));
+  const progress = deal ? getDealProgress(deal) : null;
+  const progressText = progress ? `${progress.currentCups} / ${progress.nextTarget} 杯` : "團購資料已不存在";
+
+  return (
+    <View style={styles.orderCard}>
+      <View style={[styles.statusBar, historical && styles.historyStatusBar]}>
+        <View style={styles.statusGroup}>
+          <StatusBadge owner="payment" value={order.paymentStatus} />
+          <Text style={styles.statusText}>團購進度：{progressText}</Text>
+        </View>
+        {historical ? <Text style={styles.historyReason}>{getHistoryReason(order, deal)}</Text> : null}
+      </View>
+
+      <View style={styles.summaryRow}>
+        <View style={styles.flex}>
+          <Text style={styles.storeName}>{store?.name ?? "店家資料"}</Text>
+          <Pressable
+            accessibilityRole="button"
+            onPress={() => navigation.go("dealDetail", { dealId: order.dealId })}
+            style={styles.smallDetailButton}
+          >
+            <Text style={styles.smallDetailText}>團購詳情</Text>
+          </Pressable>
+        </View>
+      </View>
+
+      <Section title="訂單明細">
+        <ScrollView
+          nestedScrollEnabled
+          showsVerticalScrollIndicator
+          style={styles.itemScroller}
+          contentContainerStyle={styles.itemList}
+        >
+          {orderItems.map((item) => (
+            <Pressable
+              accessibilityRole="button"
+              key={item.id}
+              disabled={withdrawalLocked || historical}
+              onPress={() => navigation.go("drinkSelection", {
+                dealId: order.dealId,
+                editMode: true,
+                editOrderItem: item,
+                onSaveOrderItem: (updatedItem) => {
+                  const nextItems = orderItems.map((current) => (
+                    current.id === updatedItem.id ? updatedItem : current
+                  ));
+                  actions.updateOrderItems(order.id, nextItems);
+                }
+              })}
+              style={({ pressed }) => [
+                styles.detailCard,
+                (withdrawalLocked || historical) && styles.detailCardLocked,
+                pressed && styles.pressed
+              ]}
+            >
+              <View style={styles.detailTop}>
+                <View style={styles.flex}>
+                  <Text style={styles.itemTitle}>{item.name} ({item.size}) x {item.quantity}</Text>
+                  <View style={styles.chips}>
+                    <Text style={styles.chip}>{item.sweetness}</Text>
+                    <Text style={styles.chip}>{item.ice}</Text>
+                    {item.toppings.map((topping) => (
+                      <Text key={`${item.id}-${topping}`} style={styles.chip}>{topping}</Text>
+                    ))}
+                  </View>
+                  <Text style={styles.itemPrice}>{formatCurrency(item.subtotal)}</Text>
+                </View>
+                <Pressable
+                  accessibilityRole="button"
+                  disabled={withdrawalLocked || historical}
+                  onPress={(event) => {
+                    event.stopPropagation?.();
+                    const nextItems = orderItems.filter((current) => current.id !== item.id);
+                    actions.updateOrderItems(order.id, nextItems);
+                  }}
+                  style={({ pressed }) => [
+                    styles.deleteButton,
+                    (withdrawalLocked || historical) && styles.deleteButtonDisabled,
+                    pressed && styles.pressed
+                  ]}
+                >
+                  <Text style={[styles.deleteText, (withdrawalLocked || historical) && styles.deleteTextDisabled]}>
+                    {historical ? "歷史" : withdrawalLocked ? "鎖定" : "刪除"}
+                  </Text>
+                </Pressable>
+              </View>
+            </Pressable>
+          ))}
+          {orderItems.length === 0 ? <Text style={styles.emptyItems}>目前沒有飲品明細。</Text> : null}
+        </ScrollView>
+
+        {historical ? (
+          <Text style={styles.historyNotice}>歷史訂單不可修改，僅保留查詢紀錄。</Text>
+        ) : orderLocked ? (
+          <Text style={styles.withdrawalLockNotice}>活動已到結束時間，系統已自動鎖定訂單。</Text>
+        ) : withdrawalLocked ? (
+          <Text style={styles.withdrawalLockNotice}>截止前 30 分鐘訂單已鎖定，只能加入不可退出或修改。</Text>
+        ) : null}
+
+        <PrimaryButton
+          label={historical ? "歷史訂單不可修改" : withdrawalLocked ? "訂單已鎖定" : "修改訂單"}
+          variant="secondary"
+          onPress={() => !withdrawalLocked && !historical && navigation.go("drinkSelection", {
+            dealId: order.dealId,
+            editOrderId: order.id
+          })}
+        />
+
+        <View style={styles.totalRow}>
+          <Text style={styles.totalLabel}>訂單金額</Text>
+          <View style={styles.priceGroup}>
+            <Text style={styles.price}>{formatCurrency(displayTotal)}</Text>
+            <Text style={styles.originalPrice}>{formatCurrency(authorizedTotal)}</Text>
+          </View>
+        </View>
+
+        {order.reauthorizationReason === "order_amount_changed" && !historical ? (
+          <View style={styles.reauthorizationNotice}>
+            <Text style={styles.reauthorizationTitle}>訂單金額已變動</Text>
+            <Text style={styles.reauthorizationText}>修改後需重新完成 Line Pay 預授權，訂單才會重新計入團購杯數。</Text>
+            <PrimaryButton
+              label="重新預授權"
+              onPress={() => navigation.go("paymentReport", { dealId: order.dealId, orderId: order.id })}
+            />
+          </View>
+        ) : null}
+      </Section>
+
+      {merchantAccepted && !historical ? (
+        <View style={styles.pickupPass}>
+          <View>
+            <Text style={styles.passLabel}>取貨憑證</Text>
+            <Text style={styles.passCode}>A7924</Text>
+          </View>
+          <View style={styles.qrBox}>
+            <Text style={styles.qrText}>QR</Text>
+          </View>
+        </View>
+      ) : !historical ? (
+        <View style={styles.pickupPending}>
+          <Text style={styles.pickupPendingTitle}>等待店家確認接單</Text>
+          <Text style={styles.pickupPendingText}>店家確認接單後，取貨憑證才會顯示。</Text>
+        </View>
+      ) : null}
+    </View>
+  );
+}
+
+function OrderTabs({ tab, setTab }) {
+  return (
+    <View style={styles.tabRow}>
+      <Pressable
+        accessibilityRole="button"
+        onPress={() => setTab("active")}
+        style={[styles.tabItem, tab === "active" && styles.activeTabItem]}
+      >
+        <Text style={[styles.tabText, tab === "active" && styles.activeTabText]}>訂單列表</Text>
+      </Pressable>
+      <View style={styles.tabDivider} />
+      <Pressable
+        accessibilityRole="button"
+        onPress={() => setTab("history")}
+        style={[styles.tabItem, tab === "history" && styles.activeTabItem]}
+      >
+        <Text style={[styles.tabText, tab === "history" && styles.activeTabText]}>歷史訂單</Text>
+      </Pressable>
+    </View>
+  );
+}
+
 function CartDraftSection({ cartDeal, cartItems, cartTotalQuantity, cartTotalAmount, navigation }) {
   return (
-    <Section title={`購物車草稿（${cartTotalQuantity} 杯）`}>
+    <Section title={`購物車草稿，共 ${cartTotalQuantity} 杯`}>
       <View style={styles.cartDraftHeader}>
         <View style={styles.flex}>
-          <Text style={styles.cartDraftTitle}>{cartDeal?.title ?? "尚未選定團購"}</Text>
-          <Text style={styles.meta}>這些飲料尚未送出訂單，送出後才會進入 LINE Pay 預授權。</Text>
+          <Text style={styles.cartDraftTitle}>{cartDeal?.title ?? "尚未選擇團購"}</Text>
+          <Text style={styles.meta}>送出購物車後才會建立訂單，並進入 Line Pay 預授權流程。</Text>
         </View>
         <Text style={styles.cartDraftAmount}>{formatCurrency(cartTotalAmount)}</Text>
       </View>
@@ -229,16 +356,37 @@ function CartDraftSection({ cartDeal, cartItems, cartTotalQuantity, cartTotalAmo
         {cartItems.map((item) => (
           <View key={item.id} style={styles.cartDraftItem}>
             <Text style={styles.cartDraftItemName}>{item.itemName} x {item.quantity}</Text>
-            <Text style={styles.cartDraftItemMeta}>{item.sweetness} · {item.ice} · {item.toppings.join("、")}</Text>
+            <Text style={styles.cartDraftItemMeta}>{item.sweetness} / {item.ice} / {item.toppings.join("、") || "不加料"}</Text>
           </View>
         ))}
       </View>
       <PrimaryButton
-        label="前往購物車送出"
+        label="查看購物車"
         onPress={() => cartDeal && navigation.go("cart", { dealId: cartDeal.id })}
       />
     </Section>
   );
+}
+
+function getOrderSubtotal(order) {
+  const items = (order.items ?? []).map(normalizeOrderItem);
+  if (items.length === 0) return order.subtotal ?? order.originalAmount ?? 0;
+  return items.reduce((sum, item) => sum + item.subtotal, 0);
+}
+
+function isHistoryOrder(order, deals) {
+  const deal = deals.find((item) => item.id === order.dealId);
+  const historyDealStatuses = ["cancelled", "failed", "completed"];
+  const historyOrderStatuses = ["cancelled", "completed"];
+  return historyDealStatuses.includes(deal?.status) || historyOrderStatuses.includes(order.status);
+}
+
+function getHistoryReason(order, deal) {
+  if (deal?.status === "cancelled") return "此團購已由管理員取消，訂單已移至歷史訂單。";
+  if (deal?.status === "failed") return "此團購未達門檻，訂單已移至歷史訂單。";
+  if (deal?.status === "completed" || order.status === "completed") return "此訂單已完成。";
+  if (order.status === "cancelled") return "此訂單已取消。";
+  return "此訂單已歸入歷史訂單。";
 }
 
 const styles = StyleSheet.create({
@@ -254,33 +402,96 @@ const styles = StyleSheet.create({
     shadowOffset: { width: 0, height: 8 },
     elevation: 3
   },
+  orderList: {
+    gap: 10
+  },
+  orderListCard: {
+    gap: 9,
+    borderRadius: 14,
+    borderWidth: 1,
+    borderColor: "#e2e8f0",
+    backgroundColor: "#f8fafc",
+    padding: 11
+  },
+  listTop: {
+    flexDirection: "row",
+    justifyContent: "space-between",
+    gap: 10
+  },
+  storeNameSmall: {
+    color: "#0f172a",
+    fontSize: 15,
+    fontWeight: "900"
+  },
+  orderSubtitle: {
+    color: "#64748b",
+    fontSize: 11,
+    fontWeight: "800",
+    lineHeight: 16,
+    marginTop: 4
+  },
+  listAmount: {
+    color: "#2563eb",
+    fontSize: 18,
+    fontWeight: "900"
+  },
+  orderPreview: {
+    gap: 4
+  },
+  previewText: {
+    color: "#475569",
+    fontSize: 11,
+    fontWeight: "700"
+  },
+  openHint: {
+    color: "#1f6feb",
+    fontSize: 11,
+    fontWeight: "900"
+  },
+  emptyActions: {
+    gap: 8
+  },
   tabRow: {
     flexDirection: "row",
-    gap: 8,
+    alignItems: "center",
     borderRadius: 15,
-    backgroundColor: "#e9eef6",
-    padding: 5
+    backgroundColor: "transparent"
   },
   tabItem: {
     flex: 1,
     minHeight: 36,
     borderRadius: 12,
+    alignItems: "center",
+    justifyContent: "center"
+  },
+  tabText: {
     color: "#64748b",
     fontSize: 13,
     fontWeight: "900",
-    textAlign: "center",
-    textAlignVertical: "center"
+    textAlign: "center"
+  },
+  tabDivider: {
+    width: 1,
+    height: 24,
+    backgroundColor: "#cbd5e1"
   },
   activeTabItem: {
-    color: "#1f6feb",
     backgroundColor: "#ffffff"
   },
+  activeTabText: {
+    color: "#1f6feb"
+  },
   statusBar: {
+    gap: 6,
     paddingHorizontal: 12,
     paddingVertical: 8,
     backgroundColor: "#ecfdf5",
     borderBottomWidth: 1,
     borderBottomColor: "#bbf7d0"
+  },
+  historyStatusBar: {
+    backgroundColor: "#f8fafc",
+    borderBottomColor: "#e2e8f0"
   },
   statusGroup: {
     flexDirection: "row",
@@ -301,11 +512,6 @@ const styles = StyleSheet.create({
   },
   flex: {
     flex: 1
-  },
-  drinkName: {
-    color: "#0f172a",
-    fontSize: 18,
-    fontWeight: "900"
   },
   meta: {
     color: "#64748b",
@@ -438,6 +644,12 @@ const styles = StyleSheet.create({
     fontWeight: "800",
     lineHeight: 17
   },
+  historyNotice: {
+    color: "#64748b",
+    fontSize: 11,
+    fontWeight: "800",
+    lineHeight: 17
+  },
   itemTitle: {
     color: "#0f172a",
     fontSize: 13,
@@ -556,16 +768,3 @@ const styles = StyleSheet.create({
     fontWeight: "900"
   }
 });
-
-function normalizeOrderItem(item) {
-  const itemName = item.itemName ?? item.name ?? "";
-  return {
-    ...item,
-    drinkId: item.drinkId ?? item.menuItemId ?? item.id,
-    name: item.name ?? itemName,
-    itemName,
-    size: item.size ?? "L",
-    unitPrice: item.unitPrice ?? (item.quantity > 0 ? Math.round(item.subtotal / item.quantity) : item.subtotal),
-    toppings: item.toppings ?? []
-  };
-}

@@ -6,7 +6,7 @@ import { drinks } from "../mock/drinks";
 import { stores } from "../mock/stores";
 import { calculateDrinkSubtotal, formatCurrency, getDealById, getDrinkById, getStoreById } from "../utils/calculations";
 
-export function DrinkSelectionScreen({ navigation, route, appState, actions, memberAction }) {
+export function DrinkSelectionScreen({ navigation, route, appState, actions, memberAction, selectedCustomerId }) {
   const deal = getDealById(appState.deals, route.params?.dealId);
   if (!deal) {
     return (
@@ -52,6 +52,11 @@ export function DrinkSelectionScreen({ navigation, route, appState, actions, mem
   const [quantity, setQuantity] = useState(editOrderItem?.quantity ?? 1);
   const [submitted, setSubmitted] = useState(false);
   const [customizing, setCustomizing] = useState(Boolean(editOrderItem));
+  const cartItemsForDeal = (appState.cartItems ?? []).filter((item) => (
+    item.dealId === deal.id && (!item.customerId || item.customerId === selectedCustomerId)
+  ));
+  const cartQuantity = cartItemsForDeal.reduce((sum, item) => sum + item.quantity, 0);
+  const cartTotal = cartItemsForDeal.reduce((sum, item) => sum + item.subtotal, 0);
 
   const subtotal = useMemo(() => calculateDrinkSubtotal(drink, toppingId, quantity), [drink, toppingId, quantity]);
   const categories = [
@@ -66,12 +71,13 @@ export function DrinkSelectionScreen({ navigation, route, appState, actions, mem
     : storeDrinks.filter((item) => item.category === category);
 
   return (
-    <MobileScreen
-      title={editOrderItem ? "修改飲料" : "選擇飲料"}
-      subtitle={`${store?.name} · ${deal.title}`}
-      onBack={() => navigation.back()}
-      onMemberPress={memberAction}
-    >
+    <View style={styles.screenWrap}>
+      <MobileScreen
+        title={editOrderItem ? "修改飲料" : "選擇飲料"}
+        subtitle={`${store?.name} · ${deal.title}`}
+        onBack={() => navigation.back()}
+        onMemberPress={memberAction}
+      >
       <View style={styles.menuHero}>
         <Text style={styles.shopName}>{store?.name}</Text>
         <Text style={styles.dealName}>{deal.title}</Text>
@@ -182,10 +188,11 @@ export function DrinkSelectionScreen({ navigation, route, appState, actions, mem
                   return;
                 }
                 if (editOrderId) {
-                  actions.addItemToOrder(editOrderId, {
-                    id: `order-item-${Date.now()}`,
+                  actions.addToCart({
                     dealId: deal.id,
                     drinkId: drink.id,
+                    targetOrderId: editOrderId,
+                    storeName: store?.name ?? "Mock store",
                     name: drink.name,
                     itemName: drink.name,
                     size: "L",
@@ -193,11 +200,11 @@ export function DrinkSelectionScreen({ navigation, route, appState, actions, mem
                     sweetness,
                     ice,
                     toppings: selectedTopping && selectedTopping.id !== "none" ? [selectedTopping.name] : ["不加料"],
-                    unitPrice: quantity > 0 ? Math.round(subtotal / quantity) : subtotal,
                     subtotal
                   });
                   setSubmitted(true);
-                  navigation.back();
+                  setCustomizing(false);
+                  setQuantity(1);
                   return;
                 }
                 actions.addToCart({
@@ -214,7 +221,8 @@ export function DrinkSelectionScreen({ navigation, route, appState, actions, mem
                   subtotal
                 });
                 setSubmitted(true);
-                navigation.go("cart", { dealId: deal.id });
+                setCustomizing(false);
+                setQuantity(1);
               }}
             />
           </View>
@@ -223,7 +231,24 @@ export function DrinkSelectionScreen({ navigation, route, appState, actions, mem
       ) : (
         <Text style={styles.selectHint}>請先選擇飲料，再設定甜度、冰塊與加料。</Text>
       )}
-    </MobileScreen>
+      </MobileScreen>
+      {cartQuantity > 0 ? (
+        <Pressable
+          accessibilityRole="button"
+          onPress={() => navigation.go("cart", { dealId: deal.id })}
+          style={({ pressed }) => [styles.floatingCart, pressed && styles.pressed]}
+        >
+          <View style={styles.cartBadge}>
+            <Text style={styles.cartBadgeText}>{cartQuantity}</Text>
+          </View>
+          <View style={styles.floatingCartTextGroup}>
+            <Text style={styles.floatingCartTitle}>購物車</Text>
+            <Text style={styles.floatingCartMeta}>{formatCurrency(cartTotal)}</Text>
+          </View>
+          <Text style={styles.floatingCartArrow}>›</Text>
+        </Pressable>
+      ) : null}
+    </View>
   );
 }
 
@@ -250,6 +275,9 @@ function OptionButton({ active, label, onPress }) {
 }
 
 const styles = StyleSheet.create({
+  screenWrap: {
+    flex: 1
+  },
   optionWrap: {
     flexDirection: "row",
     flexWrap: "wrap",
@@ -415,5 +443,57 @@ const styles = StyleSheet.create({
     fontSize: 14,
     fontWeight: "800",
     textAlign: "center"
+  },
+  floatingCart: {
+    position: "absolute",
+    right: 18,
+    bottom: 22,
+    minWidth: 156,
+    minHeight: 58,
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 10,
+    borderRadius: 18,
+    backgroundColor: "#111827",
+    paddingHorizontal: 13,
+    paddingVertical: 10,
+    shadowColor: "#0f172a",
+    shadowOpacity: 0.24,
+    shadowRadius: 14,
+    shadowOffset: { width: 0, height: 8 },
+    elevation: 8
+  },
+  cartBadge: {
+    minWidth: 30,
+    height: 30,
+    borderRadius: 15,
+    alignItems: "center",
+    justifyContent: "center",
+    backgroundColor: "#2563eb",
+    paddingHorizontal: 8
+  },
+  cartBadgeText: {
+    color: "#ffffff",
+    fontSize: 13,
+    fontWeight: "900"
+  },
+  floatingCartTextGroup: {
+    flex: 1
+  },
+  floatingCartTitle: {
+    color: "#ffffff",
+    fontSize: 13,
+    fontWeight: "900"
+  },
+  floatingCartMeta: {
+    color: "#bfdbfe",
+    fontSize: 12,
+    fontWeight: "800",
+    marginTop: 2
+  },
+  floatingCartArrow: {
+    color: "#ffffff",
+    fontSize: 24,
+    fontWeight: "900"
   }
 });

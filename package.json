@@ -4,6 +4,10 @@
   "private": true,
   "description": "B2C drink group-buying preorder prototype.",
   "scripts": {
-    "start": "node server.js"
+    "backend:start": "node backend/server.js",
+    "mobile:web": "npm --prefix mobile run web",
+    "mobile:android": "npm --prefix mobile run android",
+    "db:init": "node database/init-dev-db.js",
+    "db:seed": "node database/seed-dev-db.js"
   }
 }

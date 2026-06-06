@@ -18,6 +18,9 @@ import { CustomerOrdersScreen } from "../screens/CustomerOrdersScreen";
 import { AdminDashboardScreen } from "../screens/AdminDashboardScreen";
 import { CartScreen } from "../screens/CartScreen";
 import { LiveMapScreen } from "../screens/LiveMapScreen";
+import { formatDeadlineLabel, getMinutesUntilDeadline, isDeadlineReached } from "../utils/deadlineTime";
+import { normalizeOrderItem } from "../utils/orderItems";
+import { buildOrderItemsChange, rollbackAuthorizedCups } from "../utils/orderState";
 import { loadPrototypeState, savePrototypeState } from "../utils/prototypeStorage";
 
 const initialRoute = { name: "roleSelect", params: {} };
@@ -55,6 +58,70 @@ export function AppNavigator() {
       cartItems
     });
   }, [cartItems, deals, orders, paymentReports, storageLoaded]);
+
+  useEffect(() => {
+    if (!storageLoaded) return undefined;
+
+    function lockExpiredOrders() {
+      const now = new Date();
+      const expiredDealIds = new Set(
+        deals
+          .filter((deal) => isDeadlineReached(deal, now))
+          .map((deal) => deal.id)
+      );
+
+      setDeals((items) => items.map((deal) => {
+        const minutesUntilDeadline = getMinutesUntilDeadline(deal, now);
+        if (minutesUntilDeadline == null) return deal;
+
+        const expired = minutesUntilDeadline <= 0;
+        const nextStatus = expired && ["recruiting", "confirmed"].includes(deal.status)
+          ? "ordering"
+          : deal.status;
+        const nextCanJoin = expired ? false : deal.canJoin;
+        const nextRemainingTimeText = expired ? "已截止" : `剩 ${minutesUntilDeadline} 分鐘`;
+
+        if (
+          deal.minutesUntilDeadline === minutesUntilDeadline
+          && deal.status === nextStatus
+          && deal.canJoin === nextCanJoin
+          && deal.remainingTimeText === nextRemainingTimeText
+        ) {
+          return deal;
+        }
+
+        return {
+          ...deal,
+          minutesUntilDeadline,
+          remainingTimeText: nextRemainingTimeText,
+          canJoin: nextCanJoin,
+          status: nextStatus
+        };
+      }));
+
+      if (expiredDealIds.size === 0) return;
+      setOrders((items) => items.map((order) => (
+        expiredDealIds.has(order.dealId)
+          && !["cancelled", "completed", "locked"].includes(order.status)
+          ? {
+              ...order,
+              status: "locked",
+              lockedReason: "activity_deadline_reached",
+              merchantAcceptanceStatus: order.merchantAcceptanceStatus === "pending"
+                ? "accepted"
+                : order.merchantAcceptanceStatus,
+              pickupStatus: order.pickupStatus === "not_ready"
+                ? "preparing"
+                : order.pickupStatus
+            }
+          : order
+      )));
+    }
+
+    lockExpiredOrders();
+    const intervalId = setInterval(lockExpiredOrders, 30000);
+    return () => clearInterval(intervalId);
+  }, [deals, storageLoaded]);
 
   const navigation = useMemo(() => ({
     selectRole(role, routeName, params = {}) {
@@ -96,11 +163,51 @@ export function AppNavigator() {
       const submittedItems = cartItems.filter((item) => item.dealId === dealId && item.customerId === selectedCustomerId);
       if (submittedItems.length === 0) return null;
 
-      const orderId = `order-mock-${Date.now()}`;
+      const existingOrder = orders.find((order) => (
+        order.customerId === selectedCustomerId
+        && order.dealId === dealId
+        && !["cancelled", "completed"].includes(order.status)
+      ));
       const quantity = submittedItems.reduce((sum, item) => sum + item.quantity, 0);
       const subtotal = submittedItems.reduce((sum, item) => sum + item.subtotal, 0);
       const firstItem = submittedItems[0];
       const orderItems = submittedItems.map((item) => normalizeOrderItem(item));
+
+      if (existingOrder) {
+        const change = buildOrderItemsChange({
+          order: existingOrder,
+          nextItems: [...(existingOrder.items ?? []), ...orderItems]
+        });
+        setOrders((items) => items.map((order) => (
+          order.id === existingOrder.id
+            ? {
+                ...order,
+                ...change.orderPatch,
+                fallbackPurchasePreference
+              }
+            : order
+        )));
+        setPaymentReports((items) => items.map((report) => (
+          report.orderId === existingOrder.id
+            ? {
+                ...report,
+                ...change.paymentPatch,
+                note: "Original authorization remains until customer confirms reauthorization."
+              }
+            : report
+        )));
+        if (change.wasCounted) {
+          setDeals((items) => items.map((deal) => (
+            deal.id === existingOrder.dealId
+              ? rollbackAuthorizedCups(deal, existingOrder)
+              : deal
+          )));
+        }
+        setCartItems((items) => items.filter((item) => item.dealId !== dealId || item.customerId !== selectedCustomerId));
+        return existingOrder.id;
+      }
+
+      const orderId = `order-mock-${Date.now()}`;
       const newOrder = {
         id: orderId,
         customerId: selectedCustomerId,
@@ -119,6 +226,7 @@ export function AppNavigator() {
         captureAmount: null,
         releasedAmount: null,
         fallbackPurchasePreference,
+        status: "submitted",
         paymentStatus: "pending",
         authorizationStatus: "pending",
         merchantAcceptanceStatus: "pending",
@@ -151,29 +259,13 @@ export function AppNavigator() {
       const orderToUpdate = orders.find((order) => order.id === orderId);
       if (!orderToUpdate) return;
 
-      const normalizedItems = nextItems.map((item) => normalizeOrderItem(item));
-      const nextOriginalAmount = normalizedItems.reduce((sum, item) => sum + item.subtotal, 0);
-      const nextQuantity = normalizedItems.reduce((sum, item) => sum + item.quantity, 0);
-      const firstItem = normalizedItems[0];
-      const wasCounted = ["authorized", "captured"].includes(orderToUpdate.paymentStatus);
+      const change = buildOrderItemsChange({ order: orderToUpdate, nextItems });
 
       setOrders((items) => items.map((order) => (
         order.id === orderId
           ? {
               ...order,
-              itemName: firstItem ? (normalizedItems.length > 1 ? `${firstItem.itemName} 等 ${normalizedItems.length} 項` : firstItem.itemName) : "",
-              items: normalizedItems,
-              quantity: nextQuantity,
-              subtotal: nextOriginalAmount,
-              originalAmount: nextOriginalAmount,
-              authorizedAmount: 0,
-              finalAmount: null,
-              captureAmount: null,
-              releasedAmount: null,
-              paymentStatus: "pending",
-              authorizationStatus: "pending",
-              merchantAcceptanceStatus: "pending",
-              reauthorizationReason: "order_amount_changed"
+              ...change.orderPatch
             }
           : order
       )));
@@ -181,28 +273,14 @@ export function AppNavigator() {
         report.orderId === orderId
           ? {
               ...report,
-              originalAmount: nextOriginalAmount,
-              authorizedAmount: 0,
-              finalAmount: null,
-              captureAmount: null,
-              releasedAmount: null,
-              status: "pending",
-              paymentStatus: "pending",
-              authorizationStatus: "pending",
-              discountStatus: "not_yet_qualified",
-              note: "Order amount changed. Reauthorization required."
+              ...change.paymentPatch
             }
           : report
       )));
-      if (wasCounted) {
+      if (change.wasCounted) {
         setDeals((items) => items.map((deal) => (
           deal.id === orderToUpdate.dealId
-            ? {
-                ...deal,
-                currentCups: Math.max(0, deal.currentCups - orderToUpdate.quantity),
-                participantCount: Math.max(0, deal.participantCount - 1),
-                status: "recruiting"
-              }
+            ? rollbackAuthorizedCups(deal, orderToUpdate)
             : deal
         )));
       }
@@ -210,29 +288,16 @@ export function AppNavigator() {
     addItemToOrder(orderId, orderItem) {
       const orderToUpdate = orders.find((order) => order.id === orderId);
       if (!orderToUpdate) return;
-      const normalizedItems = [...(orderToUpdate.items ?? []), normalizeOrderItem(orderItem)];
-      const nextOriginalAmount = normalizedItems.reduce((sum, item) => sum + item.subtotal, 0);
-      const nextQuantity = normalizedItems.reduce((sum, item) => sum + item.quantity, 0);
-      const firstItem = normalizedItems[0];
-      const wasCounted = ["authorized", "captured"].includes(orderToUpdate.paymentStatus);
+      const change = buildOrderItemsChange({
+        order: orderToUpdate,
+        nextItems: [...(orderToUpdate.items ?? []), normalizeOrderItem(orderItem)]
+      });
 
       setOrders((items) => items.map((order) => (
         order.id === orderId
           ? {
               ...order,
-              itemName: firstItem ? (normalizedItems.length > 1 ? `${firstItem.itemName} 等 ${normalizedItems.length} 項` : firstItem.itemName) : "",
-              items: normalizedItems,
-              quantity: nextQuantity,
-              subtotal: nextOriginalAmount,
-              originalAmount: nextOriginalAmount,
-              authorizedAmount: 0,
-              finalAmount: null,
-              captureAmount: null,
-              releasedAmount: null,
-              paymentStatus: "pending",
-              authorizationStatus: "pending",
-              merchantAcceptanceStatus: "pending",
-              reauthorizationReason: "order_amount_changed"
+              ...change.orderPatch
             }
           : order
       )));
@@ -240,28 +305,14 @@ export function AppNavigator() {
         report.orderId === orderId
           ? {
               ...report,
-              originalAmount: nextOriginalAmount,
-              authorizedAmount: 0,
-              finalAmount: null,
-              captureAmount: null,
-              releasedAmount: null,
-              status: "pending",
-              paymentStatus: "pending",
-              authorizationStatus: "pending",
-              discountStatus: "not_yet_qualified",
-              note: "Order amount changed. Reauthorization required."
+              ...change.paymentPatch
             }
           : report
       )));
-      if (wasCounted) {
+      if (change.wasCounted) {
         setDeals((items) => items.map((deal) => (
           deal.id === orderToUpdate.dealId
-            ? {
-                ...deal,
-                currentCups: Math.max(0, deal.currentCups - orderToUpdate.quantity),
-                participantCount: Math.max(0, deal.participantCount - 1),
-                status: "recruiting"
-              }
+            ? rollbackAuthorizedCups(deal, orderToUpdate)
             : deal
         )));
       }
@@ -341,63 +392,11 @@ export function AppNavigator() {
           : order
       )));
     },
-    requireReauthorization(orderId, nextOriginalAmount, nextQuantity) {
-      const orderToUpdate = orders.find((order) => order.id === orderId);
-      if (!orderToUpdate || orderToUpdate.originalAmount === nextOriginalAmount) return;
-
-      const wasCounted = ["authorized", "captured"].includes(orderToUpdate.paymentStatus);
-
-      setOrders((items) => items.map((order) => (
-        order.id === orderId
-          ? {
-              ...order,
-              quantity: nextQuantity,
-              subtotal: nextOriginalAmount,
-              originalAmount: nextOriginalAmount,
-              authorizedAmount: 0,
-              finalAmount: null,
-              captureAmount: null,
-              releasedAmount: null,
-              paymentStatus: "pending",
-              authorizationStatus: "pending",
-              merchantAcceptanceStatus: "pending",
-              reauthorizationReason: "order_amount_changed"
-            }
-          : order
-      )));
-      setPaymentReports((items) => items.map((report) => (
-        report.orderId === orderId
-          ? {
-              ...report,
-              originalAmount: nextOriginalAmount,
-              authorizedAmount: 0,
-              finalAmount: null,
-              captureAmount: null,
-              releasedAmount: null,
-              status: "pending",
-              paymentStatus: "pending",
-              authorizationStatus: "pending",
-              discountStatus: "not_yet_qualified",
-              note: "Order amount changed. Reauthorization required."
-            }
-          : report
-      )));
-      if (wasCounted) {
-        setDeals((items) => items.map((deal) => (
-          deal.id === orderToUpdate.dealId
-            ? {
-                ...deal,
-                currentCups: Math.max(0, deal.currentCups - orderToUpdate.quantity),
-                participantCount: Math.max(0, deal.participantCount - 1),
-                status: "recruiting"
-              }
-            : deal
-        )));
-      }
-    },
     acceptMerchantOrdersForDeal(dealId) {
       setOrders((items) => items.map((order) => (
-        order.dealId === dealId && order.merchantAcceptanceStatus === "pending"
+        order.dealId === dealId
+          && order.status !== "cancelled"
+          && order.merchantAcceptanceStatus === "pending"
           ? { ...order, merchantAcceptanceStatus: "accepted" }
           : order
       )));
@@ -424,10 +423,11 @@ export function AppNavigator() {
         maximumCups: promotionTiers[promotionTiers.length - 1].cups,
         participantCount: 0,
         remainingTimeText: "剛建立",
-        minutesUntilDeadline: 120,
+        minutesUntilDeadline: getMinutesUntilDeadline({ deadlineAt: form.deadlineAt }) ?? 120,
         withdrawalLockMinutes: 30,
-        startTime: form.startTime || "今日 14:00",
-        endTime: form.endTime || "今日 15:30",
+        startTime: form.startTime || new Date().toISOString(),
+        deadlineAt: form.deadlineAt,
+        endTime: form.endTime || formatDeadlineLabel(form.deadlineAt),
         pickupTime: form.pickupTime || "今日 16:30 - 17:00",
         canJoin: true,
         tiers: promotionTiers,
@@ -435,6 +435,80 @@ export function AppNavigator() {
       };
       setDeals((items) => [newDeal, ...items]);
       return dealId;
+    },
+    addMerchantDealFromApi(activity) {
+      const tiers = activity.tiers.map((tier) => ({
+        cups: tier.targetCups,
+        discountAmount: tier.discountAmount
+      }));
+      const newDeal = {
+        id: activity.id,
+        storeId: activity.storeId,
+        title: activity.title,
+        status: activity.status,
+        currentCups: 0,
+        targetCups: tiers[0]?.cups ?? 20,
+        maximumCups: activity.maximumCups ?? tiers[tiers.length - 1]?.cups ?? 20,
+        participantCount: 0,
+        remainingTimeText: "剛建立",
+        minutesUntilDeadline: getMinutesUntilDeadline({ deadlineAt: activity.deadlineAt }) ?? 120,
+        withdrawalLockMinutes: activity.withdrawalLockMinutes ?? 30,
+        startTime: activity.startAt,
+        deadlineAt: activity.deadlineAt,
+        endTime: formatDeadlineLabel(activity.deadlineAt),
+        pickupTime: `${activity.pickupStartAt} - ${activity.pickupEndAt}`,
+        canJoin: true,
+        tiers,
+        notices: ["由 backend API 建立，並同步到 mobile prototype state。"]
+      };
+      setDeals((items) => [newDeal, ...items.filter((item) => item.id !== newDeal.id)]);
+      return newDeal.id;
+    },
+    cancelGroupBuyActivity(dealId, cancellationReason = "管理員刪除團購") {
+      setDeals((items) => items.map((deal) => (
+        deal.id === dealId
+          ? {
+              ...deal,
+              status: "cancelled",
+              canJoin: false,
+              cancellationReason
+            }
+            : deal
+      )));
+      setOrders((items) => items.map((order) => (
+        order.dealId === dealId
+          ? {
+              ...order,
+              status: "cancelled",
+              pickupStatus: "cancelled",
+              merchantAcceptanceStatus: "cancelled",
+              cancellationReason
+            }
+          : order
+      )));
+    },
+    cancelGroupBuyActivityFromApi(activity) {
+      setDeals((items) => items.map((deal) => (
+        deal.id === activity.id
+          ? {
+              ...deal,
+              status: activity.status,
+              canJoin: activity.status === "recruiting",
+              cancellationReason: activity.cancellationReason
+            }
+            : deal
+      )));
+      setOrders((items) => items.map((order) => (
+        order.dealId === activity.id
+          ? {
+              ...order,
+              status: "cancelled",
+              pickupStatus: "cancelled",
+              merchantAcceptanceStatus: "cancelled",
+              cancellationReason: activity.cancellationReason
+            }
+          : order
+      )));
     }
   }), [cartItems, deals, orders, selectedCustomerId]);
 
@@ -488,16 +562,3 @@ const styles = StyleSheet.create({
     flex: 1
   }
 });
-
-function normalizeOrderItem(item) {
-  const itemName = item.itemName ?? item.name ?? "";
-  return {
-    ...item,
-    drinkId: item.drinkId ?? item.menuItemId ?? item.id,
-    name: item.name ?? itemName,
-    itemName,
-    size: item.size ?? "L",
-    unitPrice: item.unitPrice ?? (item.quantity > 0 ? Math.round(item.subtotal / item.quantity) : item.subtotal),
-    toppings: item.toppings ?? []
-  };
-}

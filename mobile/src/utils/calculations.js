@@ -1,3 +1,5 @@
+import { getMinutesUntilDeadline } from "./deadlineTime";
+
 export function getStoreById(stores, storeId) {
   return stores.find((store) => store.id === storeId);
 }
@@ -20,8 +22,9 @@ export function formatCurrency(amount) {
 }
 
 export function isWithdrawalLocked(deal) {
+  const minutesUntilDeadline = getMinutesUntilDeadline(deal);
   return Boolean(deal)
     && deal.status === "recruiting"
-    && deal.minutesUntilDeadline != null
-    && deal.minutesUntilDeadline <= (deal.withdrawalLockMinutes ?? 30);
+    && minutesUntilDeadline != null
+    && minutesUntilDeadline <= (deal.withdrawalLockMinutes ?? 30);
 }

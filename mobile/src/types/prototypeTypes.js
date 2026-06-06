@@ -4,6 +4,7 @@ export const dealStatusLabels = {
   recruiting: "招募中",
   confirmed: "已成團",
   formed: "已成團",
+  ordering: "訂單製作中",
   failed: "流團",
   cancelled: "已取消",
   full: "已額滿"
@@ -36,6 +37,7 @@ export const merchantAcceptanceStatusLabels = {
 
 export const pickupStatusLabels = {
   not_ready: "尚未可取貨",
+  preparing: "訂單製作中",
   ready: "可取貨",
   picked_up: "已取貨",
   cancelled: "已取消",

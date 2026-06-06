@@ -3,9 +3,10 @@ import { Pressable, StyleSheet, Text, View } from "react-native";
 import { MobileScreen, Section } from "../components/MobileScreen";
 import { PrimaryButton } from "../components/PrimaryButton";
 import { formatCurrency, getDealById } from "../utils/calculations";
+import { isDeadlineReached } from "../utils/deadlineTime";
 
 export function CartScreen({ navigation, route, appState, actions, memberAction, selectedCustomerId }) {
-  const [acceptOriginalPrice, setAcceptOriginalPrice] = useState(false);
+  const [acceptOriginalPrice, setAcceptOriginalPrice] = useState(true);
   const deal = getDealById(appState.deals, route.params?.dealId);
   if (!deal) {
     return (
@@ -27,6 +28,13 @@ export function CartScreen({ navigation, route, appState, actions, memberAction,
   ));
   const totalQuantity = cartItems.reduce((sum, item) => sum + item.quantity, 0);
   const totalAmount = cartItems.reduce((sum, item) => sum + item.subtotal, 0);
+  const dealClosed = deal.canJoin === false || isDeadlineReached(deal);
+  const existingOrder = appState.orders.find((order) => (
+    order.customerId === selectedCustomerId
+    && order.dealId === deal.id
+    && !["cancelled", "completed"].includes(order.status)
+  ));
+  const requiresReauthorization = Boolean(existingOrder && ["authorized", "captured"].includes(existingOrder.paymentStatus));
 
   return (
     <MobileScreen
@@ -58,10 +66,14 @@ export function CartScreen({ navigation, route, appState, actions, memberAction,
         )}
       </Section>
 
+      {dealClosed ? (
+        <Text style={styles.closedNotice}>活動已截止，系統已鎖定訂單，不能再送出或修改購物車。</Text>
+      ) : null}
+
       <PrimaryButton
         label="繼續選購飲料"
         variant="secondary"
-        onPress={() => navigation.go("drinkSelection", { dealId: deal.id })}
+        onPress={() => !dealClosed && navigation.go("drinkSelection", { dealId: deal.id })}
       />
 
       <Section title="訂單金額">
@@ -69,10 +81,14 @@ export function CartScreen({ navigation, route, appState, actions, memberAction,
           <Text style={styles.totalLabel}>原價合計</Text>
           <Text style={styles.totalAmount}>{formatCurrency(totalAmount)}</Text>
         </View>
-        <Text style={styles.notice}>送出訂單後才會進入 LINE Pay 預授權；目前仍是 prototype，不會真實扣款。</Text>
+        <Text style={styles.notice}>
+          {requiresReauthorization
+            ? "送出後才會取消原本預授權，並以新訂單總額重新進行 LINE Pay 預授權。"
+            : "送出訂單後才會進入 LINE Pay 預授權；目前仍是 prototype，不會真實扣款。"}
+        </Text>
       </Section>
 
-      <Section title="流團偏好">
+      <Section title="">
         <Pressable
           accessibilityRole="checkbox"
           accessibilityState={{ checked: acceptOriginalPrice }}
@@ -83,15 +99,16 @@ export function CartScreen({ navigation, route, appState, actions, memberAction,
             <Text style={styles.checkboxMark}>{acceptOriginalPrice ? "✓" : ""}</Text>
           </View>
           <View style={styles.checkboxTextGroup}>
-            <Text style={styles.checkboxTitle}>流團時接受原價購買</Text>
-            <Text style={styles.checkboxHint}>未勾選時，流團不原價購買、不請款。</Text>
+            <Text style={styles.checkboxTitle}>若無優惠接受原價購買</Text>
+            <Text style={styles.checkboxHint}>未勾選時，若未達優惠門檻則不付款。</Text>
           </View>
         </Pressable>
       </Section>
 
       <PrimaryButton
-        label="送出訂單並前往 LINE Pay"
+        label={requiresReauthorization ? "重新預授權" : "送出訂單並前往 LINE Pay"}
         onPress={() => {
+          if (dealClosed) return;
           if (cartItems.length === 0) return;
           const fallbackPreference = acceptOriginalPrice ? "accept_original_price" : "decline_original_price";
           const orderId = actions.submitCart(deal.id, fallbackPreference);
@@ -168,26 +185,35 @@ const styles = StyleSheet.create({
     fontSize: 12,
     lineHeight: 18
   },
+  closedNotice: {
+    borderRadius: 12,
+    backgroundColor: "#fef3c7",
+    color: "#92400e",
+    fontSize: 12,
+    fontWeight: "800",
+    lineHeight: 18,
+    padding: 10
+  },
   checkboxRow: {
-    minHeight: 64,
+    minHeight: 50,
     flexDirection: "row",
     alignItems: "center",
-    gap: 11,
-    borderRadius: 14,
+    gap: 9,
+    borderRadius: 12,
     borderWidth: 1,
     borderColor: "#cbd5e1",
     backgroundColor: "#ffffff",
-    paddingHorizontal: 12,
-    paddingVertical: 10
+    paddingHorizontal: 10,
+    paddingVertical: 8
   },
   checkboxRowActive: {
     borderColor: "#1f6feb",
     backgroundColor: "#eff6ff"
   },
   checkbox: {
-    width: 24,
-    height: 24,
-    borderRadius: 7,
+    width: 21,
+    height: 21,
+    borderRadius: 6,
     alignItems: "center",
     justifyContent: "center",
     borderWidth: 2,
@@ -200,7 +226,7 @@ const styles = StyleSheet.create({
   },
   checkboxMark: {
     color: "#ffffff",
-    fontSize: 15,
+    fontSize: 13,
     fontWeight: "900"
   },
   checkboxTextGroup: {
@@ -209,13 +235,13 @@ const styles = StyleSheet.create({
   },
   checkboxTitle: {
     color: "#0f172a",
-    fontSize: 14,
+    fontSize: 13,
     fontWeight: "900"
   },
   checkboxHint: {
     color: "#64748b",
-    fontSize: 11,
-    lineHeight: 16
+    fontSize: 10,
+    lineHeight: 14
   },
   emptyText: {
     color: "#64748b",

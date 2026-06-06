@@ -3,14 +3,20 @@ import { MobileScreen, Section } from "../components/MobileScreen";
 import { customerUsers } from "../mock/customerUsers";
 import { stores } from "../mock/stores";
 import { getStoreById } from "../utils/calculations";
+import { getDealProgress } from "../utils/dealProgress";
 
 export function NearbyDealsScreen({ navigation, appState, memberAction, selectedCustomerId }) {
-  const { deals } = appState;
+  const { deals, orders } = appState;
   const currentCustomer = customerUsers.find((user) => user.id === selectedCustomerId) ?? customerUsers[0];
-  const recruitingDeals = deals.filter((deal) => deal.status === "recruiting");
-  const activeDeal = recruitingDeals[0] ?? deals[0];
+  const recruitingDeals = deals.filter(isVisibleRecruitingDeal);
+  const joinedDealIds = new Set(
+    (orders ?? [])
+      .filter((order) => order.customerId === selectedCustomerId && isActiveJoinedOrder(order))
+      .map((order) => order.dealId)
+  );
+  const activeDeal = deals.find((deal) => joinedDealIds.has(deal.id) && isOngoingJoinedDeal(deal)) ?? null;
   const activeStore = activeDeal ? getStoreById(stores, activeDeal.storeId) : null;
-  const cupsLeft = activeDeal ? Math.max(0, activeDeal.targetCups - activeDeal.currentCups) : 0;
+  const activeProgress = activeDeal ? getDealProgress(activeDeal) : null;
 
   return (
     <MobileScreen title="" compactHeader>
@@ -38,7 +44,7 @@ export function NearbyDealsScreen({ navigation, appState, memberAction, selected
         ) : null}
       </View>
 
-      {activeDeal ? (
+      {activeDeal && activeProgress ? (
         <Pressable
           accessibilityRole="button"
           onPress={() => navigation.go("dealDetail", { dealId: activeDeal.id })}
@@ -52,16 +58,16 @@ export function NearbyDealsScreen({ navigation, appState, memberAction, selected
                 <Text style={styles.deadline}>剩餘 {activeDeal.remainingTimeText}</Text>
               </View>
               <Text style={styles.cupCount}>
-                {activeDeal.currentCups} / {activeDeal.targetCups}
+                {activeProgress.currentCups} / {activeProgress.nextTarget}
                 <Text style={styles.cupUnit}> 杯</Text>
               </Text>
             </View>
             <View style={styles.dealMetaRow}>
-              <Text style={styles.meta}>目標：滿 {activeDeal.targetCups} 杯折 {activeDeal.tiers[0]?.discountAmount ?? 0}</Text>
-              <Text style={styles.meta}>剩餘 {cupsLeft} 杯</Text>
+              <Text style={styles.meta}>{getTargetSummary(activeDeal, activeProgress.nextTarget)}</Text>
+              <Text style={styles.meta}>剩餘 {activeProgress.remainingCups} 杯</Text>
             </View>
             <View style={styles.progressTrack}>
-              <View style={[styles.progressFill, { width: `${Math.min(100, Math.round((activeDeal.currentCups / activeDeal.targetCups) * 100))}%` }]} />
+              <View style={[styles.progressFill, { width: `${activeProgress.progressPercent}%` }]} />
             </View>
             <Text style={styles.storeLine}>{activeStore?.name} · {activeStore?.distanceText}</Text>
           </View>
@@ -69,7 +75,7 @@ export function NearbyDealsScreen({ navigation, appState, memberAction, selected
       ) : (
         <View style={styles.emptyCard}>
           <Text style={styles.emptyTitle}>目前沒有進行中的團購</Text>
-          <Text style={styles.emptyText}>商家建立活動後，會先出現在這裡。</Text>
+          <Text style={styles.emptyText}>加入團購後，進行中的訂單會顯示在這裡。</Text>
         </View>
       )}
 
@@ -77,6 +83,7 @@ export function NearbyDealsScreen({ navigation, appState, memberAction, selected
         <View style={styles.recommendList}>
           {recruitingDeals.map((deal) => {
             const store = getStoreById(stores, deal.storeId);
+            const progress = getDealProgress(deal);
             return (
               <Pressable
                 accessibilityRole="button"
@@ -84,8 +91,11 @@ export function NearbyDealsScreen({ navigation, appState, memberAction, selected
                 onPress={() => navigation.go("dealDetail", { dealId: deal.id })}
                 style={({ pressed }) => [styles.recommendRow, pressed && styles.pressed]}
               >
-                <Text style={styles.recommendStore}>{store?.name}</Text>
-                <Text style={styles.recommendCups}>{deal.currentCups} / {deal.targetCups} 杯</Text>
+                <View style={styles.flex}>
+                  <Text style={styles.recommendStore}>{store?.name}</Text>
+                  <Text style={styles.recommendTitle}>{deal.title}</Text>
+                </View>
+                <Text style={styles.recommendCups}>{progress.currentCups} / {progress.nextTarget} 杯</Text>
               </Pressable>
             );
           })}
@@ -98,6 +108,27 @@ export function NearbyDealsScreen({ navigation, appState, memberAction, selected
       </Section>
     </MobileScreen>
   );
+}
+
+function getTargetSummary(deal, targetCups) {
+  const tier = (deal.tiers ?? []).find((item) => Number(item.cups ?? item.targetCups) === Number(targetCups));
+  const discountAmount = tier?.discountAmount ?? deal.tiers?.[0]?.discountAmount ?? 0;
+  return `目標：滿 ${targetCups} 杯折 ${discountAmount}`;
+}
+
+function isVisibleRecruitingDeal(deal) {
+  return deal.status === "recruiting"
+    && deal.canJoin !== false
+    && !deal.cancellationReason;
+}
+
+function isActiveJoinedOrder(order) {
+  return !["cancelled", "completed"].includes(order.status);
+}
+
+function isOngoingJoinedDeal(deal) {
+  return !["cancelled", "completed", "failed"].includes(deal.status)
+    && !deal.cancellationReason;
 }
 
 const styles = StyleSheet.create({
@@ -289,6 +320,9 @@ const styles = StyleSheet.create({
     paddingHorizontal: 13,
     paddingVertical: 10
   },
+  flex: {
+    flex: 1
+  },
   emptyRecommendCard: {
     minHeight: 70,
     borderRadius: 15,
@@ -308,6 +342,12 @@ const styles = StyleSheet.create({
     color: "#0f172a",
     fontSize: 14,
     fontWeight: "900"
+  },
+  recommendTitle: {
+    color: "#64748b",
+    fontSize: 11,
+    fontWeight: "700",
+    marginTop: 3
   },
   recommendCups: {
     color: "#1f6feb",

@@ -9,11 +9,15 @@ import { getStoreById } from "../utils/calculations";
 export function MerchantDashboardScreen({ navigation, appState, actions, memberAction, selectedMerchantStoreId }) {
   const merchantStore = stores.find((store) => store.id === selectedMerchantStoreId) ?? stores[0];
   const merchantDeals = appState.deals.filter((deal) => deal.storeId === merchantStore.id);
-  const activeDeals = merchantDeals.filter((deal) => deal.status === "recruiting" || deal.status === "confirmed");
-  const merchantDealIds = new Set(merchantDeals.map((deal) => deal.id));
-  const allOrders = appState.orders.filter((order) => merchantDealIds.has(order.dealId));
-  const pendingAcceptanceCount = allOrders.filter((order) => order.merchantAcceptanceStatus === "pending").length;
-  const authorizedOrderCount = allOrders.filter((order) => ["authorized", "captured"].includes(order.paymentStatus)).length;
+  const activeDeals = merchantDeals.filter((deal) => ["recruiting", "confirmed", "ordering"].includes(deal.status));
+  const activeDealIds = new Set(activeDeals.map((deal) => deal.id));
+  const activeOrders = appState.orders.filter((order) => (
+    activeDealIds.has(order.dealId)
+    && order.status !== "cancelled"
+    && order.merchantAcceptanceStatus !== "cancelled"
+  ));
+  const pendingAcceptanceCount = activeOrders.filter((order) => order.merchantAcceptanceStatus === "pending").length;
+  const authorizedOrderCount = activeOrders.filter((order) => ["authorized", "captured"].includes(order.paymentStatus)).length;
 
   return (
     <MobileScreen title="" compactHeader>
@@ -50,19 +54,18 @@ export function MerchantDashboardScreen({ navigation, appState, actions, memberA
         ) : null}
         {activeDeals.map((deal) => {
           const store = getStoreById(stores, deal.storeId);
-          const relatedOrders = appState.orders.filter((order) => order.dealId === deal.id);
+          const relatedOrders = appState.orders.filter((order) => (
+            order.dealId === deal.id
+            && order.status !== "cancelled"
+            && order.merchantAcceptanceStatus !== "cancelled"
+          ));
           const authorizedOrders = relatedOrders.filter((order) => ["authorized", "captured"].includes(order.paymentStatus)).length;
           const capturedOrders = relatedOrders.filter((order) => order.paymentStatus === "captured").length;
           const readyPickups = relatedOrders.filter((order) => order.pickupStatus === "ready").length;
           const pendingAcceptanceOrders = relatedOrders.filter((order) => order.merchantAcceptanceStatus === "pending").length;
 
           return (
-            <Pressable
-              accessibilityRole="button"
-              key={deal.id}
-              onPress={() => navigation.go("dealDetail", { dealId: deal.id })}
-              style={({ pressed }) => [styles.card, pressed && styles.pressed]}
-            >
+            <View key={deal.id} style={styles.card}>
               <View style={styles.header}>
                 <View style={styles.flex}>
                   <Text style={styles.title}>{deal.title}</Text>
@@ -93,7 +96,7 @@ export function MerchantDashboardScreen({ navigation, appState, actions, memberA
               ) : (
                 <Text style={styles.acceptedText}>店家已確認目前訂單</Text>
               )}
-            </Pressable>
+            </View>
           );
         })}
       </Section>

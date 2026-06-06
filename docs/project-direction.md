@@ -2,89 +2,121 @@
 
 ## Current Direction
 
-DrinkGroupBuy is now officially positioned as an Android-first mobile app prototype.
+DrinkGroupBuy is now a full-stack, Android-first mobile app project.
 
-This project is not currently aiming to become a general Web frontend product. The existing Web prototype remains useful for screen, flow, and data analysis, but it is not the final product frontend.
+Primary target:
 
-## Target Prototype Technology
+- Android-first mobile app
+- React Native + Expo in `mobile/`
+- Backend APIs may be created in `backend/`
+- Development database lives in `database/`
+- Documentation lives in `docs/`
 
-- Recommended mobile technology: React Native + Expo.
-- Primary target platform for the first mobile prototype: Android.
-- iOS support is not a first-phase goal, but React Native + Expo keeps a future iOS path open.
-- The first mobile prototype should continue using mock business data and should not connect to real backend, database, payment, notification, or login services. Google Maps is allowed for map rendering only.
+The project is no longer limited to a frontend-only prototype.
 
-## Intended Project Roles
+## Current Project Roles
 
-| Path | Intended role |
+| Path | Current role |
 | --- | --- |
-| `mobile/` | Future primary development location for the Android-first mobile app prototype. This folder has not been created yet. |
-| `frontend/` | Existing React / Vite Web reference prototype. It is retained for screen and flow reference only. |
-| `docs/` | Source of product direction, screen requirements, candidate API/database analysis, status candidates, and open questions. |
-| `backend/` | Reserved future backend area. There is no formal backend implementation yet. |
-| `database/` | Reserved future database area. There is no formal database schema yet. |
-| `server.js` | Legacy prototype server file. It contains legacy static route behavior and should not be treated as the final backend architecture. |
+| `mobile/` | Main Android-first React Native + Expo app |
+| `database/` | Development SQLite schema, local DB scripts, and prototype test DB |
+| `backend/` | Future backend API location; may be created when API work starts |
+| `docs/` | Product, API, database, status, and handoff documentation |
+| `AGENTS.md` | Current collaboration and development rules |
 
-## Frontend Position
+## Deleted Legacy Areas
 
-`frontend/` is a Web reference prototype. It is useful for:
+These older prototype areas were deleted after user confirmation:
 
-- Validating user flows.
-- Reviewing screen data requirements.
-- Keeping mock data examples.
-- Comparing future mobile screens against the earlier Web exploration.
-- Preserving product analysis work until mobile screens fully replace it.
+- `frontend/`
+- `server.js`
+- `src/`
+- `data/`
 
-`frontend/` is not:
+Do not restore them unless the user explicitly requests it.
 
-- The final product frontend.
-- A mobile app implementation.
-- A React Native codebase.
-- A formal API client.
-- A production deployment target.
+## Mobile Position
+
+`mobile/` is the current app implementation.
+
+It currently contains:
+
+- role/login prototype
+- customer home
+- Google Maps live map
+- deal detail
+- drink selection
+- cart
+- customer orders
+- payment authorization mock
+- pickup info
+- merchant dashboard
+- merchant deal creation
+- admin prototype screen
 
 ## Backend Position
 
-No formal backend has been implemented for the Android-first product direction.
+Backend has not been implemented yet, but backend development is now allowed.
 
-Existing backend-like or server-like code should be interpreted carefully:
+Future backend should provide APIs for:
 
-- `server.js` belongs to the earlier lightweight prototype era.
-- `server.js` may still contain legacy route assumptions.
-- `server.js` is not the source of truth for future backend module boundaries.
-- No real API contract should be inferred directly from legacy server routes without review.
+- authentication/session
+- merchant activity creation
+- nearby activities and map store data
+- menu loading
+- cart or order draft
+- order submission and modification
+- payment authorization / capture / void
+- pickup credential generation
+- merchant dashboard summaries
 
 ## Database Position
 
-No formal database schema has been created for the Android-first product direction.
-
-Existing JSON data and mock data should be interpreted as prototype inputs only:
-
-- They are not migrations.
-- They are not schema definitions.
-- They are not formal database contracts.
-- Future database design should be derived from mobile flows, business rules, status transitions, payment decisions, and audit requirements.
-
-## Current Non-Goals
-
-- Do not build backend implementation yet.
-- Do not build database schema yet.
-- Do not write SQL or migrations yet.
-- Do not create real API endpoints yet.
-- Google Maps SDK/API may be connected for map display; store markers and nearby activity results remain prototype mock data.
-- Do not connect real payment services yet.
-- Do not connect real push notifications yet.
-- Do not optimize for iOS in the first phase.
-- Do not permanently delete the Web reference prototype until the mobile prototype has replaced its analysis value.
-
-## Direction Summary
-
-The safest project direction is:
+Development database draft exists:
 
 ```text
-Android-first mobile app prototype
-  -> React Native + Expo
-  -> mobile/ becomes the main future app location
-  -> frontend/ remains Web reference prototype
-  -> docs/ remains the planning and analysis source
-  -> backend/database remain future design work
+database/schema.sql
+database/init-dev-db.js
 ```
+
+Generated local SQLite:
+
+```text
+database/drink-group-buy-dev.sqlite
+```
+
+This local database is ignored by Git.
+
+The dev schema currently defines users, merchants, stores, menu, group-buy activities, promotion tiers, carts, orders, payments, pickups, status history, and audit logs.
+
+## Current Persistence Reality
+
+The mobile app still uses local prototype state:
+
+```text
+React state + localStorage
+```
+
+Merchant-created activities are not yet written to SQLite.
+
+Formal future flow should be:
+
+```text
+mobile
+→ backend API
+→ database
+→ API response back to mobile
+```
+
+## Near-Term Direction
+
+Recommended next vertical slice:
+
+```text
+Merchant creates group-buy activity
+→ backend API
+→ database group_buy_activities + promotion_tiers
+→ customer nearby/map reads from API
+```
+
+This is the cleanest first full-stack connection point.
