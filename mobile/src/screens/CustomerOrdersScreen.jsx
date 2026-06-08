@@ -170,6 +170,7 @@ function OrderDetailCard({ order, deals, payments, actions, navigation, historic
   const displayTotal = payment?.captureAmount ?? displaySubtotal;
   const authorizedTotal = payment?.authorizedAmount ?? displaySubtotal;
   const merchantAccepted = order.merchantAcceptanceStatus === "accepted";
+  const pickupReady = ["ready", "picked_up"].includes(order.pickupStatus);
   const orderLocked = order.status === "locked";
   const withdrawalLocked = !historical && (orderLocked || isWithdrawalLocked(deal));
   const progress = deal ? getDealProgress(deal) : null;
@@ -300,7 +301,7 @@ function OrderDetailCard({ order, deals, payments, actions, navigation, historic
         ) : null}
       </Section>
 
-      {merchantAccepted && !historical ? (
+      {pickupReady && !historical ? (
         <View style={styles.pickupPass}>
           <View>
             <Text style={styles.passLabel}>取貨憑證</Text>
@@ -312,8 +313,14 @@ function OrderDetailCard({ order, deals, payments, actions, navigation, historic
         </View>
       ) : !historical ? (
         <View style={styles.pickupPending}>
-          <Text style={styles.pickupPendingTitle}>等待店家確認接單</Text>
-          <Text style={styles.pickupPendingText}>店家確認接單後，取貨憑證才會顯示。</Text>
+          <Text style={styles.pickupPendingTitle}>
+            {merchantAccepted ? "店家製作中" : "等待店家確認接單"}
+          </Text>
+          <Text style={styles.pickupPendingText}>
+            {merchantAccepted
+              ? "店家標記可取貨後，取貨憑證才會顯示。"
+              : "店家確認接單後會進入製作中，完成後才會顯示取貨憑證。"}
+          </Text>
         </View>
       ) : null}
     </View>

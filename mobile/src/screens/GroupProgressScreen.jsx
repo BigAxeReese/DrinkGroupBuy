@@ -41,7 +41,6 @@ export function GroupProgressScreen({ navigation, route, appState, memberAction,
     : reachedTier
       ? `已達目前最高級距：${reachedTier} 杯`
       : "目前沒有下一級距資料";
-  const remainingAuthorizedCups = Math.max(0, targetCups - authorizedCups);
   const discountStatus = reachedTier ? "qualified" : "not_yet_qualified";
 
   return (
@@ -58,13 +57,8 @@ export function GroupProgressScreen({ navigation, route, appState, memberAction,
           participantCount={deal.participantCount}
           remainingTimeText={deal.remainingTimeText}
         />
-        <Text style={styles.meta}>targetCups：{targetCups} 杯</Text>
-        <Text style={styles.meta}>authorizedCups：{authorizedCups} 杯</Text>
-        <Text style={styles.meta}>remainingAuthorizedCups：{remainingAuthorizedCups} 杯</Text>
-        <Text style={styles.meta}>discountStatus：{discountStatus === "qualified" ? "優惠成立" : "尚未達標"}</Text>
         <Text style={styles.explain}>只有預授權成功的杯數才計入優惠門檻。</Text>
         <Text style={styles.meta}>{nextTierText}</Text>
-        <Text style={styles.meta}>最高優惠上限：{deal.maximumCups} 杯</Text>
       </Section>
 
       <Section title="我的訂單摘要">

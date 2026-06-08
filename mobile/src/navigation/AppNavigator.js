@@ -397,7 +397,25 @@ export function AppNavigator() {
         order.dealId === dealId
           && order.status !== "cancelled"
           && order.merchantAcceptanceStatus === "pending"
-          ? { ...order, merchantAcceptanceStatus: "accepted" }
+          ? {
+              ...order,
+              merchantAcceptanceStatus: "accepted",
+              pickupStatus: order.pickupStatus === "not_ready" ? "preparing" : order.pickupStatus
+            }
+          : order
+      )));
+    },
+    completeMerchantOrdersForDeal(dealId) {
+      setOrders((items) => items.map((order) => (
+        order.dealId === dealId
+          && order.status !== "cancelled"
+          && order.merchantAcceptanceStatus === "accepted"
+          && !["ready", "picked_up", "cancelled"].includes(order.pickupStatus)
+          ? {
+              ...order,
+              status: order.status === "locked" ? "readyForPickup" : order.status,
+              pickupStatus: "ready"
+            }
           : order
       )));
     },
