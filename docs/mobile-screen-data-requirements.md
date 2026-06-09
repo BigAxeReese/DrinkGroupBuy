@@ -258,3 +258,16 @@ The mobile prototype now treats the payment step as authorization-first, not man
 | Screen | Display data | User input | User actions | Mock data source | Loading state | Empty state | Error state | Permission needs | Open questions |
 | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |
 | LiveMapScreen | Full-page Google Maps view, National Taichung University of Science and Technology center marker, seven prototype store markers with store names shown below, selected store card, zoom level, marker legend; normal test stores use blue markers and stores with `recruiting` deals use yellow markers; Google Maps built-in POI clicks are disabled | None | Pan/pinch zoom, use zoom buttons, select prototype store marker, open that store's recruiting deal | Native Google Maps / Maps JavaScript API plus generated `mobile/src/mock/databaseMapStores.js`; this file is exported from the prototype SQLite database and is not a final API contract | Map API loading | No prototype store markers | Google Maps unavailable, missing Android/Web API key, database export missing | Customer only in current bottom navigation | A future API or local SQLite adapter is required for live map updates without rerunning the export script |
+
+## Store Menu Read-Only Update
+
+| Screen | Display data | User input | User actions | Mock data source | Loading state | Empty state | Error state | Permission needs | Open questions |
+| --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |
+| StoreMenuScreen | Store name, distance, business status, address, phone, drink names, descriptions, prices, sweetness options, ice options, topping names and topping prices | None | Open from `LiveMapScreen` selected store card when the store has no recruiting deal; read menu; use back navigation | `mobile/src/mock/stores.js`, `mobile/src/mock/drinks.js`; prototype only, not final API contract | Future menu loading | Store has no mock menu data | Store no longer exists, menu unavailable, store closed | Public customer browsing only; no order creation from this screen | Should customers be allowed to follow a store or request notification when a new group-buy starts? Should inactive stores show full menu? |
+
+### Store Menu Flow Notes
+
+- `LiveMapScreen` still opens `DealDetailScreen` when the selected store has a `recruitingDealId`.
+- If the selected store does not have a recruiting deal, `查看詳情` opens `StoreMenuScreen`.
+- `StoreMenuScreen` is read-only and intentionally has no add-to-cart, checkout, or payment action.
+- This screen does not create orders and does not imply direct single-customer ordering outside group-buy activities.

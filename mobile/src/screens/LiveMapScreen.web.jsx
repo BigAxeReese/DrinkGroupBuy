@@ -221,7 +221,7 @@ export function LiveMapScreen({ navigation, appState }) {
             accessibilityRole="button"
             onPress={() => selectedStore.recruitingDealId
               ? navigation.go("dealDetail", { dealId: selectedStore.recruitingDealId })
-              : navigation.replace("nearby")}
+              : navigation.go("storeMenu", { storeId: selectedStore.id })}
             style={styles.viewDealsButton}
           >
             <Text style={styles.viewDealsText}>查看詳情</Text>

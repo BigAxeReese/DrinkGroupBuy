@@ -18,6 +18,7 @@ import { CustomerOrdersScreen } from "../screens/CustomerOrdersScreen";
 import { AdminDashboardScreen } from "../screens/AdminDashboardScreen";
 import { CartScreen } from "../screens/CartScreen";
 import { LiveMapScreen } from "../screens/LiveMapScreen";
+import { StoreMenuScreen } from "../screens/StoreMenuScreen";
 import { formatDeadlineLabel, getMinutesUntilDeadline, isDeadlineReached } from "../utils/deadlineTime";
 import { normalizeOrderItem } from "../utils/orderItems";
 import { buildOrderItemsChange, rollbackAuthorizedCups } from "../utils/orderState";
@@ -548,6 +549,7 @@ export function AppNavigator() {
         {current.name === "roleSelect" && <RoleSelectScreen {...screenProps} />}
         {current.name === "nearby" && <NearbyDealsScreen {...screenProps} />}
         {current.name === "liveMap" && <LiveMapScreen {...screenProps} />}
+        {current.name === "storeMenu" && <StoreMenuScreen {...screenProps} />}
         {current.name === "dealDetail" && <DealDetailScreen {...screenProps} />}
         {current.name === "drinkSelection" && <DrinkSelectionScreen {...screenProps} />}
         {current.name === "cart" && <CartScreen {...screenProps} />}
