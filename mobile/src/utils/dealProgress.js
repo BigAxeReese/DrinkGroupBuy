@@ -22,3 +22,26 @@ export function getDealProgress(deal) {
     progressPercent
   };
 }
+
+export function getDealCapacityInfo(deal) {
+  const tierTargets = (deal?.tiers ?? [])
+    .map((tier) => Number(tier.cups ?? tier.targetCups))
+    .filter((cups) => Number.isFinite(cups) && cups > 0)
+    .sort((left, right) => left - right);
+  const maximumCups = Number(deal?.maximumCups ?? tierTargets[tierTargets.length - 1] ?? deal?.targetCups ?? 0);
+  const currentCups = Number(deal?.currentCups ?? 0);
+  const remainingCapacity = Math.max(0, maximumCups - currentCups);
+
+  return {
+    currentCups,
+    maximumCups,
+    remainingCapacity,
+    isFull: maximumCups > 0 && currentCups >= maximumCups
+  };
+}
+
+export function wouldExceedDealCapacity(deal, additionalCups) {
+  const { maximumCups, currentCups } = getDealCapacityInfo(deal);
+  if (!maximumCups) return false;
+  return currentCups + Number(additionalCups ?? 0) > maximumCups;
+}

@@ -1,170 +1,175 @@
-# DrinkGroupBuy Mobile Prototype
+# DrinkGroupBuy Mobile
 
-這是 DrinkGroupBuy 的 Android-first mobile app prototype。
+這是 DrinkGroupBuy 的 Android-first mobile app，目前用 React Native + Expo 開發。
 
-目前專案重點是展示與驗證流程，不是正式產品。畫面資料主要來自 mock data。Google Maps 是目前唯一允許接上的真實外部服務；登入、付款、推播、正式 backend、正式 database 都不是本階段目標。
+目前開發方式是：最後目標偏 Android App，但現在也支援 Expo Web，方便在電腦瀏覽器展示與測試。
 
-## 技術方向
+## 目前定位
 
-- React Native + Expo
-- Android-first
-- Web 預覽用於開發與展示
-- Mock data only
-- 先確認畫面流程與資料需求，再設計正式 API / database
+這不是單純 mock 前端了，現在已經開始和本機 backend / SQLite 串接。
+
+目前已接上的功能：
+
+- 顧客、商家、管理員 prototype 登入入口。
+- 顧客首頁、即時地圖、菜單、購物車、我的訂單。
+- 商家建立團購活動，會呼叫 backend API。
+- 顧客送出購物車，會呼叫 backend 建立訂單。
+- 付款頁可以呼叫 backend 建立 LINE Pay sandbox 預授權付款連結。
+- 管理員取消團購，會呼叫 backend API。
+
+目前仍未完成：
+
+- 真實帳號密碼登入。
+- App 重新載入後完整從 backend 載入所有訂單。
+- LINE Pay capture / void / refund。
+- LINE Pay webhook。
+- 團購截止後自動結算。
+- 正式 Android 打包上架流程。
 
 ## 安裝依賴
 
-第一次下載專案後，需要先安裝 mobile 依賴：
+第一次下載專案後，在專案根目錄執行：
 
-```bash
-cd DrinkGroupBuy/mobile
+```powershell
+cd mobile
 npm install
 ```
 
-同一台電腦通常只需要安裝一次。換新電腦或刪掉 `node_modules` 後才需要重跑。
+同一台電腦通常只需要執行一次。
 
 ## 開啟 Web 預覽
 
 從專案根目錄執行：
 
-```bash
-cd DrinkGroupBuy
+```powershell
 npm run mobile:web
 ```
 
-Expo 會印出網址，通常是：
+常用網址：
 
 ```text
 http://localhost:8081
 ```
 
-如果 `8081` 被占用，Expo 可能會詢問是否改用 `8082` 或其他 port。
+如果改過 `.env`，請完整停止並重啟 Expo。
 
 ## 開啟 Android 預覽
 
 從專案根目錄執行：
 
-```bash
-cd DrinkGroupBuy
+```powershell
 npm run mobile:android
 ```
 
-可以用 Android Emulator，或在 Android 手機安裝 Expo Go 後掃描終端機顯示的 QR code。
+可以用 Android Emulator，或在 Android 手機安裝 Expo Go 後掃描 QR code。
 
-## 環境變數設定
+## 環境變數
 
-本機真正使用的設定檔是：
+本機 mobile 設定檔：
 
 ```text
 mobile/.env
 ```
 
-範本是：
+範本：
 
 ```text
 mobile/.env.example
 ```
 
-建立方式：
+常見內容：
 
-```bash
-cd DrinkGroupBuy/mobile
-cp .env.example .env
-```
-
-然後在 `mobile/.env` 填入：
-
-```dotenv
+```env
 GOOGLE_MAPS_API_KEY=your_restricted_android_google_maps_api_key
 EXPO_PUBLIC_GOOGLE_MAPS_API_KEY=your_http_referrer_restricted_web_google_maps_api_key
 EXPO_PUBLIC_BACKEND_URL=http://localhost:3000
 ```
 
-### Google Maps key
+## Google Maps key 差異
 
-- `GOOGLE_MAPS_API_KEY`：Android 原生地圖用，需啟用 **Maps SDK for Android**。
-- `EXPO_PUBLIC_GOOGLE_MAPS_API_KEY`：Web 預覽與 Web demo 用，需啟用 **Maps JavaScript API**。
+| 變數 | 用途 |
+| --- | --- |
+| `GOOGLE_MAPS_API_KEY` | Android 原生地圖用 |
+| `EXPO_PUBLIC_GOOGLE_MAPS_API_KEY` | Web 預覽地圖用 |
 
-Web key 會被打包進前端 JavaScript，所以不能當秘密。請在 Google Cloud 設定 HTTP referrer 限制，例如：
+`EXPO_PUBLIC_` 開頭的變數會進入前端 bundle，所以不能放密碼或真正機密。
 
-```text
-http://localhost:*/*
-https://your-demo-domain.example.com/*
+Google Maps API key 可以放在 mobile，但要到 Google Cloud Console 設限制：
+
+- Android key：限制 package name 和 SHA-1。
+- Web key：限制 HTTP referrer，例如 `http://localhost:*/*`。
+
+## Backend URL
+
+`EXPO_PUBLIC_BACKEND_URL` 是 mobile 呼叫 backend 的網址。
+
+本機通常是：
+
+```env
+EXPO_PUBLIC_BACKEND_URL=http://localhost:3000
 ```
 
-### Backend URL
+如果你用 Android 實機測試，`localhost` 會指向手機本身，不是電腦。那時要改成電腦區網 IP 或 tunnel URL。
 
-`EXPO_PUBLIC_BACKEND_URL` 是 mobile prototype 呼叫本機 backend API 時使用的 base URL。
+## LINE Pay 注意事項
 
-目前主要用在：
+LINE Pay 的通路密鑰不能放在 `mobile/.env`。
+
+正確位置是：
 
 ```text
-POST   /api/merchant/group-buy-activities
-DELETE /api/admin/group-buy-activities/:activityId
+backend/.env
 ```
 
-如果沒有開 backend，一般顧客 mock 流程仍可展示，但商家建立活動或管理員刪除活動的 API 呼叫會失敗。
+mobile 只會呼叫 backend，真正簽章和密鑰都由後端處理。
+
+## 建議本機啟動順序
+
+從專案根目錄執行：
+
+```powershell
+npm run db:init
+npm run db:seed
+npm run backend:start
+npm run mobile:web
+```
+
+如果已經初始化過資料庫，不一定每次都要跑 `db:init` 和 `db:seed`。
+
+## 測試完整付款前的提醒
+
+LINE Pay 預授權流程要求：
+
+1. 團購活動存在於 backend SQLite。
+2. 顧客購物車送出後，backend 成功建立 `orders`。
+3. 付款頁才可以建立 LINE Pay request。
+
+如果你用的是舊的 mobile localStorage 團購，backend 可能會回：
+
+```text
+Group-buy activity not found
+```
+
+這代表那筆團購只存在前端本機，不在資料庫。請先用商家頁重新建立一筆團購。
 
 ## 重要安全提醒
 
-- 不要把 `mobile/.env` 上傳 GitHub。
-- 不要把真的 Google Maps key 放進 `.env.example`、`app.json`、source code 或 README。
-- `EXPO_PUBLIC_` 開頭的變數會進入前端 bundle，不適合放密碼、private token 或真正機密。
-- 改 `.env` 後要完整停止並重啟 Expo，hot reload 不一定會重新載入環境變數。
+- 不要上傳 `mobile/.env`。
+- 不要把 LINE Pay 通路密鑰放到 mobile。
+- 不要把真的 API key 寫進 `.env.example`、README 或 source code。
+- 改 `.env` 後要重啟 Expo。
 
-## 靜態 Web Demo 打包
+## 主要 mock data 位置
 
-如果要做展示，且展示電腦不能安裝 Node.js / npm / Expo，可以先在開發電腦打包成 Web 靜態檔：
-
-```bash
-cd DrinkGroupBuy/mobile
-npx expo export --platform web
-```
-
-通常會輸出到：
+目前 mobile 仍保留部分 prototype mock data：
 
 ```text
-mobile/dist/
-```
-
-之後可以部署到 GitHub Pages、Vercel、Netlify，展示電腦只需要打開網址。
-
-注意：每次修改程式後，都要重新 export 並重新部署，demo 網址才會更新。
-
-## Prototype 邊界
-
-目前不做：
-
-- 真實登入
-- 真實付款
-- 真實推播
-- 真實 database 連線
-- 正式 API contract
-- 正式 production business logic
-
-目前可做：
-
-- 顧客角色流程展示
-- 商家角色流程展示
-- 管理員 prototype 畫面
-- Mock cart / mock order / mock Line Pay authorization
-- Google Maps 地圖顯示
-- 店家 marker 與 mock 店家資料展示
-
-## 地圖 mock data 位置
-
-地圖與店家資料主要集中在：
-
-```text
-src/mock/mapConfig.js
 src/mock/stores.js
-src/mock/databaseMapStores.js
-```
-
-飲品菜單 mock data：
-
-```text
 src/mock/drinks.js
+src/mock/deals.js
+src/mock/orders.js
+src/mock/paymentReports.js
+src/mock/customerUsers.js
 ```
 
-這些資料都是 prototype mock data，不是最終 API response，也不是正式 database schema。
+未來會逐步改成從 backend API 載入。

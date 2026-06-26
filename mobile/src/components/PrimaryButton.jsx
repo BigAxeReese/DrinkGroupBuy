@@ -1,6 +1,6 @@
 import { Pressable, StyleSheet, Text } from "react-native";
 
-export function PrimaryButton({ label, onPress, variant = "primary" }) {
+export function PrimaryButton({ label, onPress, variant = "primary", style }) {
   const secondary = variant === "secondary";
   return (
     <Pressable
@@ -9,6 +9,7 @@ export function PrimaryButton({ label, onPress, variant = "primary" }) {
       style={({ pressed }) => [
         styles.button,
         secondary && styles.secondary,
+        style,
         pressed && styles.pressed
       ]}
     >

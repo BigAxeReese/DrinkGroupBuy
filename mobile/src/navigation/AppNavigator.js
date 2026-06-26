@@ -20,11 +20,19 @@ import { CartScreen } from "../screens/CartScreen";
 import { LiveMapScreen } from "../screens/LiveMapScreen";
 import { StoreMenuScreen } from "../screens/StoreMenuScreen";
 import { formatDeadlineLabel, getMinutesUntilDeadline, isDeadlineReached } from "../utils/deadlineTime";
+import { getDealCapacityInfo, wouldExceedDealCapacity } from "../utils/dealProgress";
 import { normalizeOrderItem } from "../utils/orderItems";
 import { buildOrderItemsChange, rollbackAuthorizedCups } from "../utils/orderState";
-import { loadPrototypeState, savePrototypeState } from "../utils/prototypeStorage";
+import { clearPrototypeStateOnce, loadPrototypeState, savePrototypeState } from "../utils/prototypeStorage";
+import { createOrder } from "../utils/apiClient";
 
 const initialRoute = { name: "roleSelect", params: {} };
+const backendCustomerUserIds = {
+  "customer-yinji": "user-customer-yinji",
+  "customer-bolun": "user-customer-bolun",
+  "customer-lixuan": "user-customer-lixuan",
+  "customer-jingwei": "user-customer-jingwei"
+};
 
 export function AppNavigator() {
   const [stack, setStack] = useState([initialRoute]);
@@ -40,6 +48,7 @@ export function AppNavigator() {
   const current = stack[stack.length - 1];
 
   useEffect(() => {
+    clearPrototypeStateOnce("2026-06-25-clear-group-buys");
     const storedState = loadPrototypeState();
     if (storedState) {
       setDeals(Array.isArray(storedState.deals) ? storedState.deals : initialDeals);
@@ -160,7 +169,7 @@ export function AppNavigator() {
     removeCartItem(cartItemId) {
       setCartItems((items) => items.filter((item) => item.id !== cartItemId));
     },
-    submitCart(dealId, fallbackPurchasePreference = "decline_original_price") {
+    async submitCart(dealId, fallbackPurchasePreference = "decline_original_price") {
       const submittedItems = cartItems.filter((item) => item.dealId === dealId && item.customerId === selectedCustomerId);
       if (submittedItems.length === 0) return null;
 
@@ -170,6 +179,16 @@ export function AppNavigator() {
         && !["cancelled", "completed"].includes(order.status)
       ));
       const quantity = submittedItems.reduce((sum, item) => sum + item.quantity, 0);
+      const deal = deals.find((item) => item.id === dealId);
+      const capacityCheckQuantity = existingOrder && !["authorized", "captured"].includes(existingOrder.paymentStatus)
+        ? (existingOrder.quantity ?? 0) + quantity
+        : quantity;
+      if (deal && wouldExceedDealCapacity(deal, capacityCheckQuantity)) {
+        return {
+          error: "capacity_exceeded",
+          message: `此團購最多 ${getDealCapacityInfo(deal).maximumCups} 杯，已無法再加入 ${capacityCheckQuantity} 杯。`
+        };
+      }
       const subtotal = submittedItems.reduce((sum, item) => sum + item.subtotal, 0);
       const firstItem = submittedItems[0];
       const orderItems = submittedItems.map((item) => normalizeOrderItem(item));
@@ -208,7 +227,32 @@ export function AppNavigator() {
         return existingOrder.id;
       }
 
-      const orderId = `order-mock-${Date.now()}`;
+      let backendOrder;
+      try {
+        backendOrder = await createOrder({
+          activityId: dealId,
+          customerUserId: backendCustomerUserIds[selectedCustomerId] ?? selectedCustomerId,
+          fallbackPurchasePreference,
+          items: orderItems.map((item) => ({
+            menuItemId: item.drinkId,
+            itemName: item.itemName,
+            quantity: item.quantity,
+            unitPrice: item.unitPrice,
+            subtotal: item.subtotal,
+            size: item.size,
+            sweetness: item.sweetness,
+            ice: item.ice,
+            toppings: item.toppings
+          }))
+        });
+      } catch (error) {
+        return {
+          error: "backend_order_create_failed",
+          message: error.message
+        };
+      }
+
+      const orderId = backendOrder.id;
       const newOrder = {
         id: orderId,
         customerId: selectedCustomerId,
@@ -354,12 +398,14 @@ export function AppNavigator() {
       if (orderToAuthorize && orderToAuthorize.paymentStatus === "pending") {
         setDeals((items) => items.map((deal) => {
           if (deal.id !== orderToAuthorize.dealId) return deal;
-          const nextCups = deal.currentCups + orderToAuthorize.quantity;
+          const maximumCups = getDealCapacityInfo(deal).maximumCups;
+          const nextCups = Math.min(maximumCups, deal.currentCups + orderToAuthorize.quantity);
           return {
             ...deal,
             currentCups: nextCups,
             participantCount: deal.participantCount + 1,
-            status: nextCups >= deal.targetCups ? "confirmed" : deal.status
+            status: nextCups >= deal.targetCups ? "confirmed" : deal.status,
+            canJoin: nextCups < maximumCups
           };
         }));
       }

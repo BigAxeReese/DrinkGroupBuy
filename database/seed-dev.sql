@@ -1,10 +1,10 @@
 -- Development seed data only. Not production data.
 
 INSERT INTO users (id, email, display_name, surname, status, created_at, updated_at) VALUES
-  ('user-customer-yinji', 'yinji@example.test', '引吉', '引', 'active', '2026-06-05T00:00:00+08:00', '2026-06-05T00:00:00+08:00'),
-  ('user-customer-bolun', 'bolun@example.test', '柏綸', '柏', 'active', '2026-06-05T00:00:00+08:00', '2026-06-05T00:00:00+08:00'),
-  ('user-customer-lixuan', 'lixuan@example.test', '立玄', '立', 'active', '2026-06-05T00:00:00+08:00', '2026-06-05T00:00:00+08:00'),
-  ('user-customer-jingwei', 'jingwei@example.test', '菁鍏', '菁', 'active', '2026-06-05T00:00:00+08:00', '2026-06-05T00:00:00+08:00'),
+  ('user-customer-yinji', 'yinji@example.test', 'A', 'A', 'active', '2026-06-05T00:00:00+08:00', '2026-06-05T00:00:00+08:00'),
+  ('user-customer-bolun', 'bolun@example.test', 'B', 'B', 'active', '2026-06-05T00:00:00+08:00', '2026-06-05T00:00:00+08:00'),
+  ('user-customer-lixuan', 'lixuan@example.test', 'C', 'C', 'active', '2026-06-05T00:00:00+08:00', '2026-06-05T00:00:00+08:00'),
+  ('user-customer-jingwei', 'jingwei@example.test', 'D', 'D', 'active', '2026-06-05T00:00:00+08:00', '2026-06-05T00:00:00+08:00'),
   ('user-merchant-001', 'merchant001@example.test', '青山手作茶商家', '青', 'active', '2026-06-05T00:00:00+08:00', '2026-06-05T00:00:00+08:00'),
   ('user-admin-001', 'admin@example.test', 'Prototype Admin', '管', 'active', '2026-06-05T00:00:00+08:00', '2026-06-05T00:00:00+08:00');
 

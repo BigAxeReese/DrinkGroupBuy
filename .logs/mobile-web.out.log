@@ -1,0 +1,15 @@
+Starting project at C:\vscode\DrinkGroupBuy\mobile
+env: load .env
+env: export GOOGLE_MAPS_API_KEY EXPO_PUBLIC_GOOGLE_MAPS_API_KEY EXPO_PUBLIC_BACKEND_URL
+Starting Metro Bundler
+Waiting on http://localhost:8081
+Logs for your project will appear below.
+Web Bundled 1605ms C:\vscode\DrinkGroupBuy\mobile\node_modules\expo\AppEntry.js (296 modules)
+Web Bundled 25ms C:\vscode\DrinkGroupBuy\mobile\node_modules\expo\AppEntry.js (1 module)
+Web Bundled 793ms C:\vscode\DrinkGroupBuy\mobile\node_modules\expo\AppEntry.js (1 module)
+Web Bundled 12ms C:\vscode\DrinkGroupBuy\mobile\node_modules\expo\AppEntry.js (1 module)
+Web Bundled 19ms C:\vscode\DrinkGroupBuy\mobile\node_modules\expo\AppEntry.js (1 module)
+Web Bundled 822ms C:\vscode\DrinkGroupBuy\mobile\node_modules\expo\AppEntry.js (1 module)
+Web Bundled 1091ms C:\vscode\DrinkGroupBuy\mobile\node_modules\expo\AppEntry.js (1 module)
+Web Bundled 1034ms C:\vscode\DrinkGroupBuy\mobile\node_modules\expo\AppEntry.js (1 module)
+Web Bundled 819ms C:\vscode\DrinkGroupBuy\mobile\node_modules\expo\AppEntry.js (1 module)

@@ -1,385 +1,90 @@
-# Current Progress Handoff
+# Current Progress
 
-Last updated: 2026-06-05
+Last updated: 2026-06-26
 
-## Project Direction
+## Mobile
 
-The project direction is now:
+Technology: React Native + Expo, Android-first with Expo Web preview.
 
-- Android-first mobile app prototype
-- React Native + Expo
-- Main development folder: `mobile/`
-- Database draft folder: `database/`
-- Documentation folder: `docs/`
+Implemented screens and flows:
 
-This is still a prototype. It is not a finished production system.
+- Prototype customer, merchant, and administrator sign-in selection.
+- Customer home, Google Maps live map, store menu, drink customization, and cart.
+- Customer home separates current-customer joined orders from global/nearby recruiting activity recommendations.
+- Customer active orders, order detail/editing, group progress, pickup code, and order history.
+- Activity capacity follows the highest promotion tier; for example 20/30/40 cup tiers mean the activity can accept at most 40 cups.
+- LINE Pay authorization and partial-capture UI/state simulation.
+- Payment screen can now ask the backend to create a LINE Pay sandbox authorization URL, then open the LINE Pay hosted page.
+- Merchant dashboard, activity creation, order acceptance, preparation completion, and merchant history.
+- Administrator dashboard and activity cancellation.
+- Local prototype persistence through browser `localStorage` when available.
 
-## Important Deleted Legacy Files
+Real API usage:
 
-The old Web / Node prototype has been deleted by user confirmation:
+- `MerchantDealCreateScreen` creates activities through the backend, with local fallback on failure.
+- `AdminDashboardScreen` cancels activities through the backend, with local fallback on failure.
 
-- `frontend/`
-- `server.js`
-- `src/`
-- `data/`
+Important limitation: app startup does not yet load the authoritative activity list from the backend. Orders, payments, pickup, and most runtime progress remain mobile-local state.
 
-Do not restore these unless the user explicitly asks.
+## Backend
 
-Cleanup completed:
+Technology: Node.js built-in HTTP server and built-in SQLite driver.
 
-- Root `package.json` no longer points to deleted `server.js`.
-- Deleted legacy `scripts/verifyPromotions.js`.
-- Archived old Web prototype docs that referenced deleted files.
+Implemented endpoints:
 
-## Mobile App Prototype
+| Method | Path | Purpose |
+| --- | --- | --- |
+| `GET` | `/health` | Service health check |
+| `GET` | `/api/group-buy-activities` | List activities and promotion tiers |
+| `POST` | `/api/merchant/group-buy-activities` | Create an activity and tiers |
+| `POST` | `/api/orders` | Create an order and order item snapshots from cart data |
+| `DELETE` | `/api/admin/group-buy-activities/:activityId` | Soft-cancel an activity |
+| `POST` | `/api/payments/line-pay/request` | Create a LINE Pay sandbox authorization request |
+| `GET` | `/api/payments/line-pay/confirm` | LINE Pay redirect confirm endpoint |
+| `GET` | `/api/payments/line-pay/cancel` | LINE Pay redirect cancellation endpoint |
 
-Main entry:
+Implemented safeguards:
 
-```text
-mobile/App.jsx
-mobile/src/navigation/AppNavigator.js
-```
+- Transactional activity creation and cancellation.
+- Transactional order creation with item/customization snapshots.
+- Simple idempotency handling for activity creation.
+- Status history and audit log on administrator cancellation.
+- Request validation for required activity fields.
+- LINE Pay request signing keeps Channel ID/Secret on the backend only.
+- LINE Pay request now requires a matching backend `orders` row, creates `payment_authorizations.status = pending`, and confirm updates the authorization and order to `authorized`.
+- LINE Pay request now blocks duplicate requests when the latest authorization for the order is already `pending` or `authorized`.
 
-`AppNavigator.js` currently owns most prototype state and interactions:
+Not implemented: authentication, authorization, order modification APIs, durable LINE Pay redirect lookup across backend restarts, LINE Pay capture/void/refund, payment webhooks, pickup APIs, deadline settlement jobs, production migrations, and automated tests.
 
-- login role selection
-- customer / merchant / admin navigation
-- merchant deal creation
-- cart state
-- order submission
-- order modification
-- Line Pay authorization mock
-- partial capture mock
-- localStorage prototype persistence
+Important current limitation: `POST /api/orders` only works for activities that already exist in the backend SQLite database. A stale mobile-local activity will be rejected until mobile startup loads the backend activity list.
 
-## Login / Role Flow
+## Database
 
-Current login screen:
+Development database: `database/drink-group-buy-dev.sqlite`.
 
-```text
-mobile/src/screens/RoleSelectScreen.jsx
-```
+The schema includes users/roles, merchants/stores, menu data, activities/tiers, carts, cart item customizations, orders/items, order item customizations, payment authorization/capture, settlement, pickup credentials, status history, and audit logs.
 
-It uses one dropdown-style selector for:
+Core cart/order customization data has been adjusted toward first normal form: selected sweetness, ice, toppings, and size are stored as child rows instead of JSON arrays on the item row.
 
-- customer accounts
-- merchant accounts
-- admin prototype account
+Current development data:
 
-Customer prototype accounts:
+- 6 users and 6 roles.
+- 1 merchant, 1 merchant user, and 1 store.
+- 2 menu items.
+- 2 group-buy activities and 5 promotion tiers.
+- 0 orders, payment authorizations, captures, settlements, or pickup credentials.
 
-```text
-mobile/src/mock/customerUsers.js
-```
+Prototype test database: `database/test/drink-group-buy-test.sqlite`.
 
-Current customer users:
+- 9 users, 7 stores, and 8 menu items.
+- Map data is exported to `mobile/src/mock/databaseMapStores.js`; it is not live database access.
 
-- 引吉
-- 柏綸
-- 立玄
-- 菁鍏
+## Next Vertical Slice
 
-Each customer has separate cart/order state by `customerId`.
+Recommended next slice:
 
-The Google login button is display-only and has no real login behavior.
-
-## Customer Screens
-
-Customer flow:
-
-```text
-RoleSelectScreen
-→ NearbyDealsScreen
-→ LiveMapScreen
-→ DealDetailScreen
-→ DrinkSelectionScreen
-→ CartScreen
-→ PaymentReportScreen
-→ CustomerOrdersScreen
-→ PickupInfoScreen
-```
-
-Important customer screens:
-
-- `NearbyDealsScreen.jsx`: customer home and active/recommended deals.
-- `LiveMapScreen.web.jsx`: Web Google Maps implementation.
-- `LiveMapScreen.native.jsx`: Android native Google Maps implementation.
-- `DealDetailScreen.jsx`: group-buy detail and discount tiers.
-- `DrinkSelectionScreen.jsx`: drink list first, then customization.
-- `CartScreen.jsx`: cart, fallback preference checkbox, submit order.
-- `CustomerOrdersScreen.jsx`: cart draft and submitted order details.
-- `GroupProgressScreen.jsx`: group-buy progress.
-- `PaymentReportScreen.jsx`: Line Pay authorization / partial capture mock.
-- `PickupInfoScreen.jsx`: pickup info and pickup credential placeholder.
-
-## Merchant Screens
-
-Merchant flow:
-
-```text
-RoleSelectScreen
-→ MerchantDashboardScreen
-→ MerchantDealCreateScreen
-→ MerchantDashboardScreen
-```
-
-Important merchant behavior:
-
-- Merchant identity is chosen on login.
-- Merchant dashboard shows only that merchant store's activities.
-- Merchant can create group-buy activities.
-- Created activities are saved to React state and prototype localStorage.
-- Created activities are not written to SQLite yet.
-
-## Admin Screen
-
-Admin prototype screen:
-
-```text
-mobile/src/screens/AdminDashboardScreen.jsx
-```
-
-Current admin behavior:
-
-- Shows all prototype group-buy activities.
-- Admin can delete a group-buy activity from the admin dashboard.
-- Delete currently means soft cancel: activity status becomes `cancelled`.
-- Backend writes `status_history` and `audit_logs` for the cancel action.
-- The mobile state also marks the activity `cancelled` and disables joining.
-
-Related prototype API:
-
-```text
-DELETE /api/admin/group-buy-activities/:activityId
-```
-
-## Current Payment Prototype
-
-Payment design direction:
-
-- original amount authorization
-- successful authorization sets payment status to `authorized`
-- authorized cups count toward group-buy progress
-- if group qualifies, final amount / capture amount / released amount are shown
-- if order amount changes after authorization, reauthorization is required
-
-This is a mock only:
-
-- no real Line Pay integration
-- no backend API
-- no provider webhook
-
-## Cart And Order Behavior
-
-Current behavior:
-
-1. Customer selects drink.
-2. Customer customizes sweetness, ice, toppings, quantity.
-3. Drink is added to cart.
-4. Cart appears on `CustomerOrdersScreen` as a draft.
-5. Cart can be submitted.
-6. Submitted cart becomes an order.
-7. Order goes to Line Pay authorization mock.
-8. After authorization, editing the order resets payment state to `pending` and requires reauthorization.
-
-Recent fix:
-
-- Order detail now displays drink names correctly.
-- `itemName` / `name` fields are normalized.
-- Adding drinks while editing an already authorized order adds items directly to the existing order.
-- Order totals recalculate after item add/edit/delete.
-
-## Prototype Persistence
-
-Prototype local persistence is implemented in:
-
-```text
-mobile/src/utils/prototypeStorage.js
-```
-
-It saves to browser `localStorage` when available:
-
-- `deals`
-- `orders`
-- `paymentReports`
-- `cartItems`
-
-Important:
-
-- This is not a database.
-- It only persists on the same browser/device.
-- It is not shared across computers.
-- Clearing browser data removes it.
-
-## Google Maps
-
-Google Maps is allowed for prototype map display.
-
-Relevant files:
-
-```text
-mobile/src/screens/LiveMapScreen.web.jsx
-mobile/src/screens/LiveMapScreen.native.jsx
-mobile/src/mock/mapConfig.js
-mobile/src/mock/databaseMapStores.js
-```
-
-Current behavior:
-
-- Web uses Google Maps JavaScript API.
-- Native uses `react-native-maps`.
-- Store marker is blue when there is no recruiting deal.
-- Store marker is yellow when there is a recruiting deal.
-- If a store has an active group-buy, marker label shows current cups / nearest unmet target cups.
-
-Example:
-
-```text
-4/20杯
-22/35杯
-```
-
-Google Maps API keys must remain local and must not be committed.
-
-## Database Status
-
-There are two SQLite areas:
-
-### Development Database Draft
-
-```text
-database/schema.sql
-database/init-dev-db.js
-database/drink-group-buy-dev.sqlite
-```
-
-`drink-group-buy-dev.sqlite` is generated locally and ignored by Git.
-
-Current dev database has tables but no seed data yet.
-
-Main tables:
-
-- `users`
-- `user_roles`
-- `merchants`
-- `merchant_users`
-- `stores`
-- `menu_items`
-- `customization_options`
-- `group_buy_activities`
-- `promotion_tiers`
-- `cart_drafts`
-- `cart_draft_items`
-- `orders`
-- `order_items`
-- `payment_authorizations`
-- `payment_captures`
-- `payment_provider_events`
-- `activity_settlements`
-- `pickup_credentials`
-- `status_history`
-- `audit_logs`
-
-Run:
-
-```powershell
-node database/init-dev-db.js
-```
-
-### Prototype Test Database
-
-```text
-database/test/
-```
-
-This is for prototype map exports and test data only.
-
-Current test database has:
-
-- 9 test users
-- 7 stores
-- 8 menu items
-- 0 deals
-- 0 orders
-- 0 payment authorizations
-- 0 pickup credentials
-
-Run:
-
-```powershell
-node database/test/init-test-db.js
-node database/test/export-mobile-map-data.js
-```
-
-## Important Constraint
-
-Merchant-created deals currently do not write into SQLite.
-
-Current storage:
-
-```text
-Merchant creates deal
-→ React state
-→ prototype localStorage
-```
-
-Future formal flow should be:
-
-```text
-Merchant creates deal
-→ mobile app calls backend API
-→ backend validates merchant permission
-→ backend writes group_buy_activities and promotion_tiers
-→ customer app reads activities from API
-```
-
-## How To Continue On Another Computer
-
-After cloning the repository on another computer, tell the next Codex session:
-
-```text
-請先閱讀 AGENTS.md、docs/current-progress.md、docs/project-direction.md、docs/mobile-prototype-plan.md。
-目前專案是 Android-first mobile app prototype。
-主要開發位置是 mobile/。
-舊的 frontend/、server.js、src/、data/ 已刪除，請不要恢復。
-請根據目前檔案狀態接續作業。
-```
-
-Then install and run mobile:
-
-```powershell
-cd mobile
-npm install
-npm run web
-```
-
-For Android:
-
-```powershell
-cd mobile
-npm install
-npm run android
-```
-
-If Google Maps does not appear, create local env:
-
-```text
-mobile/.env
-```
-
-and set:
-
-```text
-EXPO_PUBLIC_GOOGLE_MAPS_API_KEY=your_google_maps_api_key
-```
-
-Do not commit `.env`.
-
-## Suggested Next Steps
-
-1. Add `database/seed-dev.sql` for dev database users, stores, menu items.
-2. Create `backend/` scaffold.
-3. Design first backend API for merchant creating group-buy activities.
-4. Connect merchant create screen to backend API.
-5. Connect customer nearby/map data to backend API.
-6. Replace prototype localStorage persistence step by step.
+1. Load activities from the backend when mobile starts.
+2. Add menu read APIs.
+3. Add transactional order creation and order item persistence.
+4. Move payment authorization state from mobile local state into backend/database mock endpoints.
+5. Add merchant acceptance, ready-for-pickup, and pickup credential APIs.

@@ -4,9 +4,12 @@ import { MobileScreen, Section } from "../components/MobileScreen";
 import { PrimaryButton } from "../components/PrimaryButton";
 import { formatCurrency, getDealById } from "../utils/calculations";
 import { isDeadlineReached } from "../utils/deadlineTime";
+import { getDealCapacityInfo } from "../utils/dealProgress";
 
 export function CartScreen({ navigation, route, appState, actions, memberAction, selectedCustomerId }) {
   const [acceptOriginalPrice, setAcceptOriginalPrice] = useState(true);
+  const [submitError, setSubmitError] = useState("");
+  const [isSubmitting, setIsSubmitting] = useState(false);
   const deal = getDealById(appState.deals, route.params?.dealId);
   if (!deal) {
     return (
@@ -35,6 +38,11 @@ export function CartScreen({ navigation, route, appState, actions, memberAction,
     && !["cancelled", "completed"].includes(order.status)
   ));
   const requiresReauthorization = Boolean(existingOrder && ["authorized", "captured"].includes(existingOrder.paymentStatus));
+  const capacityInfo = getDealCapacityInfo(deal);
+  const capacityCheckQuantity = existingOrder && !["authorized", "captured"].includes(existingOrder.paymentStatus)
+    ? (existingOrder.quantity ?? 0) + totalQuantity
+    : totalQuantity;
+  const exceedsCapacity = capacityInfo.maximumCups > 0 && capacityCheckQuantity > capacityInfo.remainingCapacity;
 
   return (
     <MobileScreen
@@ -69,6 +77,12 @@ export function CartScreen({ navigation, route, appState, actions, memberAction,
       {dealClosed ? (
         <Text style={styles.closedNotice}>活動已截止，系統已鎖定訂單，不能再送出或修改購物車。</Text>
       ) : null}
+      {!dealClosed && exceedsCapacity ? (
+        <Text style={styles.closedNotice}>
+          此團購最高 {capacityInfo.maximumCups} 杯，目前剩餘容量不足，請調整購物車數量。
+        </Text>
+      ) : null}
+      {submitError ? <Text style={styles.closedNotice}>{submitError}</Text> : null}
 
       <PrimaryButton
         label="繼續選購飲料"
@@ -106,13 +120,28 @@ export function CartScreen({ navigation, route, appState, actions, memberAction,
       </Section>
 
       <PrimaryButton
-        label={requiresReauthorization ? "重新預授權" : "送出訂單並前往 LINE Pay"}
-        onPress={() => {
+        label={isSubmitting ? "正在建立訂單..." : requiresReauthorization ? "重新預授權" : "送出訂單並前往 LINE Pay"}
+        onPress={async () => {
+          if (isSubmitting) return;
+          setSubmitError("");
           if (dealClosed) return;
           if (cartItems.length === 0) return;
+          if (exceedsCapacity) {
+            setSubmitError(`此團購最多 ${capacityInfo.maximumCups} 杯，剩餘 ${capacityInfo.remainingCapacity} 杯可加入。`);
+            return;
+          }
           const fallbackPreference = acceptOriginalPrice ? "accept_original_price" : "decline_original_price";
-          const orderId = actions.submitCart(deal.id, fallbackPreference);
-          if (orderId) navigation.go("paymentReport", { dealId: deal.id, orderId });
+          setIsSubmitting(true);
+          try {
+            const orderId = await actions.submitCart(deal.id, fallbackPreference);
+            if (orderId?.error) {
+              setSubmitError(orderId.message);
+              return;
+            }
+            if (orderId) navigation.go("paymentReport", { dealId: deal.id, orderId });
+          } finally {
+            setIsSubmitting(false);
+          }
         }}
       />
     </MobileScreen>

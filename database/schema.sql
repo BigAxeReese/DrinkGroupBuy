@@ -136,12 +136,19 @@ CREATE TABLE cart_draft_items (
   item_name_snapshot TEXT NOT NULL,
   unit_price_snapshot INTEGER NOT NULL CHECK (unit_price_snapshot >= 0),
   quantity INTEGER NOT NULL CHECK (quantity > 0),
-  sweetness TEXT,
-  ice TEXT,
-  toppings_snapshot TEXT NOT NULL DEFAULT '[]',
   subtotal INTEGER NOT NULL CHECK (subtotal >= 0),
   created_at TEXT NOT NULL,
   updated_at TEXT NOT NULL
+);
+
+CREATE TABLE cart_draft_item_customizations (
+  id TEXT PRIMARY KEY,
+  cart_draft_item_id TEXT NOT NULL REFERENCES cart_draft_items(id) ON DELETE CASCADE,
+  customization_option_id TEXT REFERENCES customization_options(id),
+  option_type TEXT NOT NULL CHECK (option_type IN ('sweetness', 'ice', 'topping', 'size')),
+  label_snapshot TEXT NOT NULL,
+  price_delta_snapshot INTEGER NOT NULL DEFAULT 0,
+  sort_order INTEGER NOT NULL DEFAULT 0
 );
 
 CREATE TABLE orders (
@@ -175,13 +182,19 @@ CREATE TABLE order_items (
   order_id TEXT NOT NULL REFERENCES orders(id) ON DELETE CASCADE,
   menu_item_id TEXT REFERENCES menu_items(id),
   item_name_snapshot TEXT NOT NULL,
-  size_snapshot TEXT,
-  sweetness_snapshot TEXT,
-  ice_snapshot TEXT,
-  toppings_snapshot TEXT NOT NULL DEFAULT '[]',
   quantity INTEGER NOT NULL CHECK (quantity > 0),
   unit_price_snapshot INTEGER NOT NULL CHECK (unit_price_snapshot >= 0),
   subtotal INTEGER NOT NULL CHECK (subtotal >= 0)
+);
+
+CREATE TABLE order_item_customizations (
+  id TEXT PRIMARY KEY,
+  order_item_id TEXT NOT NULL REFERENCES order_items(id) ON DELETE CASCADE,
+  customization_option_id TEXT REFERENCES customization_options(id),
+  option_type TEXT NOT NULL CHECK (option_type IN ('sweetness', 'ice', 'topping', 'size')),
+  label_snapshot TEXT NOT NULL,
+  price_delta_snapshot INTEGER NOT NULL DEFAULT 0,
+  sort_order INTEGER NOT NULL DEFAULT 0
 );
 
 CREATE TABLE payment_authorizations (

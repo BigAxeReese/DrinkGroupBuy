@@ -51,6 +51,48 @@ export async function deleteGroupBuyActivity(activityId, input = {}) {
   });
 }
 
+export async function createOrder(input) {
+  const requestKey = `createOrder:${stableStringify(input)}`;
+  return dedupeRequest(requestKey, async () => {
+    const response = await fetch(`${backendBaseUrl}/api/orders`, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json"
+      },
+      body: JSON.stringify(input)
+    });
+
+    const payload = await response.json();
+    if (!response.ok) {
+      throw new Error(payload.error ?? "Create order failed");
+    }
+
+    return payload.order;
+  });
+}
+
+export async function requestLinePayAuthorization(input) {
+  const requestKey = `requestLinePayAuthorization:${stableStringify(input)}`;
+  return dedupeRequest(requestKey, async () => {
+    const response = await fetch(`${backendBaseUrl}/api/payments/line-pay/request`, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json"
+      },
+      body: JSON.stringify(input)
+    });
+
+    const payload = await response.json();
+    if (!response.ok) {
+      const error = new Error(payload.error ?? "LINE Pay authorization request failed");
+      error.payload = payload;
+      throw error;
+    }
+
+    return payload;
+  });
+}
+
 async function dedupeRequest(key, requestFn) {
   if (inflightRequests.has(key)) {
     return inflightRequests.get(key);

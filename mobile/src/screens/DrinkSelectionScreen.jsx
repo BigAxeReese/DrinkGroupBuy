@@ -166,9 +166,9 @@ export function DrinkSelectionScreen({ navigation, route, appState, actions, mem
           </Section>
 
           <View style={styles.stickyAction}>
-            <Text style={styles.stickyTotal}>{formatCurrency(subtotal)}</Text>
             <PrimaryButton
               label={editOrderItem ? "儲存修改（Mock）" : editOrderId ? "加入訂單並重新預授權" : "加入購物車"}
+              style={styles.stickyButton}
               onPress={() => {
                 const selectedTopping = drink.toppings.find((item) => item.id === toppingId);
                 if (editOrderItem) {
@@ -424,19 +424,14 @@ const styles = StyleSheet.create({
     paddingVertical: 8
   },
   stickyAction: {
-    flexDirection: "row",
-    alignItems: "center",
-    justifyContent: "space-between",
-    gap: 12,
+    width: "100%",
     borderRadius: 18,
-    backgroundColor: "#111827",
-    padding: 12
+    backgroundColor: "transparent",
+    paddingVertical: 4
   },
-  stickyTotal: {
-    color: "#ffffff",
-    fontSize: 20,
-    fontWeight: "900",
-    paddingLeft: 8
+  stickyButton: {
+    minHeight: 58,
+    borderRadius: 18
   },
   success: {
     color: "#047857",

@@ -1,122 +1,43 @@
 # Project Direction
 
-## Current Direction
+Last updated: 2026-06-24
 
-DrinkGroupBuy is now a full-stack, Android-first mobile app project.
+## Product Direction
 
-Primary target:
+DrinkGroupBuy is a full-stack, Android-first hand-shaken drink group-buying application.
 
-- Android-first mobile app
-- React Native + Expo in `mobile/`
-- Backend APIs may be created in `backend/`
-- Development database lives in `database/`
-- Documentation lives in `docs/`
+- `mobile/`: React Native + Expo app; Web is used for development preview.
+- `backend/`: Node.js HTTP API connected to the development SQLite database.
+- `database/`: SQLite development schema, seed data, and a separate prototype test database.
+- `docs/`: current contracts, terminology, status rules, requirements, and unresolved decisions.
 
-The project is no longer limited to a frontend-only prototype.
+The current system is an evolving prototype, not a production deployment.
 
-## Current Project Roles
+## Current Integration Boundary
 
-| Path | Current role |
-| --- | --- |
-| `mobile/` | Main Android-first React Native + Expo app |
-| `database/` | Development SQLite schema, local DB scripts, and prototype test DB |
-| `backend/` | Future backend API location; may be created when API work starts |
-| `docs/` | Product, API, database, status, and handoff documentation |
-| `AGENTS.md` | Current collaboration and development rules |
+Already connected end to end:
 
-## Deleted Legacy Areas
+- Merchant creates a group-buy activity: Mobile -> API -> SQLite.
+- Administrator cancels an activity: Mobile -> API -> SQLite soft cancellation.
+- Backend can list activities from SQLite.
 
-These older prototype areas were deleted after user confirmation:
+Still local or mocked in mobile:
 
-- `frontend/`
-- `server.js`
-- `src/`
-- `data/`
+- Login and authorization.
+- Cart, customer orders, order edits, and progress updates.
+- LINE Pay authorization, capture, void, and webhook behavior.
+- Merchant acceptance, preparation completion, and pickup credentials.
+- Most store/menu reads and map marker synchronization.
 
-Do not restore them unless the user explicitly requests it.
+## Architecture Principles
 
-## Mobile Position
+1. New backend and database work uses `groupBuyActivity` / `group_buy_activity` terminology.
+2. Mobile legacy variables may temporarily use `deal`, but new interfaces must not expand that usage.
+3. Mobile and API fields use `camelCase`; database tables and columns use `snake_case`.
+4. Secrets stay in local environment files and are never committed.
+5. Payment remains mock or sandbox until real-money behavior is explicitly approved.
+6. Stateful operations require validation, idempotency where relevant, transactions, and history records.
 
-`mobile/` is the current app implementation.
+## Legacy Note
 
-It currently contains:
-
-- role/login prototype
-- customer home
-- Google Maps live map
-- deal detail
-- drink selection
-- cart
-- customer orders
-- payment authorization mock
-- pickup info
-- merchant dashboard
-- merchant deal creation
-- admin prototype screen
-
-## Backend Position
-
-Backend has not been implemented yet, but backend development is now allowed.
-
-Future backend should provide APIs for:
-
-- authentication/session
-- merchant activity creation
-- nearby activities and map store data
-- menu loading
-- cart or order draft
-- order submission and modification
-- payment authorization / capture / void
-- pickup credential generation
-- merchant dashboard summaries
-
-## Database Position
-
-Development database draft exists:
-
-```text
-database/schema.sql
-database/init-dev-db.js
-```
-
-Generated local SQLite:
-
-```text
-database/drink-group-buy-dev.sqlite
-```
-
-This local database is ignored by Git.
-
-The dev schema currently defines users, merchants, stores, menu, group-buy activities, promotion tiers, carts, orders, payments, pickups, status history, and audit logs.
-
-## Current Persistence Reality
-
-The mobile app still uses local prototype state:
-
-```text
-React state + localStorage
-```
-
-Merchant-created activities are not yet written to SQLite.
-
-Formal future flow should be:
-
-```text
-mobile
-→ backend API
-→ database
-→ API response back to mobile
-```
-
-## Near-Term Direction
-
-Recommended next vertical slice:
-
-```text
-Merchant creates group-buy activity
-→ backend API
-→ database group_buy_activities + promotion_tiers
-→ customer nearby/map reads from API
-```
-
-This is the cleanest first full-stack connection point.
+The old Web frontend and root legacy server were deleted. Do not restore `frontend/`, root `server.js`, `src/`, or `data/` unless explicitly requested.

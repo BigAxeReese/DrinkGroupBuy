@@ -1,14 +1,19 @@
-import { StyleSheet, Text, View } from "react-native";
+import { useState } from "react";
+import { Linking, StyleSheet, Text, View } from "react-native";
 import { MobileScreen, Section } from "../components/MobileScreen";
 import { PlaceholderBox } from "../components/PlaceholderBox";
 import { PrimaryButton } from "../components/PrimaryButton";
 import { StatusBadge } from "../components/StatusBadge";
 import { formatCurrency } from "../utils/calculations";
+import { requestLinePayAuthorization } from "../utils/apiClient";
 
 export function PaymentReportScreen({ navigation, route, appState, actions, memberAction, selectedCustomerId }) {
+  const [linePayStatus, setLinePayStatus] = useState("idle");
+  const [linePayMessage, setLinePayMessage] = useState("");
   const allowedOrderIds = new Set(appState.orders.filter((order) => order.customerId === selectedCustomerId).map((order) => order.id));
   const payment = appState.paymentReports.find((item) => item.orderId === route.params?.orderId && allowedOrderIds.has(item.orderId))
     ?? appState.paymentReports.find((item) => allowedOrderIds.has(item.orderId));
+  const order = payment ? appState.orders.find((item) => item.id === payment.orderId) : null;
   if (!payment) {
     return (
       <MobileScreen
@@ -53,6 +58,22 @@ export function PaymentReportScreen({ navigation, route, appState, actions, memb
         <PlaceholderBox title="Line Pay authorization" />
       </Section>
 
+      <Section title="LINE Pay sandbox">
+        <Text style={styles.meta}>此按鈕會向 backend 建立 LINE Pay 預授權請求，並開啟 LINE Pay 付款頁。</Text>
+        <Text style={styles.meta}>目前只做授權 confirm，不會在 App 內自動完成正式請款。</Text>
+        {linePayMessage ? (
+          <Text style={linePayStatus === "error" ? styles.errorText : styles.successText}>{linePayMessage}</Text>
+        ) : null}
+        <PrimaryButton
+          label={linePayStatus === "loading" ? "正在建立 LINE Pay 請求..." : "前往 LINE Pay 預授權"}
+          onPress={() => {
+            if (linePayStatus !== "loading") {
+              startLinePayAuthorization({ payment, order, setLinePayStatus, setLinePayMessage });
+            }
+          }}
+        />
+      </Section>
+
       {isCaptured ? (
         <Section title="請款結果">
           <AmountRow label="優惠價 finalAmount" value={payment.finalAmount} />
@@ -72,6 +93,79 @@ export function PaymentReportScreen({ navigation, route, appState, actions, memb
       <PrimaryButton label="前往取貨資訊" variant="secondary" onPress={() => navigation.go("pickupInfo", { orderId: payment.orderId })} />
     </MobileScreen>
   );
+}
+
+async function startLinePayAuthorization({ payment, order, setLinePayStatus, setLinePayMessage }) {
+  try {
+    if (!payment || !order) {
+      throw new Error("找不到可預授權的訂單資料");
+    }
+
+    setLinePayStatus("loading");
+    setLinePayMessage("");
+
+    const products = buildLinePayProducts(order, payment);
+
+    const payload = await requestLinePayAuthorization({
+      orderId: order.id,
+      amount: payment.originalAmount,
+      productName: order.itemName || "DrinkGroupBuy 飲料訂單",
+      packageName: payment.recipientName || "DrinkGroupBuy",
+      products
+    });
+    const paymentUrl = payload.paymentUrl?.web || payload.paymentUrl?.app;
+    if (!paymentUrl) {
+      throw new Error("LINE Pay 沒有回傳付款網址");
+    }
+
+    await Linking.openURL(paymentUrl);
+    setLinePayStatus("ready");
+    setLinePayMessage("已開啟 LINE Pay。完成後會回到 backend confirm 頁面；App 內狀態目前仍需用 mock 同步。");
+  } catch (error) {
+    setLinePayStatus("error");
+    setLinePayMessage(getLinePayErrorMessage(error));
+  }
+}
+
+function getLinePayErrorMessage(error) {
+  if (error.payload?.status === "already_authorized") {
+    return "此訂單已完成 LINE Pay 授權，不需要重複付款。";
+  }
+  if (error.payload?.status === "authorization_already_pending") {
+    return "此訂單已有一筆進行中的 LINE Pay 授權，請先完成該付款流程或稍後再試。";
+  }
+  return error.message;
+}
+
+function buildLinePayProducts(order, payment) {
+  const items = order.items || [];
+  const products = items
+    .map((item) => {
+      const quantity = item.quantity || 1;
+      const subtotal = Number(item.subtotal);
+      if (!Number.isInteger(subtotal) || subtotal <= 0 || subtotal % quantity !== 0) {
+        return null;
+      }
+      return {
+        name: item.itemName || order.itemName || "飲料",
+        quantity,
+        price: subtotal / quantity
+      };
+    })
+    .filter(Boolean);
+  const productTotal = products.reduce((sum, item) => sum + item.price * item.quantity, 0);
+
+  if (products.length > 0 && productTotal === payment.originalAmount) {
+    return products;
+  }
+
+  return [
+    {
+      name: order.itemName || "DrinkGroupBuy 飲料訂單",
+      quantity: 1,
+      price: payment.originalAmount
+    }
+  ];
 }
 
 function AmountRow({ label, value }) {
@@ -111,6 +205,18 @@ const styles = StyleSheet.create({
     color: "#047857",
     fontSize: 13,
     fontWeight: "800"
+  },
+  successText: {
+    color: "#047857",
+    fontSize: 13,
+    fontWeight: "800",
+    lineHeight: 20
+  },
+  errorText: {
+    color: "#dc2626",
+    fontSize: 13,
+    fontWeight: "800",
+    lineHeight: 20
   },
   amountRows: {
     gap: 8
