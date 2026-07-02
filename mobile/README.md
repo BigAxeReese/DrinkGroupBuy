@@ -10,7 +10,7 @@
 
 目前已接上的功能：
 
-- 顧客、商家、管理員 prototype 登入入口。
+- 顧客、商家與管理員 prototype 登入入口。
 - 顧客首頁、即時地圖、菜單、購物車、我的訂單。
 - 商家建立團購活動，會呼叫 backend API。
 - 顧客送出購物車，會呼叫 backend 建立訂單。
@@ -19,7 +19,7 @@
 
 目前仍未完成：
 
-- 真實帳號密碼登入。
+- 正式顧客手機號碼密碼登入，以及商家/管理員 Email 密碼登入。
 - App 重新載入後完整從 backend 載入所有訂單。
 - LINE Pay capture / void / refund。
 - LINE Pay webhook。

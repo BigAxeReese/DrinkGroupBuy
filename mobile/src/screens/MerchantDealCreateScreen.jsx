@@ -59,7 +59,6 @@ export function MerchantDealCreateScreen({ navigation, actions, memberAction, se
     try {
       const activity = await createGroupBuyActivity({
         storeId: merchantStore.id,
-        createdByUserId: "user-merchant-001",
         title,
         startAt: startTime,
         deadlineAt,

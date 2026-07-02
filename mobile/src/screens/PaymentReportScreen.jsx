@@ -10,6 +10,8 @@ import { requestLinePayAuthorization } from "../utils/apiClient";
 export function PaymentReportScreen({ navigation, route, appState, actions, memberAction, selectedCustomerId }) {
   const [linePayStatus, setLinePayStatus] = useState("idle");
   const [linePayMessage, setLinePayMessage] = useState("");
+  const [syncStatus, setSyncStatus] = useState("idle");
+  const [syncMessage, setSyncMessage] = useState("");
   const allowedOrderIds = new Set(appState.orders.filter((order) => order.customerId === selectedCustomerId).map((order) => order.id));
   const payment = appState.paymentReports.find((item) => item.orderId === route.params?.orderId && allowedOrderIds.has(item.orderId))
     ?? appState.paymentReports.find((item) => allowedOrderIds.has(item.orderId));
@@ -72,6 +74,18 @@ export function PaymentReportScreen({ navigation, route, appState, actions, memb
             }
           }}
         />
+        <PrimaryButton
+          label={syncStatus === "loading" ? "正在刷新付款狀態..." : "刷新付款狀態"}
+          variant="secondary"
+          onPress={() => {
+            if (syncStatus !== "loading") {
+              syncBackendOrder({ orderId: payment.orderId, actions, setSyncStatus, setSyncMessage });
+            }
+          }}
+        />
+        {syncMessage ? (
+          <Text style={syncStatus === "error" ? styles.errorText : styles.successText}>{syncMessage}</Text>
+        ) : null}
       </Section>
 
       {isCaptured ? (
@@ -93,6 +107,19 @@ export function PaymentReportScreen({ navigation, route, appState, actions, memb
       <PrimaryButton label="前往取貨資訊" variant="secondary" onPress={() => navigation.go("pickupInfo", { orderId: payment.orderId })} />
     </MobileScreen>
   );
+}
+
+async function syncBackendOrder({ orderId, actions, setSyncStatus, setSyncMessage }) {
+  try {
+    setSyncStatus("loading");
+    setSyncMessage("");
+    const result = await actions.syncOrderFromBackend(orderId);
+    setSyncStatus("ready");
+    setSyncMessage(`已同步後端狀態：${result.order.paymentStatus}`);
+  } catch (error) {
+    setSyncStatus("error");
+    setSyncMessage(error.message);
+  }
 }
 
 async function startLinePayAuthorization({ payment, order, setLinePayStatus, setLinePayMessage }) {

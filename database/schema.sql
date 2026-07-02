@@ -6,6 +6,8 @@ PRAGMA foreign_keys = ON;
 
 CREATE TABLE users (
   id TEXT PRIMARY KEY,
+  login_name TEXT UNIQUE,
+  phone_number TEXT UNIQUE,
   email TEXT UNIQUE,
   password_hash TEXT,
   google_subject_id TEXT UNIQUE,

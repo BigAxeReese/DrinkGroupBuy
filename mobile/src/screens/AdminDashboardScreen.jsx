@@ -23,7 +23,6 @@ export function AdminDashboardScreen({ navigation, appState, actions, memberActi
 
     try {
       const activity = await deleteGroupBuyActivity(deal.id, {
-        actorUserId: "user-admin-001",
         reason
       });
       actions.cancelGroupBuyActivityFromApi(activity);

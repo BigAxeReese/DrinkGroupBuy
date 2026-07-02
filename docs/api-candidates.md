@@ -20,7 +20,7 @@ API JSON uses `camelCase`. Implemented routes are authoritative only for the cur
 | --- | --- |
 | Method / path | `GET /api/group-buy-activities` |
 | Purpose | Return activities, stores, and promotion tiers from SQLite |
-| Response | `{ activities: [{ id, storeId, createdByUserId, title, status, startAt, deadlineAt, pickupStartAt, pickupEndAt, maximumCups, withdrawalLockMinutes, cancellationReason, store, tiers }] }` |
+| Response | `{ activities: [{ id, storeId, createdByUserId, title, status, rawStatus, startAt, deadlineAt, pickupStartAt, pickupEndAt, maximumCups, targetCups, currentCups, authorizedCups, participantCount, withdrawalLockMinutes, cancellationReason, store, tiers }] }` |
 | Current gap | Mobile does not call this endpoint at startup |
 
 ### Create Merchant Activity
@@ -29,10 +29,10 @@ API JSON uses `camelCase`. Implemented routes are authoritative only for the cur
 | --- | --- |
 | Method / path | `POST /api/merchant/group-buy-activities` |
 | Related screen | `MerchantDealCreateScreen` |
-| Request | `{ storeId, createdByUserId, title, startAt, deadlineAt, pickupStartAt, pickupEndAt, withdrawalLockMinutes?, tiers[], notice?, idempotencyKey? }` |
+| Request | Bearer token required. Body: `{ storeId, title, startAt, deadlineAt, pickupStartAt, pickupEndAt, withdrawalLockMinutes?, tiers[], notice?, idempotencyKey? }` |
 | Response | `{ activity }` |
-| Implemented rules | Required-field validation, tier normalization, maximum cups derived from highest tier, transaction, simple idempotency, audit log |
-| Missing rules | Authentication, merchant/store authorization, robust date validation |
+| Implemented rules | Requires merchant role, verifies merchant-store access, derives `createdByUserId` from authenticated user, required-field validation, tier normalization, maximum cups derived from highest tier, transaction, simple idempotency, audit log |
+| Missing rules | Robust date validation, richer merchant permission model |
 
 ### Administrator Cancels Activity
 
@@ -40,10 +40,10 @@ API JSON uses `camelCase`. Implemented routes are authoritative only for the cur
 | --- | --- |
 | Method / path | `DELETE /api/admin/group-buy-activities/:activityId` |
 | Related screen | `AdminDashboardScreen` |
-| Request | `{ actorUserId?, reason? }` |
+| Request | Bearer token required. Body: `{ reason? }` |
 | Response | `{ activity }` |
-| Implemented rules | Soft cancellation, status history, audit log, idempotent response for an already cancelled activity |
-| Missing rules | Authentication, administrator authorization, cascading order/payment handling |
+| Implemented rules | Requires admin role, derives `actorUserId` from authenticated user, soft cancellation, status history, audit log, idempotent response for an already cancelled activity |
+| Missing rules | Cascading order/payment handling |
 
 ### Create Customer Order
 
@@ -51,10 +51,21 @@ API JSON uses `camelCase`. Implemented routes are authoritative only for the cur
 | --- | --- |
 | Method / path | `POST /api/orders` |
 | Related screen | `CartScreen` |
-| Request | `{ activityId, customerUserId, fallbackPurchasePreference, items: [{ menuItemId?, itemName, quantity, unitPrice, subtotal, size?, sweetness?, ice?, toppings? }] }` |
+| Request | Bearer token required. Body: `{ activityId, fallbackPurchasePreference, items: [{ menuItemId?, itemName, quantity, unitPrice, subtotal, size?, sweetness?, ice?, toppings? }] }` |
 | Response | `{ order }` |
-| Implemented rules | Requires existing backend `group_buy_activities` row, requires active customer user, writes `orders`, `order_items`, `order_item_customizations`, `status_history`, and `audit_logs` in one transaction, blocks non-joinable activities, checks authorized cups against `maximum_cups` |
-| Missing rules | Authentication, current-user ownership, order modification API, price validation against current menu, idempotency key, complete concurrency locking for simultaneous joins |
+| Implemented rules | Requires customer role, derives `customerUserId` from authenticated user, requires existing backend `group_buy_activities` row, requires active customer user, writes `orders`, `order_items`, `order_item_customizations`, `status_history`, and `audit_logs` in one transaction, blocks non-joinable activities, checks authorized cups against `maximum_cups` |
+| Missing rules | Order modification API, price validation against current menu, idempotency key, complete concurrency locking for simultaneous joins |
+
+### Get Order Detail
+
+| Item | Value |
+| --- | --- |
+| Method / path | `GET /api/orders/:orderId` |
+| Related screen | `PaymentReportScreen`, `CustomerOrdersScreen` |
+| Request | Bearer token required |
+| Response | `{ order: { id, activityId, customerUserId, status, paymentStatus, authorizationStatus, originalAmount, totalCups, items, latestLinePayAuthorization } }` |
+| Implemented rules | Owner/admin access check; returns order item snapshots and latest LINE Pay authorization so mobile can refresh payment state after LINE Pay redirect |
+| Missing rules | Merchant visibility checks, pagination/history for multiple authorizations |
 
 ### Request LINE Pay Authorization
 
@@ -62,9 +73,9 @@ API JSON uses `camelCase`. Implemented routes are authoritative only for the cur
 | --- | --- |
 | Method / path | `POST /api/payments/line-pay/request` |
 | Related screen | `PaymentReportScreen` |
-| Request | `{ orderId, amount, currency?, productName?, packageName?, products? }` |
+| Request | Bearer token required. Body: `{ orderId, amount, currency?, productName?, packageName?, products? }` |
 | Response | `{ provider, orderId, transactionId, paymentUrl, paymentAccessToken, status }` |
-| Implemented rules | Backend-only Channel ID/Secret, LINE Pay request signature, sandbox base URL by default, verifies order exists in SQLite, verifies requested amount equals `orders.original_amount`, blocks duplicate request when latest LINE Pay authorization is `pending` or `authorized`, creates `payment_authorizations.status = pending`, keeps temporary in-memory redirect lookup |
+| Implemented rules | Owner/admin access check, backend-only Channel ID/Secret, LINE Pay request signature, sandbox base URL by default, verifies order exists in SQLite, verifies requested amount equals `orders.original_amount`, blocks duplicate request when latest LINE Pay authorization is `pending` or `authorized`, creates `payment_authorizations.status = pending`, keeps temporary in-memory redirect lookup |
 | Missing rules | Durable redirect lookup, idempotency table, webhook verification, mobile callback sync, authorization expiry handling, separated capture support confirmation |
 
 ### LINE Pay Confirm Redirect
@@ -103,7 +114,7 @@ API JSON uses `camelCase`. Implemented routes are authoritative only for the cur
 | --- | --- | --- |
 | `POST /api/group-buy-activities/:activityId/orders` | Alternative nested route for order creation | Current implemented route is `POST /api/orders`; final route shape still undecided |
 | `GET /api/customers/me/orders` | Active and historical customer orders | Authentication and pagination |
-| `GET /api/orders/:orderId` | Order detail | Owner/merchant/admin visibility |
+| `GET /api/orders/:orderId/history` | Order/payment status history | Owner/merchant/admin visibility |
 | `PATCH /api/orders/:orderId/items` | Modify order before lock | Reauthorization and revision history |
 | `POST /api/orders/:orderId/cancel` | Exit before lock | Deadline race and authorized-cup rollback |
 

@@ -24,7 +24,7 @@ import { getDealCapacityInfo, wouldExceedDealCapacity } from "../utils/dealProgr
 import { normalizeOrderItem } from "../utils/orderItems";
 import { buildOrderItemsChange, rollbackAuthorizedCups } from "../utils/orderState";
 import { clearPrototypeStateOnce, loadPrototypeState, savePrototypeState } from "../utils/prototypeStorage";
-import { createOrder } from "../utils/apiClient";
+import { createOrder, getOrder, listGroupBuyActivities } from "../utils/apiClient";
 
 const initialRoute = { name: "roleSelect", params: {} };
 const backendCustomerUserIds = {
@@ -48,7 +48,7 @@ export function AppNavigator() {
   const current = stack[stack.length - 1];
 
   useEffect(() => {
-    clearPrototypeStateOnce("2026-06-25-clear-group-buys");
+    clearPrototypeStateOnce("2026-07-02-clear-group-buys");
     const storedState = loadPrototypeState();
     if (storedState) {
       setDeals(Array.isArray(storedState.deals) ? storedState.deals : initialDeals);
@@ -438,6 +438,82 @@ export function AppNavigator() {
             }
           : order
       )));
+    },
+    async syncOrderFromBackend(orderId) {
+      const backendOrder = await getOrder(orderId);
+      const authorization = backendOrder.latestLinePayAuthorization;
+      const authorizedAmount = authorization?.authorizedAmount ?? backendOrder.originalAmount;
+      const backendActivities = await listGroupBuyActivities();
+      const backendActivity = backendActivities.find((activity) => activity.id === backendOrder.activityId);
+
+      setOrders((items) => items.map((order) => (
+        order.id === orderId
+          ? {
+              ...order,
+              status: backendOrder.status,
+              paymentStatus: backendOrder.paymentStatus,
+              authorizationStatus: backendOrder.authorizationStatus,
+              originalAmount: backendOrder.originalAmount,
+              authorizedAmount,
+              finalAmount: backendOrder.finalAmount,
+              quantity: backendOrder.totalCups,
+              subtotal: backendOrder.originalAmount,
+              items: backendOrder.items?.map((item) => ({
+                id: item.id,
+                drinkId: item.menuItemId,
+                itemName: item.itemName,
+                name: item.itemName,
+                quantity: item.quantity,
+                unitPrice: item.unitPrice,
+                subtotal: item.subtotal,
+                size: item.customizations?.find((customization) => customization.optionType === "size")?.label ?? "L",
+                sweetness: item.customizations?.find((customization) => customization.optionType === "sweetness")?.label ?? "",
+                ice: item.customizations?.find((customization) => customization.optionType === "ice")?.label ?? "",
+                toppings: (item.customizations || [])
+                  .filter((customization) => customization.optionType === "topping")
+                  .map((customization) => customization.label)
+              })) ?? order.items
+            }
+          : order
+      )));
+      setPaymentReports((items) => items.map((report) => (
+        report.orderId === orderId
+          ? {
+              ...report,
+              status: backendOrder.paymentStatus,
+              paymentStatus: backendOrder.paymentStatus,
+              authorizationStatus: backendOrder.authorizationStatus,
+              originalAmount: backendOrder.originalAmount,
+              authorizedAmount,
+              provider: authorization?.provider ?? report.provider,
+              providerReference: authorization?.providerAuthorizationId ?? report.providerReference,
+              note: "Synced from backend order state."
+            }
+          : report
+      )));
+      if (backendActivity) {
+        setDeals((items) => items.map((deal) => (
+          deal.id === backendActivity.id
+            ? {
+                ...deal,
+                status: backendActivity.status,
+                currentCups: backendActivity.authorizedCups ?? backendActivity.currentCups ?? deal.currentCups,
+                participantCount: backendActivity.participantCount ?? deal.participantCount,
+                targetCups: backendActivity.targetCups ?? deal.targetCups,
+                maximumCups: backendActivity.maximumCups ?? deal.maximumCups,
+                tiers: backendActivity.tiers?.map((tier) => ({
+                  id: tier.id,
+                  cups: tier.targetCups ?? tier.cups,
+                  targetCups: tier.targetCups ?? tier.cups,
+                  discountAmount: tier.discountAmount,
+                  sortOrder: tier.sortOrder
+                })) ?? deal.tiers
+              }
+            : deal
+        )));
+      }
+
+      return { order: backendOrder, activity: backendActivity };
     },
     acceptMerchantOrdersForDeal(dealId) {
       setOrders((items) => items.map((order) => (

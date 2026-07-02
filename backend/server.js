@@ -6,9 +6,13 @@ const {
   createOrder,
   createPendingLinePayAuthorization,
   getLatestLinePayAuthorizationForOrder,
+  getOrderDetail,
   getOrderPaymentContext,
+  getUserAuthProfileByLoginIdentifier,
+  getUserAuthProfileById,
   listGroupBuyActivities
 } = require("./db");
+const { createAuthToken, getBearerToken, verifyAuthToken, verifyPassword } = require("./auth");
 const { confirmLinePayPayment, requestLinePayPayment } = require("./linePayClient");
 
 const port = Number(process.env.PORT ?? 3000);
@@ -28,25 +32,71 @@ const server = http.createServer(async (request, response) => {
       return;
     }
 
+    if (request.method === "POST" && url.pathname === "/api/auth/login") {
+      const body = await readJsonBody(request);
+      const loginIdentifier = body.phoneNumber || body.loginName || body.email;
+      if (!loginIdentifier || !body.password) {
+        sendJson(response, 400, { error: "phoneNumber or loginName and password are required" });
+        return;
+      }
+
+      const user = getUserAuthProfileByLoginIdentifier(loginIdentifier);
+      if (!user || !verifyPassword(body.password, user.passwordHash)) {
+        sendJson(response, 401, { error: "Invalid phoneNumber/loginName or password" });
+        return;
+      }
+
+      const token = createAuthToken(user);
+      sendJson(response, 200, { token, user: toPublicUserResponse(user) });
+      return;
+    }
+
     if (request.method === "GET" && url.pathname === "/api/group-buy-activities") {
       sendJson(response, 200, { activities: listGroupBuyActivities() });
       return;
     }
 
     if (request.method === "POST" && url.pathname === "/api/merchant/group-buy-activities") {
+      const authUser = getAuthenticatedUser(request);
+      if (!authUser) {
+        sendJson(response, 401, { error: "Authentication required" });
+        return;
+      }
+      if (!authUser.roles.includes("merchant")) {
+        sendJson(response, 403, { error: "Merchant role required" });
+        return;
+      }
+
       const body = await readJsonBody(request);
       const validationError = validateCreateActivity(body);
       if (validationError) {
         sendJson(response, 400, { error: validationError });
         return;
       }
+      if (!canManageStore(authUser, body.storeId)) {
+        sendJson(response, 403, { error: "Store access denied" });
+        return;
+      }
 
-      const activity = createGroupBuyActivity(body);
+      const activity = createGroupBuyActivity({
+        ...body,
+        createdByUserId: authUser.id
+      });
       sendJson(response, 201, { activity });
       return;
     }
 
     if (request.method === "POST" && url.pathname === "/api/orders") {
+      const authUser = getAuthenticatedUser(request);
+      if (!authUser) {
+        sendJson(response, 401, { error: "Authentication required" });
+        return;
+      }
+      if (!authUser.roles.includes("customer")) {
+        sendJson(response, 403, { error: "Customer role required" });
+        return;
+      }
+
       const body = await readJsonBody(request);
       const validationError = validateCreateOrder(body);
       if (validationError) {
@@ -54,7 +104,10 @@ const server = http.createServer(async (request, response) => {
         return;
       }
 
-      const result = createOrder(body);
+      const result = createOrder({
+        ...body,
+        customerUserId: authUser.id
+      });
       if (result?.error === "activity_not_found") {
         sendJson(response, 404, { error: "Group-buy activity not found" });
         return;
@@ -81,7 +134,35 @@ const server = http.createServer(async (request, response) => {
       return;
     }
 
+    const orderMatch = url.pathname.match(/^\/api\/orders\/([^/]+)$/);
+    if (request.method === "GET" && orderMatch) {
+      const authUser = getAuthenticatedUser(request);
+      if (!authUser) {
+        sendJson(response, 401, { error: "Authentication required" });
+        return;
+      }
+
+      const order = getOrderDetail(orderMatch[1]);
+      if (!order) {
+        sendJson(response, 404, { error: "Order not found" });
+        return;
+      }
+      if (!canAccessOrder(authUser, order)) {
+        sendJson(response, 403, { error: "Order access denied" });
+        return;
+      }
+
+      sendJson(response, 200, { order });
+      return;
+    }
+
     if (request.method === "POST" && url.pathname === "/api/payments/line-pay/request") {
+      const authUser = getAuthenticatedUser(request);
+      if (!authUser) {
+        sendJson(response, 401, { error: "Authentication required" });
+        return;
+      }
+
       const body = await readJsonBody(request);
       const validationError = validateLinePayRequest(body);
       if (validationError) {
@@ -95,6 +176,10 @@ const server = http.createServer(async (request, response) => {
           error: "Order not found in backend database",
           nextStep: "Create the order in the backend before requesting LINE Pay authorization."
         });
+        return;
+      }
+      if (order.customerUserId !== authUser.id && !authUser.roles.includes("admin")) {
+        sendJson(response, 403, { error: "Order access denied" });
         return;
       }
       if (order.originalAmount !== Number(body.amount)) {
@@ -208,8 +293,21 @@ const server = http.createServer(async (request, response) => {
 
     const adminActivityMatch = url.pathname.match(/^\/api\/admin\/group-buy-activities\/([^/]+)$/);
     if (request.method === "DELETE" && adminActivityMatch) {
+      const authUser = getAuthenticatedUser(request);
+      if (!authUser) {
+        sendJson(response, 401, { error: "Authentication required" });
+        return;
+      }
+      if (!authUser.roles.includes("admin")) {
+        sendJson(response, 403, { error: "Admin role required" });
+        return;
+      }
+
       const body = await readJsonBody(request);
-      const activity = cancelGroupBuyActivity(adminActivityMatch[1], body);
+      const activity = cancelGroupBuyActivity(adminActivityMatch[1], {
+        ...body,
+        actorUserId: authUser.id
+      });
       if (!activity) {
         sendJson(response, 404, { error: "Group-buy activity not found" });
         return;
@@ -273,7 +371,6 @@ function readJsonBody(request) {
 function validateCreateActivity(body) {
   const requiredFields = [
     "storeId",
-    "createdByUserId",
     "title",
     "startAt",
     "deadlineAt",
@@ -292,7 +389,6 @@ function validateCreateActivity(body) {
 
 function validateCreateOrder(body) {
   if (!body.activityId) return "Missing required field: activityId";
-  if (!body.customerUserId) return "Missing required field: customerUserId";
   if (!Array.isArray(body.items) || body.items.length === 0) {
     return "items must be a non-empty array";
   }
@@ -314,6 +410,36 @@ function validateLinePayRequest(body) {
     return "products must be an array";
   }
   return null;
+}
+
+function getAuthenticatedUser(request) {
+  const token = getBearerToken(request);
+  const payload = verifyAuthToken(token);
+  if (!payload?.sub) return null;
+  return getUserAuthProfileById(payload.sub);
+}
+
+function canAccessOrder(user, order) {
+  if (user.roles.includes("admin")) return true;
+  return order.customerUserId === user.id;
+}
+
+function canManageStore(user, storeId) {
+  if (!storeId) return false;
+  return user.merchantStores.some((store) => store.id === storeId);
+}
+
+function toPublicUserResponse(user) {
+  return {
+    id: user.id,
+    loginName: user.loginName,
+    phoneNumber: user.phoneNumber,
+    email: user.email,
+    displayName: user.displayName,
+    surname: user.surname,
+    roles: user.roles,
+    merchantStores: user.merchantStores
+  };
 }
 
 function buildLinePayResultPage({ title, message, detail, rawCode }) {

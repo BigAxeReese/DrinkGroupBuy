@@ -1,61 +1,126 @@
 import { useMemo, useState } from "react";
-import { Platform, Pressable, StyleSheet, Text, View } from "react-native";
+import { Platform, Pressable, StyleSheet, Text, TextInput, View } from "react-native";
 import { MobileScreen, Section } from "../components/MobileScreen";
 import { PrimaryButton } from "../components/PrimaryButton";
 import { customerUsers } from "../mock/customerUsers";
 import { stores } from "../mock/stores";
+import { login as loginApi } from "../utils/apiClient";
+
+const customerAccountMap = {
+  "customer-yinji": { phoneNumber: "0911000001", password: "customer1" },
+  "customer-bolun": { phoneNumber: "0911000002", password: "customer2" },
+  "customer-lixuan": { phoneNumber: "0911000003", password: "customer3" },
+  "customer-jingwei": { phoneNumber: "0911000004", password: "customer4" }
+};
+
+const merchantAccountMap = {
+  "store-001": { email: "store1@example.com", password: "merchant1" },
+  "store-002": { email: "store2@example.com", password: "merchant2" },
+  "store-003": { email: "store3@example.com", password: "merchant3" },
+  "store-004": { email: "store4@example.com", password: "merchant4" },
+  "store-005": { email: "store5@example.com", password: "merchant5" },
+  "store-006": { email: "store6@example.com", password: "merchant6" },
+  "store-007": { email: "store7@example.com", password: "merchant7" }
+};
+
+const adminAccount = {
+  email: "admin@example.com",
+  password: "admin1"
+};
 
 export function RoleSelectScreen({ navigation }) {
   const loginOptions = useMemo(() => ([
-    ...customerUsers.map((user) => ({
-      key: `customer:${user.id}`,
-      role: "customer",
-      routeName: "nearby",
-      params: { userId: user.id },
-      label: `顧客｜${user.name}`,
-      helper: "瀏覽附近優惠、加入團購、查看自己的訂單。"
-    })),
-    ...stores.map((store) => ({
-      key: `merchant:${store.id}`,
-      role: "merchant",
-      routeName: "merchantDashboard",
-      params: { storeId: store.id },
-      label: `商家｜${store.name}`,
-      helper: "管理商家首頁、開團與查看活動狀態。"
-    })),
+    ...customerUsers.map((user) => {
+      const account = customerAccountMap[user.id] ?? customerAccountMap["customer-yinji"];
+      return {
+        key: `customer:${user.id}`,
+        identifierType: "phone",
+        identifierLabel: "手機號碼",
+        identifierValue: account.phoneNumber,
+        password: account.password,
+        role: "customer",
+        routeName: "nearby",
+        params: { userId: user.id },
+        label: `顧客 ${user.name}`,
+        helper: "顧客使用手機號碼與密碼登入。"
+      };
+    }),
+    ...stores.map((store) => {
+      const account = merchantAccountMap[store.id] ?? merchantAccountMap["store-001"];
+      return {
+        key: `merchant:${store.id}`,
+        identifierType: "email",
+        identifierLabel: "商家 Email",
+        identifierValue: account.email,
+        password: account.password,
+        role: "merchant",
+        routeName: "merchantDashboard",
+        params: { storeId: store.id },
+        label: `商家 ${store.name}`,
+        helper: "商家使用 Email 與密碼登入，一組 Email 對應一間店。"
+      };
+    }),
     {
       key: "admin:prototype",
+      identifierType: "email",
+      identifierLabel: "管理員 Email",
+      identifierValue: adminAccount.email,
+      password: adminAccount.password,
       role: "admin",
       routeName: "adminDashboard",
       params: {},
-      label: "管理員｜Prototype Admin",
-      helper: "查看全平台團購、訂單與付款狀態。"
+      label: "管理員",
+      helper: "管理員使用 Email 與密碼登入。"
     }
   ]), []);
   const [selectedKey, setSelectedKey] = useState(loginOptions[0].key);
+  const [identifier, setIdentifier] = useState(loginOptions[0].identifierValue);
+  const [password, setPassword] = useState(loginOptions[0].password);
+  const [passwordVisible, setPasswordVisible] = useState(false);
+  const [loginError, setLoginError] = useState("");
+  const [isLoggingIn, setIsLoggingIn] = useState(false);
   const [menuOpen, setMenuOpen] = useState(false);
   const selectedOption = loginOptions.find((option) => option.key === selectedKey) ?? loginOptions[0];
 
-  const login = () => {
-    navigation.selectRole(
-      selectedOption.role,
-      selectedOption.routeName,
-      selectedOption.params
-    );
+  const selectLoginOption = (optionKey) => {
+    const option = loginOptions.find((item) => item.key === optionKey) ?? loginOptions[0];
+    setSelectedKey(option.key);
+    setIdentifier(option.identifierValue);
+    setPassword(option.password);
+    setLoginError("");
+    setMenuOpen(false);
+  };
+
+  const login = async () => {
+    try {
+      setIsLoggingIn(true);
+      setLoginError("");
+      const result = await loginApi({
+        phoneNumber: selectedOption.identifierType === "phone" ? identifier : undefined,
+        email: selectedOption.identifierType === "email" ? identifier : undefined,
+        password
+      });
+      const route = getRouteForUser(result.user, selectedOption);
+      navigation.selectRole(route.role, route.routeName, route.params);
+    } catch (error) {
+      setLoginError(error.message);
+    } finally {
+      setIsLoggingIn(false);
+    }
   };
 
   return (
     <MobileScreen title="登入">
-      <Section title="選擇登入身分">
+      <Section title="選擇測試身份">
         <Text style={styles.description}>
-          目前是 prototype 用的身分切換；未來會改成正式帳號密碼或第三方登入後，由後端判斷身分與權限。
+          顧客使用手機號碼登入；商家與管理員使用 Email 登入。這個設計之後較容易接 Firebase Auth。
         </Text>
 
         {Platform.OS === "web" ? (
           <select
-            aria-label="選擇登入身分"
+            aria-label="選擇測試身份"
             value={selectedKey}
-            onChange={(event) => setSelectedKey(event.target.value)}
+            onChange={(event) => selectLoginOption(event.target.value)}
             style={styles.nativeSelect}
           >
             {loginOptions.map((option) => (
@@ -70,7 +135,7 @@ export function RoleSelectScreen({ navigation }) {
               style={({ pressed }) => [styles.selectBox, pressed && styles.pressed]}
             >
               <Text numberOfLines={1} style={styles.selectValue}>{selectedOption.label}</Text>
-              <Text style={styles.chevron}>{menuOpen ? "⌃" : "⌄"}</Text>
+              <Text style={styles.chevron}>{menuOpen ? "▲" : "▼"}</Text>
             </Pressable>
 
             {menuOpen ? (
@@ -79,10 +144,7 @@ export function RoleSelectScreen({ navigation }) {
                   <Pressable
                     accessibilityRole="button"
                     key={option.key}
-                    onPress={() => {
-                      setSelectedKey(option.key);
-                      setMenuOpen(false);
-                    }}
+                    onPress={() => selectLoginOption(option.key)}
                     style={({ pressed }) => [
                       styles.option,
                       selectedKey === option.key && styles.activeOption,
@@ -99,14 +161,70 @@ export function RoleSelectScreen({ navigation }) {
           </>
         )}
 
-        <PrimaryButton label="登入" onPress={login} />
+        <View style={styles.accountCard}>
+          <Text style={styles.accountLabel}>{selectedOption.identifierLabel}</Text>
+          <TextInput
+            value={identifier}
+            onChangeText={setIdentifier}
+            placeholder={selectedOption.identifierLabel}
+            keyboardType={selectedOption.identifierType === "phone" ? "phone-pad" : "email-address"}
+            autoCapitalize="none"
+            style={styles.textInput}
+          />
+          <Text style={styles.accountHelper}>{selectedOption.helper}</Text>
+        </View>
+
+        <View style={styles.fieldGroup}>
+          <Text style={styles.fieldLabel}>密碼</Text>
+          <View style={styles.passwordRow}>
+            <TextInput
+              secureTextEntry={!passwordVisible}
+              value={password}
+              onChangeText={setPassword}
+              placeholder="請輸入密碼"
+              style={styles.passwordInput}
+            />
+            <Pressable
+              accessibilityRole="button"
+              accessibilityLabel={passwordVisible ? "隱藏密碼" : "顯示密碼"}
+              onPress={() => setPasswordVisible((value) => !value)}
+              style={({ pressed }) => [styles.eyeButton, pressed && styles.pressed]}
+            >
+              <Text style={styles.eyeText}>{passwordVisible ? "🙈" : "👁"}</Text>
+            </Pressable>
+          </View>
+        </View>
+        {loginError ? <Text style={styles.errorText}>{loginError}</Text> : null}
+
+        <PrimaryButton label={isLoggingIn ? "登入中..." : "登入"} onPress={() => !isLoggingIn && login()} />
         <Pressable accessibilityRole="button" style={({ pressed }) => [styles.googleButton, pressed && styles.pressed]}>
           <Text style={styles.googleIcon}>G</Text>
-          <Text style={styles.googleText}>以 Google 登入（Prototype）</Text>
+          <Text style={styles.googleText}>使用 Google 登入（尚未啟用）</Text>
         </Pressable>
       </Section>
     </MobileScreen>
   );
+}
+
+function getRouteForUser(user, selectedOption) {
+  if (selectedOption.role === "admin" && user.roles.includes("admin")) {
+    return { role: "admin", routeName: "adminDashboard", params: {} };
+  }
+  if (selectedOption.role === "merchant" && user.roles.includes("merchant")) {
+    return {
+      role: "merchant",
+      routeName: "merchantDashboard",
+      params: { storeId: user.merchantStores?.[0]?.id ?? selectedOption.params.storeId }
+    };
+  }
+  if (selectedOption.role === "customer" && user.roles.includes("customer")) {
+    return {
+      role: "customer",
+      routeName: "nearby",
+      params: selectedOption.params
+    };
+  }
+  throw new Error("此帳號沒有對應的登入權限");
 }
 
 const styles = StyleSheet.create({
@@ -114,6 +232,75 @@ const styles = StyleSheet.create({
     color: "#475569",
     fontSize: 13,
     lineHeight: 20
+  },
+  fieldGroup: {
+    gap: 6
+  },
+  fieldLabel: {
+    color: "#334155",
+    fontSize: 12,
+    fontWeight: "900"
+  },
+  accountCard: {
+    gap: 5,
+    borderRadius: 12,
+    backgroundColor: "#f8fafc",
+    padding: 12
+  },
+  accountLabel: {
+    color: "#64748b",
+    fontSize: 11,
+    fontWeight: "900"
+  },
+  accountHelper: {
+    color: "#475569",
+    fontSize: 12,
+    lineHeight: 18
+  },
+  textInput: {
+    minHeight: 42,
+    borderRadius: 10,
+    borderWidth: 1,
+    borderColor: "#94a3b8",
+    backgroundColor: "#ffffff",
+    color: "#0f172a",
+    fontSize: 14,
+    fontWeight: "800",
+    paddingHorizontal: 10
+  },
+  passwordRow: {
+    minHeight: 42,
+    flexDirection: "row",
+    alignItems: "center",
+    borderRadius: 10,
+    borderWidth: 1,
+    borderColor: "#94a3b8",
+    backgroundColor: "#ffffff",
+    paddingLeft: 10,
+    paddingRight: 4
+  },
+  passwordInput: {
+    flex: 1,
+    minHeight: 40,
+    color: "#0f172a",
+    fontSize: 14,
+    fontWeight: "800",
+    paddingVertical: 0
+  },
+  eyeButton: {
+    minHeight: 36,
+    minWidth: 40,
+    alignItems: "center",
+    justifyContent: "center",
+    borderRadius: 9
+  },
+  eyeText: {
+    fontSize: 16
+  },
+  errorText: {
+    color: "#dc2626",
+    fontSize: 12,
+    fontWeight: "900"
   },
   nativeSelect: {
     minHeight: 40,
@@ -147,7 +334,7 @@ const styles = StyleSheet.create({
   },
   chevron: {
     color: "#1f6feb",
-    fontSize: 16,
+    fontSize: 12,
     fontWeight: "900"
   },
   optionList: {

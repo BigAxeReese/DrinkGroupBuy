@@ -41,35 +41,63 @@ function listGroupBuyActivities() {
       FROM promotion_tiers
       ORDER BY target_cups ASC
     `).all();
+    const progressRows = database.prepare(`
+      SELECT
+        activity_id,
+        COALESCE(SUM(total_cups), 0) AS authorized_cups,
+        COUNT(*) AS participant_count
+      FROM orders
+      WHERE payment_status IN ('authorized', 'captured')
+        AND status NOT IN ('cancelled')
+      GROUP BY activity_id
+    `).all();
+    const progressByActivityId = new Map(progressRows.map((row) => [row.activity_id, row]));
 
-    return rows.map((row) => ({
-      id: row.id,
-      storeId: row.store_id,
-      createdByUserId: row.created_by_user_id,
-      title: row.title,
-      status: row.status,
-      startAt: row.start_at,
-      deadlineAt: row.deadline_at,
-      pickupStartAt: row.pickup_start_at,
-      pickupEndAt: row.pickup_end_at,
-      maximumCups: row.maximum_cups,
-      withdrawalLockMinutes: row.withdrawal_lock_minutes,
-      cancellationReason: row.cancellation_reason,
-      store: {
-        name: row.store_name,
-        address: row.store_address,
-        latitude: row.latitude,
-        longitude: row.longitude
-      },
-      tiers: tiers
+    return rows.map((row) => {
+      const activityTiers = tiers
         .filter((tier) => tier.activity_id === row.id)
         .map((tier) => ({
           id: tier.id,
           targetCups: tier.target_cups,
+          cups: tier.target_cups,
           discountAmount: tier.discount_amount,
           sortOrder: tier.sort_order
-        }))
-    }));
+        }));
+      const progress = progressByActivityId.get(row.id);
+      const authorizedCups = Number(progress?.authorized_cups ?? 0);
+      const participantCount = Number(progress?.participant_count ?? 0);
+      const firstTargetCups = activityTiers[0]?.targetCups ?? row.maximum_cups ?? 0;
+      const displayStatus = row.status === "recruiting" && authorizedCups >= firstTargetCups
+        ? "confirmed"
+        : row.status;
+
+      return {
+        id: row.id,
+        storeId: row.store_id,
+        createdByUserId: row.created_by_user_id,
+        title: row.title,
+        status: displayStatus,
+        rawStatus: row.status,
+        startAt: row.start_at,
+        deadlineAt: row.deadline_at,
+        pickupStartAt: row.pickup_start_at,
+        pickupEndAt: row.pickup_end_at,
+        maximumCups: row.maximum_cups,
+        targetCups: firstTargetCups,
+        currentCups: authorizedCups,
+        authorizedCups,
+        participantCount,
+        withdrawalLockMinutes: row.withdrawal_lock_minutes,
+        cancellationReason: row.cancellation_reason,
+        store: {
+          name: row.store_name,
+          address: row.store_address,
+          latitude: row.latitude,
+          longitude: row.longitude
+        },
+        tiers: activityTiers
+      };
+    });
   } finally {
     database.close();
   }
@@ -268,6 +296,42 @@ function cancelGroupBuyActivity(activityId, input = {}) {
       database.exec("ROLLBACK;");
     }
     throw error;
+  } finally {
+    database.close();
+  }
+}
+
+function getUserAuthProfileByLoginIdentifier(identifier) {
+  const database = openDatabase();
+  try {
+    const user = database.prepare(`
+      SELECT id, login_name, phone_number, email, password_hash, display_name, surname, status
+      FROM users
+      WHERE (
+          phone_number = ?
+          OR lower(login_name) = lower(?)
+          OR lower(email) = lower(?)
+        )
+        AND status = 'active'
+    `).get(identifier, identifier, identifier);
+
+    return user ? hydrateUserAuthProfile(database, user) : null;
+  } finally {
+    database.close();
+  }
+}
+
+function getUserAuthProfileById(userId) {
+  const database = openDatabase();
+  try {
+    const user = database.prepare(`
+      SELECT id, login_name, phone_number, email, password_hash, display_name, surname, status
+      FROM users
+      WHERE id = ?
+        AND status = 'active'
+    `).get(userId);
+
+    return user ? hydrateUserAuthProfile(database, user) : null;
   } finally {
     database.close();
   }
@@ -494,6 +558,15 @@ function getLatestLinePayAuthorizationForOrder(orderId) {
   } finally {
     database.close();
   }
+}
+
+function getOrderDetail(orderId) {
+  const order = getOrderById(orderId);
+  if (!order) return null;
+  return {
+    ...order,
+    latestLinePayAuthorization: getLatestLinePayAuthorizationForOrder(orderId)
+  };
 }
 
 function createPendingLinePayAuthorization(input) {
@@ -876,6 +949,59 @@ function mapPaymentAuthorization(row) {
   };
 }
 
+function hydrateUserAuthProfile(database, user) {
+  const roles = database.prepare(`
+    SELECT role
+    FROM user_roles
+    WHERE user_id = ?
+      AND status = 'active'
+    ORDER BY role ASC
+  `).all(user.id).map((row) => row.role);
+
+  const merchantStores = database.prepare(`
+    SELECT
+      store.id,
+      store.name,
+      store.merchant_id,
+      merchant_user.permission_level
+    FROM merchant_users merchant_user
+    JOIN stores store ON store.merchant_id = merchant_user.merchant_id
+    WHERE merchant_user.user_id = ?
+      AND merchant_user.status = 'active'
+    ORDER BY store.name ASC
+  `).all(user.id).map((row) => ({
+    id: row.id,
+    name: row.name,
+    merchantId: row.merchant_id,
+    permissionLevel: row.permission_level
+  }));
+
+  return {
+    id: user.id,
+    loginName: user.login_name,
+    phoneNumber: user.phone_number,
+    email: user.email,
+    passwordHash: user.password_hash,
+    displayName: user.display_name,
+    surname: user.surname,
+    roles,
+    merchantStores
+  };
+}
+
+function toPublicUser(user) {
+  return {
+    id: user.id,
+    loginName: user.loginName,
+    phoneNumber: user.phoneNumber,
+    email: user.email,
+    displayName: user.displayName,
+    surname: user.surname,
+    roles: user.roles,
+    merchantStores: user.merchantStores
+  };
+}
+
 function mapOrder(row, items = []) {
   return {
     id: row.id,
@@ -914,7 +1040,11 @@ module.exports = {
   createGroupBuyActivity,
   createOrder,
   createPendingLinePayAuthorization,
+  getOrderDetail,
   getLatestLinePayAuthorizationForOrder,
   getOrderPaymentContext,
-  listGroupBuyActivities
+  getUserAuthProfileByLoginIdentifier,
+  getUserAuthProfileById,
+  listGroupBuyActivities,
+  toPublicUser
 };

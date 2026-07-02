@@ -1,25 +1,32 @@
 # Project Direction
 
-Last updated: 2026-06-24
+Last updated: 2026-07-02
 
 ## Product Direction
 
 DrinkGroupBuy is a full-stack, Android-first hand-shaken drink group-buying application.
 
 - `mobile/`: React Native + Expo app; Web is used for development preview.
-- `backend/`: Node.js HTTP API connected to the development SQLite database.
-- `database/`: SQLite development schema, seed data, and a separate prototype test database.
+- `backend/`: Node.js HTTP API connected to the development SQLite database for now.
+- `database/`: SQLite development schema, seed data, and a separate prototype test database. The intended production database direction is PostgreSQL.
 - `docs/`: current contracts, terminology, status rules, requirements, and unresolved decisions.
 
 The current system is an evolving prototype, not a production deployment.
+
+Production data direction:
+
+- Use PostgreSQL as the future primary production database target.
+- Keep SQLite for local development until a PostgreSQL migration slice is explicitly started.
+- Firebase is not the planned main database. It may still be evaluated later for authentication, push notifications, or storage if needed.
+- Payment, order, group-buy settlement, audit log, and authorization state should remain backend-controlled and database-backed.
 
 ## Current Integration Boundary
 
 Already connected end to end:
 
-- Merchant creates a group-buy activity: Mobile -> API -> SQLite.
+- Merchant creates a group-buy activity: Mobile -> API -> SQLite development database.
 - Administrator cancels an activity: Mobile -> API -> SQLite soft cancellation.
-- Backend can list activities from SQLite.
+- Backend can list activities from the SQLite development database.
 
 Still local or mocked in mobile:
 

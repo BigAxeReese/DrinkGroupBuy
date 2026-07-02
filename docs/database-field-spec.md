@@ -20,15 +20,17 @@ This document is a development field specification based on `database/schema.sql
 
 | No. | Field name | Chinese name | Type | Key | Rule / format / range | Example |
 | --- | --- | --- | --- | --- | --- | --- |
-| 1 | `id` | 使用者編號 | TEXT | PK | Recommend `user_` + unique suffix | `user_001` |
-| 2 | `email` | 電子信箱 | TEXT | UNIQUE | Nullable during prototype; unique if present | `alice@example.com` |
-| 3 | `password_hash` | 密碼雜湊 | TEXT |  | Store hash only, never plain password | `$argon2id$...` |
-| 4 | `google_subject_id` | Google 帳號識別 | TEXT | UNIQUE | Nullable; unique if Google login is used | `google-oauth-sub` |
-| 5 | `display_name` | 顯示名稱 | TEXT |  | Required | `Alice Wang` |
-| 6 | `surname` | 姓氏 | TEXT |  | Merchant may see surname only if privacy rule allows | `王` |
-| 7 | `status` | 使用者狀態 | TEXT |  | `active`, `disabled`, `deleted` | `active` |
-| 8 | `created_at` | 建立時間 | TEXT |  | ISO datetime string | `2026-06-25T10:00:00+08:00` |
-| 9 | `updated_at` | 更新時間 | TEXT |  | ISO datetime string | `2026-06-25T10:30:00+08:00` |
+| 1 | `id` | ????? | TEXT | PK | Recommend `user_` + unique suffix | `user_001` |
+| 2 | `login_name` | ?????? | TEXT | UNIQUE | Kept for development compatibility; phone login is preferred | `customera` |
+| 3 | `phone_number` | ???? | TEXT | UNIQUE | Primary password-login identifier; store normalized digits | `0911000001` |
+| 4 | `email` | ???? | TEXT | UNIQUE | Nullable; reserved for real email contact/login later | `alice@example.com` |
+| 5 | `password_hash` | ???? | TEXT |  | Store hash only, never plain password | `scrypt:salt:hash` |
+| 6 | `google_subject_id` | Google ???? | TEXT | UNIQUE | Nullable; unique if Google login is used | `google-oauth-sub` |
+| 7 | `display_name` | ???? | TEXT |  | Required | `Alice Wang` |
+| 8 | `surname` | ?? | TEXT |  | Merchant may see surname only if privacy rule allows | `?` |
+| 9 | `status` | ????? | TEXT |  | `active`, `disabled`, `deleted` | `active` |
+| 10 | `created_at` | ???? | TEXT |  | ISO datetime string | `2026-06-25T10:00:00+08:00` |
+| 11 | `updated_at` | ???? | TEXT |  | ISO datetime string | `2026-06-25T10:30:00+08:00` |
 
 ## `user_roles`
 
