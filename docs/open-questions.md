@@ -9,9 +9,9 @@ Only unresolved decisions that still affect implementation are retained here.
 | Priority | Question | Impact |
 | --- | --- | --- |
 | High | Can one user hold customer and merchant roles simultaneously? | Navigation, token claims, `user_roles` |
-| High | How is a merchant user authorized for one or multiple stores? | Merchant API scope and `merchant_users` |
+| Resolved | How is a merchant user authorized for one or multiple stores? | One merchant account manages exactly one store through `merchant_users.store_id`; no owner/manager/staff split in the current direction. |
 | High | How are administrator roles granted and audited? | Admin API security and audit logs |
-| Medium | Which customer fields may merchants see besides surname? | Privacy and merchant order response |
+| Medium | Which customer public profile fields may merchants see besides alias and pickup/order data? | Privacy and merchant order response |
 
 ## Stores And Menu
 

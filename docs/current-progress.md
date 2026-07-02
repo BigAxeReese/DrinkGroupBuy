@@ -73,7 +73,7 @@ Important current limitation: `POST /api/orders` only works for activities that 
 
 Development database: `database/drink-group-buy-dev.sqlite`.
 
-The schema includes users/roles, merchants/stores, menu data, activities/tiers, carts, cart item customizations, orders/items, order item customizations, payment authorization/capture, settlement, pickup credentials, status history, and audit logs.
+The schema includes users/roles, private/public user profiles, merchants/stores, menu data, activities/tiers, carts, cart item customizations, orders/items, order item customizations, payment authorization/capture, settlement, pickup credentials, status history, and audit logs.
 
 Core cart/order customization data has been adjusted toward first normal form: selected sweetness, ice, toppings, and size are stored as child rows instead of JSON arrays on the item row.
 
@@ -81,13 +81,18 @@ Database design v1 is now summarized in `docs/database-design-v1.md`. The curren
 
 The PostgreSQL migration roadmap is documented in `docs/postgresql-migration-plan.md`. PostgreSQL is not implemented yet.
 
-A PostgreSQL v1 schema draft exists at `database/migrations/001_initial_postgres.sql`. It is not executed yet and the backend still uses SQLite.
+A PostgreSQL v1 schema draft exists at `database/migrations/001_initial_postgres.sql`. It splits private and public user profile data for customer anonymity, links each merchant account to exactly one store, and was successfully validated against the local Docker PostgreSQL dev container on 2026-07-02. The backend still uses SQLite.
+
+A PostgreSQL development seed draft exists at `database/migrations/002_seed_dev_postgres.sql`. It seeds baseline accounts, private/public profiles, merchants, stores, store-bound merchant user links, and menu items; it does not seed old group-buy activities, orders, payment data, settlements, or pickup credentials. It was successfully validated after the schema draft on 2026-07-02.
+
+A local PostgreSQL dev container configuration exists at `database/docker-compose.postgres.yml` for manual schema/seed validation. The backend has not been switched to PostgreSQL.
 
 Current development data:
 
 - 12 users and 12 roles.
+- 12 private profiles and 12 public profiles in the PostgreSQL seed draft.
 - 7 merchants, 7 merchant users, and 7 stores.
-- 8 menu items.
+- 8 menu items and 96 customization options in the PostgreSQL seed draft.
 - 0 group-buy activities and 0 promotion tiers.
 - 0 orders, payment authorizations, captures, settlements, or pickup credentials.
 

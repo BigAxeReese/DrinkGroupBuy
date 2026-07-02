@@ -41,6 +41,8 @@ As of 2026-07-02, the local development database contains:
 | Table | Purpose | Primary key | Important relationships |
 | --- | --- | --- | --- |
 | `users` | Stores account identity shared by customers, merchants, and admins | `id` | 1 user can have many roles |
+| `user_private_profiles` | Stores internal private identity/contact data | `user_id` | 1 private profile belongs to one user |
+| `user_public_profiles` | Stores merchant/customer-facing alias data | `user_id` | 1 public profile belongs to one user |
 | `user_roles` | Stores the role granted to a user | `id` | Many roles belong to one user |
 
 Current login direction:
@@ -49,11 +51,16 @@ Current login direction:
 - Merchants use email plus password.
 - Admin uses email plus password.
 - Passwords are stored as hashes, not plain text.
+- Customers should be able to self-register in the future.
+- Merchants should see customer aliases instead of private identity/contact fields.
 
 Future PostgreSQL direction:
 
-- Keep `users` and `user_roles` as normalized relational tables.
-- Add stronger production constraints later, such as verified phone/email fields, password reset fields, and session or refresh-token storage.
+- Keep `users`, `user_private_profiles`, `user_public_profiles`, and `user_roles` as normalized relational tables.
+- `users` stores login/security fields such as phone, email, password hash, verification timestamps, status, and last login time.
+- `user_private_profiles` stores internal private profile data such as real name and contact fields. Merchant-facing APIs should not expose this table.
+- `user_public_profiles` stores the alias that can be shown to merchants and other customers, such as `匿名顧客 A`.
+- Add stronger production constraints later, such as password reset fields, session or refresh-token storage, and stricter verification rules.
 - If Firebase Auth is ever used, keep payment/order ownership in PostgreSQL and link `users` to the Firebase Auth UID.
 
 ### Merchant And Store
@@ -61,19 +68,23 @@ Future PostgreSQL direction:
 | Table | Purpose | Primary key | Important relationships |
 | --- | --- | --- | --- |
 | `merchants` | Business organization | `id` | 1 merchant can own many stores |
-| `merchant_users` | Links merchant accounts to merchants | `id` | Many-to-many bridge between users and merchants |
 | `stores` | Physical pickup and map location | `id` | Store belongs to one merchant |
+| `merchant_users` | Links one merchant account to one store | `id` | One store has one merchant account; one merchant account manages one store |
 
 Design note:
 
 - `merchant` means the business owner/company.
 - `store` means the physical branch shown on the map and used for pickup.
+- Each store has its own merchant account.
+- Merchant accounts are not split into owner/manager/staff roles in the current product direction.
+- A merchant account should only manage its linked store's data.
 
 Future PostgreSQL direction:
 
 - Keep `merchants`, `stores`, and `merchant_users` as separate relational tables.
-- Use foreign keys and indexes for merchant permission checks.
-- This structure maps directly from SQLite to PostgreSQL.
+- `merchant_users.store_id` is the permission boundary for merchant APIs.
+- Use `UNIQUE (store_id)` and `UNIQUE (user_id)` in PostgreSQL v1 to enforce one store account per store and one store per merchant account.
+- This intentionally diverges from the current SQLite runtime schema until backend PostgreSQL migration begins.
 
 ### Menu And Customization
 
@@ -86,6 +97,12 @@ Design note:
 
 - Customization options are rows, not comma-separated text.
 - This keeps the menu compatible with first normal form.
+- Current PostgreSQL seed direction gives every seeded menu item the same base option set:
+  - sweetness: `正常糖`, `半糖`, `微糖`, `無糖`
+  - ice: `正常冰`, `少冰`, `微冰`, `去冰`
+  - size: `中杯`, `大杯`
+  - topping: `珍珠`, `椰果`
+- `大杯` adds 10 NTD; `珍珠` and `椰果` each add 10 NTD; sweetness and ice add 0.
 
 Future PostgreSQL direction:
 
@@ -317,7 +334,7 @@ The schema is mostly second-normal-form friendly:
 
 - Tables use single-column primary keys.
 - Business attributes depend on the row's own `id`.
-- Many-to-many relationships are separated into bridge tables such as `merchant_users`.
+- Store account authorization is separated into `merchant_users`, with one merchant account linked to one store in the PostgreSQL draft.
 
 ### Third Normal Form
 

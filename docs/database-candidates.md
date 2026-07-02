@@ -9,8 +9,8 @@ The authoritative development draft is `database/schema.sql`. This document expl
 | Entity | Purpose | Important relationships |
 | --- | --- | --- |
 | `users`, `user_roles` | Identity and customer/merchant/admin roles | User 1:N roles |
-| `merchants`, `merchant_users` | Business organization and authorized users | Merchant M:N users |
-| `stores` | Physical store and map location | Merchant 1:N stores |
+| `merchants` | Business organization or brand grouping | Merchant 1:N stores |
+| `stores`, `merchant_users` | Physical store and its merchant login account | Store 1:1 merchant account in PostgreSQL draft |
 | `menu_items`, `customization_options` | Store menu and allowed customization | Store 1:N items; item 1:N options |
 | `group_buy_activities` | Merchant-created group-buy activity | Store 1:N activities |
 | `promotion_tiers` | Cup thresholds and group discount amounts | Activity 1:N tiers |

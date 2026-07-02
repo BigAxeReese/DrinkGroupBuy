@@ -4,6 +4,8 @@ Last updated: 2026-06-25
 
 This document is a development field specification based on `database/schema.sql`. It is similar to a formal data dictionary, but it is not a production migration document yet.
 
+Note: the PostgreSQL draft has started to diverge from the current SQLite runtime schema for identity/privacy. PostgreSQL replaces merchant-facing customer surname display with `user_private_profiles` and `user_public_profiles`.
+
 ## Legend
 
 | Column | Meaning |
@@ -27,10 +29,36 @@ This document is a development field specification based on `database/schema.sql
 | 5 | `password_hash` | ???? | TEXT |  | Store hash only, never plain password | `scrypt:salt:hash` |
 | 6 | `google_subject_id` | Google ???? | TEXT | UNIQUE | Nullable; unique if Google login is used | `google-oauth-sub` |
 | 7 | `display_name` | ???? | TEXT |  | Required | `Alice Wang` |
-| 8 | `surname` | ?? | TEXT |  | Merchant may see surname only if privacy rule allows | `?` |
+| 8 | `surname` | 姓氏 | TEXT |  | Legacy SQLite field. Do not use for new merchant-facing privacy design; PostgreSQL uses `user_public_profiles.display_alias`. | `王` |
 | 9 | `status` | ????? | TEXT |  | `active`, `disabled`, `deleted` | `active` |
 | 10 | `created_at` | ???? | TEXT |  | ISO datetime string | `2026-06-25T10:00:00+08:00` |
 | 11 | `updated_at` | ???? | TEXT |  | ISO datetime string | `2026-06-25T10:30:00+08:00` |
+
+## PostgreSQL draft: `user_private_profiles`
+
+This table exists in the PostgreSQL draft, not the current SQLite runtime schema.
+
+| No. | Field name | Chinese name | Type | Key | Rule / format / range | Example |
+| --- | --- | --- | --- | --- | --- | --- |
+| 1 | `user_id` | 使用者編號 | text | PK, FK | References `users(id)` | `user-customer-yinji` |
+| 2 | `real_name` | 真實姓名 | text |  | Internal/private use only | `顧客 A` |
+| 3 | `contact_phone` | 聯絡電話 | text |  | Internal/private use only | `0911000001` |
+| 4 | `contact_email` | 聯絡 Email | text |  | Internal/private use only, nullable | `alice@example.com` |
+| 5 | `created_at` | 建立時間 | timestamptz |  | ISO datetime | `2026-06-05T00:00:00+08:00` |
+| 6 | `updated_at` | 更新時間 | timestamptz |  | ISO datetime | `2026-06-05T00:00:00+08:00` |
+
+## PostgreSQL draft: `user_public_profiles`
+
+This table exists in the PostgreSQL draft, not the current SQLite runtime schema. Merchant-facing customer APIs should use this table instead of private profile fields.
+
+| No. | Field name | Chinese name | Type | Key | Rule / format / range | Example |
+| --- | --- | --- | --- | --- | --- | --- |
+| 1 | `user_id` | 使用者編號 | text | PK, FK | References `users(id)` | `user-customer-yinji` |
+| 2 | `display_alias` | 對外顯示名稱 | text |  | Required alias shown to merchants/customers | `匿名顧客 A` |
+| 3 | `avatar_color` | 頭像顏色 | text |  | Optional UI display color | `#4F46E5` |
+| 4 | `privacy_mode` | 隱私模式 | text |  | `anonymous`, `display_name` | `anonymous` |
+| 5 | `created_at` | 建立時間 | timestamptz |  | ISO datetime | `2026-06-05T00:00:00+08:00` |
+| 6 | `updated_at` | 更新時間 | timestamptz |  | ISO datetime | `2026-06-05T00:00:00+08:00` |
 
 ## `user_roles`
 
@@ -54,14 +82,16 @@ This document is a development field specification based on `database/schema.sql
 
 ## `merchant_users`
 
+SQLite runtime note: the current SQLite schema still links merchant users to `merchant_id` and has `permission_level`.
+PostgreSQL draft note: the PostgreSQL draft links merchant users directly to `store_id`, removes `permission_level`, and enforces one account per store.
+
 | No. | Field name | Chinese name | Type | Key | Rule / format / range | Example |
 | --- | --- | --- | --- | --- | --- | --- |
 | 1 | `id` | 商家使用者關聯編號 | TEXT | PK | Recommend `merchant_user_` + unique suffix | `merchant_user_001` |
-| 2 | `merchant_id` | 商家編號 | TEXT | FK, UNIQUE pair | References `merchants(id)`; unique with `user_id` | `merchant_001` |
-| 3 | `user_id` | 使用者編號 | TEXT | FK, UNIQUE pair | References `users(id)` | `user_002` |
-| 4 | `permission_level` | 權限等級 | TEXT |  | `owner`, `manager`, `staff` | `owner` |
-| 5 | `status` | 關聯狀態 | TEXT |  | `active`, `disabled` | `active` |
-| 6 | `created_at` | 建立時間 | TEXT |  | ISO datetime string | `2026-06-25T10:00:00+08:00` |
+| 2 | `store_id` | 分店編號 | text | FK, UNIQUE | PostgreSQL draft: references `stores(id)`; one account per store | `store-001` |
+| 3 | `user_id` | 使用者編號 | text | FK, UNIQUE | PostgreSQL draft: references `users(id)`; one store per merchant account | `user-merchant-001` |
+| 4 | `status` | 關聯狀態 | text |  | `active`, `disabled` | `active` |
+| 5 | `created_at` | 建立時間 | timestamptz |  | ISO datetime string | `2026-06-25T10:00:00+08:00` |
 
 ## `stores`
 

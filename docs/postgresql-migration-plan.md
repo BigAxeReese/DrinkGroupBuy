@@ -209,8 +209,8 @@ The first PostgreSQL version should keep the current SQLite table list:
 
 | Group | Tables |
 | --- | --- |
-| Identity | `users`, `user_roles` |
-| Merchant/store | `merchants`, `merchant_users`, `stores` |
+| Identity | `users`, `user_private_profiles`, `user_public_profiles`, `user_roles` |
+| Merchant/store | `merchants`, `stores`, `merchant_users` |
 | Menu | `menu_items`, `customization_options` |
 | Activity | `group_buy_activities`, `promotion_tiers`, `activity_notices` |
 | Cart | `cart_drafts`, `cart_draft_items`, `cart_draft_item_customizations` |
@@ -249,6 +249,8 @@ These are not required for the first PostgreSQL migration, but they are strongly
 - Add `DATABASE_URL` to `.env.example` without secrets.
 - Keep SQLite code path available during transition.
 
+Status: local PostgreSQL dev container configuration exists at `database/docker-compose.postgres.yml`, and `.env.example` includes a non-secret local `DATABASE_URL` placeholder. The backend dependency and runtime code path have not been added.
+
 ### Phase 3: Create PostgreSQL Schema
 
 - Create a versioned migration file: `database/migrations/001_initial_postgres.sql`.
@@ -256,13 +258,17 @@ These are not required for the first PostgreSQL migration, but they are strongly
 - Keep constraints and indexes.
 - Use `jsonb` for raw provider/audit payload fields.
 
-Status: draft migration file has been created but is not executed or wired into backend runtime.
+Status: draft migration file has been created and successfully validated against the local Docker PostgreSQL dev container on 2026-07-02 after splitting private/public user profile data and changing merchant accounts to one account per store. It is not wired into backend runtime.
 
 ### Phase 4: Seed PostgreSQL Dev Data
 
 - Convert `database/seed-dev.sql` into PostgreSQL-compatible seed data.
 - Preserve the 4 customer users, 7 merchant users, 1 admin, 7 stores, and menu items.
 - Do not seed old group-buy activities unless explicitly needed for tests.
+
+Status: draft seed file has been created at `database/migrations/002_seed_dev_postgres.sql`. It mirrors the current SQLite development seed accounts, merchants, stores, and 8 menu items, adds 96 customization options, adds private/public profile seed rows for seeded users, links each merchant account to exactly one store, converts SQLite boolean values to PostgreSQL booleans, and intentionally leaves runtime group-buy, order, payment, settlement, and pickup tables empty. It was successfully validated against the local Docker PostgreSQL dev container on 2026-07-03 after adding customization option seed rows. It is not wired into backend runtime.
+
+The seed can be manually validated with the PostgreSQL dev container documented in `database/README.md`.
 
 ### Phase 5: Switch Backend Repository Layer
 

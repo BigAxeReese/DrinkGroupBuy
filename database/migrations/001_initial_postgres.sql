@@ -17,8 +17,28 @@ CREATE TABLE users (
   password_hash text,
   google_subject_id text UNIQUE,
   display_name text NOT NULL,
-  surname text,
   status text NOT NULL DEFAULT 'active' CHECK (status IN ('active', 'disabled', 'deleted')),
+  phone_verified_at timestamptz,
+  email_verified_at timestamptz,
+  last_login_at timestamptz,
+  created_at timestamptz NOT NULL,
+  updated_at timestamptz NOT NULL
+);
+
+CREATE TABLE user_private_profiles (
+  user_id text PRIMARY KEY REFERENCES users(id) ON DELETE CASCADE,
+  real_name text,
+  contact_phone text,
+  contact_email text,
+  created_at timestamptz NOT NULL,
+  updated_at timestamptz NOT NULL
+);
+
+CREATE TABLE user_public_profiles (
+  user_id text PRIMARY KEY REFERENCES users(id) ON DELETE CASCADE,
+  display_alias text NOT NULL,
+  avatar_color text,
+  privacy_mode text NOT NULL DEFAULT 'anonymous' CHECK (privacy_mode IN ('anonymous', 'display_name')),
   created_at timestamptz NOT NULL,
   updated_at timestamptz NOT NULL
 );
@@ -40,16 +60,6 @@ CREATE TABLE merchants (
   updated_at timestamptz NOT NULL
 );
 
-CREATE TABLE merchant_users (
-  id text PRIMARY KEY,
-  merchant_id text NOT NULL REFERENCES merchants(id) ON DELETE CASCADE,
-  user_id text NOT NULL REFERENCES users(id) ON DELETE CASCADE,
-  permission_level text NOT NULL DEFAULT 'owner' CHECK (permission_level IN ('owner', 'manager', 'staff')),
-  status text NOT NULL DEFAULT 'active' CHECK (status IN ('active', 'disabled')),
-  created_at timestamptz NOT NULL,
-  UNIQUE (merchant_id, user_id)
-);
-
 CREATE TABLE stores (
   id text PRIMARY KEY,
   merchant_id text NOT NULL REFERENCES merchants(id) ON DELETE CASCADE,
@@ -64,6 +74,16 @@ CREATE TABLE stores (
 );
 
 CREATE INDEX idx_stores_location ON stores(latitude, longitude);
+
+CREATE TABLE merchant_users (
+  id text PRIMARY KEY,
+  store_id text NOT NULL REFERENCES stores(id) ON DELETE CASCADE,
+  user_id text NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+  status text NOT NULL DEFAULT 'active' CHECK (status IN ('active', 'disabled')),
+  created_at timestamptz NOT NULL,
+  UNIQUE (store_id),
+  UNIQUE (user_id)
+);
 
 CREATE TABLE menu_items (
   id text PRIMARY KEY,

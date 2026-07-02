@@ -203,6 +203,8 @@ Important docs:
 | `docs/database-design-v1.md` | Current database design baseline |
 | `docs/postgresql-migration-plan.md` | SQLite to PostgreSQL migration plan |
 | `database/migrations/001_initial_postgres.sql` | PostgreSQL v1 schema draft |
+| `database/migrations/002_seed_dev_postgres.sql` | PostgreSQL dev seed draft |
+| `database/docker-compose.postgres.yml` | Local PostgreSQL dev container |
 
 PostgreSQL v1 decisions:
 
@@ -219,7 +221,11 @@ Important:
 
 - PostgreSQL is not implemented yet.
 - Backend still uses SQLite.
-- The migration file is a draft and is not wired into runtime.
+- The PostgreSQL migration and seed files are drafts and are not wired into runtime.
+- PostgreSQL schema/seed drafts were validated with the local Docker PostgreSQL dev container on 2026-07-02.
+- PostgreSQL draft now separates `users`, `user_private_profiles`, and `user_public_profiles` so merchants can see customer aliases without seeing private identity/contact fields.
+- PostgreSQL draft links each merchant account to exactly one store through `merchant_users.store_id`; there is no owner/manager/staff split in the current direction.
+- PostgreSQL seed draft gives each seeded menu item sweetness, ice, size, and topping options.
 
 ## LINE Pay State
 
@@ -269,28 +275,11 @@ Security rule:
 7. LINE Pay capture/void/refund needs implementation.
 8. Payment webhook/idempotency handling is needed.
 9. Pickup credential API is needed.
-10. PostgreSQL seed draft is not created yet.
+10. PostgreSQL backend runtime adapter is not created yet.
 
 ## Suggested Next Step
 
-Recommended next step:
-
-Create a PostgreSQL seed draft:
-
-```text
-database/migrations/002_seed_dev_postgres.sql
-```
-
-Purpose:
-
-- Seed 4 customers.
-- Seed 7 merchants.
-- Seed 1 admin.
-- Seed 7 stores.
-- Seed menu items.
-- Do not seed old group-buy activities unless needed for tests.
-
-After that, choose one of these paths:
+Recommended next step: choose one of these paths:
 
 1. Continue SQLite feature work first.
 2. Start PostgreSQL implementation slice.
