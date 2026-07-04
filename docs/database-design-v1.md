@@ -2,6 +2,15 @@
 
 Last updated: 2026-07-02
 
+## Language / 中文註解規則
+
+本文件是目前資料庫設計總覽。因為資料表、欄位、API 欄位會直接對應程式，所以技術名稱保留英文。
+
+- `users`、`orders`、`group_buy_activities` 這類資料表名稱不要翻成中文。
+- 業務說明可以使用中文，但 schema、欄位、status value、API 欄位必須保留英文。
+- 若要寫專題報告，可以引用本文件的中文說明，再搭配英文資料表名稱。
+- PostgreSQL 的細節請搭配 `docs/postgresql-migration-plan.md` 與 `database/migrations/001_initial_postgres.sql` 閱讀。
+
 This document is the current database design baseline for DrinkGroupBuy. It describes the local SQLite development schema and keeps the design friendly for a future PostgreSQL migration.
 
 The authoritative implementation draft is still `database/schema.sql`. This document explains the design in product terms.
@@ -13,7 +22,7 @@ The authoritative implementation draft is still `database/schema.sql`. This docu
 - Current seed source: `database/seed-dev.sql`.
 - Future production database target: PostgreSQL.
 - SQLite is currently used as the local development backend database, not just mock data.
-- Firebase is not planned as the main production database. It may still be considered later for Auth, push notifications, or storage if needed.
+- Firebase is not planned as the main production database. Current decision: use Firebase Auth for Google Login only; keep business data in backend database / PostgreSQL.
 
 ## Current Development Data
 
@@ -54,6 +63,14 @@ Current login direction:
 - Customers should be able to self-register in the future.
 - Merchants should see customer aliases instead of private identity/contact fields.
 
+Future login decision:
+
+- Formal login direction is Firebase Auth + Google Login.
+- Development may keep dev mock login for fast role testing.
+- Firebase is only for authentication, not the main database.
+- Backend database remains the source of truth for roles, merchant-store binding, orders, payments, and group-buy activity state.
+- Add or map a stable Firebase identity field, such as `firebase_uid`, to `users` before real Firebase login is implemented.
+
 Future PostgreSQL direction:
 
 - Keep `users`, `user_private_profiles`, `user_public_profiles`, and `user_roles` as normalized relational tables.
@@ -61,7 +78,7 @@ Future PostgreSQL direction:
 - `user_private_profiles` stores internal private profile data such as real name and contact fields. Merchant-facing APIs should not expose this table.
 - `user_public_profiles` stores the alias that can be shown to merchants and other customers, such as `匿名顧客 A`.
 - Add stronger production constraints later, such as password reset fields, session or refresh-token storage, and stricter verification rules.
-- If Firebase Auth is ever used, keep payment/order ownership in PostgreSQL and link `users` to the Firebase Auth UID.
+- With Firebase Auth, keep payment/order ownership in PostgreSQL and link `users` to the Firebase Auth UID.
 
 ### Merchant And Store
 
@@ -394,7 +411,7 @@ The next database step should be small:
 3. Should pickup status include `preparing`, or should preparation be represented by activity/order status only?
 4. Should rejected merchant orders be possible after payment authorization?
 5. Should failed group buys with `accept_original_price` create captures at original price?
-6. Should Firebase be used at all, or should authentication also remain fully backend/PostgreSQL based?
+6. Resolved: use Firebase Auth for Google Login only; backend/PostgreSQL remains the source of truth for roles and business data.
 7. Should customer phone numbers be encrypted or only normalized and protected by access control?
 8. How long should LINE Pay authorizations remain valid?
 9. Should deadline settlement be triggered by backend cron, Cloud Functions, or merchant action fallback?

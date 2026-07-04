@@ -2,6 +2,16 @@
 
 Last updated: 2026-06-24
 
+## Language / 中文註解規則
+
+本文件整理系統中各種狀態值，例如團購狀態、訂單狀態、付款狀態與取貨狀態。
+
+- status value 必須保留英文，例如 `recruiting`、`authorized`、`ready`。
+- 中文說明用來解釋每個狀態的意義與流程。
+- 不要為同一個狀態另外新增中文狀態值給程式使用。
+- 新增或修改 status 時，必須同步更新本文件，避免 mobile、backend、database 用不同名稱。
+- PostgreSQL 第一版 status 欄位會使用 `text check (...)`，不是 enum。
+
 These statuses reflect the current code and schema direction. Differences listed below must be resolved before the corresponding API is implemented.
 
 ## Group-Buy Activity

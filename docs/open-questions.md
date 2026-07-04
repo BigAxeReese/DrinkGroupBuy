@@ -2,6 +2,16 @@
 
 Last updated: 2026-06-26
 
+## Language / 中文註解規則
+
+本文件整理目前還沒完全決定、但會影響實作的問題。
+
+- `Resolved` 表示目前已有暫定決策。
+- `High` 表示會影響核心流程，例如付款、訂單、團購結算或權限。
+- `Medium` / `Low` 表示可以稍後再定，但仍需要追蹤。
+- 問題可以用中文補充，但涉及欄位、API、status value 時仍保留英文名稱。
+- 技術決策確認後，應同步更新對應的 API、database 或 status 文件。
+
 Only unresolved decisions that still affect implementation are retained here.
 
 ## Identity And Permission
@@ -9,6 +19,9 @@ Only unresolved decisions that still affect implementation are retained here.
 | Priority | Question | Impact |
 | --- | --- | --- |
 | High | Can one user hold customer and merchant roles simultaneously? | Navigation, token claims, `user_roles` |
+| Resolved | Should Firebase be used? | Use Firebase Auth for Google Login only. Do not use Firestore as the primary business database. |
+| High | How should backend map Firebase Auth users to existing `users` rows? | Need `firebase_uid` or equivalent mapping, account linking, and duplicate email handling. |
+| High | How should dev mock login be disabled for production? | Must prevent test identity bypass in production builds. |
 | Resolved | How is a merchant user authorized for one or multiple stores? | One merchant account manages exactly one store through `merchant_users.store_id`; no owner/manager/staff split in the current direction. |
 | High | How are administrator roles granted and audited? | Admin API security and audit logs |
 | Medium | Which customer public profile fields may merchants see besides alias and pickup/order data? | Privacy and merchant order response |

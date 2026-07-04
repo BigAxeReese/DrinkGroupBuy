@@ -2,6 +2,15 @@
 
 Last updated: 2026-06-24
 
+## Language / 中文註解規則
+
+本文件整理 mobile 每個畫面需要顯示的資料、使用者操作、目前資料來源，以及尚未完成的後端工作。
+
+- Screen / component 名稱保留英文，因為它們對應 `mobile/src/screens/` 內的檔案。
+- 中文說明用來輔助理解畫面用途與資料需求。
+- 若涉及 API 欄位、state key 或 route name，保留英文並可加中文註解。
+- 若畫面資料來源仍是 local state、localStorage 或 mock，之後要逐步改成 backend authoritative data。
+
 Current app: React Native + Expo, Android-first. Data may come from backend API, mobile local state, localStorage, or clearly marked mock files; each screen below states the current source.
 
 | Screen | Role and purpose | Displayed data / input | Actions | Current source | Missing states / backend work |

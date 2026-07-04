@@ -2,6 +2,16 @@
 
 Last updated: 2026-06-24
 
+## Language / 中文註解規則
+
+本文件整理目前資料庫已實作的實體，以及仍需要補強的資料庫設計。
+
+- 資料表名稱與欄位名稱保留英文 `snake_case`，不要翻成中文。
+- 中文只用來解釋每個 entity 的用途與關聯。
+- 若中文說明與英文表名衝突，實作時以英文表名與 schema 為準。
+- 若內容與 `docs/database-design-v1.md` 不一致，先以 `docs/database-design-v1.md` 與 `database/schema.sql` 為主要依據。
+- PostgreSQL 相關遷移細節請看 `docs/postgresql-migration-plan.md`。
+
 The authoritative development draft is `database/schema.sql`. This document explains current entities and unresolved additions; it is not a migration file. Field-level details are listed in `docs/database-field-spec.md`.
 
 ## Implemented Development Entities

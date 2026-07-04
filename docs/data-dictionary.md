@@ -2,6 +2,16 @@
 
 Last updated: 2026-06-25
 
+## Language / 中文註解規則
+
+本文件用來整理專案詞彙，避免同一個概念在 mobile、API、database 使用不同名稱。
+
+- 中文詞彙用於報告、文件與畫面說明，不作為程式命名來源。
+- Mobile / API 使用英文 `camelCase`。
+- Database 使用英文 `snake_case`。
+- 同一概念要固定一組英文命名，再用中文註解輔助理解。
+- 本文件部分早期中文詞彙可能有編碼亂碼；若要交報告，建議以 `docs/database-design-v1.md` 的命名為準重新整理。
+
 This document defines preferred product terminology. It is used to keep mobile UI, API JSON, and database naming consistent.
 
 ## Core Terms

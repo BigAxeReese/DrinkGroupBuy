@@ -2,6 +2,16 @@
 
 Last updated: 2026-06-26
 
+## Language / 中文註解規則
+
+本文件整理目前已實作與未來可能需要的 API。
+
+- API method、path、request / response 欄位名稱保留英文，因為它們會直接影響程式串接。
+- 中文只作為用途、完成度與缺口的輔助說明。
+- 不要把 API path 或 JSON 欄位翻成中文。
+- `Implemented` 代表目前開發版已存在的 API。
+- `Candidate` 或缺口說明代表未來可能要補的 API，還不是正式契約。
+
 API JSON uses `camelCase`. Implemented routes are authoritative only for the current development prototype; candidate routes are not contracts.
 
 ## Implemented

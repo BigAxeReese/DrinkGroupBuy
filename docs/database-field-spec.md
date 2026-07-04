@@ -2,6 +2,16 @@
 
 Last updated: 2026-06-25
 
+## Language / 中文註解規則
+
+本文件是資料庫欄位規格表，類似資料字典。
+
+- 資料表名稱與欄位名稱保留英文，因為它們會直接對應 SQL 與後端程式。
+- 中文欄位說明只用來輔助專題報告與閱讀，不應反過來改變實際欄位名稱。
+- 若某欄位中文說明不清楚，請保留英文欄位名並補中文註解。
+- 本文件部分早期中文欄位可能有編碼亂碼；後續若要放進報告，建議逐表重新整理中文欄位說明。
+- 若內容與 `docs/database-design-v1.md`、`database/schema.sql` 或 PostgreSQL migration draft 不一致，先以後三者為準。
+
 This document is a development field specification based on `database/schema.sql`. It is similar to a formal data dictionary, but it is not a production migration document yet.
 
 Note: the PostgreSQL draft has started to diverge from the current SQLite runtime schema for identity/privacy. PostgreSQL replaces merchant-facing customer surname display with `user_private_profiles` and `user_public_profiles`.
