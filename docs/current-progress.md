@@ -6,6 +6,33 @@
 
 文件語言規則：會影響程式、API、資料庫或工具辨識的內容使用英文；不影響實作的說明、報告文字與備註可使用中文。若英文技術名稱不容易理解，保留英文並加中文註解。
 
+## 2026-07-05 Login Direction Update
+
+- Formal login direction is now Firebase Auth with Google Login only.
+- Password login should be treated as legacy development compatibility, not the final product flow.
+- Customer, merchant, and admin roles must not be chosen by the mobile UI in production. The mobile app should receive a Firebase ID token after Google login, send it to the backend, and let the backend resolve the user role from the database.
+- Backend database remains the source of truth for roles, merchant-store binding, orders, payments, and group-buy activity state.
+- The existing `/api/auth/login` password endpoint remains only as a temporary development bridge until Firebase login is implemented and tested.
+
+## 2026-07-05 Firebase Google Login Slice
+
+- Mobile login screen now shows a Google-only Firebase Auth entry point instead of role/password selection.
+- Mobile exchanges the Firebase ID token with backend `POST /api/auth/firebase-session`.
+- Backend verifies the Firebase ID token with Firebase Admin SDK, looks up `users.firebase_uid`, resolves roles/stores from the database, and returns the existing backend bearer token shape.
+- Unmapped Firebase users receive 403 with a development next step to add the Firebase UID to `users.firebase_uid`.
+- Required local setup is still external: create Firebase project/OAuth clients, add mobile public Firebase config, configure backend Firebase Admin credentials, then map test account UIDs in the dev database.
+
+## 2026-07-05 Local Role Mapping Helper
+
+- For local development with only one Google test account, `scripts/map-firebase-user.js` can remap the existing Firebase UID to seeded users in SQLite.
+- Root npm helpers:
+  - `npm run auth:map:customer`
+  - `npm run auth:map:customer-b`
+  - `npm run auth:map:merchant`
+  - `npm run auth:map:admin`
+- This is not a production role switcher. The mobile app still does not expose role selection; role resolution remains backend/database controlled.
+- After remapping, sign out and sign in again so the app receives a fresh backend token.
+
 ## Mobile
 
 技術方向：React Native + Expo，Android-first，目前使用 Expo Web 預覽。
@@ -84,7 +111,7 @@
 - 忘記密碼 / 密碼重設。
 - Firebase Auth + Google Login 實作。
 - Backend 驗證 Firebase ID token。
-- `users` 對應 Firebase identity，例如 `firebase_uid`。
+- `users.firebase_uid` 對應 Firebase identity。
 - 訂單修改 API。
 - 後端重啟後仍可追蹤 LINE Pay redirect 的 durable lookup。
 - LINE Pay capture / void / refund。

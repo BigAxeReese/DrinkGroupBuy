@@ -28,6 +28,7 @@ Invoke-RestMethod http://localhost:3000/health
 
 | Method | Path | Purpose |
 | --- | --- | --- |
+| `POST` | `/api/auth/firebase-session` | Firebase ID token login and backend role resolution |
 | `POST` | `/api/auth/login` | 開發版登入 |
 | `GET` | `/health` | 後端健康檢查 |
 | `GET` | `/api/group-buy-activities` | 讀取團購活動 |
@@ -38,6 +39,26 @@ Invoke-RestMethod http://localhost:3000/health
 | `POST` | `/api/payments/line-pay/request` | 建立 LINE Pay sandbox 授權請求 |
 | `GET` | `/api/payments/line-pay/confirm` | LINE Pay redirect confirm |
 | `GET` | `/api/payments/line-pay/cancel` | LINE Pay redirect cancel |
+
+## Firebase Google Login
+
+`POST /api/auth/firebase-session` is the primary auth route. The mobile app sends:
+
+```json
+{ "idToken": "firebase_id_token_from_google_login" }
+```
+
+The backend verifies the token with Firebase Admin SDK, looks up `users.firebase_uid`, resolves `user_roles` and `merchant_users`, then returns the existing bearer token response shape.
+
+Required local backend env:
+
+```env
+FIREBASE_PROJECT_ID=your_firebase_project_id
+GOOGLE_APPLICATION_CREDENTIALS=C:\local\secrets\firebase-service-account.json
+AUTH_SESSION_SECRET=replace_with_backend_session_secret_at_least_16_chars
+```
+
+Do not commit the Firebase service account JSON. Each Firebase Google test account UID must be stored in `users.firebase_uid`.
 
 ## 開發測試登入
 

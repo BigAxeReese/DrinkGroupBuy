@@ -49,7 +49,7 @@ API：groupBuyActivity
 - 正式角色與權限由 backend database 判斷，不由前端自行決定。
 - Mobile 取得 Firebase ID token 後，應交給 backend 驗證。
 - Backend 驗證 Firebase ID token 後，再查 `users`、`user_roles`、`merchant_users` 決定使用者身份。
-- 若使用 Firebase Auth，backend `users` 應保存可對應 Firebase 使用者的欄位，例如 `firebase_uid` 或等價欄位。
+- 使用 Firebase Auth 時，backend `users.firebase_uid` 是對應 Firebase 使用者的正式欄位。
 - LINE Pay secret、訂單狀態、付款狀態、團購結算不可放在 mobile 或 Firestore 前端直寫流程。
 
 ## 目前已串接的範圍
@@ -89,3 +89,26 @@ API：groupBuyActivity
 - root `server.js`
 - root `src/`
 - root `data/`
+
+## 2026-07-05 Login Direction Update
+
+- Formal authentication is Firebase Auth with Google Login only.
+- Do not design new production flows around phone/password, email/password, or role-select login.
+- The current password login and role-select UI are legacy development compatibility and should be removed or hidden once Firebase login works.
+- Mobile app flow: user taps Google Login -> Firebase returns an ID token -> mobile sends the ID token to backend -> backend verifies the Firebase token -> backend maps the Firebase user to `users`, `user_roles`, and `merchant_users`.
+- Firebase is for authentication only. Firestore is not the primary business database for this project.
+- Backend database remains authoritative for customer/merchant/admin roles, store permissions, group-buy activities, orders, payments, pickup credentials, status history, and audit logs.
+- Required database direction: use `users.firebase_uid` as the canonical stable Firebase identity field.
+
+## Development Role Testing Strategy
+
+- Production rule: users never choose a role manually in the mobile app.
+- Development rule: test different roles by signing in with different Firebase Google test accounts whose Firebase UIDs are mapped in `users.firebase_uid`.
+- Role selection must happen in backend/database, not in the mobile UI.
+- Recommended seed mapping:
+  - customer A Google test account -> `users.firebase_uid` for customer A -> `user_roles.role = customer`
+  - customer B Google test account -> `users.firebase_uid` for customer B -> `user_roles.role = customer`
+  - merchant store 001 Google test account -> `users.firebase_uid` for merchant 001 -> `user_roles.role = merchant` and `merchant_users.store_id = store-001`
+  - admin Google test account -> `users.firebase_uid` for admin -> `user_roles.role = admin`
+- For local development only, a Firebase Auth emulator or explicitly gated dev-auth bypass may be used, but it must be disabled unless `AUTH_DEV_MODE=true` or equivalent is set in local `.env`.
+- Dev-auth bypass must never be enabled by default and must never be used for production builds.

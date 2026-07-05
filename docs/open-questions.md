@@ -20,8 +20,12 @@ Only unresolved decisions that still affect implementation are retained here.
 | --- | --- | --- |
 | High | Can one user hold customer and merchant roles simultaneously? | Navigation, token claims, `user_roles` |
 | Resolved | Should Firebase be used? | Use Firebase Auth for Google Login only. Do not use Firestore as the primary business database. |
-| High | How should backend map Firebase Auth users to existing `users` rows? | Need `firebase_uid` or equivalent mapping, account linking, and duplicate email handling. |
-| High | How should dev mock login be disabled for production? | Must prevent test identity bypass in production builds. |
+| Resolved | Should password login remain in the formal product? | No. Formal direction is Google Login only; current password login is legacy development compatibility. |
+| Resolved | Which field maps Firebase Auth users to existing `users` rows? | Use `users.firebase_uid` as the canonical unique Firebase identity field. |
+| High | How should Google accounts be linked to existing seeded users and merchant/store permissions? | Account linking, duplicate email handling, merchant onboarding, and migration from seeded users. |
+| Resolved | How should development/test login work without role-select password accounts? | Use Firebase Google test accounts mapped by `users.firebase_uid`; optional local emulator/dev bypass must be gated by env. |
+| Resolved | How should dev mock login be disabled for production? | Default disabled; only enable by explicit local env such as `AUTH_DEV_MODE=true`, and never expose role selection in production UI. |
+| High | Which actual Google test accounts map to customer A/B/C/D, merchant stores, and admin? | Firebase Console setup and seed data need the real Firebase UIDs. |
 | Resolved | How is a merchant user authorized for one or multiple stores? | One merchant account manages exactly one store through `merchant_users.store_id`; no owner/manager/staff split in the current direction. |
 | High | How are administrator roles granted and audited? | Admin API security and audit logs |
 | Medium | Which customer public profile fields may merchants see besides alias and pickup/order data? | Privacy and merchant order response |

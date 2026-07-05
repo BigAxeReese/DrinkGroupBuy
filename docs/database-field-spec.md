@@ -37,7 +37,7 @@ Note: the PostgreSQL draft has started to diverge from the current SQLite runtim
 | 3 | `phone_number` | ???? | TEXT | UNIQUE | Primary password-login identifier; store normalized digits | `0911000001` |
 | 4 | `email` | ???? | TEXT | UNIQUE | Nullable; reserved for real email contact/login later | `alice@example.com` |
 | 5 | `password_hash` | ???? | TEXT |  | Store hash only, never plain password | `scrypt:salt:hash` |
-| 6 | `google_subject_id` | Google ???? | TEXT | UNIQUE | Nullable; unique if Google login is used | `google-oauth-sub` |
+| 6 | `firebase_uid` | Firebase UID | TEXT | UNIQUE | Nullable until Firebase Google Login is linked; canonical Firebase Auth identity key | `firebase-uid-abc123` |
 | 7 | `display_name` | ???? | TEXT |  | Required | `Alice Wang` |
 | 8 | `surname` | 姓氏 | TEXT |  | Legacy SQLite field. Do not use for new merchant-facing privacy design; PostgreSQL uses `user_public_profiles.display_alias`. | `王` |
 | 9 | `status` | ????? | TEXT |  | `active`, `disabled`, `deleted` | `active` |

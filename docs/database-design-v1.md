@@ -54,30 +54,26 @@ As of 2026-07-02, the local development database contains:
 | `user_public_profiles` | Stores merchant/customer-facing alias data | `user_id` | 1 public profile belongs to one user |
 | `user_roles` | Stores the role granted to a user | `id` | Many roles belong to one user |
 
-Current login direction:
+Current login direction as of 2026-07-05:
 
-- Customers use phone number plus password.
-- Merchants use email plus password.
-- Admin uses email plus password.
-- Passwords are stored as hashes, not plain text.
-- Customers should be able to self-register in the future.
-- Merchants should see customer aliases instead of private identity/contact fields.
-
-Future login decision:
-
-- Formal login direction is Firebase Auth + Google Login.
-- Development may keep dev mock login for fast role testing.
+- Formal login direction is Firebase Auth with Google Login only.
+- Phone/password and email/password login are legacy development compatibility and should not be used for new production flows.
+- Production mobile UI should not let users manually choose customer, merchant, or admin role.
+- Mobile obtains a Firebase ID token after Google Login and sends it to backend.
+- Backend verifies the Firebase ID token and maps the identity to `users`, `user_roles`, and `merchant_users`.
 - Firebase is only for authentication, not the main database.
 - Backend database remains the source of truth for roles, merchant-store binding, orders, payments, and group-buy activity state.
-- Add or map a stable Firebase identity field, such as `firebase_uid`, to `users` before real Firebase login is implemented.
+- Use `users.firebase_uid` as the canonical stable Firebase identity field before real Firebase login is implemented.
+- Customers should be able to self-register in the future only through the Google Login/account-linking flow.
+- Merchants should see customer aliases instead of private identity/contact fields.
 
 Future PostgreSQL direction:
 
 - Keep `users`, `user_private_profiles`, `user_public_profiles`, and `user_roles` as normalized relational tables.
-- `users` stores login/security fields such as phone, email, password hash, verification timestamps, status, and last login time.
+- `users` stores application identity and account status. Password hash fields may remain for development compatibility but should not be required in the Google-only production flow.
 - `user_private_profiles` stores internal private profile data such as real name and contact fields. Merchant-facing APIs should not expose this table.
 - `user_public_profiles` stores the alias that can be shown to merchants and other customers, such as `匿名顧客 A`.
-- Add stronger production constraints later, such as password reset fields, session or refresh-token storage, and stricter verification rules.
+- Add stronger production constraints later, such as Firebase UID uniqueness, account-linking audit logs, session or token verification policy, and stricter verification rules.
 - With Firebase Auth, keep payment/order ownership in PostgreSQL and link `users` to the Firebase Auth UID.
 
 ### Merchant And Store

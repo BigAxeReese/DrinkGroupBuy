@@ -321,6 +321,22 @@ function getUserAuthProfileByLoginIdentifier(identifier) {
   }
 }
 
+function getUserAuthProfileByFirebaseUid(firebaseUid) {
+  const database = openDatabase();
+  try {
+    const user = database.prepare(`
+      SELECT id, login_name, phone_number, email, password_hash, display_name, surname, status
+      FROM users
+      WHERE firebase_uid = ?
+        AND status = 'active'
+    `).get(firebaseUid);
+
+    return user ? hydrateUserAuthProfile(database, user) : null;
+  } finally {
+    database.close();
+  }
+}
+
 function getUserAuthProfileById(userId) {
   const database = openDatabase();
   try {
@@ -1043,6 +1059,7 @@ module.exports = {
   getOrderDetail,
   getLatestLinePayAuthorizationForOrder,
   getOrderPaymentContext,
+  getUserAuthProfileByFirebaseUid,
   getUserAuthProfileByLoginIdentifier,
   getUserAuthProfileById,
   listGroupBuyActivities,

@@ -10,7 +10,7 @@ CREATE TABLE users (
   phone_number TEXT UNIQUE,
   email TEXT UNIQUE,
   password_hash TEXT,
-  google_subject_id TEXT UNIQUE,
+  firebase_uid TEXT UNIQUE,
   display_name TEXT NOT NULL,
   surname TEXT,
   status TEXT NOT NULL DEFAULT 'active' CHECK (status IN ('active', 'disabled', 'deleted')),

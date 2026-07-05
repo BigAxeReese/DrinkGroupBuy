@@ -6,14 +6,17 @@
   "scripts": {
     "start": "expo start",
     "android": "expo start --android",
-    "web": "expo start --web"
+    "web": "expo start --web --port 8083"
   },
   "dependencies": {
     "@expo/metro-runtime": "~3.2.3",
     "@googlemaps/js-api-loader": "^2.1.0",
     "@react-native-community/datetimepicker": "8.0.1",
     "expo": "~51.0.0",
+    "expo-auth-session": "~5.5.2",
     "expo-status-bar": "~1.12.1",
+    "expo-web-browser": "~13.0.3",
+    "firebase": "^12.15.0",
     "react": "18.2.0",
     "react-dom": "18.2.0",
     "react-native": "0.74.5",

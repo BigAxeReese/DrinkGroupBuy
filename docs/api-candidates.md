@@ -16,6 +16,34 @@ API JSON uses `camelCase`. Implemented routes are authoritative only for the cur
 
 ## Implemented
 
+### Authentication Direction Update
+
+| Item | Value |
+| --- | --- |
+| Decision date | 2026-07-05 |
+| Formal direction | Firebase Auth with Google Login only |
+| Current implemented route | `POST /api/auth/firebase-session` |
+| Legacy compatibility route | `POST /api/auth/login` remains temporary development compatibility |
+| Request | `{ idToken }` where `idToken` is the Firebase ID token from Google Login |
+| Response | `{ token, user: { id, loginName, phoneNumber, email, displayName, surname, roles, merchantStores } }` |
+| Backend responsibility | Verify Firebase ID token, map Firebase UID/email to `users`, resolve roles and store permissions from database |
+| Current session behavior | Backend returns its existing bearer token after Firebase verification |
+| Current mapping behavior | Looks up `users.firebase_uid`; unmapped Firebase users receive 403 |
+| Migration note | Do not add new production features depending on phone/password or email/password login |
+
+### Development Role Testing Auth
+
+| Item | Value |
+| --- | --- |
+| Purpose | Allow developers to test customer, merchant, and admin flows while production remains Google-only |
+| Preferred method | Use real Firebase test Google accounts mapped by `users.firebase_uid` |
+| Alternative local method | Firebase Auth emulator or dev-only bypass |
+| Required guard | Enabled only by local backend env such as `AUTH_DEV_MODE=true`; default must be disabled |
+| Candidate request | `{ devFirebaseUid }` only in local/dev mode, or normal `{ idToken }` from Firebase emulator |
+| Candidate response | Same shape as formal Google login: `{ token, user }` |
+| Forbidden behavior | Mobile production UI must not expose role selection or arbitrary Firebase UID input |
+| Audit note | If a dev bypass is implemented, log usage clearly and keep it out of production deployment config |
+
 ### Health Check
 
 | Item | Value |
@@ -155,6 +183,7 @@ API JSON uses `camelCase`. Implemented routes are authoritative only for the cur
 ## Cross-Cutting Requirements
 
 - Authentication and role authorization.
+- Local mobile web CORS must allow `Authorization` so bearer-token API calls can pass browser preflight.
 - Input validation and consistent error format.
 - Idempotency for create, authorization, capture, cancellation, and pickup operations.
 - Transactions for operations that update orders, cup totals, payment state, and history together.

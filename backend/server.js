@@ -8,11 +8,13 @@ const {
   getLatestLinePayAuthorizationForOrder,
   getOrderDetail,
   getOrderPaymentContext,
+  getUserAuthProfileByFirebaseUid,
   getUserAuthProfileByLoginIdentifier,
   getUserAuthProfileById,
   listGroupBuyActivities
 } = require("./db");
 const { createAuthToken, getBearerToken, verifyAuthToken, verifyPassword } = require("./auth");
+const { verifyFirebaseIdToken } = require("./firebaseAuth");
 const { confirmLinePayPayment, requestLinePayPayment } = require("./linePayClient");
 
 const port = Number(process.env.PORT ?? 3000);
@@ -29,6 +31,45 @@ const server = http.createServer(async (request, response) => {
 
     if (request.method === "GET" && url.pathname === "/health") {
       sendJson(response, 200, { ok: true, service: "drink-group-buy-backend" });
+      return;
+    }
+
+    if (request.method === "POST" && url.pathname === "/api/auth/firebase-session") {
+      const body = await readJsonBody(request);
+      if (!body.idToken) {
+        sendJson(response, 400, { error: "idToken is required" });
+        return;
+      }
+
+      let firebaseUser;
+      try {
+        firebaseUser = await verifyFirebaseIdToken(body.idToken);
+      } catch (error) {
+        console.error("Firebase ID token verification failed:", {
+          code: error.code,
+          message: error.message,
+          stack: error.stack
+        });
+        sendJson(response, 401, {
+          error: "Invalid Firebase ID token",
+          ...(process.env.NODE_ENV !== "production"
+            ? { debug: { code: error.code, message: error.message } }
+            : {})
+        });
+        return;
+      }
+
+      const user = getUserAuthProfileByFirebaseUid(firebaseUser.uid);
+      if (!user) {
+        sendJson(response, 403, {
+          error: "Firebase user is not mapped to an active backend user",
+          nextStep: "Add this Firebase UID to users.firebase_uid in the development database."
+        });
+        return;
+      }
+
+      const token = createAuthToken(user);
+      sendJson(response, 200, { token, user: toPublicUserResponse(user) });
       return;
     }
 
@@ -331,7 +372,7 @@ function sendJson(response, statusCode, payload) {
   response.writeHead(statusCode, {
     "Access-Control-Allow-Origin": "*",
     "Access-Control-Allow-Methods": "GET,POST,DELETE,OPTIONS",
-    "Access-Control-Allow-Headers": "Content-Type",
+    "Access-Control-Allow-Headers": "Content-Type, Authorization",
     "Content-Type": "application/json; charset=utf-8"
   });
 

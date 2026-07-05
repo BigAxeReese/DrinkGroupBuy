@@ -8,6 +8,13 @@
     "mobile:web": "npm --prefix mobile run web",
     "mobile:android": "npm --prefix mobile run android",
     "db:init": "node database/init-dev-db.js",
-    "db:seed": "node database/seed-dev-db.js"
+    "db:seed": "node database/seed-dev-db.js",
+    "auth:map:customer": "node scripts/map-firebase-user.js customer",
+    "auth:map:customer-b": "node scripts/map-firebase-user.js customer-b",
+    "auth:map:merchant": "node scripts/map-firebase-user.js merchant",
+    "auth:map:admin": "node scripts/map-firebase-user.js admin"
+  },
+  "dependencies": {
+    "firebase-admin": "^14.1.0"
   }
 }

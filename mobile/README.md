@@ -48,7 +48,7 @@ npm run mobile:web
 常用網址：
 
 ```text
-http://localhost:8081
+http://localhost:8083
 ```
 
 如果改過 `.env`，請完整停止並重啟 Expo。
@@ -83,6 +83,13 @@ mobile/.env.example
 GOOGLE_MAPS_API_KEY=your_restricted_android_google_maps_api_key
 EXPO_PUBLIC_GOOGLE_MAPS_API_KEY=your_http_referrer_restricted_web_google_maps_api_key
 EXPO_PUBLIC_BACKEND_URL=http://localhost:3000
+EXPO_PUBLIC_AUTH_MODE=firebase
+EXPO_PUBLIC_FIREBASE_API_KEY=your_firebase_web_api_key
+EXPO_PUBLIC_FIREBASE_AUTH_DOMAIN=your_project_id.firebaseapp.com
+EXPO_PUBLIC_FIREBASE_PROJECT_ID=your_firebase_project_id
+EXPO_PUBLIC_FIREBASE_APP_ID=your_firebase_app_id
+EXPO_PUBLIC_GOOGLE_ANDROID_CLIENT_ID=your_android_oauth_client_id.apps.googleusercontent.com
+EXPO_PUBLIC_GOOGLE_WEB_CLIENT_ID=your_web_oauth_client_id.apps.googleusercontent.com
 ```
 
 ## Google Maps key 差異
@@ -109,7 +116,21 @@ Google Maps API key 可以放在 mobile，但要到 Google Cloud Console 設限�
 EXPO_PUBLIC_BACKEND_URL=http://localhost:3000
 ```
 
+Expo Web is fixed to `http://localhost:8083` in local development so Google OAuth and Maps referrer settings stay stable.
+
 如果你用 Android 實機測試，`localhost` 會指向手機本身，不是電腦。那時要改成電腦區網 IP 或 tunnel URL。
+
+## Firebase Google Login
+
+Mobile now uses Firebase Auth with Google Login as the primary login path. The app sends the Firebase ID token to `POST /api/auth/firebase-session`, and the backend decides the user role from `users.firebase_uid`, `user_roles`, and `merchant_users`.
+
+Required setup:
+
+- Create a Firebase project and enable Google sign-in.
+- Add Android OAuth client settings for package `com.drinkgroupbuy.prototype`.
+- Put only public Firebase app config and OAuth client IDs in `mobile/.env`.
+- Configure backend Firebase Admin credentials in `backend/.env` or root `.env`.
+- Update the development database so each Google test account UID is stored in `users.firebase_uid`.
 
 ## LINE Pay 注意事項
 

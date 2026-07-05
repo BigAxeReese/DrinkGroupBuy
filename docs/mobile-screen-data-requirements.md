@@ -15,7 +15,7 @@ Current app: React Native + Expo, Android-first. Data may come from backend API,
 
 | Screen | Role and purpose | Displayed data / input | Actions | Current source | Missing states / backend work |
 | --- | --- | --- | --- | --- | --- |
-| `RoleSelectScreen` | Prototype login and role selection | Customer identity, merchant identity, admin entry, Google login placeholder | Select identity and enter role flow | Mobile mock users/stores | Real authentication, loading/error, authorization |
+| `RoleSelectScreen` | Google Login entry screen | Google Login button, loading/error state, signed-in user summary after login | Start Google Login, exchange Firebase ID token with backend, continue to backend-resolved role home, sign out Firebase session | Firebase Auth + backend `POST /api/auth/firebase-session` | Requires Firebase project config and `users.firebase_uid` mappings in development database |
 | `NearbyDealsScreen` | Customer home and joined/recommended activities | Member header, joined activity progress for the selected customer only, recommended stores/activities | Open activity, map, orders, member page | Mobile deals/orders/store mocks and local state | Backend activity load, location loading/error |
 | `LiveMapScreen` | Browse stores geographically | Google map, store marker/name, active activity cup progress | Pan/zoom, inspect marker | Google Maps SDK plus exported/mock store data | Nearby store API, live activity synchronization |
 | `DealDetailScreen` | Review activity before ordering | Store, activity status, tiers, progress, deadline, pickup window, notices | Open menu or progress | Mobile app state and store mocks | Detail API, join eligibility validation |
@@ -48,19 +48,30 @@ Current app: React Native + Expo, Android-first. Data may come from backend API,
 Customer:
 
 ```text
-Login -> Home/Map -> Activity Detail -> Menu -> Drink Customization -> Cart
+Google Login -> Backend role resolution -> Home/Map -> Activity Detail -> Menu -> Drink Customization -> Cart
       -> Payment Authorization Mock -> Progress/Orders -> Pickup
 ```
 
 Merchant:
 
 ```text
-Login -> Merchant Dashboard -> Create Activity -> Dashboard
+Google Login -> Backend role resolution -> Merchant Dashboard -> Create Activity -> Dashboard
                             -> Accept Orders -> Complete Preparation
 ```
 
 Administrator:
 
 ```text
-Login -> Admin Dashboard -> Activity Detail / Cancel Activity
+Google Login -> Backend role resolution -> Admin Dashboard -> Activity Detail / Cancel Activity
 ```
+
+## 2026-07-05 Login UI Direction
+
+- Production login shows only Google Login.
+- The user must not manually select customer, merchant, or admin role in production.
+- After Firebase login, backend response decides the destination:
+  - customer -> customer home/map/orders
+  - merchant -> merchant dashboard for authorized store
+  - admin -> admin dashboard
+- Existing password fields and account dropdown have been removed from the mobile login screen.
+- During development, test roles should be switched by signing in with different Firebase Google test accounts mapped in backend seed data, not by selecting a role in the app.

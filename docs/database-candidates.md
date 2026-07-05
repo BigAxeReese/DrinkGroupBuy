@@ -53,10 +53,20 @@ The authoritative development draft is `database/schema.sql`. This document expl
 | Order revisions | Authorized order edits need immutable before/after history. |
 | Pricing snapshots | Exact applied tier and per-order discount allocation must be reproducible. |
 | Store/menu source | Seven-store test database and one-store development database are not unified. |
-| Authentication | Password/Google identity fields exist, but credential/session tables and policies are not implemented. |
+| Authentication | Formal direction is Firebase Auth with Google Login only. Password fields are legacy development compatibility; database must map Firebase identity to `users` and role/permission tables. |
 | Notification | No notification delivery or event table yet. |
 | Migrations | Current schema is recreated by script; no production migration history exists. |
 | Test fixture normalization | `database/test/` still uses JSON fields for prototype map/menu exports and is not the canonical normalized schema. |
+
+## 2026-07-05 Authentication Database Direction
+
+- Firebase Auth handles Google Login and identity proof.
+- Backend database still owns application identity, roles, merchant-store permissions, orders, payments, and audit history.
+- Canonical mapping field is `users.firebase_uid`.
+- Use `users.firebase_uid` for backend lookups. Email can be a fallback for first-time account linking, but should not be the only permanent key.
+- Password-related columns may remain during development but should not be required for production Google-only login.
+- Seed data must eventually include Firebase UID placeholders or a documented local development mapping.
+- Development role testing should seed one `firebase_uid` per test identity. The role is still resolved from `user_roles`, and merchant store permission is still resolved from `merchant_users`.
 
 ## Transaction Boundaries Required Later
 

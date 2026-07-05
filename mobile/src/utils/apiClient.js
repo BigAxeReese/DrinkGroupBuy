@@ -34,6 +34,26 @@ export async function login(input) {
   return payload;
 }
 
+export async function loginWithFirebaseIdToken(idToken) {
+  const response = await fetch(`${backendBaseUrl}/api/auth/firebase-session`, {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json"
+    },
+    body: JSON.stringify({ idToken })
+  });
+
+  const payload = await response.json();
+  if (!response.ok) {
+    const error = new Error(payload.error ?? "Firebase login failed");
+    error.payload = payload;
+    throw error;
+  }
+
+  setAuthToken(payload.token);
+  return payload;
+}
+
 export async function createGroupBuyActivity(input) {
   const requestKey = `createGroupBuyActivity:${stableStringify(input)}`;
   return dedupeRequest(requestKey, async () => {

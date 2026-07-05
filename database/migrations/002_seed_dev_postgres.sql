@@ -24,7 +24,7 @@
 BEGIN;
 
 INSERT INTO users (
-  id, login_name, phone_number, email, password_hash, google_subject_id, display_name, status,
+  id, login_name, phone_number, email, password_hash, firebase_uid, display_name, status,
   phone_verified_at, email_verified_at, last_login_at, created_at, updated_at
 ) VALUES
   ('user-customer-yinji', 'customera', '0911000001', NULL, 'scrypt:17d1254f2df99e16ea4d2df911a20725:ec192dad05c846d2820845199faece873ccc90b499a2709c6b12fcda30984dd3', NULL, 'A', 'active', '2026-06-05T00:00:00+08:00', NULL, NULL, '2026-06-05T00:00:00+08:00', '2026-06-05T00:00:00+08:00'),

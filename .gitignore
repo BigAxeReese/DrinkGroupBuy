@@ -2,6 +2,9 @@
 node_modules/
 mobile/node_modules/
 
+# Local runtime logs
+.logs/
+
 # Local environment files
 .env
 .env.*
