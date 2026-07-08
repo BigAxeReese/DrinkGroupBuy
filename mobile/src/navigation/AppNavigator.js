@@ -24,7 +24,7 @@ import { getDealCapacityInfo, wouldExceedDealCapacity } from "../utils/dealProgr
 import { normalizeOrderItem } from "../utils/orderItems";
 import { buildOrderItemsChange, rollbackAuthorizedCups } from "../utils/orderState";
 import { clearPrototypeStateOnce, loadPrototypeState, savePrototypeState } from "../utils/prototypeStorage";
-import { createOrder, getOrder, listGroupBuyActivities } from "../utils/apiClient";
+import { createOrder, getOrder, listGroupBuyActivities, updateOrder } from "../utils/apiClient";
 
 const initialRoute = { name: "roleSelect", params: {} };
 const backendCustomerUserIds = {
@@ -48,7 +48,7 @@ export function AppNavigator() {
   const current = stack[stack.length - 1];
 
   useEffect(() => {
-    clearPrototypeStateOnce("2026-07-02-clear-group-buys");
+    clearPrototypeStateOnce("2026-07-08-clear-group-buys-orders-cart");
     const storedState = loadPrototypeState();
     if (storedState) {
       setDeals(Array.isArray(storedState.deals) ? storedState.deals : initialDeals);
@@ -180,9 +180,7 @@ export function AppNavigator() {
       ));
       const quantity = submittedItems.reduce((sum, item) => sum + item.quantity, 0);
       const deal = deals.find((item) => item.id === dealId);
-      const capacityCheckQuantity = existingOrder && !["authorized", "captured"].includes(existingOrder.paymentStatus)
-        ? (existingOrder.quantity ?? 0) + quantity
-        : quantity;
+      const capacityCheckQuantity = quantity;
       if (deal && wouldExceedDealCapacity(deal, capacityCheckQuantity)) {
         return {
           error: "capacity_exceeded",
@@ -194,16 +192,60 @@ export function AppNavigator() {
       const orderItems = submittedItems.map((item) => normalizeOrderItem(item));
 
       if (existingOrder) {
-        const change = buildOrderItemsChange({
-          order: existingOrder,
-          nextItems: [...(existingOrder.items ?? []), ...orderItems]
-        });
+        if (existingOrder.paymentStatus !== "pending") {
+          return {
+            error: "existing_order_requires_payment",
+            message: "此團購已有一筆已授權或已鎖定的訂單，目前尚未支援合併新飲料。請先查看既有訂單。",
+            orderId: existingOrder.id
+          };
+        }
+
+        let backendOrder;
+        try {
+          backendOrder = await updateOrder(existingOrder.id, {
+            fallbackPurchasePreference,
+            items: orderItems.map((item) => ({
+              menuItemId: item.drinkId,
+              itemName: item.itemName,
+              quantity: item.quantity,
+              unitPrice: item.unitPrice,
+              subtotal: item.subtotal,
+              size: item.size,
+              sweetness: item.sweetness,
+              ice: item.ice,
+              toppings: item.toppings
+            }))
+          });
+        } catch (error) {
+          return {
+            error: "backend_order_update_failed",
+            message: error.message
+          };
+        }
+
         setOrders((items) => items.map((order) => (
           order.id === existingOrder.id
             ? {
                 ...order,
-                ...change.orderPatch,
-                fallbackPurchasePreference
+                status: backendOrder.status,
+                itemName: submittedItems.length > 1 ? `${firstItem.itemName} 等 ${submittedItems.length} 項` : firstItem.itemName,
+                items: orderItems,
+                quantity,
+                sweetness: firstItem.sweetness,
+                ice: firstItem.ice,
+                toppings: firstItem.toppings,
+                subtotal,
+                originalAmount: subtotal,
+                authorizedAmount: 0,
+                finalAmount: null,
+                captureAmount: null,
+                releasedAmount: null,
+                fallbackPurchasePreference,
+                paymentStatus: backendOrder.paymentStatus,
+                authorizationStatus: backendOrder.authorizationStatus,
+                merchantAcceptanceStatus: backendOrder.merchantAcceptanceStatus,
+                pickupStatus: backendOrder.pickupStatus,
+                reauthorizationReason: null
               }
             : order
         )));
@@ -211,19 +253,19 @@ export function AppNavigator() {
           report.orderId === existingOrder.id
             ? {
                 ...report,
-                ...change.paymentPatch,
-                note: "Original authorization remains until customer confirms reauthorization."
+                originalAmount: subtotal,
+                authorizedAmount: 0,
+                finalAmount: null,
+                captureAmount: null,
+                releasedAmount: null,
+                status: "pending",
+                paymentStatus: backendOrder.paymentStatus,
+                authorizationStatus: backendOrder.authorizationStatus,
+                discountStatus: "not_yet_qualified",
+                note: "Pending order updated from cart. Reauthorization required."
               }
             : report
         )));
-        if (change.wasCounted) {
-          setDeals((items) => items.map((deal) => (
-            deal.id === existingOrder.dealId
-              ? rollbackAuthorizedCups(deal, existingOrder)
-              : deal
-          )));
-        }
-        setCartItems((items) => items.filter((item) => item.dealId !== dealId || item.customerId !== selectedCustomerId));
         return existingOrder.id;
       }
 
@@ -297,7 +339,6 @@ export function AppNavigator() {
           note: "Line Pay authorization prototype."
         }
       ]);
-      setCartItems((items) => items.filter((item) => item.dealId !== dealId || item.customerId !== selectedCustomerId));
       return orderId;
     },
     updateOrderItems(orderId, nextItems) {
@@ -408,6 +449,9 @@ export function AppNavigator() {
             canJoin: nextCups < maximumCups
           };
         }));
+        setCartItems((items) => items.filter((item) => (
+          item.dealId !== orderToAuthorize.dealId || item.customerId !== selectedCustomerId
+        )));
       }
     },
     captureQualifiedPayment(orderId, captureAmount, providerReference = "linepay-capture") {
@@ -510,6 +554,11 @@ export function AppNavigator() {
                 })) ?? deal.tiers
               }
             : deal
+        )));
+      }
+      if (["authorized", "captured"].includes(backendOrder.paymentStatus)) {
+        setCartItems((items) => items.filter((item) => (
+          item.dealId !== backendOrder.activityId || item.customerId !== selectedCustomerId
         )));
       }
 

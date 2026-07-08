@@ -11,7 +11,8 @@ const {
   getUserAuthProfileByFirebaseUid,
   getUserAuthProfileByLoginIdentifier,
   getUserAuthProfileById,
-  listGroupBuyActivities
+  listGroupBuyActivities,
+  updatePendingOrder
 } = require("./db");
 const { createAuthToken, getBearerToken, verifyAuthToken, verifyPassword } = require("./auth");
 const { verifyFirebaseIdToken } = require("./firebaseAuth");
@@ -176,6 +177,74 @@ const server = http.createServer(async (request, response) => {
     }
 
     const orderMatch = url.pathname.match(/^\/api\/orders\/([^/]+)$/);
+    if (request.method === "PATCH" && orderMatch) {
+      const authUser = getAuthenticatedUser(request);
+      if (!authUser) {
+        sendJson(response, 401, { error: "Authentication required" });
+        return;
+      }
+      if (!authUser.roles.includes("customer")) {
+        sendJson(response, 403, { error: "Customer role required" });
+        return;
+      }
+
+      const body = await readJsonBody(request);
+      const validationError = validateUpdateOrder(body);
+      if (validationError) {
+        sendJson(response, 400, { error: validationError });
+        return;
+      }
+
+      const result = updatePendingOrder({
+        ...body,
+        orderId: orderMatch[1],
+        customerUserId: authUser.id
+      });
+      if (result?.error === "order_not_found") {
+        sendJson(response, 404, { error: "Order not found" });
+        return;
+      }
+      if (result?.error === "order_access_denied") {
+        sendJson(response, 403, { error: "Order access denied" });
+        return;
+      }
+      if (result?.error === "order_not_editable") {
+        sendJson(response, 409, {
+          error: "Order is not editable before authorization",
+          status: result.status,
+          paymentStatus: result.paymentStatus
+        });
+        return;
+      }
+      if (result?.error === "activity_not_found") {
+        sendJson(response, 404, { error: "Group-buy activity not found" });
+        return;
+      }
+      if (result?.error === "activity_not_joinable") {
+        sendJson(response, 409, { error: "Group-buy activity is not joinable", status: result.status });
+        return;
+      }
+      if (result?.error === "capacity_exceeded") {
+        sendJson(response, 409, {
+          error: "Group-buy activity capacity exceeded",
+          maximumCups: result.maximumCups,
+          authorizedCups: result.authorizedCups,
+          requestedCups: result.requestedCups
+        });
+        return;
+      }
+
+      pendingLinePayPayments.delete(orderMatch[1]);
+      for (const authorization of result.failedAuthorizations || []) {
+        if (authorization.providerAuthorizationId) {
+          pendingLinePayPayments.delete(authorization.providerAuthorizationId);
+        }
+      }
+
+      sendJson(response, 200, { order: result.order });
+      return;
+    }
+
     if (request.method === "GET" && orderMatch) {
       const authUser = getAuthenticatedUser(request);
       if (!authUser) {
@@ -371,7 +440,7 @@ server.listen(port, () => {
 function sendJson(response, statusCode, payload) {
   response.writeHead(statusCode, {
     "Access-Control-Allow-Origin": "*",
-    "Access-Control-Allow-Methods": "GET,POST,DELETE,OPTIONS",
+    "Access-Control-Allow-Methods": "GET,POST,PATCH,DELETE,OPTIONS",
     "Access-Control-Allow-Headers": "Content-Type, Authorization",
     "Content-Type": "application/json; charset=utf-8"
   });
@@ -430,6 +499,19 @@ function validateCreateActivity(body) {
 
 function validateCreateOrder(body) {
   if (!body.activityId) return "Missing required field: activityId";
+  if (!Array.isArray(body.items) || body.items.length === 0) {
+    return "items must be a non-empty array";
+  }
+  if (
+    body.fallbackPurchasePreference != null
+    && !["decline_original_price", "accept_original_price"].includes(body.fallbackPurchasePreference)
+  ) {
+    return "fallbackPurchasePreference is invalid";
+  }
+  return null;
+}
+
+function validateUpdateOrder(body) {
   if (!Array.isArray(body.items) || body.items.length === 0) {
     return "items must be a non-empty array";
   }

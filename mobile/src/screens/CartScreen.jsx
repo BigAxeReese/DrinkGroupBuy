@@ -37,11 +37,10 @@ export function CartScreen({ navigation, route, appState, actions, memberAction,
     && order.dealId === deal.id
     && !["cancelled", "completed"].includes(order.status)
   ));
-  const requiresReauthorization = Boolean(existingOrder && ["authorized", "captured"].includes(existingOrder.paymentStatus));
+  const canUpdatePendingOrder = Boolean(existingOrder && existingOrder.paymentStatus === "pending");
+  const blocksOrderUpdate = Boolean(existingOrder && !canUpdatePendingOrder);
   const capacityInfo = getDealCapacityInfo(deal);
-  const capacityCheckQuantity = existingOrder && !["authorized", "captured"].includes(existingOrder.paymentStatus)
-    ? (existingOrder.quantity ?? 0) + totalQuantity
-    : totalQuantity;
+  const capacityCheckQuantity = totalQuantity;
   const exceedsCapacity = capacityInfo.maximumCups > 0 && capacityCheckQuantity > capacityInfo.remainingCapacity;
 
   return (
@@ -83,6 +82,16 @@ export function CartScreen({ navigation, route, appState, actions, memberAction,
         </Text>
       ) : null}
       {submitError ? <Text style={styles.closedNotice}>{submitError}</Text> : null}
+      {canUpdatePendingOrder && cartItems.length > 0 ? (
+        <Text style={styles.closedNotice}>
+          此團購已有一筆尚未完成預授權的訂單。送出後會用目前購物車內容更新該訂單，再重新進行 LINE Pay 預授權。
+        </Text>
+      ) : null}
+      {blocksOrderUpdate && cartItems.length > 0 ? (
+        <Text style={styles.closedNotice}>
+          此團購已有一筆已授權或已鎖定的訂單。目前尚未支援把新飲料合併到已授權訂單。
+        </Text>
+      ) : null}
 
       <PrimaryButton
         label="繼續選購飲料"
@@ -96,8 +105,10 @@ export function CartScreen({ navigation, route, appState, actions, memberAction,
           <Text style={styles.totalAmount}>{formatCurrency(totalAmount)}</Text>
         </View>
         <Text style={styles.notice}>
-          {requiresReauthorization
-            ? "送出後才會取消原本預授權，並以新訂單總額重新進行 LINE Pay 預授權。"
+          {canUpdatePendingOrder
+            ? "送出後會以目前購物車內容更新尚未授權的訂單。預授權成功後，購物車才會清空。"
+            : blocksOrderUpdate
+              ? "此團購已有一筆已授權或已鎖定的訂單，請先回到訂單頁查看。"
             : "送出訂單後才會進入 LINE Pay 預授權；目前仍是 prototype，不會真實扣款。"}
         </Text>
       </Section>
@@ -120,12 +131,25 @@ export function CartScreen({ navigation, route, appState, actions, memberAction,
       </Section>
 
       <PrimaryButton
-        label={isSubmitting ? "正在建立訂單..." : requiresReauthorization ? "重新預授權" : "送出訂單並前往 LINE Pay"}
+        label={isSubmitting
+          ? "正在建立訂單..."
+          : blocksOrderUpdate
+            ? "前往既有訂單"
+            : canUpdatePendingOrder
+              ? "更新訂單並前往 LINE Pay"
+              : "送出訂單並前往 LINE Pay"}
         onPress={async () => {
           if (isSubmitting) return;
           setSubmitError("");
           if (dealClosed) return;
-          if (cartItems.length === 0) return;
+          if (cartItems.length === 0) {
+            if (existingOrder) navigation.go("paymentReport", { dealId: deal.id, orderId: existingOrder.id });
+            return;
+          }
+          if (blocksOrderUpdate) {
+            navigation.go("paymentReport", { dealId: deal.id, orderId: existingOrder.id });
+            return;
+          }
           if (exceedsCapacity) {
             setSubmitError(`此團購最多 ${capacityInfo.maximumCups} 杯，剩餘 ${capacityInfo.remainingCapacity} 杯可加入。`);
             return;

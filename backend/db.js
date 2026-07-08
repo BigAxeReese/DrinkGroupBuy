@@ -536,6 +536,222 @@ function createOrder(input) {
   }
 }
 
+function updatePendingOrder(input) {
+  const database = openDatabase();
+  const now = new Date().toISOString();
+  const items = normalizeOrderItems(input.items);
+  const totalCups = items.reduce((sum, item) => sum + item.quantity, 0);
+  const originalAmount = items.reduce((sum, item) => sum + item.subtotal, 0);
+  let transactionStarted = false;
+
+  try {
+    const order = database.prepare(`
+      SELECT id, activity_id, customer_user_id, status, payment_status
+      FROM orders
+      WHERE id = ?
+    `).get(input.orderId);
+
+    if (!order) {
+      return { error: "order_not_found" };
+    }
+    if (order.customer_user_id !== input.customerUserId) {
+      return { error: "order_access_denied" };
+    }
+    if (order.status !== "submitted" || order.payment_status !== "pending") {
+      return {
+        error: "order_not_editable",
+        status: order.status,
+        paymentStatus: order.payment_status
+      };
+    }
+
+    const activity = database.prepare(`
+      SELECT id, status, maximum_cups
+      FROM group_buy_activities
+      WHERE id = ?
+    `).get(order.activity_id);
+    if (!activity) {
+      return { error: "activity_not_found" };
+    }
+    if (!["recruiting", "confirmed"].includes(activity.status)) {
+      return { error: "activity_not_joinable", status: activity.status };
+    }
+
+    const authorizedCups = database.prepare(`
+      SELECT COALESCE(SUM(total_cups), 0) AS cups
+      FROM orders
+      WHERE activity_id = ?
+        AND id != ?
+        AND payment_status IN ('authorized', 'captured')
+        AND status NOT IN ('cancelled')
+    `).get(order.activity_id, input.orderId).cups;
+
+    if (activity.maximum_cups && authorizedCups + totalCups > activity.maximum_cups) {
+      return {
+        error: "capacity_exceeded",
+        maximumCups: activity.maximum_cups,
+        authorizedCups,
+        requestedCups: totalCups
+      };
+    }
+
+    const pendingAuthorizations = database.prepare(`
+      SELECT id, status, provider_authorization_id
+      FROM payment_authorizations
+      WHERE order_id = ?
+        AND provider = 'line_pay'
+        AND status = 'pending'
+    `).all(input.orderId);
+
+    database.exec("BEGIN;");
+    transactionStarted = true;
+
+    for (const authorization of pendingAuthorizations) {
+      database.prepare(`
+        UPDATE payment_authorizations
+        SET status = 'failed',
+            failure_reason = 'order_updated_before_authorization',
+            updated_at = ?
+        WHERE id = ?
+      `).run(now, authorization.id);
+
+      database.prepare(`
+        INSERT INTO status_history (
+          id,
+          resource_type,
+          resource_id,
+          from_status,
+          to_status,
+          reason,
+          actor_user_id,
+          created_at
+        ) VALUES (?, 'payment_authorization', ?, 'pending', 'failed', 'order_updated_before_authorization', ?, ?)
+      `).run(
+        `status-history-${randomUUID()}`,
+        authorization.id,
+        input.customerUserId,
+        now
+      );
+    }
+
+    database.prepare(`
+      DELETE FROM order_item_customizations
+      WHERE order_item_id IN (
+        SELECT id
+        FROM order_items
+        WHERE order_id = ?
+      )
+    `).run(input.orderId);
+    database.prepare("DELETE FROM order_items WHERE order_id = ?").run(input.orderId);
+
+    const insertOrderItem = database.prepare(`
+      INSERT INTO order_items (
+        id,
+        order_id,
+        menu_item_id,
+        item_name_snapshot,
+        quantity,
+        unit_price_snapshot,
+        subtotal
+      ) VALUES (?, ?, ?, ?, ?, ?, ?)
+    `);
+    const insertCustomization = database.prepare(`
+      INSERT INTO order_item_customizations (
+        id,
+        order_item_id,
+        customization_option_id,
+        option_type,
+        label_snapshot,
+        price_delta_snapshot,
+        sort_order
+      ) VALUES (?, ?, NULL, ?, ?, 0, ?)
+    `);
+
+    items.forEach((item) => {
+      const orderItemId = `order-item-${randomUUID()}`;
+      const menuItem = item.menuItemId
+        ? database.prepare("SELECT id FROM menu_items WHERE id = ?").get(item.menuItemId)
+        : null;
+
+      insertOrderItem.run(
+        orderItemId,
+        input.orderId,
+        menuItem?.id ?? null,
+        item.itemName,
+        item.quantity,
+        item.unitPrice,
+        item.subtotal
+      );
+
+      item.customizations.forEach((customization, index) => {
+        insertCustomization.run(
+          `order-item-customization-${randomUUID()}`,
+          orderItemId,
+          customization.optionType,
+          customization.label,
+          index
+        );
+      });
+    });
+
+    database.prepare(`
+      UPDATE orders
+      SET fallback_purchase_preference = ?,
+          total_cups = ?,
+          original_amount = ?,
+          final_amount = NULL,
+          payment_status = 'pending',
+          authorization_status = 'pending',
+          merchant_acceptance_status = 'pending',
+          pickup_status = 'not_ready',
+          updated_at = ?
+      WHERE id = ?
+    `).run(
+      input.fallbackPurchasePreference || "decline_original_price",
+      totalCups,
+      originalAmount,
+      now,
+      input.orderId
+    );
+
+    database.prepare(`
+      INSERT INTO status_history (
+        id,
+        resource_type,
+        resource_id,
+        from_status,
+        to_status,
+        reason,
+        actor_user_id,
+        created_at
+      ) VALUES (?, 'order', ?, 'submitted', 'submitted', 'customer_update_pending_order', ?, ?)
+    `).run(
+      `status-history-${randomUUID()}`,
+      input.orderId,
+      input.customerUserId,
+      now
+    );
+
+    database.exec("COMMIT;");
+    transactionStarted = false;
+
+    return {
+      order: getOrderById(input.orderId),
+      failedAuthorizations: pendingAuthorizations.map((authorization) => ({
+        id: authorization.id,
+        providerAuthorizationId: authorization.provider_authorization_id
+      }))
+    };
+  } catch (error) {
+    if (transactionStarted) {
+      database.exec("ROLLBACK;");
+    }
+    throw error;
+  } finally {
+    database.close();
+  }
+}
+
 function getOrderPaymentContext(orderId) {
   const database = openDatabase();
   try {
@@ -1063,5 +1279,6 @@ module.exports = {
   getUserAuthProfileByLoginIdentifier,
   getUserAuthProfileById,
   listGroupBuyActivities,
-  toPublicUser
+  toPublicUser,
+  updatePendingOrder
 };

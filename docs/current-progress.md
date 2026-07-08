@@ -1,6 +1,6 @@
 # 目前進度
 
-最後更新：2026-07-05
+最後更新：2026-07-08
 
 換電腦或交接給其他 AI 時，請先閱讀 `docs/handoff-summary.md`。
 
@@ -50,6 +50,8 @@
 - 活動容量依最高優惠級距判斷，例如 20 / 30 / 40 杯代表最多接受 40 杯。
 - LINE Pay 預授權與 partial capture 的 UI / 狀態模擬已開始。
 - 付款畫面可向後端建立 LINE Pay sandbox 授權網址，並開啟 LINE Pay 付款頁。
+- 付款畫面在開啟 LINE Pay 後會短時間自動輪詢 backend 訂單狀態；App / 瀏覽器回到前景時也會安靜刷新，授權完成後同步顯示 `authorized`。
+- 顧客送出預授權後，購物車會保留飲品；只有 backend 訂單同步為 `authorized` / `captured` 後，才清除該團購的購物車飲品。
 - 商家儀表板、建立活動、接單、完成訂單、商家歷史訂單。
 - 管理員儀表板與取消活動。
 - 在瀏覽器環境可使用 `localStorage` 做 prototype local persistence。
@@ -58,6 +60,7 @@
 
 - App 啟動時尚未完整載入後端 authoritative activity list。
 - 訂單、付款、取貨與大部分 runtime progress 仍有 mobile-local state。
+- LINE Pay 完成後目前仍回 backend HTML 頁，尚未做正式 app deep link；mobile 端先以 polling / foreground refresh 同步狀態。
 - 部分流程仍保留 fallback 行為。
 
 ## Backend
@@ -83,6 +86,7 @@
 | `GET` | `/api/group-buy-activities` | 查詢團購活動與優惠級距 |
 | `POST` | `/api/merchant/group-buy-activities` | 商家建立團購活動 |
 | `POST` | `/api/orders` | 建立訂單與訂單品項快照 |
+| `PATCH` | `/api/orders/:orderId` | 更新尚未預授權成功的 pending 訂單明細 |
 | `GET` | `/api/orders/:orderId` | 查詢訂單明細與最新 LINE Pay 授權 |
 | `DELETE` | `/api/admin/group-buy-activities/:activityId` | 管理員 soft-cancel 活動 |
 | `POST` | `/api/payments/line-pay/request` | 建立 LINE Pay sandbox 授權請求 |
@@ -93,7 +97,8 @@
 
 - 活動建立與取消使用交易。
 - 訂單建立會保存品項與客製化快照。
-- 付款畫面可在 LINE Pay redirect 後刷新後端訂單狀態。
+- 尚未預授權成功的 pending 訂單可以用目前購物車內容更新；更新時會把舊的 pending LINE Pay 授權標成 `failed`，避免下一次預授權被阻擋。
+- 付款畫面可在 LINE Pay redirect 後透過自動輪詢、回前景刷新或手動刷新同步後端訂單狀態。
 - 團購列表會回傳 `authorizedCups` 與 `participantCount`。
 - 活動建立有基本 idempotency 處理。
 - 管理員取消活動會寫入 `status_history` 與 `audit_logs`。
@@ -112,7 +117,7 @@
 - Firebase Auth + Google Login 實作。
 - Backend 驗證 Firebase ID token。
 - `users.firebase_uid` 對應 Firebase identity。
-- 訂單修改 API。
+- 已授權後的訂單修改 / 重新授權流程。
 - 後端重啟後仍可追蹤 LINE Pay redirect 的 durable lookup。
 - LINE Pay capture / void / refund。
 - LINE Pay webhook。

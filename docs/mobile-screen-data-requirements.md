@@ -1,77 +1,103 @@
 # Mobile Screen Data Requirements
 
-Last updated: 2026-06-24
+Last updated: 2026-07-08
 
-## Language / 中文註解規則
+## 文件用途
 
-本文件整理 mobile 每個畫面需要顯示的資料、使用者操作、目前資料來源，以及尚未完成的後端工作。
+本文件整理 mobile 每個畫面需要顯示的資料、使用者可以做的操作、目前資料來源，以及尚未完成的後端工作。
+
+它不是「最終成品固定流程」，而是目前版本的畫面與流程規格。之後 API、資料庫、付款、訂單狀態變清楚時，這份文件會一起更新。
+
+## 中文註解規則
 
 - Screen / component 名稱保留英文，因為它們對應 `mobile/src/screens/` 內的檔案。
-- 中文說明用來輔助理解畫面用途與資料需求。
-- 若涉及 API 欄位、state key 或 route name，保留英文並可加中文註解。
-- 若畫面資料來源仍是 local state、localStorage 或 mock，之後要逐步改成 backend authoritative data。
+- API route、state key、status value 保留英文，避免和程式碼命名脫節。
+- 中文說明用來輔助理解畫面用途、資料需求、使用者操作流程。
+- 如果畫面資料來源仍是 local state、localStorage 或 mock，代表目前還不是完全由 backend 資料驅動，之後要逐步改成 backend authoritative data。
 
-Current app: React Native + Expo, Android-first. Data may come from backend API, mobile local state, localStorage, or clearly marked mock files; each screen below states the current source.
+目前 app 是 React Native + Expo，Android-first。開發時也會用 Expo Web 測試。
 
-| Screen | Role and purpose | Displayed data / input | Actions | Current source | Missing states / backend work |
+## 畫面資料需求
+
+| Screen | 角色與用途 | 顯示資料 / 輸入 | 使用者操作 | 目前資料來源 | 尚未完成 / 後端缺口 |
 | --- | --- | --- | --- | --- | --- |
-| `RoleSelectScreen` | Google Login entry screen | Google Login button, loading/error state, signed-in user summary after login | Start Google Login, exchange Firebase ID token with backend, continue to backend-resolved role home, sign out Firebase session | Firebase Auth + backend `POST /api/auth/firebase-session` | Requires Firebase project config and `users.firebase_uid` mappings in development database |
-| `NearbyDealsScreen` | Customer home and joined/recommended activities | Member header, joined activity progress for the selected customer only, recommended stores/activities | Open activity, map, orders, member page | Mobile deals/orders/store mocks and local state | Backend activity load, location loading/error |
-| `LiveMapScreen` | Browse stores geographically | Google map, store marker/name, active activity cup progress | Pan/zoom, inspect marker | Google Maps SDK plus exported/mock store data | Nearby store API, live activity synchronization |
-| `DealDetailScreen` | Review activity before ordering | Store, activity status, tiers, progress, deadline, pickup window, notices | Open menu or progress | Mobile app state and store mocks | Detail API, join eligibility validation |
-| `StoreMenuScreen` | Browse drink menu | Categories, menu items, prices | Select drink | Mobile drink/store mocks | Menu API, availability and price changes |
-| `DrinkSelectionScreen` | Customize one drink | Size, sweetness, ice, toppings, quantity, subtotal | Add to cart or save edit | Mobile state and mocks | Server validation, unavailable options |
-| `CartScreen` | Review draft and submit | Items, totals, fallback original-price checkbox | Remove item, continue shopping, submit | Mobile cart state/localStorage | Transactional order API, price conflict handling |
-| `PaymentReportScreen` | Simulate LINE Pay authorization/capture and launch sandbox LINE Pay authorization | Original, authorized, final, capture and released amounts; payment status; provider `transactionId`; `paymentUrl`; backend request result | Open LINE Pay sandbox authorization URL; authorize/capture mock fallback | Mobile payment state; `POST /api/payments/line-pay/request` | Rename screen, provider API persistence, redirect-to-app sync, webhook/error recovery |
-| `GroupProgressScreen` | Show activity and customer order progress | Activity badge, current/next target cups, participants, remaining time, order summary | Open payment or pickup | Mobile app state | Progress API, authoritative settlement result |
-| `CustomerOrdersScreen` | Active/history orders and order editing | Store, items, customizations, item totals, order total, statuses, pickup code | Open activity, edit/delete before lock, reauthorize | Mobile orders/payments/localStorage | Order APIs, revision history, server permission/lock validation |
-| `PickupInfoScreen` | Show pickup information | Store/address/window, order summary, pickup status | View location/code placeholder | Mobile state and mocks | Pickup API and credential verification |
-| `MerchantDashboardScreen` | Merchant activity and fulfillment dashboard | Active activities, order/payment/pickup counts, history | Create activity, accept orders, complete preparation | Activities partly API-backed; orders local | Merchant summary/order APIs and authorization |
-| `MerchantDealCreateScreen` | Create activity and promotion tiers | Fixed store, title, deadline, pickup time, notes, tiers | Add/remove tier, create activity | POST API with local fallback | Merchant auth, robust validation, retry UX |
-| `AdminDashboardScreen` | Review/cancel platform activities | Activity progress, order/payment summaries, cancellation state | View detail, cancel activity | DELETE API with local fallback | Admin auth, backend list, cascading payment/order result |
-| `CustomerPlaceholderScreen` | Discussion/profile placeholders | Placeholder copy | Navigate only | Static | Features not designed |
+| `RoleSelectScreen` | Google 登入入口畫面 | Google Login 按鈕、載入狀態、錯誤訊息、登入後使用者摘要 | 開始 Google 登入、把 Firebase ID token 送到 backend、依 backend 回傳角色進入對應首頁、登出 Firebase session | Firebase Auth + backend `POST /api/auth/firebase-session` | 需要 Firebase 專案設定，以及開發資料庫的 `users.firebase_uid` 對應 |
+| `NearbyDealsScreen` | 顧客首頁，顯示已參加與推薦團購 | 會員資訊、目前顧客已參加的團購進度、推薦店家 / 團購 | 開啟團購詳情、地圖、訂單、會員頁 | Mobile mocks、本機 state | 後端團購列表 API、定位載入 / 錯誤狀態 |
+| `LiveMapScreen` | 用地圖瀏覽附近店家 | Google Map、店家 marker、店名、進行中的團購杯數進度 | 地圖拖曳 / 縮放、查看 marker | Google Maps SDK + 匯出 / mock 店家資料 | 附近店家 API、即時團購同步 |
+| `DealDetailScreen` | 下單前查看團購詳情 | 店家、團購狀態、優惠門檻、目前進度、截止時間、取餐時間、公告 | 開啟菜單、查看進度 | Mobile app state + store mocks | 詳情 API、是否可加入的後端驗證 |
+| `StoreMenuScreen` | 瀏覽飲料菜單 | 分類、品項、價格 | 選擇飲料 | Mobile drink/store mocks | 菜單 API、品項供應狀態、價格異動 |
+| `DrinkSelectionScreen` | 客製化單杯飲料 | 尺寸、甜度、冰塊、加料、數量、小計 | 加入購物車、編輯後儲存 | Mobile state + mocks | 後端驗證、不可用選項處理 |
+| `CartScreen` | 檢查購物車並送出訂單 | 飲料明細、數量、客製化、金額、是否接受原價購買 | 刪除項目、繼續選購、建立訂單、更新尚未預授權成功的 pending 訂單 | Mobile cart state / localStorage；`POST /api/orders`；`PATCH /api/orders/:orderId` | 價格衝突處理、已授權後的重新授權流程 |
+| `PaymentReportScreen` | 模擬 LINE Pay 授權 / 請款，並開啟 sandbox 授權頁 | 原價金額、授權金額、最終金額、請款金額、釋放金額、付款狀態、provider `transactionId`、`paymentUrl`、backend 結果 | 開啟 LINE Pay sandbox 授權 URL、自動刷新 backend 訂單狀態、手動刷新付款狀態、使用 mock fallback | Mobile payment state；`POST /api/payments/line-pay/request`；`GET /api/orders/:orderId` | 畫面命名調整、provider API durable lookup、正式 app deep link、webhook / 錯誤恢復、capture / void / refund |
+| `GroupProgressScreen` | 顯示團購與顧客訂單進度 | 團購徽章、目前 / 下一門檻杯數、參與者、剩餘時間、訂單摘要 | 前往付款或取餐資訊 | Mobile app state | 進度 API、權威結算結果 |
+| `CustomerOrdersScreen` | 顧客查看進行中 / 歷史訂單與編輯訂單 | 店家、品項、客製化、品項金額、訂單總額、訂單狀態、取餐碼 | 開啟團購、鎖單前編輯 / 刪除、重新授權 | Mobile orders/payments/localStorage | 訂單 API、版本紀錄、後端權限與鎖單驗證 |
+| `PickupInfoScreen` | 顯示取餐資訊 | 店家、地址、取餐時間、訂單摘要、取餐狀態 | 查看位置 / 取餐碼 placeholder | Mobile state + mocks | 取餐 API、取餐憑證驗證 |
+| `MerchantDashboardScreen` | 商家管理團購與履約 | 進行中團購、訂單數、付款數、取餐數、歷史紀錄 | 建立團購、接受訂單、完成備餐 | 團購部分接 API；訂單仍偏 local | 商家總覽 API、商家訂單 API、商家授權 |
+| `MerchantDealCreateScreen` | 商家建立團購與優惠門檻 | 固定店家、標題、截止時間、取餐時間、公告、優惠門檻 | 新增 / 刪除門檻、建立團購 | POST API + local fallback | 商家權限、完整驗證、重試 UX |
+| `AdminDashboardScreen` | 管理員查看 / 取消平台團購 | 團購進度、訂單 / 付款摘要、取消狀態 | 查看詳情、取消團購 | DELETE API + local fallback | 管理員授權、後端列表、取消後付款 / 訂單連動 |
+| `CustomerPlaceholderScreen` | 討論區 / 個人中心 placeholder | placeholder 文字 | 只做頁面切換 | Static | 功能尚未設計 |
 
-## Shared Screen Rules
+## 共用畫面規則
 
-- Mobile tap targets should remain at least approximately 44x44 points.
-- Back actions should use navigation history and an explicit fallback only when no prior route exists.
-- Customer data must be scoped to the authenticated customer once authentication exists.
-- Customer joined/active order areas are customer-scoped. Home recommendations, map discovery, and recruiting activity lists are global/nearby activity data.
-- Merchant data must be scoped to authorized stores.
-- Raw internal field names such as `targetCups:` must not be shown as debug text.
-- Pickup credentials are visible only when `pickupStatus = ready` or during a defined later state.
-- Cancelled/failed/completed activities and orders belong in history, not active lists.
-- The highest promotion tier cup count is the activity capacity limit. Cart submit and payment authorization must not push activity cups beyond that maximum.
+- Mobile 可點擊區域應盡量維持至少約 44x44 points。
+- 返回動作應優先使用 navigation history；只有沒有上一頁時才使用明確 fallback。
+- 顧客資料必須綁定目前登入的顧客。
+- 顧客已參加 / 進行中訂單區塊只顯示該顧客資料。
+- 首頁推薦、地圖探索、招募中的團購列表屬於全域 / 附近資料，不是單一顧客私有資料。
+- 商家資料必須限制在該商家有權管理的店家。
+- 不應把內部欄位名稱，例如 `targetCups:`，直接當 debug 文字顯示給使用者。
+- 取餐憑證只有在 `pickupStatus = ready` 或之後明確定義的狀態才可顯示。
+- `cancelled`、`failed`、`completed` 的團購與訂單應進入歷史紀錄，不應顯示在進行中清單。
+- 最高優惠門檻杯數目前視為團購容量上限。送出購物車與付款授權不得讓杯數超過該上限。
 
-## Current Navigation
+## 目前操作流程
 
-Customer:
-
-```text
-Google Login -> Backend role resolution -> Home/Map -> Activity Detail -> Menu -> Drink Customization -> Cart
-      -> Payment Authorization Mock -> Progress/Orders -> Pickup
-```
-
-Merchant:
+顧客：
 
 ```text
-Google Login -> Backend role resolution -> Merchant Dashboard -> Create Activity -> Dashboard
-                            -> Accept Orders -> Complete Preparation
+Google Login
+-> Backend 判斷角色
+-> 首頁 / 地圖
+-> 團購詳情
+-> 菜單
+-> 飲料客製化
+-> 購物車
+-> 建立或更新 pending 訂單
+-> LINE Pay 預授權
+-> 自動刷新訂單付款狀態
+-> 預授權成功後清除該團購購物車
+-> 團購進度 / 我的訂單
+-> 取餐
 ```
 
-Administrator:
+商家：
 
 ```text
-Google Login -> Backend role resolution -> Admin Dashboard -> Activity Detail / Cancel Activity
+Google Login
+-> Backend 判斷角色
+-> 商家後台
+-> 建立團購
+-> 回到商家後台查看進度
+-> 接受訂單
+-> 完成備餐
 ```
 
-## 2026-07-05 Login UI Direction
+管理員：
 
-- Production login shows only Google Login.
-- The user must not manually select customer, merchant, or admin role in production.
-- After Firebase login, backend response decides the destination:
-  - customer -> customer home/map/orders
-  - merchant -> merchant dashboard for authorized store
-  - admin -> admin dashboard
-- Existing password fields and account dropdown have been removed from the mobile login screen.
-- During development, test roles should be switched by signing in with different Firebase Google test accounts mapped in backend seed data, not by selecting a role in the app.
+```text
+Google Login
+-> Backend 判斷角色
+-> 管理員後台
+-> 查看團購詳情 / 取消團購
+```
+
+## 2026-07-05 登入 UI 方向
+
+- 正式環境只顯示 Google Login。
+- 使用者不能在正式 app 內手動選擇顧客、商家或管理員。
+- Firebase 登入後，由 backend response 決定進入哪個入口：
+  - `customer` -> 顧客首頁 / 地圖 / 訂單
+  - `merchant` -> 該商家有權管理店家的商家後台
+  - `admin` -> 管理員後台
+- 既有 password 欄位與帳號下拉選單已從 mobile 登入畫面移除。
+- 開發期間如果要測不同角色，應使用不同 Firebase Google 測試帳號，或用本機 mapping helper 改 `users.firebase_uid` 對應；正式 app 不提供角色切換 UI。

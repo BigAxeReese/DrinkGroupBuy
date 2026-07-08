@@ -3,6 +3,72 @@
 這份 README 是給第一次開啟專案的人看的。  
 目前專案方向是 Android-first mobile app，但開發與展示時可以先用 Expo Web 在電腦瀏覽器預覽。
 
+## 最常用指令
+
+以下指令都在專案根目錄執行：
+
+```powershell
+cd C:\vscode\DrinkGroupBuy
+```
+
+### 啟動專案
+
+開第一個終端機啟動 backend：
+
+```powershell
+npm run backend:start
+```
+
+開第二個終端機啟動 mobile web：
+
+```powershell
+npm run mobile:web
+```
+
+瀏覽器開啟：
+
+```text
+http://localhost:8083
+```
+
+backend 預設是：
+
+```text
+http://localhost:3000
+```
+
+如果 `backend/.env` 有設定其他 `PORT`，例如 `3001`，就以該 port 為準。
+
+### 初始化資料庫
+
+第一次開專案或想重建測試資料時：
+
+```powershell
+npm run db:init
+npm run db:seed
+```
+
+### 開發測試切換角色
+
+這些指令只修改本機開發資料庫的 `users.firebase_uid` 對應，不會修改 Firebase，也不是正式產品功能。
+
+```powershell
+npm run auth:map:customer
+npm run auth:map:customer-b
+npm run auth:map:merchant
+npm run auth:map:admin
+```
+
+切換角色後，請在 App 內登出並重新 Google 登入，backend 才會重新判斷角色。
+
+### Android 預覽
+
+如果已經準備好 Android 模擬器或 Expo Go：
+
+```powershell
+npm run mobile:android
+```
+
 ## 專案目前內容
 
 ```text
@@ -124,7 +190,7 @@ npm run mobile:web
 通常會開在：
 
 ```text
-http://localhost:8081
+http://localhost:8083
 ```
 
 如果終端機顯示其他網址，請以終端機顯示的網址為準。
@@ -139,32 +205,22 @@ npm run mobile:android
 
 Android 手機測試時，如果 backend 連不上，通常是因為手機無法直接連到電腦的 `localhost`。這時要把 `mobile/.env` 的 `EXPO_PUBLIC_BACKEND_URL` 改成手機能連到的 backend 網址。
 
-## 測試帳號
+## 測試登入與角色切換
 
-目前是開發用登入資料。
+正式方向是 Firebase Auth + Google Login。App 不提供角色選擇，角色由 backend 查本機開發資料庫決定。
 
-顧客：
+開發時可以用同一個 Google 測試帳號，搭配本機 mapping 指令切換角色：
 
-```text
-0911000001 / customer1
-0911000002 / customer2
-0911000003 / customer3
-0911000004 / customer4
+```powershell
+npm run auth:map:customer
+npm run auth:map:customer-b
+npm run auth:map:merchant
+npm run auth:map:admin
 ```
 
-商家：
+切換後需要在 App 內登出並重新 Google 登入。
 
-```text
-store1@example.com / merchant1
-store2@example.com / merchant2
-store3@example.com / merchant3
-```
-
-管理員：
-
-```text
-admin@example.com / admin1
-```
+舊的帳密登入只保留作為開發相容用途，不是正式產品流程。
 
 ## 常見問題
 

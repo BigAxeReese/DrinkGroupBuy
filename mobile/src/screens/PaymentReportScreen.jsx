@@ -1,5 +1,5 @@
-import { useState } from "react";
-import { Linking, StyleSheet, Text, View } from "react-native";
+import { useEffect, useRef, useState } from "react";
+import { AppState, Linking, Platform, StyleSheet, Text, View } from "react-native";
 import { MobileScreen, Section } from "../components/MobileScreen";
 import { PlaceholderBox } from "../components/PlaceholderBox";
 import { PrimaryButton } from "../components/PrimaryButton";
@@ -7,15 +7,67 @@ import { StatusBadge } from "../components/StatusBadge";
 import { formatCurrency } from "../utils/calculations";
 import { requestLinePayAuthorization } from "../utils/apiClient";
 
+const LINE_PAY_SYNC_POLL_INTERVAL_MS = 3000;
+const LINE_PAY_SYNC_POLL_TIMEOUT_MS = 90000;
+const PAYMENT_SYNC_FINISHED_STATUSES = new Set([
+  "authorized",
+  "captured",
+  "authorization_voided",
+  "failed",
+  "refunded"
+]);
+
 export function PaymentReportScreen({ navigation, route, appState, actions, memberAction, selectedCustomerId }) {
   const [linePayStatus, setLinePayStatus] = useState("idle");
   const [linePayMessage, setLinePayMessage] = useState("");
   const [syncStatus, setSyncStatus] = useState("idle");
   const [syncMessage, setSyncMessage] = useState("");
+  const pollIntervalRef = useRef(null);
+  const pollTimeoutRef = useRef(null);
+  const pollInFlightRef = useRef(false);
   const allowedOrderIds = new Set(appState.orders.filter((order) => order.customerId === selectedCustomerId).map((order) => order.id));
   const payment = appState.paymentReports.find((item) => item.orderId === route.params?.orderId && allowedOrderIds.has(item.orderId))
     ?? appState.paymentReports.find((item) => allowedOrderIds.has(item.orderId));
   const order = payment ? appState.orders.find((item) => item.id === payment.orderId) : null;
+
+  useEffect(() => () => {
+    stopLinePaySyncPolling({ pollIntervalRef, pollTimeoutRef });
+  }, []);
+
+  useEffect(() => {
+    if (!payment?.orderId) return undefined;
+
+    const syncWhenActive = () => {
+      syncBackendOrder({
+        orderId: payment.orderId,
+        actions,
+        setSyncStatus,
+        setSyncMessage,
+        silentPending: true,
+        silentError: true
+      }).catch(() => {
+        // Keep foreground refresh non-intrusive; manual refresh still reports the error.
+      });
+    };
+
+    const appStateSubscription = AppState.addEventListener("change", (nextState) => {
+      if (nextState === "active") {
+        syncWhenActive();
+      }
+    });
+
+    let removeWindowFocusListener = null;
+    if (Platform.OS === "web" && typeof window !== "undefined") {
+      window.addEventListener("focus", syncWhenActive);
+      removeWindowFocusListener = () => window.removeEventListener("focus", syncWhenActive);
+    }
+
+    return () => {
+      appStateSubscription?.remove?.();
+      removeWindowFocusListener?.();
+    };
+  }, [actions, payment?.orderId]);
+
   if (!payment) {
     return (
       <MobileScreen
@@ -62,7 +114,7 @@ export function PaymentReportScreen({ navigation, route, appState, actions, memb
 
       <Section title="LINE Pay sandbox">
         <Text style={styles.meta}>此按鈕會向 backend 建立 LINE Pay 預授權請求，並開啟 LINE Pay 付款頁。</Text>
-        <Text style={styles.meta}>目前只做授權 confirm，不會在 App 內自動完成正式請款。</Text>
+        <Text style={styles.meta}>完成授權後會自動刷新 backend 訂單狀態；目前只做授權 confirm，不會正式請款。</Text>
         {linePayMessage ? (
           <Text style={linePayStatus === "error" ? styles.errorText : styles.successText}>{linePayMessage}</Text>
         ) : null}
@@ -70,7 +122,18 @@ export function PaymentReportScreen({ navigation, route, appState, actions, memb
           label={linePayStatus === "loading" ? "正在建立 LINE Pay 請求..." : "前往 LINE Pay 預授權"}
           onPress={() => {
             if (linePayStatus !== "loading") {
-              startLinePayAuthorization({ payment, order, setLinePayStatus, setLinePayMessage });
+              startLinePayAuthorization({
+                payment,
+                order,
+                actions,
+                pollIntervalRef,
+                pollTimeoutRef,
+                pollInFlightRef,
+                setLinePayStatus,
+                setLinePayMessage,
+                setSyncStatus,
+                setSyncMessage
+              });
             }
           }}
         />
@@ -109,20 +172,47 @@ export function PaymentReportScreen({ navigation, route, appState, actions, memb
   );
 }
 
-async function syncBackendOrder({ orderId, actions, setSyncStatus, setSyncMessage }) {
+async function syncBackendOrder({
+  orderId,
+  actions,
+  setSyncStatus,
+  setSyncMessage,
+  silentPending = false,
+  silentError = false
+}) {
   try {
-    setSyncStatus("loading");
-    setSyncMessage("");
+    if (!silentPending) {
+      setSyncStatus("loading");
+      setSyncMessage("");
+    }
     const result = await actions.syncOrderFromBackend(orderId);
+    if (silentPending && !PAYMENT_SYNC_FINISHED_STATUSES.has(result.order.paymentStatus)) {
+      return result;
+    }
     setSyncStatus("ready");
     setSyncMessage(`已同步後端狀態：${result.order.paymentStatus}`);
+    return result;
   } catch (error) {
-    setSyncStatus("error");
-    setSyncMessage(error.message);
+    if (!silentError) {
+      setSyncStatus("error");
+      setSyncMessage(error.message);
+    }
+    throw error;
   }
 }
 
-async function startLinePayAuthorization({ payment, order, setLinePayStatus, setLinePayMessage }) {
+async function startLinePayAuthorization({
+  payment,
+  order,
+  actions,
+  pollIntervalRef,
+  pollTimeoutRef,
+  pollInFlightRef,
+  setLinePayStatus,
+  setLinePayMessage,
+  setSyncStatus,
+  setSyncMessage
+}) {
   try {
     if (!payment || !order) {
       throw new Error("找不到可預授權的訂單資料");
@@ -147,10 +237,105 @@ async function startLinePayAuthorization({ payment, order, setLinePayStatus, set
 
     await Linking.openURL(paymentUrl);
     setLinePayStatus("ready");
-    setLinePayMessage("已開啟 LINE Pay。完成後會回到 backend confirm 頁面；App 內狀態目前仍需用 mock 同步。");
+    setLinePayMessage("已開啟 LINE Pay。完成授權後回到 App，付款狀態會自動刷新。");
+    startLinePaySyncPolling({
+      orderId: payment.orderId,
+      actions,
+      pollIntervalRef,
+      pollTimeoutRef,
+      pollInFlightRef,
+      setSyncStatus,
+      setSyncMessage
+    });
   } catch (error) {
+    if (error.payload?.status === "already_authorized") {
+      setLinePayStatus("ready");
+      setLinePayMessage("此訂單已完成 LINE Pay 授權，正在同步 backend 狀態。");
+      syncBackendOrder({
+        orderId: payment.orderId,
+        actions,
+        setSyncStatus,
+        setSyncMessage
+      }).catch(() => {});
+      return;
+    }
+
+    if (error.payload?.status === "authorization_already_pending") {
+      setLinePayStatus("ready");
+      setLinePayMessage("此訂單已有一筆 LINE Pay 授權流程進行中，會自動等待 backend 結果。");
+      startLinePaySyncPolling({
+        orderId: payment.orderId,
+        actions,
+        pollIntervalRef,
+        pollTimeoutRef,
+        pollInFlightRef,
+        setSyncStatus,
+        setSyncMessage
+      });
+      return;
+    }
+
     setLinePayStatus("error");
     setLinePayMessage(getLinePayErrorMessage(error));
+  }
+}
+
+function startLinePaySyncPolling({
+  orderId,
+  actions,
+  pollIntervalRef,
+  pollTimeoutRef,
+  pollInFlightRef,
+  setSyncStatus,
+  setSyncMessage
+}) {
+  stopLinePaySyncPolling({ pollIntervalRef, pollTimeoutRef });
+  const deadline = Date.now() + LINE_PAY_SYNC_POLL_TIMEOUT_MS;
+
+  setSyncStatus("loading");
+  setSyncMessage("等待 LINE Pay 授權結果，完成後會自動更新訂單狀態。");
+
+  const poll = async () => {
+    if (pollInFlightRef.current) return;
+    pollInFlightRef.current = true;
+
+    try {
+      const result = await actions.syncOrderFromBackend(orderId);
+      const paymentStatus = result.order.paymentStatus;
+
+      if (PAYMENT_SYNC_FINISHED_STATUSES.has(paymentStatus)) {
+        stopLinePaySyncPolling({ pollIntervalRef, pollTimeoutRef });
+        setSyncStatus("ready");
+        setSyncMessage(`已同步後端狀態：${paymentStatus}`);
+        return;
+      }
+
+      if (Date.now() >= deadline) {
+        stopLinePaySyncPolling({ pollIntervalRef, pollTimeoutRef });
+        setSyncStatus("idle");
+        setSyncMessage("尚未收到 LINE Pay 授權結果，可稍後按「刷新付款狀態」。");
+      }
+    } catch (error) {
+      stopLinePaySyncPolling({ pollIntervalRef, pollTimeoutRef });
+      setSyncStatus("error");
+      setSyncMessage(error.message);
+    } finally {
+      pollInFlightRef.current = false;
+    }
+  };
+
+  pollTimeoutRef.current = setTimeout(poll, 1500);
+  pollIntervalRef.current = setInterval(poll, LINE_PAY_SYNC_POLL_INTERVAL_MS);
+}
+
+function stopLinePaySyncPolling({ pollIntervalRef, pollTimeoutRef }) {
+  if (pollIntervalRef.current) {
+    clearInterval(pollIntervalRef.current);
+    pollIntervalRef.current = null;
+  }
+  if (pollTimeoutRef.current) {
+    clearTimeout(pollTimeoutRef.current);
+    pollTimeoutRef.current = null;
   }
 }
 

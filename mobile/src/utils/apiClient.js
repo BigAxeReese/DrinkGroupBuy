@@ -146,6 +146,28 @@ export async function getOrder(orderId) {
   });
 }
 
+export async function updateOrder(orderId, input) {
+  const requestKey = `updateOrder:${orderId}:${stableStringify(input)}`;
+  return dedupeRequest(requestKey, async () => {
+    const response = await fetch(`${backendBaseUrl}/api/orders/${encodeURIComponent(orderId)}`, {
+      method: "PATCH",
+      headers: withAuthHeaders({
+        "Content-Type": "application/json"
+      }),
+      body: JSON.stringify(input)
+    });
+
+    const payload = await response.json();
+    if (!response.ok) {
+      const error = new Error(payload.error ?? "Update order failed");
+      error.payload = payload;
+      throw error;
+    }
+
+    return payload.order;
+  });
+}
+
 export async function requestLinePayAuthorization(input) {
   const requestKey = `requestLinePayAuthorization:${stableStringify(input)}`;
   return dedupeRequest(requestKey, async () => {

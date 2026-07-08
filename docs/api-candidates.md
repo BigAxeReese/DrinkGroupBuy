@@ -1,6 +1,6 @@
 # API Inventory And Candidates
 
-Last updated: 2026-06-26
+Last updated: 2026-07-08
 
 ## Language / 中文註解規則
 
@@ -92,7 +92,18 @@ API JSON uses `camelCase`. Implemented routes are authoritative only for the cur
 | Request | Bearer token required. Body: `{ activityId, fallbackPurchasePreference, items: [{ menuItemId?, itemName, quantity, unitPrice, subtotal, size?, sweetness?, ice?, toppings? }] }` |
 | Response | `{ order }` |
 | Implemented rules | Requires customer role, derives `customerUserId` from authenticated user, requires existing backend `group_buy_activities` row, requires active customer user, writes `orders`, `order_items`, `order_item_customizations`, `status_history`, and `audit_logs` in one transaction, blocks non-joinable activities, checks authorized cups against `maximum_cups` |
-| Missing rules | Order modification API, price validation against current menu, idempotency key, complete concurrency locking for simultaneous joins |
+| Missing rules | Price validation against current menu, idempotency key, complete concurrency locking for simultaneous joins |
+
+### Update Pending Customer Order
+
+| Item | Value |
+| --- | --- |
+| Method / path | `PATCH /api/orders/:orderId` |
+| Related screen | `CartScreen`, `PaymentReportScreen` |
+| Request | Bearer token required. Body: `{ fallbackPurchasePreference, items: [{ menuItemId?, itemName, quantity, unitPrice, subtotal, size?, sweetness?, ice?, toppings? }] }` |
+| Response | `{ order }` |
+| Implemented rules | Requires customer role and order ownership, only allows `status = submitted` with `payment_status = pending`, replaces `order_items` and `order_item_customizations`, recalculates `total_cups` and `original_amount`, checks capacity against already authorized/captured cups, marks pending LINE Pay authorizations as `failed` before allowing a new request |
+| Missing rules | Authorized-order reauthorization flow, explicit customer cancel/exit API, revision history table |
 
 ### Get Order Detail
 
@@ -153,7 +164,7 @@ API JSON uses `camelCase`. Implemented routes are authoritative only for the cur
 | `POST /api/group-buy-activities/:activityId/orders` | Alternative nested route for order creation | Current implemented route is `POST /api/orders`; final route shape still undecided |
 | `GET /api/customers/me/orders` | Active and historical customer orders | Authentication and pagination |
 | `GET /api/orders/:orderId/history` | Order/payment status history | Owner/merchant/admin visibility |
-| `PATCH /api/orders/:orderId/items` | Modify order before lock | Reauthorization and revision history |
+| `PATCH /api/orders/:orderId/items` | More granular item modification route if needed later | Reauthorization and revision history |
 | `POST /api/orders/:orderId/cancel` | Exit before lock | Deadline race and authorized-cup rollback |
 
 ### Payment
