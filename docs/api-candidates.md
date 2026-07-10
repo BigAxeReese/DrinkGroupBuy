@@ -1,8 +1,8 @@
-# API Inventory And Candidates
+# API 清單與候選項
 
-Last updated: 2026-07-10
+最後更新：2026-07-10
 
-## Language / 中文註解規則
+## 語言規則
 
 本文件整理目前已實作與未來可能需要的 API。
 
@@ -12,193 +12,193 @@ Last updated: 2026-07-10
 - `Implemented` 代表目前開發版已存在的 API。
 - `Candidate` 或缺口說明代表未來可能要補的 API，還不是正式契約。
 
-API JSON uses `camelCase`. Implemented routes are authoritative only for the current development prototype; candidate routes are not contracts.
+API JSON 使用 `camelCase`。已實作 routes 只對目前開發 prototype 具權威性；candidate routes 不是正式契約。
 
-## Implemented
+## 已實作
 
-### Authentication Direction Update
+### 登入方向更新
 
-| Item                       | Value                                                                                                          |
-| -------------------------- | -------------------------------------------------------------------------------------------------------------- |
-| Decision date              | 2026-07-05                                                                                                     |
-| Formal direction           | Firebase Auth with Google Login only                                                                           |
-| Current implemented route  | `POST /api/auth/firebase-session`                                                                              |
-| Legacy compatibility route | `POST /api/auth/login` remains temporary development compatibility                                             |
-| Request                    | `{ idToken }` where `idToken` is the Firebase ID token from Google Login                                       |
-| Response                   | `{ token, user: { id, loginName, phoneNumber, email, displayName, surname, roles, merchantStores } }`          |
-| Backend responsibility     | Verify Firebase ID token, map Firebase UID/email to `users`, resolve roles and store permissions from database |
-| Current session behavior   | Backend returns its existing bearer token after Firebase verification                                          |
-| Current mapping behavior   | Looks up `users.firebase_uid`; unmapped Firebase users receive 403                                             |
-| Migration note             | Do not add new production features depending on phone/password or email/password login                         |
+| 項目              | 內容                                                                                                    |
+| ----------------- | ------------------------------------------------------------------------------------------------------- |
+| 決策日期          | 2026-07-05                                                                                              |
+| 正式方向          | 只使用 Firebase Auth + Google Login                                                                     |
+| 目前已實作 route  | `POST /api/auth/firebase-session`                                                                       |
+| 舊版相容 route    | `POST /api/auth/login` 暫時保留為開發相容功能                                                           |
+| Request           | `{ idToken }`，其中 `idToken` 是 Google Login 後取得的 Firebase ID token                                |
+| Response          | `{ token, user: { id, loginName, phoneNumber, email, displayName, surname, roles, merchantStores } }`   |
+| Backend 責任      | 驗證 Firebase ID token，將 Firebase UID/email 對應到 `users`，並從資料庫解析 roles 與 store permissions |
+| 目前 session 行為 | Backend 在 Firebase 驗證後回傳既有 bearer token                                                         |
+| 目前對應行為      | 查詢 `users.firebase_uid`；未對應的 Firebase users 回傳 403                                             |
+| 遷移備註          | 不要再新增依賴 phone/password 或 email/password login 的 production features                            |
 
-### Development Role Testing Auth
+### 開發期角色測試登入
 
-| Item                     | Value                                                                                             |
-| ------------------------ | ------------------------------------------------------------------------------------------------- |
-| Purpose                  | Allow developers to test customer, merchant, and admin flows while production remains Google-only |
-| Preferred method         | Use real Firebase test Google accounts mapped by `users.firebase_uid`                             |
-| Alternative local method | Firebase Auth emulator or dev-only bypass                                                         |
-| Required guard           | Enabled only by local backend env such as `AUTH_DEV_MODE=true`; default must be disabled          |
-| Candidate request        | `{ devFirebaseUid }` only in local/dev mode, or normal `{ idToken }` from Firebase emulator       |
-| Candidate response       | Same shape as formal Google login: `{ token, user }`                                              |
-| Forbidden behavior       | Mobile production UI must not expose role selection or arbitrary Firebase UID input               |
-| Audit note               | If a dev bypass is implemented, log usage clearly and keep it out of production deployment config |
+| 項目               | 內容                                                                                         |
+| ------------------ | -------------------------------------------------------------------------------------------- |
+| 用途               | 在 production 維持 Google-only 的前提下，讓開發者測試 customer、merchant、admin 流程         |
+| 建議方法           | 使用真實 Firebase Google 測試帳號，並用 `users.firebase_uid` 對應                            |
+| 本機替代方法       | Firebase Auth emulator 或 dev-only bypass                                                    |
+| 必要防護           | 只能由本機 backend env 如 `AUTH_DEV_MODE=true` 開啟；預設必須停用                            |
+| Candidate request  | 僅 local/dev mode 可使用 `{ devFirebaseUid }`，或使用 Firebase emulator 的正常 `{ idToken }` |
+| Candidate response | 與正式 Google login 相同：`{ token, user }`                                                  |
+| 禁止行為           | Mobile production UI 不得顯示角色選擇，也不得允許任意輸入 Firebase UID                       |
+| Audit 備註         | 若實作 dev bypass，需明確記錄使用情況，且不得進入 production deployment config               |
 
-### Health Check
+### 健康檢查
 
-| Item          | Value                       |
-| ------------- | --------------------------- |
-| Method / path | `GET /health`               |
-| Purpose       | Verify backend availability |
-| Response      | `{ ok, service }`           |
+| 項目          | 內容                |
+| ------------- | ------------------- |
+| Method / path | `GET /health`       |
+| 用途          | 確認 backend 可用性 |
+| Response      | `{ ok, service }`   |
 
-### List Group-Buy Activities
+### 查詢團購活動列表
 
-| Item          | Value                                                                                                                                                                                                                                                            |
+| 項目          | 內容                                                                                                                                                                                                                                                             |
 | ------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | Method / path | `GET /api/group-buy-activities`                                                                                                                                                                                                                                  |
-| Purpose       | Return activities, stores, and promotion tiers from SQLite                                                                                                                                                                                                       |
+| 用途          | 從 SQLite 回傳 activities、stores 與 promotion tiers                                                                                                                                                                                                             |
 | Response      | `{ activities: [{ id, storeId, createdByUserId, title, status, rawStatus, startAt, deadlineAt, pickupStartAt, pickupEndAt, maximumCups, targetCups, currentCups, authorizedCups, participantCount, withdrawalLockMinutes, cancellationReason, store, tiers }] }` |
-| Current gap   | Mobile does not call this endpoint at startup                                                                                                                                                                                                                    |
+| 目前缺口      | Mobile 啟動時尚未呼叫此 endpoint                                                                                                                                                                                                                                 |
 
-### Create Merchant Activity
+### 商家建立團購活動
 
-| Item                 | Value                                                                                                                                                                                                                                        |
-| -------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| Method / path        | `POST /api/merchant/group-buy-activities`                                                                                                                                                                                                    |
-| Related screen       | `MerchantDealCreateScreen`                                                                                                                                                                                                                   |
-| Request              | Bearer token required. Body: `{ storeId, title, startAt, deadlineAt, pickupStartAt, pickupEndAt, withdrawalLockMinutes?, tiers[], notice?, idempotencyKey? }`                                                                                |
-| Response             | `{ activity }`                                                                                                                                                                                                                               |
-| Implemented rules    | Requires merchant role, verifies merchant-store access, derives `createdByUserId` from authenticated user, required-field validation, tier normalization, maximum cups derived from highest tier, transaction, simple idempotency, audit log |
-| Final business rules | `deadlineAt` must be within 24 hours after the activity is published or opened for recruiting                                                                                                                                                |
-| Missing rules        | Enforce 24-hour deadline limit, robust date validation, richer merchant permission model                                                                                                                                                     |
+| 項目          | 內容                                                                                                                                                                                          |
+| ------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Method / path | `POST /api/merchant/group-buy-activities`                                                                                                                                                     |
+| 相關畫面      | `MerchantDealCreateScreen`                                                                                                                                                                    |
+| Request       | 需要 bearer token。Body: `{ storeId, title, startAt, deadlineAt, pickupStartAt, pickupEndAt, withdrawalLockMinutes?, tiers[], notice?, idempotencyKey? }`                                     |
+| Response      | `{ activity }`                                                                                                                                                                                |
+| 已實作規則    | 需要 merchant role、驗證 merchant-store access、從登入使用者推導 `createdByUserId`、必填欄位驗證、tier normalization、由最高 tier 推導 maximum cups、transaction、簡單 idempotency、audit log |
+| 最終商業規則  | `deadlineAt` 必須在活動發布或開放招募後 24 小時內                                                                                                                                             |
+| 尚缺規則      | 強制 24 小時 deadline limit、較完整的日期驗證、較完整的 merchant permission model                                                                                                             |
 
-### Administrator Cancels Activity
+### 管理員取消團購活動
 
-| Item              | Value                                                                                                                                                                   |
-| ----------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| Method / path     | `DELETE /api/admin/group-buy-activities/:activityId`                                                                                                                    |
-| Related screen    | `AdminDashboardScreen`                                                                                                                                                  |
-| Request           | Bearer token required. Body: `{ reason? }`                                                                                                                              |
-| Response          | `{ activity }`                                                                                                                                                          |
-| Implemented rules | Requires admin role, derives `actorUserId` from authenticated user, soft cancellation, status history, audit log, idempotent response for an already cancelled activity |
-| Missing rules     | Cascading order/payment handling                                                                                                                                        |
+| 項目          | 內容                                                                                                                                        |
+| ------------- | ------------------------------------------------------------------------------------------------------------------------------------------- |
+| Method / path | `DELETE /api/admin/group-buy-activities/:activityId`                                                                                        |
+| 相關畫面      | `AdminDashboardScreen`                                                                                                                      |
+| Request       | 需要 bearer token。Body: `{ reason? }`                                                                                                      |
+| Response      | `{ activity }`                                                                                                                              |
+| 已實作規則    | 需要 admin role、從登入使用者推導 `actorUserId`、soft cancellation、status history、audit log、已取消活動重複呼叫時回傳 idempotent response |
+| 尚缺規則      | 取消活動時連動 orders/payment handling                                                                                                      |
 
-### Create Customer Order
+### 顧客建立訂單
 
-| Item              | Value                                                                                                                                                                                                                                                                                                                                                            |
-| ----------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| Method / path     | `POST /api/orders`                                                                                                                                                                                                                                                                                                                                               |
-| Related screen    | `CartScreen`                                                                                                                                                                                                                                                                                                                                                     |
-| Request           | Bearer token required. Body: `{ activityId, fallbackPurchasePreference, items: [{ menuItemId?, itemName, quantity, unitPrice, subtotal, size?, sweetness?, ice?, toppings? }] }`                                                                                                                                                                                 |
-| Response          | `{ order }`                                                                                                                                                                                                                                                                                                                                                      |
-| Implemented rules | Requires customer role, derives `customerUserId` from authenticated user, requires existing backend `group_buy_activities` row, requires active customer user, writes `orders`, `order_items`, `order_item_customizations`, `status_history`, and `audit_logs` in one transaction, blocks non-joinable activities, checks authorized cups against `maximum_cups` |
-| Missing rules     | Price validation against current menu, idempotency key, complete concurrency locking for simultaneous joins                                                                                                                                                                                                                                                      |
+| 項目          | 內容                                                                                                                                                                                                                                                                                                    |
+| ------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Method / path | `POST /api/orders`                                                                                                                                                                                                                                                                                      |
+| 相關畫面      | `CartScreen`                                                                                                                                                                                                                                                                                            |
+| Request       | 需要 bearer token。Body: `{ activityId, fallbackPurchasePreference, items: [{ menuItemId?, itemName, quantity, unitPrice, subtotal, size?, sweetness?, ice?, toppings? }] }`                                                                                                                            |
+| Response      | `{ order }`                                                                                                                                                                                                                                                                                             |
+| 已實作規則    | 需要 customer role、從登入使用者推導 `customerUserId`、需要既有 backend `group_buy_activities` row、需要 active customer user、在同一個 transaction 寫入 `orders`、`order_items`、`order_item_customizations`、`status_history`、`audit_logs`、阻擋不可加入活動、用 `maximum_cups` 檢查 authorized cups |
+| 尚缺規則      | 依目前菜單驗證價格、idempotency key、同時加入時完整 concurrency locking                                                                                                                                                                                                                                 |
 
-### Update Pending Customer Order
+### 更新尚未預授權成功的顧客訂單
 
-| Item              | Value                                                                                                                                                                                                                                                                                                                                                            |
-| ----------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| Method / path     | `PATCH /api/orders/:orderId`                                                                                                                                                                                                                                                                                                                                     |
-| Related screen    | `CartScreen`, `PaymentReportScreen`                                                                                                                                                                                                                                                                                                                              |
-| Request           | Bearer token required. Body: `{ fallbackPurchasePreference, items: [{ menuItemId?, itemName, quantity, unitPrice, subtotal, size?, sweetness?, ice?, toppings? }] }`                                                                                                                                                                                             |
-| Response          | `{ order }`                                                                                                                                                                                                                                                                                                                                                      |
-| Implemented rules | Requires customer role and order ownership, only allows `status = submitted` with `payment_status = pending`, replaces `order_items` and `order_item_customizations`, recalculates `total_cups` and `original_amount`, checks capacity against already authorized/captured cups, marks pending LINE Pay authorizations as `failed` before allowing a new request |
-| Missing rules     | Authorized-order reauthorization flow, explicit customer cancel/exit API, revision history table                                                                                                                                                                                                                                                                 |
+| 項目          | 內容                                                                                                                                                                                                                                                                                                        |
+| ------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Method / path | `PATCH /api/orders/:orderId`                                                                                                                                                                                                                                                                                |
+| 相關畫面      | `CartScreen`、`PaymentReportScreen`                                                                                                                                                                                                                                                                         |
+| Request       | 需要 bearer token。Body: `{ fallbackPurchasePreference, items: [{ menuItemId?, itemName, quantity, unitPrice, subtotal, size?, sweetness?, ice?, toppings? }] }`                                                                                                                                            |
+| Response      | `{ order }`                                                                                                                                                                                                                                                                                                 |
+| 已實作規則    | 需要 customer role 與 order ownership；只允許 `status = submitted` 且 `payment_status = pending`；替換 `order_items` 與 `order_item_customizations`；重新計算 `total_cups` 與 `original_amount`；用已 authorized/captured 杯數檢查容量；允許新 request 前，將 pending LINE Pay authorizations 標成 `failed` |
+| 尚缺規則      | 已授權訂單 reauthorization flow、明確 customer cancel/exit API、revision history table                                                                                                                                                                                                                      |
 
-### Get Order Detail
+### 查詢訂單明細
 
-| Item              | Value                                                                                                                                                     |
-| ----------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| Method / path     | `GET /api/orders/:orderId`                                                                                                                                |
-| Related screen    | `PaymentReportScreen`, `CustomerOrdersScreen`                                                                                                             |
-| Request           | Bearer token required                                                                                                                                     |
-| Response          | `{ order: { id, activityId, customerUserId, status, paymentStatus, authorizationStatus, originalAmount, totalCups, items, latestLinePayAuthorization } }` |
-| Implemented rules | Owner/admin access check; returns order item snapshots and latest LINE Pay authorization so mobile can refresh payment state after LINE Pay redirect      |
-| Missing rules     | Merchant visibility checks, pagination/history for multiple authorizations                                                                                |
+| 項目          | 內容                                                                                                                                                      |
+| ------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Method / path | `GET /api/orders/:orderId`                                                                                                                                |
+| 相關畫面      | `PaymentReportScreen`、`CustomerOrdersScreen`                                                                                                             |
+| Request       | 需要 bearer token                                                                                                                                         |
+| Response      | `{ order: { id, activityId, customerUserId, status, paymentStatus, authorizationStatus, originalAmount, totalCups, items, latestLinePayAuthorization } }` |
+| 已實作規則    | 檢查 owner/admin 權限；回傳 order item snapshots 與最新 LINE Pay authorization，讓 mobile 可在 LINE Pay redirect 後刷新付款狀態                           |
+| 尚缺規則      | Merchant visibility checks、多筆 authorizations 的 pagination/history                                                                                     |
 
-### Request LINE Pay Authorization
+### 建立 LINE Pay 預授權
 
-| Item              | Value                                                                                                                                                                                                                                                                                                                                                                                                 |
-| ----------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| Method / path     | `POST /api/payments/line-pay/request`                                                                                                                                                                                                                                                                                                                                                                 |
-| Related screen    | `PaymentReportScreen`                                                                                                                                                                                                                                                                                                                                                                                 |
-| Request           | Bearer token required. Body: `{ orderId, amount, currency?, productName?, packageName?, products? }`                                                                                                                                                                                                                                                                                                  |
-| Response          | `{ provider, orderId, transactionId, paymentUrl, paymentAccessToken, status }`                                                                                                                                                                                                                                                                                                                        |
-| Implemented rules | Owner/admin access check, backend-only Channel ID/Secret, LINE Pay request signature, sandbox base URL by default, verifies order exists in SQLite, verifies requested amount equals `orders.original_amount`, blocks duplicate request when latest LINE Pay authorization is `pending` or `authorized`, creates `payment_authorizations.status = pending`, keeps temporary in-memory redirect lookup |
-| Missing rules     | Durable redirect lookup, idempotency table, webhook verification, mobile callback sync, authorization expiry handling, separated capture support confirmation                                                                                                                                                                                                                                         |
+| 項目          | 內容                                                                                                                                                                                                                                                                                                                                                      |
+| ------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Method / path | `POST /api/payments/line-pay/request`                                                                                                                                                                                                                                                                                                                     |
+| 相關畫面      | `PaymentReportScreen`                                                                                                                                                                                                                                                                                                                                     |
+| Request       | 需要 bearer token。Body: `{ orderId, amount, currency?, productName?, packageName?, products? }`                                                                                                                                                                                                                                                          |
+| Response      | `{ provider, orderId, transactionId, paymentUrl, paymentAccessToken, status }`                                                                                                                                                                                                                                                                            |
+| 已實作規則    | Owner/admin access check、Channel ID/Secret 只在 backend、LINE Pay request signature、預設 sandbox base URL、確認 SQLite 有對應訂單、確認 request amount 等於 `orders.original_amount`、latest LINE Pay authorization 為 `pending` 或 `authorized` 時阻擋重複 request、建立 `payment_authorizations.status = pending`、暫時使用 in-memory redirect lookup |
+| 尚缺規則      | Durable redirect lookup、idempotency table、webhook verification、mobile callback sync、authorization expiry handling、separated capture support confirmation                                                                                                                                                                                             |
 
 ### LINE Pay Confirm Redirect
 
-| Item              | Value                                                                                                                                                                                                                                                                                   |
-| ----------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| Method / path     | `GET /api/payments/line-pay/confirm?transactionId=&orderId=`                                                                                                                                                                                                                            |
-| Related screen    | LINE Pay hosted page redirects here                                                                                                                                                                                                                                                     |
-| Request           | Query parameters from LINE Pay plus `orderId` added to configured confirm URL                                                                                                                                                                                                           |
-| Response          | HTML result page                                                                                                                                                                                                                                                                        |
-| Implemented rules | Looks up pending payment in memory, calls LINE Pay confirm using original amount/currency, updates `payment_authorizations.status = authorized`, updates `orders.payment_status = authorized` and `orders.authorization_status = authorized`, records provider event and status history |
-| Missing rules     | Durable redirect lookup across server restart, mobile callback sync, handle provider retries or duplicate redirects beyond simple already-authorized behavior                                                                                                                           |
+| 項目          | 內容                                                                                                                                                                                                                                                         |
+| ------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| Method / path | `GET /api/payments/line-pay/confirm?transactionId=&orderId=`                                                                                                                                                                                                 |
+| 相關畫面      | LINE Pay hosted page 會 redirect 到這裡                                                                                                                                                                                                                      |
+| Request       | LINE Pay query parameters，加上 confirm URL 裡自行帶入的 `orderId`                                                                                                                                                                                           |
+| Response      | HTML result page                                                                                                                                                                                                                                             |
+| 已實作規則    | 在 memory 查詢 pending payment、用原價金額/currency 呼叫 LINE Pay confirm、更新 `payment_authorizations.status = authorized`、更新 `orders.payment_status = authorized` 與 `orders.authorization_status = authorized`、記錄 provider event 與 status history |
+| 尚缺規則      | 跨 server restart 的 durable redirect lookup、mobile callback sync、處理 provider retries 或 duplicate redirects，不能只依賴簡單 already-authorized behavior                                                                                                 |
 
 ### LINE Pay Cancel Redirect
 
-| Item              | Value                                                       |
-| ----------------- | ----------------------------------------------------------- |
-| Method / path     | `GET /api/payments/line-pay/cancel?transactionId=&orderId=` |
-| Related screen    | LINE Pay hosted page redirects here                         |
-| Response          | HTML cancellation page                                      |
-| Implemented rules | Clears in-memory pending payment when possible              |
-| Missing rules     | Persist cancellation event and return user to app           |
+| 項目          | 內容                                                        |
+| ------------- | ----------------------------------------------------------- |
+| Method / path | `GET /api/payments/line-pay/cancel?transactionId=&orderId=` |
+| 相關畫面      | LINE Pay hosted page 會 redirect 到這裡                     |
+| Response      | HTML cancellation page                                      |
+| 已實作規則    | 可行時清除 in-memory pending payment                        |
+| 尚缺規則      | 保存 cancellation event，並導回 app                         |
 
-## Next Candidates
+## 下一步候選 API
 
-### Stores And Menus
+### 店家與菜單
 
-| Method / path candidate                                     | Purpose                        | Key uncertainty                                |
-| ----------------------------------------------------------- | ------------------------------ | ---------------------------------------------- |
-| `GET /api/stores/nearby?latitude=&longitude=&radiusMeters=` | Map and nearby store data      | Distance source and Google Places relationship |
-| `GET /api/stores/:storeId/menu`                             | Menu and customization options | Availability and snapshot/version rules        |
+| Method / path candidate                                     | 用途               | 主要不確定點                     |
+| ----------------------------------------------------------- | ------------------ | -------------------------------- |
+| `GET /api/stores/nearby?latitude=&longitude=&radiusMeters=` | 地圖與附近店家資料 | 距離來源與 Google Places 關係    |
+| `GET /api/stores/:storeId/menu`                             | 菜單與客製化選項   | 供應狀態與 snapshot/version 規則 |
 
-### Orders And Cart
+### 訂單與購物車
 
-| Method / path candidate                             | Purpose                                               | Key uncertainty                                                                    |
-| --------------------------------------------------- | ----------------------------------------------------- | ---------------------------------------------------------------------------------- |
-| `POST /api/group-buy-activities/:activityId/orders` | Alternative nested route for order creation           | Current implemented route is `POST /api/orders`; final route shape still undecided |
-| `GET /api/customers/me/orders`                      | Active and historical customer orders                 | Authentication and pagination                                                      |
-| `GET /api/orders/:orderId/history`                  | Order/payment status history                          | Owner/merchant/admin visibility                                                    |
-| `PATCH /api/orders/:orderId/items`                  | More granular item modification route if needed later | Reauthorization and revision history                                               |
-| `POST /api/orders/:orderId/cancel`                  | Exit before lock                                      | Deadline race and authorized-cup rollback                                          |
+| Method / path candidate                             | 用途                             | 主要不確定點                                                      |
+| --------------------------------------------------- | -------------------------------- | ----------------------------------------------------------------- |
+| `POST /api/group-buy-activities/:activityId/orders` | 訂單建立的替代 nested route      | 目前已實作 route 是 `POST /api/orders`；最終 route shape 尚未決定 |
+| `GET /api/customers/me/orders`                      | 顧客進行中與歷史訂單             | Authentication 與 pagination                                      |
+| `GET /api/orders/:orderId/history`                  | 訂單與付款狀態歷史               | Owner/merchant/admin visibility                                   |
+| `PATCH /api/orders/:orderId/items`                  | 若未來需要，更細的品項修改 route | Reauthorization 與 revision history                               |
+| `POST /api/orders/:orderId/cancel`                  | 鎖定前退出團購                   | Deadline race 與 authorized-cup rollback                          |
 
-### Payment
+### 付款
 
-| Method / path candidate                                     | Purpose                      | Key uncertainty                                 |
-| ----------------------------------------------------------- | ---------------------------- | ----------------------------------------------- |
-| `POST /api/orders/:orderId/payment-authorizations`          | Start provider authorization | LINE Pay capability and redirect/deep-link flow |
-| `POST /api/payment-authorizations/:authorizationId/void`    | Void unused authorization    | Provider expiry and idempotency                 |
-| `POST /api/payment-authorizations/:authorizationId/capture` | Partial capture final amount | Provider support and retry policy               |
-| `POST /api/payments/webhooks/line-pay`                      | Receive provider events      | Signature verification and event ordering       |
+| Method / path candidate                                     | 用途                         | 主要不確定點                                   |
+| ----------------------------------------------------------- | ---------------------------- | ---------------------------------------------- |
+| `POST /api/orders/:orderId/payment-authorizations`          | 開始 provider authorization  | LINE Pay capability 與 redirect/deep-link flow |
+| `POST /api/payment-authorizations/:authorizationId/void`    | 取消未使用授權               | Provider expiry 與 idempotency                 |
+| `POST /api/payment-authorizations/:authorizationId/capture` | Partial capture final amount | Provider support 與 retry policy               |
+| `POST /api/payments/webhooks/line-pay`                      | 接收 provider events         | Signature verification 與 event ordering       |
 
-### Merchant Fulfillment
+### 商家履約
 
-| Method / path candidate                                             | Purpose                                          | Key uncertainty                           |
-| ------------------------------------------------------------------- | ------------------------------------------------ | ----------------------------------------- |
-| `GET /api/merchant/group-buy-activities/:activityId/orders`         | Merchant order queue and history                 | Exposed customer fields                   |
-| `POST /api/merchant/group-buy-activities/:activityId/accept-orders` | Accept eligible locked orders                    | Bulk vs per-order acceptance              |
-| `POST /api/merchant/orders/:orderId/ready`                          | Mark preparation complete and reveal pickup code | Current UI labels this action as 完成訂單 |
-| `POST /api/merchant/orders/:orderId/pickup`                         | Verify pickup and complete order                 | Code/QR verification method               |
+| Method / path candidate                                             | 用途                         | 主要不確定點                     |
+| ------------------------------------------------------------------- | ---------------------------- | -------------------------------- |
+| `GET /api/merchant/group-buy-activities/:activityId/orders`         | 商家訂單佇列與歷史           | 可曝光的 customer fields         |
+| `POST /api/merchant/group-buy-activities/:activityId/accept-orders` | 接受符合條件的 locked orders | Bulk vs per-order acceptance     |
+| `POST /api/merchant/orders/:orderId/ready`                          | 標記製作完成並顯示取貨碼     | 目前 UI 將此動作標為「完成訂單」 |
+| `POST /api/merchant/orders/:orderId/pickup`                         | 驗證取貨並完成訂單           | Code/QR verification method      |
 
-### Deadline Settlement
+### 截止結算
 
-| Method / path candidate                        | Purpose                                                            | Key uncertainty                                        |
-| ---------------------------------------------- | ------------------------------------------------------------------ | ------------------------------------------------------ |
-| Internal job/event, not necessarily public API | Lock orders, select tier, capture/void payments, create settlement | Scheduler ownership, retries, concurrency and recovery |
+| Method / path candidate                        | 用途                                                        | 主要不確定點                                       |
+| ---------------------------------------------- | ----------------------------------------------------------- | -------------------------------------------------- |
+| Internal job/event, not necessarily public API | 鎖定訂單、選擇 tier、capture/void payments、建立 settlement | Scheduler ownership、retries、concurrency/recovery |
 
-## Cross-Cutting Requirements
+## 跨功能需求
 
-- Authentication and role authorization.
-- Local mobile web CORS must allow `Authorization` so bearer-token API calls can pass browser preflight.
-- Input validation and consistent error format.
-- Idempotency for create, authorization, capture, cancellation, and pickup operations.
-- Transactions for operations that update orders, cup totals, payment state, and history together.
-- Optimistic concurrency or locking for deadline/capacity races.
-- Highest promotion tier is the activity cup capacity. Order creation and payment authorization must reject requests that would exceed `maximumCups`.
-- Status history and audit logs for sensitive transitions.
+- Authentication 與 role authorization。
+- Local mobile web CORS 必須允許 `Authorization`，讓 bearer-token API calls 可以通過 browser preflight。
+- Input validation 與一致的 error format。
+- create、authorization、capture、cancellation、pickup operations 需要 idempotency。
+- 更新 orders、cup totals、payment state 與 history 的操作需要 transaction。
+- deadline/capacity races 需要 optimistic concurrency 或 locking。
+- 最高 promotion tier 是 activity cup capacity。建立訂單與付款 authorization 必須拒絕會超過 `maximumCups` 的 request。
+- 敏感狀態轉換需要 status history 與 audit logs。

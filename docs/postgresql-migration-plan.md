@@ -1,54 +1,52 @@
 # PostgreSQL 遷移規劃
 
-最後更新：2026-07-05
+最後更新：2026-07-11
 
-本文件說明目前從 SQLite 開發資料庫遷移到 PostgreSQL 的規劃。這是規劃文件，不代表後端已經切換到 PostgreSQL。
+本文件整理從目前 SQLite 開發資料庫遷移到 PostgreSQL 的方向。它是規劃文件，不是可直接執行的 production migration。
 
 ## 目前狀態
 
 - 目前開發資料庫：SQLite。
-- SQLite schema 來源：`database/schema.sql`。
-- SQLite seed 來源：`database/seed-dev.sql`。
-- 後端目前使用 Node.js built-in SQLite driver。
-- 未來正式資料庫目標：PostgreSQL。
+- SQLite schema：`database/schema.sql`。
+- SQLite seed：`database/seed-dev.sql`。
+- Backend 目前仍以本機 SQLite 作為開發資料來源。
 - PostgreSQL schema draft：`database/migrations/001_initial_postgres.sql`。
 - PostgreSQL seed draft：`database/migrations/002_seed_dev_postgres.sql`。
-- 本機 PostgreSQL 驗證設定：`database/docker-compose.postgres.yml`。
+- 本機 PostgreSQL 設定草案：`database/docker-compose.postgres.yml`。
 
-## 為什麼選 PostgreSQL
+## 為什麼要遷移到 PostgreSQL
 
-DrinkGroupBuy 未來正式版會有下列需求，PostgreSQL 比 SQLite 更適合：
+DrinkGroupBuy 後續會處理訂單、付款、截止結算與多使用者同時加入團購，PostgreSQL 比 SQLite 更適合正式 backend 使用。
 
-- 顧客訂單。
-- LINE Pay authorization、capture、void、refund、webhook 狀態。
-- 團購截止時間結算。
-- 優惠級距計算。
-- 多人同時加入團購的併發處理。
-- 商家與管理員權限。
-- 狀態歷史與 audit log。
+- 支援更可靠的 transaction 與 row lock。
+- 適合處理 LINE Pay authorization、capture、void、refund 與 webhook 狀態。
+- 適合保存 audit log 與 status history。
+- 適合處理活動截止時的結算批次。
+- 適合防止多人同時下單造成杯數超過上限。
+- 適合長期保留訂單、付款與取貨紀錄。
 
 ## 遷移原則
 
-1. 保留目前主要資料表邊界。
-2. 資料庫表名與欄位使用 `snake_case`。
-3. API JSON 欄位使用 `camelCase`。
-4. 訂單與付款需要保留交易歷史與 snapshot。
-5. Mobile app 不可以直接修改付款或結算狀態。
-6. 下單、付款確認、團購結算要由後端交易控制。
-7. PostgreSQL 要用小切片逐步導入，不一次重寫全部。
-8. PostgreSQL 第一版主鍵使用 `text`，不在第一版改成 UUID。
+1. 第一版 PostgreSQL 先保留 `text` primary key，不改成 UUID。
+2. 資料表與欄位維持 `snake_case`。
+3. API JSON 對外仍使用 `camelCase`。
+4. 訂單、付款、活動狀態需要保留歷史紀錄。
+5. Mobile app 不應直接連資料庫。
+6. 金流密鑰只放 backend 環境變數，不進 database 或 mobile。
+7. PostgreSQL migration 必須可追蹤、可重跑到乾淨 dev database。
+8. PostgreSQL draft 可與目前 SQLite runtime schema 有少量差異，但差異要寫清楚。
 
-## 主鍵決策
+## Primary key 決策
 
-決策：PostgreSQL 第一版保留 `text` ID。
+決策：PostgreSQL v1 繼續使用 `text` ID。
 
 原因：
 
-- 目前 SQLite schema 已經使用 text ID。
-- Mobile 與 API 目前都把 ID 當字串傳遞。
-- 保留 text ID 可以降低遷移風險。
-- 測試資料比較好讀，適合專題展示。
-- 未來正式商業版如有需要，再評估 UUID。
+- 目前 SQLite schema 已使用 text ID。
+- Mobile 與 API 已把 ID 視為字串。
+- 開發資料可以使用可讀 ID，例如 `user-customer-yinji`、`store-001`。
+- 第一階段遷移不應同時改變 ID 型別與所有 API 行為。
+- UUID 可保留為未來選項，但不是第一版遷移目標。
 
 範例：
 
@@ -58,20 +56,13 @@ id text primary key
 
 ## 時間欄位決策
 
-決策：PostgreSQL 時間欄位使用 `timestamptz`。
+決策：PostgreSQL 的時間欄位使用 `timestamptz`。
 
 原因：
 
-- 團購截止時間必須可靠。
-- LINE Pay 授權、請款、取消授權時間需要可稽核。
-- 取貨時間區間不能含糊。
-- `timestamptz` 表示明確的時間點，可避免時區混亂。
-
-規則：
-
-- 後端與資料庫儲存使用 `timestamptz`。
-- API 回傳可以使用 ISO 8601 字串。
-- UI 可以顯示台灣時間，但資料庫不應存 UI 格式字串。
+- 團購截止時間、付款預授權時間、取貨時間與結算時間都必須是可靠時間點。
+- UI 可以顯示台灣時間，但資料庫不應長期保存 UI formatted string。
+- `timestamptz` 可避免時區解讀不一致。
 
 範例：
 
@@ -100,70 +91,42 @@ authorized_at timestamptz
 - `processed_at`
 - `settled_at`
 
-## 布林欄位決策
+## Boolean 欄位決策
 
-決策：PostgreSQL 真 / 假欄位使用 `boolean`。
+決策：PostgreSQL 的 true/false 欄位使用 `boolean`。
 
-原因：
+| SQLite 欄位                                            | PostgreSQL 型別 | 說明                 |
+| ------------------------------------------------------ | --------------- | -------------------- |
+| `menu_items.is_available`                              | `boolean`       | 飲品是否開放販售     |
+| `customization_options.is_available`                   | `boolean`       | 客製化選項是否可使用 |
+| `pickup_credentials.visible_after_merchant_acceptance` | `boolean`       | 取貨憑證顯示規則     |
 
-- SQLite 目前用 `0 / 1` 表示真假。
-- PostgreSQL 有真正的 `boolean` 型別。
-- `true / false` 比 `1 / 0` 清楚。
-- API JSON 也應回傳 `true / false`。
-
-目前應轉成 `boolean` 的欄位：
-
-| SQLite 欄位                                            | PostgreSQL 型別 | 意義                             |
-| ------------------------------------------------------ | --------------- | -------------------------------- |
-| `menu_items.is_available`                              | `boolean`       | 飲料是否可販售                   |
-| `customization_options.is_available`                   | `boolean`       | 客製化選項是否可選               |
-| `pickup_credentials.visible_after_merchant_acceptance` | `boolean`       | 取貨憑證是否需等商家確認後才顯示 |
-
-範例：
-
-```sql
-is_available boolean not null default true
-visible_after_merchant_acceptance boolean not null default true
-```
+API JSON 應對外回傳 `true` / `false`，不要回傳 `1` / `0`。
 
 ## JSON 欄位決策
 
-決策：原始金流事件與 audit metadata 使用 `jsonb`。
+決策：只有 raw provider payload 與 audit metadata 使用 `jsonb`。
 
-| SQLite 欄位                            | PostgreSQL 型別 | 用途                                           |
-| -------------------------------------- | --------------- | ---------------------------------------------- |
-| `payment_provider_events.payload_json` | `jsonb`         | 保存 LINE Pay 或其他金流 provider 原始事件內容 |
-| `audit_logs.metadata_json`             | `jsonb`         | 保存不同操作的額外 audit metadata              |
+| SQLite 欄位                            | PostgreSQL 型別 | 說明                                   |
+| -------------------------------------- | --------------- | -------------------------------------- |
+| `payment_provider_events.payload_json` | `jsonb`         | 保存 LINE Pay 或其他 provider 原始事件 |
+| `audit_logs.metadata_json`             | `jsonb`         | 保存敏感操作的補充 metadata            |
 
-原因：
+限制：
 
-- 金流 provider payload 可能有巢狀欄位與 provider-specific 欄位。
-- audit metadata 會依操作類型不同而有不同內容。
-- `jsonb` 比純文字更適合查詢與保存 JSON 結構。
-- 這些欄位只用於 trace、debug、audit，不作為核心業務狀態來源。
+- 不用 JSON 保存核心訂單、飲品、客製化、優惠門檻或付款狀態。
+- 核心資料仍使用 relational child tables。
+- `jsonb` 僅用於 trace、debug、audit 與 provider event 重播。
 
-重要規則：
+## Status 欄位決策
 
-- 不要把核心業務資料塞進 `jsonb`。
-- 訂單品項、客製化選項、優惠級距、付款狀態、取貨狀態都必須用正式欄位或 child tables。
-
-範例：
-
-```sql
-payload_json jsonb
-metadata_json jsonb
-```
-
-## 狀態欄位決策
-
-決策：PostgreSQL 第一版 status 欄位使用 `text check (...)`，先不使用 PostgreSQL `enum`。
+決策：PostgreSQL v1 使用 `text check (...)`，不使用 PostgreSQL enum。
 
 原因：
 
-- 產品流程仍在調整。
-- 狀態值未來可能新增、改名或刪除。
-- `text check (...)` 可以限制合法值，也比 enum 更容易修改。
-- 等 activity、order、payment、pickup 流程穩定後，再考慮是否改 enum。
+- 目前 activity、order、payment、pickup 狀態仍會隨產品規則調整。
+- `text check (...)` 可以保留有效值限制，又比 enum 容易修改。
+- 等流程穩定後，再評估是否改用 enum。
 
 範例：
 
@@ -172,7 +135,7 @@ status text not null check (status in ('recruiting', 'confirmed', 'failed', 'can
 payment_status text not null check (payment_status in ('pending', 'authorized', 'captured', 'authorization_voided', 'failed', 'refunded'))
 ```
 
-目前 status 類欄位：
+目前主要 status 欄位：
 
 - `users.status`
 - `user_roles.status`
@@ -192,86 +155,84 @@ payment_status text not null check (payment_status in ('pending', 'authorized', 
 
 ## SQLite 到 PostgreSQL 型別對照
 
-| SQLite 型別 / 寫法                    | PostgreSQL 型別    | 備註                                               |
-| ------------------------------------- | ------------------ | -------------------------------------------------- |
-| `TEXT PRIMARY KEY`                    | `text PRIMARY KEY` | 第一版保留 text ID                                 |
-| `TEXT` datetime                       | `timestamptz`      | 適用 created_at、updated_at、deadline_at、付款時間 |
-| `INTEGER` 金額                        | `integer`          | 台幣整數                                           |
-| `INTEGER` boolean with `CHECK (0, 1)` | `boolean`          | 例如 `is_available`                                |
-| `REAL` latitude / longitude           | `double precision` | 地圖座標                                           |
-| JSON text                             | `jsonb`            | provider events 與 audit logs                      |
-| `CHECK (...)` status strings          | `text CHECK (...)` | 第一版不使用 enum                                  |
-| `UNIQUE (...)`                        | 相同               | PostgreSQL 支援                                    |
-| `REFERENCES ... ON DELETE CASCADE`    | 相同               | PostgreSQL 支援                                    |
+| SQLite 型別或寫法                       | PostgreSQL 型別       | 說明                          |
+| --------------------------------------- | --------------------- | ----------------------------- |
+| `TEXT PRIMARY KEY`                      | `text PRIMARY KEY`    | 第一版維持 text ID            |
+| `TEXT` datetime                         | `timestamptz`         | 用於 created_at、deadline_at  |
+| `INTEGER` 數量或金額                    | `integer`             | 金額以 NTD 整數保存           |
+| `INTEGER` boolean with `CHECK (0, 1)`   | `boolean`             | 例如 `is_available`           |
+| `REAL` latitude / longitude             | `double precision`    | 地圖座標                      |
+| JSON text                               | `jsonb`               | provider events 與 audit logs |
+| `CHECK (...)` status strings            | `text CHECK (...)`    | 第一版不使用 enum             |
+| `UNIQUE (...)`                          | 相同                  | PostgreSQL 支援               |
+| `REFERENCES ... ON DELETE CASCADE`      | 相同                  | PostgreSQL 支援               |
 
-## PostgreSQL 第一版資料表
+## PostgreSQL schema 分組
 
-第一版先保留目前 SQLite 的主要資料表：
+| 分組           | 資料表                                                                  |
+| -------------- | ----------------------------------------------------------------------- |
+| 身份與角色     | `users`, `user_roles`, `user_private_profiles`, `user_public_profiles`  |
+| 商家與門市     | `merchants`, `merchant_users`, `stores`                                 |
+| 菜單           | `menu_items`, `customization_options`                                   |
+| 團購活動       | `group_buy_activities`, `promotion_tiers`, `activity_notices`           |
+| 購物車草稿     | `cart_drafts`, `cart_draft_items`, `cart_draft_item_customizations`     |
+| 訂單           | `orders`, `order_items`, `order_item_customizations`                    |
+| 付款           | `payment_authorizations`, `payment_captures`, `payment_provider_events` |
+| 結算與取貨     | `activity_settlements`, `pickup_credentials`                            |
+| 狀態與稽核     | `status_history`, `audit_logs`                                          |
 
-| 類別       | 資料表                                                                  |
-| ---------- | ----------------------------------------------------------------------- |
-| 身分與角色 | `users`, `user_roles`, `user_private_profiles`, `user_public_profiles`  |
-| 商家與店家 | `merchants`, `merchant_users`, `stores`                                 |
-| 菜單       | `menu_items`, `customization_options`                                   |
-| 團購活動   | `group_buy_activities`, `promotion_tiers`, `activity_notices`           |
-| 購物車     | `cart_drafts`, `cart_draft_items`, `cart_draft_item_customizations`     |
-| 訂單       | `orders`, `order_items`, `order_item_customizations`                    |
-| 付款       | `payment_authorizations`, `payment_captures`, `payment_provider_events` |
-| 結算與取貨 | `activity_settlements`, `pickup_credentials`                            |
-| 歷史與稽核 | `status_history`, `audit_logs`                                          |
+## PostgreSQL 可後續補充的 schema
 
-## PostgreSQL 前建議補強的 schema
+以下不放進第一版 migration，除非正式功能開始實作。
 
-這些不是第一版必做，但正式上線前建議處理：
+| 候選項目             | 可能資料表或欄位                         | 原因                                      |
+| -------------------- | ---------------------------------------- | ----------------------------------------- |
+| 訂單修改歷史         | `order_revisions`, revision item tables  | 需要保存已預授權訂單修改前後內容          |
+| Idempotency          | order/payment API idempotency key        | 避免重複送單、重複確認或重複請款          |
+| Session              | `sessions`, `refresh_tokens`             | 若未來 backend 自行管理 session           |
+| Settlement job log   | settlement job attempt table             | 追蹤截止結算重試與失敗原因                |
+| Notification         | `notifications`, `notification_events`   | 實作推播或站內通知時需要                  |
+| Verification policy  | phone/email verification audit fields    | 若未來手機或 email 驗證成為正式需求       |
 
-| 項目             | 建議                                           | 原因                                   |
-| ---------------- | ---------------------------------------------- | -------------------------------------- |
-| 訂單修改         | 新增 `order_revisions` 與 revision item tables | 授權後修改訂單需要 before / after 歷史 |
-| 付款 idempotency | 增加 order / payment API idempotency key       | 避免重複授權或重複請款                 |
-| Session          | 新增 `sessions` 或 `refresh_tokens`            | 目前 auth token 偏開發用               |
-| 截止結算         | 增加 settlement job attempt 欄位               | 方便 retry 與錯誤追蹤                  |
-| 通知             | 新增 `notifications` 或 `notification_events`  | 未來推播 / 站內通知需要                |
-| 個資             | 增加 phone/email 驗證與隱私欄位                | 真實使用者前需要                       |
+## 遷移階段
 
-## 後端遷移階段
+### Phase 1：盤點完成
 
-### Phase 1：準備
+- 保留 SQLite runtime。
+- 建立 PostgreSQL schema draft。
+- 建立 database design v1。
+- 確認 primary key 第一版使用 `text`。
+- 確認時間欄位使用 `timestamptz`。
 
-- 保持 SQLite 繼續運作。
-- 補齊 PostgreSQL 文件與 schema draft。
-- 確認 database design v1。
-- 第一版 ID 維持 `text`。
-- 時間欄位使用 `timestamptz`。
+### Phase 2：加入 PostgreSQL dependency
 
-### Phase 2：增加 PostgreSQL dependency
-
-- 加入 `pg` 或選定 query builder / migration tool。
+- 在 backend 加入 `pg` 或 query builder / migration tool。
 - 在 `backend/.env` 加入 `DATABASE_URL`。
-- 在 `.env.example` 只加入名稱，不放真實密碼。
-- 過渡期保留 SQLite code path。
+- 在 `.env.example` 提供不含密鑰的範例。
+- 保留現有 SQLite code path，直到 PostgreSQL vertical slice 穩定。
 
-### Phase 3：建立 PostgreSQL schema
+### Phase 3：完成 PostgreSQL schema migration
 
-- 已建立 draft：`database/migrations/001_initial_postgres.sql`。
-- 已把 SQLite schema 轉成 PostgreSQL-compatible SQL。
-- 保留 constraints 與 indexes。
+- 完成 `database/migrations/001_initial_postgres.sql`。
+- 將 SQLite schema 轉為 PostgreSQL-compatible SQL。
+- 補上 constraints 與 indexes。
 - 使用 `jsonb` 保存 provider/audit payload。
 
-狀態：
+驗收：
 
-- draft migration file 已建立。
-- 尚未接到 backend runtime。
-- 尚未作為正式 migration 系統執行。
+- migration 可在乾淨 dev database 成功執行。
+- 尚未切換 backend runtime。
+- 尚未碰正式資料。
 
-### Phase 4：建立 PostgreSQL seed data
+### Phase 4：完成 PostgreSQL seed data
 
-- 已建立 draft：`database/migrations/002_seed_dev_postgres.sql`。
-- 包含 4 個顧客、7 個商家帳號、1 個管理員、7 間店與菜單資料。
-- 不 seed 舊團購、訂單、付款、取貨資料。
+- 完成 `database/migrations/002_seed_dev_postgres.sql`。
+- Seed 顧客、店家、管理員、商家、門市與菜單。
+- 不 seed runtime 團購、訂單、付款與取貨資料，避免測試殘留。
 
-### Phase 5：切換 backend repository layer
+### Phase 5：建立 backend repository layer
 
-建議先建立資料庫 adapter 或 repository layer，再逐步切換：
+以 adapter / repository layer 逐步抽換資料庫存取，優先做：
 
 1. Login。
 2. List activities。
@@ -279,33 +240,33 @@ payment_status text not null check (payment_status in ('pending', 'authorized', 
 4. Customer creates order。
 5. LINE Pay authorization confirm。
 
-目標：
+要求：
 
-- 保持 mobile API response shape 穩定。
-- 不一次重寫全部 backend。
+- Mobile API response shape 不要一次大改。
+- 不要直接在很多 route 裡混用 SQL。
 
-### Phase 6：驗證交易
+### Phase 6：付款與結算 transaction
 
-要驗證：
+需要補強：
 
-- 建立活動與優惠級距。
-- 送出訂單與訂單品項。
+- 建立 activity transaction。
+- 送出 order transaction。
 - 建立 payment authorization。
-- 確認 LINE Pay authorization。
-- 計算 authorized cups。
-- 取消活動。
+- LINE Pay authorization confirm。
+- 更新 authorized cups。
+- Deadline settlement。
 
 ### Phase 7：移除 SQLite runtime dependency
 
-只有在 PostgreSQL 通過主要流程後才能做：
+當 PostgreSQL vertical slice 穩定後：
 
-- backend runtime 停止使用 SQLite。
-- SQLite schema 保留為歷史參考。
-- 文件更新為 PostgreSQL 已正式啟用。
+- Backend runtime 不再依賴 SQLite。
+- SQLite schema 僅保留歷史或測試用途。
+- PostgreSQL migration 成為開發與正式部署依據。
 
-## 未來環境變數
+## 環境變數需求
 
-後端 `.env` 可能需要：
+本機 `.env` 應保留在本機，不可 commit。
 
 ```text
 DATABASE_URL=postgres://user:password@localhost:5432/drink_group_buy
@@ -317,75 +278,45 @@ LINE_PAY_CONFIRM_URL=...
 LINE_PAY_CANCEL_URL=...
 ```
 
-不要提交真實值。
+`.env.example` 只能放範例，不放真實密鑰。
 
-## 重要交易邊界
+## 重要 transaction 設計
 
-PostgreSQL 遷移時，最重要的是這些交易邊界：
+PostgreSQL 遷移後，以下流程需要 transaction：
 
-1. 建立活動：
-   - insert activity。
-   - insert promotion tiers。
-   - insert notices。
-   - insert status history。
-
-2. 送出訂單：
-   - lock / validate activity。
-   - 檢查 status 與 deadline。
-   - 檢查 maximum cups。
-   - insert order。
-   - insert order items / customizations。
-   - create payment authorization record。
-
-3. 付款 confirm：
-   - lock order。
-   - update payment authorization。
-   - update order payment status。
-   - write status history / audit log。
-
-4. 截止結算：
-   - lock activity。
-   - lock eligible authorized orders。
-   - count authorized cups。
-   - select promotion tier。
-   - create settlement。
-   - capture 或 void payments。
-   - write status history。
-
-5. 取消活動：
-   - lock activity。
-   - cancel eligible orders。
-   - void eligible authorizations。
-   - write status history / audit log。
+1. 建立團購：insert activity、insert promotion tiers、insert notices、insert status history。
+2. 送出訂單：lock/validate activity、檢查 deadline、檢查 capacity、insert order/items/customizations、create payment authorization record。
+3. 付款 confirm：lock order、update payment authorization、update order payment status、write status history/audit log。
+4. 截止結算：lock activity、lock eligible authorized orders、count authorized cups、select promotion tier、create settlement、capture/void payments、write status history。
+5. 取消團購：lock activity、cancel eligible orders、void eligible authorizations、write status history/audit log。
 
 ## 風險
 
-| 風險                          | 原因                                    | 緩解方式                                |
-| ----------------------------- | --------------------------------------- | --------------------------------------- |
-| SQLite 與 PostgreSQL 行為不同 | 時間、boolean、JSON、locking 都不同     | 對關鍵交易加測試                        |
-| 一次重寫太多                  | 容易破壞 mobile 流程                    | 一次只遷移一個 vertical slice           |
-| secrets 外洩                  | PostgreSQL URL 與 LINE Pay secrets 敏感 | `.env` ignore，`.env.example` 只放名稱  |
-| 付款狀態不一致                | authorization / capture 必須可信        | 付款狀態只能由後端更新                  |
-| 團購超收                      | 多人同時送單可能超過上限                | 使用 PostgreSQL transaction 與 row lock |
+| 風險                             | 原因                                    | 緩解方式                                        |
+| -------------------------------- | --------------------------------------- | ----------------------------------------------- |
+| SQLite 與 PostgreSQL schema 差異 | 時間、boolean、jsonb、locking 行為不同  | 以 migration draft 與欄位規格追蹤差異           |
+| 一次改太多                       | Mobile/API/DB 同時變動容易造成回歸      | 一次只遷移一個 vertical slice                   |
+| secrets 洩漏                     | PostgreSQL URL 與 LINE Pay secrets 敏感 | `.env` ignore，`.env.example` 只放範例          |
+| 付款狀態不一致                   | authorization/capture/void 需嚴格同步   | 付款狀態寫入 DB 並建立 status history/audit log |
+| 團購超賣                         | 多人同時下單可能超過最高門檻            | 使用 PostgreSQL transaction 與 row lock         |
 
-## 測試清單
+## 驗收清單
 
-切換 backend runtime 到 PostgreSQL 前，至少要確認：
+切換 backend runtime 到 PostgreSQL 前，至少需要確認：
 
-- 顧客手機 + 密碼登入可用。
-- 商家 email + 密碼登入可用。
-- 管理員 email + 密碼登入可用。
-- 商家可建立活動與優惠級距。
-- 顧客可看到招募中的活動。
-- 顧客可把購物車送成訂單。
-- LINE Pay sandbox request 可建立。
-- LINE Pay confirm 可更新 payment authorization 與 order 狀態。
-- 管理員可取消活動。
-- 已取消活動會讓相關顧客訂單進歷史訂單。
-- 授權杯數顯示下一級距正確，例如 `25 / 30`。
+- 顧客 Google Login + backend role mapping 正常。
+- 店家 Google Login + store permission mapping 正常。
+- 管理員 Google Login + role mapping 正常。
+- 店家只能管理自己的門市。
+- 顧客只能看到自己的訂單。
+- 顧客不能在截止前 30 分鐘內修改或退出。
+- 店家不能在截止前 30 分鐘內取消團購。
+- 團購截止時間不可超過建立或發布後 24 小時。
+- LINE Pay sandbox request 正常。
+- LINE Pay confirm 正常更新 payment authorization 與 order 狀態。
+- 顧客完成預授權後，杯數會立即納入團購統計。
+- 截止結算能顯示正確杯數，例如 `25 / 30`。
 
-## 目前決策
+## 下一步
 
-使用 PostgreSQL 作為未來正式資料庫目標。
-
-在正式 PostgreSQL implementation slice 開始前，SQLite 繼續作為目前本機開發資料庫。
+先保留 SQLite runtime，完成 PostgreSQL migration draft 與付款/訂單流程設計。等一個完整 vertical slice 穩定後，再開始把 backend 資料存取從 SQLite 抽換成 PostgreSQL。

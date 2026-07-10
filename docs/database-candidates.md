@@ -1,77 +1,90 @@
-# Database Inventory And Candidates
+# 資料庫盤點與候選設計
 
-Last updated: 2026-06-24
+最後更新：2026-07-11
 
-## Language / 中文註解規則
+## 語言與命名規則
 
-本文件整理目前資料庫已實作的實體，以及仍需要補強的資料庫設計。
+本文件用中文描述資料庫設計方向；必要的技術名稱、資料表名稱、欄位名稱、狀態值與檔案路徑保留英文。
 
-- 資料表名稱與欄位名稱保留英文 `snake_case`，不要翻成中文。
-- 中文只用來解釋每個 entity 的用途與關聯。
-- 若中文說明與英文表名衝突，實作時以英文表名與 schema 為準。
-- 若內容與 `docs/database-design-v1.md` 不一致，先以 `docs/database-design-v1.md` 與 `database/schema.sql` 為主要依據。
-- PostgreSQL 相關遷移細節請看 `docs/postgresql-migration-plan.md`。
+- 資料表與欄位使用 `snake_case`。
+- API JSON 欄位使用 `camelCase`。
+- 同一個概念不要在不同文件使用不同名稱。
+- 目前正式開發草案以 `database/schema.sql` 為準。
+- PostgreSQL 遷移方向請看 `docs/postgresql-migration-plan.md`。
 
-The authoritative development draft is `database/schema.sql`. This document explains current entities and unresolved additions; it is not a migration file. Field-level details are listed in `docs/database-field-spec.md`.
+`database/schema.sql` 是目前本機開發資料庫的權威草案。本文件只整理目前已存在的 entity、候選補充項目與尚未解決的資料庫問題，不是 migration 檔。欄位細節請看 `docs/database-field-spec.md`。
 
-## Implemented Development Entities
+## 已建立的開發資料表
 
-| Entity                                                              | Purpose                                                 | Important relationships                                              |
-| ------------------------------------------------------------------- | ------------------------------------------------------- | -------------------------------------------------------------------- |
-| `users`, `user_roles`                                               | Identity and customer/merchant/admin roles              | User 1:N roles                                                       |
-| `merchants`                                                         | Business organization or brand grouping                 | Merchant 1:N stores                                                  |
-| `stores`, `merchant_users`                                          | Physical store and its merchant login account           | Store 1:1 merchant account in PostgreSQL draft                       |
-| `menu_items`, `customization_options`                               | Store menu and allowed customization                    | Store 1:N items; item 1:N options                                    |
-| `group_buy_activities`                                              | Merchant-created group-buy activity                     | Store 1:N activities                                                 |
-| `promotion_tiers`                                                   | Cup thresholds and group discount amounts               | Activity 1:N tiers                                                   |
-| `activity_notices`                                                  | Activity notes                                          | Activity 1:N notices                                                 |
-| `cart_drafts`, `cart_draft_items`, `cart_draft_item_customizations` | Optional server-side pre-submit cart                    | User/activity 1:N items; item 1:N selected options                   |
-| `orders`, `order_items`, `order_item_customizations`                | Customer participation and item/customization snapshots | Activity/user 1:N orders; order 1:N items; item 1:N selected options |
-| `payment_authorizations`                                            | Provider authorization attempts                         | Order 1:N authorizations                                             |
-| `payment_captures`                                                  | Partial/full capture result                             | Authorization/order 1:N captures                                     |
-| `payment_provider_events`                                           | Idempotent provider webhook/event storage               | References payment resources logically                               |
-| `activity_settlements`                                              | Deadline result and applied tier                        | Activity 1:1 settlement                                              |
-| `pickup_credentials`                                                | Order pickup code                                       | Order 1:1 credential                                                 |
-| `status_history`                                                    | Status transitions and reasons                          | Polymorphic resource reference                                       |
-| `audit_logs`                                                        | Sensitive actor/action history                          | Polymorphic resource reference                                       |
+| 資料表                                                              | 用途                           | 重要關係                                                   |
+| ------------------------------------------------------------------- | ------------------------------ | ---------------------------------------------------------- |
+| `users`, `user_roles`                                               | 帳號身份與顧客/店家/管理員角色 | User 1:N roles                                             |
+| `merchants`                                                         | 商家組織或品牌                 | Merchant 1:N stores                                        |
+| `stores`, `merchant_users`                                          | 實體門市與店家登入帳號         | PostgreSQL draft 中 Store 1:1 merchant account             |
+| `menu_items`, `customization_options`                               | 門市菜單與可選客製化項目       | Store 1:N items；item 1:N options                          |
+| `group_buy_activities`                                              | 店家建立的團購活動             | Store 1:N activities                                       |
+| `promotion_tiers`                                                   | 杯數門檻與折扣金額             | Activity 1:N tiers                                         |
+| `activity_notices`                                                  | 團購活動備註                   | Activity 1:N notices                                       |
+| `cart_drafts`, `cart_draft_items`, `cart_draft_item_customizations` | 送出前的伺服器端購物車草稿     | User/activity 1:N items；item 1:N selected options         |
+| `orders`, `order_items`, `order_item_customizations`                | 顧客參與團購與品項快照         | Activity/user 1:N orders；order 1:N items                  |
+| `payment_authorizations`                                            | 付款預授權紀錄                 | Order 1:N authorizations                                   |
+| `payment_captures`                                                  | 請款結果                       | Authorization/order 1:N captures                           |
+| `payment_provider_events`                                           | 金流 webhook/event 原始紀錄    | 以邏輯方式關聯付款資源                                     |
+| `activity_settlements`                                              | 截止後結算結果與適用門檻       | Activity 1:1 settlement                                    |
+| `pickup_credentials`                                                | 訂單取貨憑證                   | Order 1:1 credential                                       |
+| `status_history`                                                    | 狀態變更歷程與原因             | Polymorphic resource reference                             |
+| `audit_logs`                                                        | 敏感操作紀錄                   | Polymorphic resource reference                             |
 
-## Current Persistence Status
+## 目前資料保存狀態
 
-- Backend reads/writes `group_buy_activities`, `promotion_tiers`, `activity_notices`, `status_history`, and `audit_logs` for implemented activity APIs.
-- Seed data populates users, roles, one merchant/store, menu items, activities, and tiers.
-- Order, payment, settlement, and pickup tables currently contain no development records and are not connected to mobile flows.
-- `database/test/` is a separate prototype fixture database. It must not be treated as production schema or live mobile persistence.
-- Core cart/order customization data is now first-normal-form friendly: selected sweetness, ice, toppings, and size are represented as child rows instead of JSON arrays.
-- Activity capacity is derived from the highest promotion tier. `group_buy_activities.maximum_cups` should match that highest tier unless a future separate capacity rule is explicitly added.
+- Backend 已經會讀寫 `group_buy_activities`、`promotion_tiers`、`activity_notices`、`status_history` 與 `audit_logs`，用於目前已實作的活動 API。
+- Seed data 會建立 users、roles、一組或多組 merchant/store、menu items、activities 與 tiers。
+- `orders`、payment、settlement、pickup 相關資料表目前仍偏向候選設計與付款模組串接準備，尚未完整連到所有 mobile 流程。
+- `database/test/` 是舊 prototype fixture database，不應視為正式 schema 或目前 mobile 的權威資料來源。
+- 購物車與訂單客製化資料已朝 first normal form 調整：甜度、冰塊、加料與尺寸以 child rows 表示，不以 JSON array 當主要資料結構。
+- 活動容量目前由最高 `promotion_tiers.target_cups` 推導；除非未來明確新增獨立容量規則，`group_buy_activities.maximum_cups` 應與最高門檻一致。
 
-## Known Schema Gaps
+## 已確認的業務規則
 
-| Area                       | Gap / decision                                                                                                                                                                             |
-| -------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
-| Order status               | Mobile uses `readyForPickup`; schema does not. Decide whether pickup readiness belongs only to `pickup_status`.                                                                            |
-| Pickup status              | Mobile uses `preparing`; schema does not. Add it or derive it from activity/acceptance state.                                                                                              |
-| Order revisions            | Authorized order edits need immutable before/after history.                                                                                                                                |
-| Pricing snapshots          | Exact applied tier and per-order discount allocation must be reproducible.                                                                                                                 |
-| Store/menu source          | Seven-store test database and one-store development database are not unified.                                                                                                              |
-| Authentication             | Formal direction is Firebase Auth with Google Login only. Password fields are legacy development compatibility; database must map Firebase identity to `users` and role/permission tables. |
-| Notification               | No notification delivery or event table yet.                                                                                                                                               |
-| Migrations                 | Current schema is recreated by script; no production migration history exists.                                                                                                             |
-| Test fixture normalization | `database/test/` still uses JSON fields for prototype map/menu exports and is not the canonical normalized schema.                                                                         |
+- 正式登入只使用 Firebase Auth + Google Login。
+- Mobile 不顯示角色選擇，使用者不能自行選顧客、店家或管理員。
+- Backend 驗證 Firebase ID token 後，依 `users.firebase_uid`、`user_roles` 與 `merchant_users` 決定身份。
+- 顧客送出訂單並完成 LINE Pay 預授權後，訂單即納入團購杯數統計。
+- 店家不需要逐筆確認接單，也不能任意取消單一已預授權訂單。
+- 顧客可在截止前 30 分鐘以前修改訂單或退出團購；進入截止前 30 分鐘後不可修改或退出。
+- 店家可在截止前 30 分鐘以前取消整個團購；進入截止前 30 分鐘後不可取消。
+- 團購截止時間必須在建立或發布後 24 小時內。
+- 若顧客修改已預授權訂單，採 replacement flow：舊預授權先保留，新預授權成功後才替換；新預授權失敗時，原訂單與原預授權維持有效。
 
-## 2026-07-05 Authentication Database Direction
+## 已知 schema 缺口
 
-- Firebase Auth handles Google Login and identity proof.
-- Backend database still owns application identity, roles, merchant-store permissions, orders, payments, and audit history.
-- Canonical mapping field is `users.firebase_uid`.
-- Use `users.firebase_uid` for backend lookups. Email can be a fallback for first-time account linking, but should not be the only permanent key.
-- Password-related columns may remain during development but should not be required for production Google-only login.
-- Seed data must eventually include Firebase UID placeholders or a documented local development mapping.
-- Development role testing should seed one `firebase_uid` per test identity. The role is still resolved from `user_roles`, and merchant store permission is still resolved from `merchant_users`.
+| 範圍                    | 缺口或待決策項目                                                                                                      |
+| ----------------------- | --------------------------------------------------------------------------------------------------------------------- |
+| Order revision          | 已預授權訂單修改需要不可變更的 before/after 歷史紀錄，尚未建立 `order_revisions`。                                    |
+| Pricing snapshot        | 實際適用門檻、折扣分配與請款金額需要可重現，目前仍需補強欄位或 settlement 設計。                                      |
+| Activity deadline       | 24 小時截止限制與截止前 30 分鐘鎖定規則需落到 schema/API validation。                                                 |
+| Merchant acceptance     | `orders.merchant_acceptance_status` 是早期候選欄位；最新規則不需要店家逐筆確認接單，未來可考慮移除或固定為 accepted。 |
+| Pickup status           | Mobile 曾使用 `preparing`，目前 schema 沒有該值；應優先用 activity/order 狀態與 `pickup_status = ready` 表示。        |
+| Store/menu source       | 七間店家的測試資料與正式開發資料需統一來源。                                                                          |
+| Authentication          | Password 欄位屬於開發相容；正式方向以 Firebase UID 對應 backend user 與角色權限。                                     |
+| Notification            | 尚未有通知 delivery 或 notification event 資料表。                                                                    |
+| Migrations              | 目前 SQLite schema 可重建，尚未有正式 production migration history。                                                  |
+| Test fixture            | `database/test/` 仍有 JSON 欄位供 prototype 匯出，不是權威 normalized schema。                                        |
 
-## Transaction Boundaries Required Later
+## 2026-07-05 Authentication 資料庫方向
 
-1. Submit order: validate activity/menu/prices, write order/items, initiate or reserve authorization workflow.
-2. Modify authorized order: preserve revision, void/re-authorize safely, update counted cups once.
-3. Deadline settlement: lock activity/orders, count authorized cups, choose tier, persist settlement, capture/void each payment idempotently.
-4. Cancel activity: cancel eligible orders, handle authorizations, write histories and audit records.
-5. Pickup: validate credential, mark pickup/order completion, write history atomically.
+- Firebase Auth 負責 Google Login 與身份證明。
+- Backend database 仍負責 app identity、roles、merchant-store permissions、orders、payments 與 audit history。
+- 權威對應欄位是 `users.firebase_uid`。
+- Backend 查詢應優先使用 `users.firebase_uid`。Email 可以作為首次連結帳號的輔助依據，但不應成為永久唯一身份鍵。
+- Password 相關欄位可在開發期間保留，但正式 Google-only login 不應依賴 password。
+- Seed data 應逐步補上 Firebase UID placeholder 或明確的本機開發 mapping。
+- 開發期間測不同角色時，每個測試身份應 seed 一個 `firebase_uid`；角色仍由 `user_roles` 決定，店家門市權限仍由 `merchant_users` 決定。
+
+## 後續需要的交易邊界
+
+1. 送出訂單：驗證活動、菜單、價格、剩餘容量，建立 order/items，並啟動 LINE Pay 預授權。
+2. 修改已預授權訂單：保存 revision，進行 replacement authorization，避免杯數重複計算或超過上限。
+3. 截止結算：鎖定活動與合格訂單，計算 authorized cups，選擇適用 tier，保存 settlement，並以 idempotent 方式 capture/void payment。
+4. 取消活動：只允許截止前 30 分鐘以前取消，取消 eligible orders，處理 authorizations，寫入 history 與 audit log。
+5. 取貨：驗證 pickup credential，更新 pickup/order completion，並寫入 status history。

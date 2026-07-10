@@ -1,8 +1,8 @@
-# Data Dictionary
+# 資料字典
 
-Last updated: 2026-06-25
+最後更新：2026-06-25
 
-## Language / 中文註解規則
+## 語言規則
 
 本文件用來整理專案詞彙，避免同一個概念在 mobile、API、database 使用不同名稱。
 
@@ -12,70 +12,70 @@ Last updated: 2026-06-25
 - 同一概念要固定一組英文命名，再用中文註解輔助理解。
 - 本文件部分早期中文詞彙可能有編碼亂碼；若要交報告，建議以 `docs/database-design-v1.md` 的命名為準重新整理。
 
-This document defines preferred product terminology. It is used to keep mobile UI, API JSON, and database naming consistent.
+本文件定義建議使用的產品詞彙，用來維持 mobile UI、API JSON 與 database 命名一致。
 
-## Core Terms
+## 核心詞彙
 
-| Chinese term     | Meaning                                         | Mobile / API (`camelCase`)       | Database (`snake_case`)               | Notes                                                 |
-| ---------------- | ----------------------------------------------- | -------------------------------- | ------------------------------------- | ----------------------------------------------------- |
-| 使用者           | A person with one or more roles                 | `user`, `userId`                 | `users`, `user_id`                    | Roles can be customer, merchant, or admin             |
-| 使用者角色       | A permission role attached to a user            | `userRole`, `role`               | `user_roles`, `role`                  | Current roles: `customer`, `merchant`, `admin`        |
-| 商家             | Business organization                           | `merchant`, `merchantId`         | `merchants`, `merchant_id`            | Not the same as a physical store                      |
-| 門市 / 店家      | Physical ordering and pickup location           | `store`, `storeId`               | `stores`, `store_id`                  | Prefer `store`; avoid introducing `shop`              |
-| 菜單品項         | Drink or product sold by a store                | `menuItem`, `menuItemId`         | `menu_items`, `menu_item_id`          | Base price is stored here                             |
-| 客製化選項       | Sweetness, ice, topping, or size option         | `customizationOption`            | `customization_options`               | Some options may add price                            |
-| 團購活動         | Merchant-created group-buy event                | `groupBuyActivity`, `activityId` | `group_buy_activities`, `activity_id` | Mobile prototype may still use `deal`                 |
-| 優惠級距         | Cup threshold and discount amount               | `promotionTier`, `tierId`        | `promotion_tiers`, `tier_id`          | Example: 20 cups discount 200                         |
-| 活動注意事項     | Merchant note shown on activity detail          | `activityNotice`                 | `activity_notices`                    | Stored separately for multiple notes                  |
-| 購物車草稿       | Items selected but not submitted as an order    | `cartDraft`, `cartDraftId`       | `cart_drafts`, `cart_draft_id`        | Used before payment authorization                     |
-| 購物車品項       | One drink item in a cart draft                  | `cartDraftItem`                  | `cart_draft_items`                    | Customizations are stored in child rows               |
-| 購物車客製化明細 | One selected option for one cart item           | `cartDraftItemCustomization`     | `cart_draft_item_customizations`      | Keeps cart data first-normal-form friendly            |
-| 訂單             | One customer's participation in one activity    | `order`, `orderId`               | `orders`, `order_id`                  | Contains one or more order items                      |
-| 訂單品項         | One drink item snapshot inside an order         | `orderItem`, `orderItemId`       | `order_items`, `order_item_id`        | Preserve item name and price snapshots                |
-| 訂單客製化明細   | One selected option snapshot for one order item | `orderItemCustomization`         | `order_item_customizations`           | Preserve sweetness, ice, topping, and size as rows    |
-| 原價金額         | Amount calculated before discount               | `originalAmount`                 | `original_amount`                     | Integer New Taiwan dollar amount                      |
-| 預授權金額       | Amount authorized by payment provider           | `authorizedAmount`               | `authorized_amount`                   | Not captured yet                                      |
-| 最終金額         | Amount after final tier calculation             | `finalAmount`                    | `final_amount`                        | Determined at settlement                              |
-| 請款金額         | Amount actually captured                        | `captureAmount`                  | `capture_amount`                      | Must not exceed valid authorization                   |
-| 釋放金額         | Authorized amount not captured                  | `releasedAmount`                 | `released_amount`                     | Release timing depends on provider/bank               |
-| 付款預授權       | Payment provider authorization attempt          | `paymentAuthorization`           | `payment_authorizations`              | Target flow is LINE Pay-like authorization            |
-| 付款請款         | Capture after activity settlement               | `paymentCapture`                 | `payment_captures`                    | May be partial capture                                |
-| 金流事件         | Provider webhook or event payload               | `paymentProviderEvent`           | `payment_provider_events`             | Needed for idempotency and reconciliation             |
-| 活動結算         | Deadline outcome and applied tier               | `activitySettlement`             | `activity_settlements`                | Should be created once and auditable                  |
-| 商家接單狀態     | Whether merchant accepted production            | `merchantAcceptanceStatus`       | `merchant_acceptance_status`          | Separate from order and pickup status                 |
-| 取貨狀態         | Preparation and pickup lifecycle                | `pickupStatus`                   | `pickup_status`                       | `ready` means pickup code may be shown                |
-| 取貨憑證         | Customer code/QR used at pickup                 | `pickupCredential`, `pickupCode` | `pickup_credentials`, `pickup_code`   | Must belong to exactly one order                      |
-| 狀態歷史         | Immutable status transition record              | `statusHistory`                  | `status_history`                      | Include actor, reason, and timestamp                  |
-| 稽核紀錄         | Sensitive actor/action record                   | `auditLog`                       | `audit_logs`                          | Required for admin, payment, and cancellation actions |
+| 中文詞彙         | 意義                            | Mobile / API (`camelCase`)       | Database (`snake_case`)               | 備註                                         |
+| ---------------- | ------------------------------- | -------------------------------- | ------------------------------------- | -------------------------------------------- |
+| 使用者           | 擁有一個或多個角色的人          | `user`, `userId`                 | `users`, `user_id`                    | 角色可以是 `customer`、`merchant` 或 `admin` |
+| 使用者角色       | 掛在使用者身上的權限角色        | `userRole`, `role`               | `user_roles`, `role`                  | 目前角色為 `customer`、`merchant`、`admin`   |
+| 商家             | 商業組織                        | `merchant`, `merchantId`         | `merchants`, `merchant_id`            | 不等同實體店家或門市                         |
+| 門市 / 店家      | 實體下單與取貨地點              | `store`, `storeId`               | `stores`, `store_id`                  | 優先使用 `store`，避免再引入 `shop`          |
+| 菜單品項         | 店家販售的飲品或商品            | `menuItem`, `menuItemId`         | `menu_items`, `menu_item_id`          | 基本價格存放於此                             |
+| 客製化選項       | 甜度、冰塊、加料或尺寸選項      | `customizationOption`            | `customization_options`               | 部分選項可能加價                             |
+| 團購活動         | 商家建立的團購事件              | `groupBuyActivity`, `activityId` | `group_buy_activities`, `activity_id` | Mobile prototype 仍可能使用 `deal`           |
+| 優惠級距         | 杯數門檻與折扣金額              | `promotionTier`, `tierId`        | `promotion_tiers`, `tier_id`          | 例如 20 杯折 200 元                          |
+| 活動注意事項     | 顯示於活動詳情的商家備註        | `activityNotice`                 | `activity_notices`                    | 多筆注意事項分開儲存                         |
+| 購物車草稿       | 已選擇但尚未送出成訂單的品項    | `cartDraft`, `cartDraftId`       | `cart_drafts`, `cart_draft_id`        | 用於付款預授權前                             |
+| 購物車品項       | 購物車草稿中的一杯飲料          | `cartDraftItem`                  | `cart_draft_items`                    | 客製化內容以 child rows 儲存                 |
+| 購物車客製化明細 | 購物車品項的一個已選選項        | `cartDraftItemCustomization`     | `cart_draft_item_customizations`      | 讓購物車資料符合 first normal form           |
+| 訂單             | 顧客參與某一個團購活動的紀錄    | `order`, `orderId`               | `orders`, `order_id`                  | 包含一個或多個訂單品項                       |
+| 訂單品項         | 訂單中的單杯飲料 snapshot       | `orderItem`, `orderItemId`       | `order_items`, `order_item_id`        | 保留品項名稱與價格 snapshot                  |
+| 訂單客製化明細   | 訂單品項的一個已選選項 snapshot | `orderItemCustomization`         | `order_item_customizations`           | 甜度、冰塊、加料與尺寸以 rows 保存           |
+| 原價金額         | 折扣前計算出的金額              | `originalAmount`                 | `original_amount`                     | 台幣整數金額                                 |
+| 預授權金額       | 金流服務商已授權的金額          | `authorizedAmount`               | `authorized_amount`                   | 尚未請款                                     |
+| 最終金額         | 最終優惠級距計算後的金額        | `finalAmount`                    | `final_amount`                        | 在結算時決定                                 |
+| 請款金額         | 實際請款金額                    | `captureAmount`                  | `capture_amount`                      | 不得超過有效授權金額                         |
+| 釋放金額         | 已授權但未請款的金額            | `releasedAmount`                 | `released_amount`                     | 實際釋放時間取決於 provider/bank             |
+| 付款預授權       | 金流服務商的付款授權嘗試        | `paymentAuthorization`           | `payment_authorizations`              | 目標流程類似 LINE Pay authorization          |
+| 付款請款         | 活動結算後的 capture            | `paymentCapture`                 | `payment_captures`                    | 可能是 partial capture                       |
+| 金流事件         | Provider webhook 或事件 payload | `paymentProviderEvent`           | `payment_provider_events`             | 用於 idempotency 與 reconciliation           |
+| 活動結算         | 截止結果與套用級距              | `activitySettlement`             | `activity_settlements`                | 應只建立一次且可稽核                         |
+| 商家接單狀態     | 商家是否接受製作                | `merchantAcceptanceStatus`       | `merchant_acceptance_status`          | 與訂單狀態、取貨狀態分開                     |
+| 取貨狀態         | 製作與取貨生命週期              | `pickupStatus`                   | `pickup_status`                       | `ready` 代表可以顯示取貨碼                   |
+| 取貨憑證         | 顧客取貨時使用的 code/QR        | `pickupCredential`, `pickupCode` | `pickup_credentials`, `pickup_code`   | 必須只屬於一筆訂單                           |
+| 狀態歷史         | 不可變更的狀態轉換紀錄          | `statusHistory`                  | `status_history`                      | 包含 actor、reason 與 timestamp              |
+| 稽核紀錄         | 敏感操作者與操作紀錄            | `auditLog`                       | `audit_logs`                          | admin、payment、cancellation 操作都需要      |
 
-## Derived Values
+## 衍生值
 
-| Term           | Meaning                                                | Rule                                                    |
-| -------------- | ------------------------------------------------------ | ------------------------------------------------------- |
-| 已預授權杯數   | Cups from orders whose payment authorization succeeded | Count only orders with authorized payment state         |
-| 下一級目標杯數 | Lowest promotion tier above current authorized cups    | Example: 25 cups with tiers 20/30/40 shows 30           |
-| 剩餘杯數       | Cups needed to reach next displayed target             | `nextTargetCups - authorizedCups`, minimum 0            |
-| 是否達標       | Whether an activity reached a promotion tier           | Based on authorized cups at deadline or current display |
+| 詞彙           | 意義                               | 規則                                          |
+| -------------- | ---------------------------------- | --------------------------------------------- |
+| 已預授權杯數   | 付款預授權成功訂單的杯數           | 只計算付款狀態已授權的訂單                    |
+| 下一級目標杯數 | 高於目前已預授權杯數的最低優惠級距 | 例如目前 25 杯、級距 20/30/40，畫面顯示 30    |
+| 剩餘杯數       | 達到下一個顯示目標還需要的杯數     | `nextTargetCups - authorizedCups`，最小值為 0 |
+| 是否達標       | 活動是否達到優惠級距               | 依截止時的已預授權杯數，或目前顯示進度判斷    |
 
-## Normalization Notes
+## 正規化備註
 
-- Core transaction data should avoid storing multiple selected options in one JSON/text column.
-- Cart item and order item customizations are stored as child rows so one row represents one selected option.
-- `payment_provider_events.payload_json` and `audit_logs.metadata_json` are retained as raw external-event/audit payloads, not as query-oriented business fields.
+- 核心交易資料應避免把多個已選選項塞進同一個 JSON/text 欄位。
+- 購物車品項與訂單品項的客製化內容以 child rows 儲存，讓一列代表一個已選選項。
+- `payment_provider_events.payload_json` 與 `audit_logs.metadata_json` 保留外部事件與稽核 payload 原文，不作為主要查詢用業務欄位。
 
-## Deprecated Or Legacy Terms
+## 棄用或舊版詞彙
 
-| Legacy term                  | Preferred replacement                     | Reason                                                            |
-| ---------------------------- | ----------------------------------------- | ----------------------------------------------------------------- |
-| `deal`                       | `groupBuyActivity` / `activity`           | UI shorthand is ambiguous in backend/database work                |
-| `groupOrder` for an activity | `groupBuyActivity`                        | An order belongs to a customer; an activity belongs to a store    |
-| `shop`                       | `store`                                   | Current schema and mobile mock use store                          |
-| `discountTier`               | `promotionTier`                           | Matches current database table                                    |
-| `paymentReport`              | `paymentAuthorization` / `paymentCapture` | Manual transfer report flow is no longer the target payment model |
+| 舊詞彙                       | 建議替代名稱                              | 原因                                      |
+| ---------------------------- | ----------------------------------------- | ----------------------------------------- |
+| `deal`                       | `groupBuyActivity` / `activity`           | UI 簡稱在 backend/database 工作中容易混淆 |
+| activity 使用的 `groupOrder` | `groupBuyActivity`                        | order 屬於顧客；activity 屬於店家         |
+| `shop`                       | `store`                                   | 目前 schema 與 mobile mock 使用 `store`   |
+| `discountTier`               | `promotionTier`                           | 與目前 database table 一致                |
+| `paymentReport`              | `paymentAuthorization` / `paymentCapture` | 手動匯款回報流程已不是目標付款模型        |
 
-## Naming Rules
+## 命名規則
 
-- Mobile variables and API JSON: `camelCase`.
-- Database tables and columns: `snake_case`.
-- Status values crossing API boundaries: use database-compatible `snake_case` values.
-- Currency values are integer New Taiwan dollar amounts unless a future multi-currency requirement is approved.
+- Mobile 變數與 API JSON 使用 `camelCase`。
+- Database tables 與 columns 使用 `snake_case`。
+- 跨 API 邊界的 status values 使用與 database 相容的 `snake_case` values。
+- 除非未來核准多幣別需求，金額一律使用台幣整數。
