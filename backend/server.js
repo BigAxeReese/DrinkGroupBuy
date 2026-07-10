@@ -1,13 +1,9 @@
 const http = require("node:http");
 const {
-  authorizeLinePayPaymentInDatabase,
   cancelGroupBuyActivity,
   createGroupBuyActivity,
   createOrder,
-  createPendingLinePayAuthorization,
-  getLatestLinePayAuthorizationForOrder,
   getOrderDetail,
-  getOrderPaymentContext,
   getUserAuthProfileByFirebaseUid,
   getUserAuthProfileByLoginIdentifier,
   getUserAuthProfileById,
@@ -16,10 +12,15 @@ const {
 } = require("./db");
 const { createAuthToken, getBearerToken, verifyAuthToken, verifyPassword } = require("./auth");
 const { verifyFirebaseIdToken } = require("./firebaseAuth");
-const { confirmLinePayPayment, requestLinePayPayment } = require("./linePayClient");
+const {
+  PaymentServiceError,
+  cancelLinePayAuthorization,
+  clearPendingLinePayAuthorizationsForOrderUpdate,
+  confirmLinePayAuthorization,
+  requestLinePayAuthorization
+} = require("./payments/linePayService");
 
 const port = Number(process.env.PORT ?? 3000);
-const pendingLinePayPayments = new Map();
 
 const server = http.createServer(async (request, response) => {
   try {
@@ -234,12 +235,10 @@ const server = http.createServer(async (request, response) => {
         return;
       }
 
-      pendingLinePayPayments.delete(orderMatch[1]);
-      for (const authorization of result.failedAuthorizations || []) {
-        if (authorization.providerAuthorizationId) {
-          pendingLinePayPayments.delete(authorization.providerAuthorizationId);
-        }
-      }
+      clearPendingLinePayAuthorizationsForOrderUpdate(
+        orderMatch[1],
+        result.failedAuthorizations || []
+      );
 
       sendJson(response, 200, { order: result.order });
       return;
@@ -274,91 +273,25 @@ const server = http.createServer(async (request, response) => {
       }
 
       const body = await readJsonBody(request);
-      const validationError = validateLinePayRequest(body);
-      if (validationError) {
-        sendJson(response, 400, { error: validationError });
-        return;
+      try {
+        const result = await requestLinePayAuthorization({ authUser, body });
+        sendJson(response, 201, result);
+      } catch (error) {
+        if (error instanceof PaymentServiceError) {
+          sendJson(response, error.statusCode, error.payload);
+          return;
+        }
+        throw error;
       }
-
-      const order = getOrderPaymentContext(body.orderId);
-      if (!order) {
-        sendJson(response, 404, {
-          error: "Order not found in backend database",
-          nextStep: "Create the order in the backend before requesting LINE Pay authorization."
-        });
-        return;
-      }
-      if (order.customerUserId !== authUser.id && !authUser.roles.includes("admin")) {
-        sendJson(response, 403, { error: "Order access denied" });
-        return;
-      }
-      if (order.originalAmount !== Number(body.amount)) {
-        sendJson(response, 409, {
-          error: "LINE Pay authorization amount does not match order original amount",
-          orderOriginalAmount: order.originalAmount,
-          requestedAmount: Number(body.amount)
-        });
-        return;
-      }
-      const existingAuthorization = getLatestLinePayAuthorizationForOrder(body.orderId);
-      if (order.paymentStatus === "authorized" || existingAuthorization?.status === "authorized") {
-        sendJson(response, 409, {
-          error: "Order is already authorized",
-          status: "already_authorized",
-          authorization: existingAuthorization
-        });
-        return;
-      }
-      if (existingAuthorization?.status === "pending") {
-        sendJson(response, 409, {
-          error: "Order already has a pending LINE Pay authorization",
-          status: "authorization_already_pending",
-          authorization: existingAuthorization
-        });
-        return;
-      }
-
-      const payload = await requestLinePayPayment(body);
-      const info = payload.info || {};
-      const transactionId = info.transactionId ? String(info.transactionId) : null;
-      const authorization = createPendingLinePayAuthorization({
-        orderId: body.orderId,
-        amount: Number(body.amount),
-        providerTransactionId: transactionId
-      });
-      const pendingPayment = {
-        orderId: body.orderId,
-        amount: Number(body.amount),
-        currency: body.currency || process.env.LINE_PAY_CURRENCY || "TWD",
-        transactionId,
-        authorizationId: authorization?.id,
-        createdAt: new Date().toISOString()
-      };
-
-      pendingLinePayPayments.set(body.orderId, pendingPayment);
-      if (transactionId) {
-        pendingLinePayPayments.set(transactionId, pendingPayment);
-      }
-
-      sendJson(response, 201, {
-        provider: "line_pay",
-        orderId: body.orderId,
-        transactionId,
-        authorization,
-        paymentUrl: info.paymentUrl,
-        paymentAccessToken: info.paymentAccessToken,
-        status: "payment_url_created"
-      });
       return;
     }
 
     if (request.method === "GET" && url.pathname === "/api/payments/line-pay/confirm") {
       const transactionId = url.searchParams.get("transactionId");
       const orderId = url.searchParams.get("orderId");
-      const pendingPayment = (transactionId && pendingLinePayPayments.get(transactionId))
-        || (orderId && pendingLinePayPayments.get(orderId));
+      const result = await confirmLinePayAuthorization({ transactionId, orderId });
 
-      if (!transactionId || !pendingPayment) {
+      if (!result) {
         sendHtml(response, 409, buildLinePayResultPage({
           title: "LINE Pay 預授權無法完成",
           message: "找不到待確認的付款資料。請回到 App 重新發起預授權。"
@@ -366,24 +299,11 @@ const server = http.createServer(async (request, response) => {
         return;
       }
 
-      const payload = await confirmLinePayPayment(transactionId, {
-        amount: pendingPayment.amount,
-        currency: pendingPayment.currency
-      });
-      const authorization = authorizeLinePayPaymentInDatabase({
-        orderId: pendingPayment.orderId,
-        providerTransactionId: transactionId,
-        amount: pendingPayment.amount,
-        providerPayload: payload
-      });
-      pendingLinePayPayments.delete(pendingPayment.orderId);
-      pendingLinePayPayments.delete(transactionId);
-
       sendHtml(response, 200, buildLinePayResultPage({
         title: "LINE Pay 預授權完成",
         message: "目前僅完成授權，尚未正式請款。請回到 App 查看團購進度。",
-        detail: `Order ID: ${pendingPayment.orderId}${authorization ? ` / Authorization: ${authorization.status}` : ""}`,
-        rawCode: payload.returnCode
+        detail: `Order ID: ${result.pendingPayment.orderId}${result.authorization ? ` / Authorization: ${result.authorization.status}` : ""}`,
+        rawCode: result.payload.returnCode
       }));
       return;
     }
@@ -391,8 +311,7 @@ const server = http.createServer(async (request, response) => {
     if (request.method === "GET" && url.pathname === "/api/payments/line-pay/cancel") {
       const transactionId = url.searchParams.get("transactionId");
       const orderId = url.searchParams.get("orderId");
-      if (transactionId) pendingLinePayPayments.delete(transactionId);
-      if (orderId) pendingLinePayPayments.delete(orderId);
+      cancelLinePayAuthorization({ transactionId, orderId });
 
       sendHtml(response, 200, buildLinePayResultPage({
         title: "LINE Pay 預授權已取消",
@@ -520,17 +439,6 @@ function validateUpdateOrder(body) {
     && !["decline_original_price", "accept_original_price"].includes(body.fallbackPurchasePreference)
   ) {
     return "fallbackPurchasePreference is invalid";
-  }
-  return null;
-}
-
-function validateLinePayRequest(body) {
-  if (!body.orderId) return "Missing required field: orderId";
-  if (!Number.isInteger(Number(body.amount)) || Number(body.amount) <= 0) {
-    return "amount must be a positive integer";
-  }
-  if (body.products != null && !Array.isArray(body.products)) {
-    return "products must be an array";
   }
   return null;
 }

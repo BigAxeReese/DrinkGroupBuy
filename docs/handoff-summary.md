@@ -6,7 +6,7 @@
 
 ## 專案方向
 
-DrinkGroupBuy 目前是 full-stack Android-first mobile app 專案。
+DrinkGroupBuy 目前是全端 Android-first mobile app 專案。
 
 目前結構：
 
@@ -39,7 +39,7 @@ project-root/
 
 ## 最重要規則
 
-不要提交 secrets。
+不要提交機密資料 `secrets`。
 
 機密資料只放在：
 
@@ -82,9 +82,9 @@ backend/.env
 
 重要限制：
 
-- 部分 runtime state 仍在 mobile local state。
-- App 啟動時尚未完整載入後端 authoritative activity / order / payment data。
-- 部分畫面仍可能有 prototype fallback behavior。
+- 部分執行狀態 `runtime state` 仍保存在 mobile local state。
+- App 啟動時尚未完整載入後端權威 activity / order / payment data。
+- 部分畫面仍可能有 prototype fallback 行為。
 
 ## 目前 Backend 狀態
 
@@ -96,28 +96,31 @@ backend/
 
 重要檔案：
 
-| 檔案 | 用途 |
-| --- | --- |
-| `backend/server.js` | HTTP API server |
-| `backend/db.js` | SQLite 資料庫存取 |
-| `backend/auth.js` | 開發用登入、token、密碼工具 |
-| `backend/linePayClient.js` | LINE Pay sandbox request signing |
-| `backend/README.md` | 後端啟動說明 |
+| 檔案                                      | 用途                                          |
+| ----------------------------------------- | --------------------------------------------- |
+| `backend/server.js`                       | HTTP API server                               |
+| `backend/db.js`                           | SQLite 資料庫存取                             |
+| `backend/auth.js`                         | 開發用登入、token、密碼工具                   |
+| `backend/payments/linePayClient.js`       | LINE Pay sandbox request 簽章                 |
+| `backend/payments/linePayService.js`      | LINE Pay 授權 request / confirm / cancel 流程 |
+| `backend/payments/linePayPendingStore.js` | LINE Pay redirect 前後的暫存查找              |
+| `backend/linePayClient.js`                | payment client 相容匯出                       |
+| `backend/README.md`                       | 後端啟動說明                                  |
 
 目前 API：
 
-| Method | Path | 用途 |
-| --- | --- | --- |
-| `POST` | `/api/auth/login` | 登入 |
-| `GET` | `/health` | 健康檢查 |
-| `GET` | `/api/group-buy-activities` | 查詢團購活動 |
-| `POST` | `/api/merchant/group-buy-activities` | 商家建立團購活動 |
-| `POST` | `/api/orders` | 顧客建立訂單 |
-| `GET` | `/api/orders/:orderId` | 查詢訂單明細 |
-| `DELETE` | `/api/admin/group-buy-activities/:activityId` | 管理員取消活動 |
-| `POST` | `/api/payments/line-pay/request` | 建立 LINE Pay sandbox 授權請求 |
-| `GET` | `/api/payments/line-pay/confirm` | LINE Pay confirm redirect |
-| `GET` | `/api/payments/line-pay/cancel` | LINE Pay cancel redirect |
+| 方法     | 路徑                                          | 用途                           |
+| -------- | --------------------------------------------- | ------------------------------ |
+| `POST`   | `/api/auth/login`                             | 登入                           |
+| `GET`    | `/health`                                     | 健康檢查                       |
+| `GET`    | `/api/group-buy-activities`                   | 查詢團購活動                   |
+| `POST`   | `/api/merchant/group-buy-activities`          | 商家建立團購活動               |
+| `POST`   | `/api/orders`                                 | 顧客建立訂單                   |
+| `GET`    | `/api/orders/:orderId`                        | 查詢訂單明細                   |
+| `DELETE` | `/api/admin/group-buy-activities/:activityId` | 管理員取消活動                 |
+| `POST`   | `/api/payments/line-pay/request`              | 建立 LINE Pay sandbox 授權請求 |
+| `GET`    | `/api/payments/line-pay/confirm`              | LINE Pay confirm redirect      |
+| `GET`    | `/api/payments/line-pay/cancel`               | LINE Pay cancel redirect       |
 
 目前 backend 限制：
 
@@ -136,17 +139,17 @@ backend/
 
 顧客使用手機號碼 + 密碼登入。
 
-| 顧客 | 手機 | 密碼 |
-| --- | --- | --- |
-| A | `0911000001` | `customer1` |
-| B | `0911000002` | `customer2` |
-| C | `0911000003` | `customer3` |
-| D | `0911000004` | `customer4` |
+| 顧客 | 手機         | 密碼        |
+| ---- | ------------ | ----------- |
+| A    | `0911000001` | `customer1` |
+| B    | `0911000002` | `customer2` |
+| C    | `0911000003` | `customer3` |
+| D    | `0911000004` | `customer4` |
 
 商家使用 email + 密碼登入。
 
-| 商家 | Email | 密碼 |
-| --- | --- | --- |
+| 商家    | Email                | 密碼        |
+| ------- | -------------------- | ----------- |
 | Store 1 | `store1@example.com` | `merchant1` |
 | Store 2 | `store2@example.com` | `merchant2` |
 | Store 3 | `store3@example.com` | `merchant3` |
@@ -157,8 +160,8 @@ backend/
 
 管理員：
 
-| Email | 密碼 |
-| --- | --- |
+| Email               | 密碼     |
+| ------------------- | -------- |
 | `admin@example.com` | `admin1` |
 
 ## 目前資料庫狀態
@@ -183,20 +186,20 @@ database/seed-dev.sql
 
 目前資料概況：
 
-| 資料 | 筆數 |
-| --- | ---: |
-| Users | 12 |
-| User roles | 12 |
-| Merchants | 7 |
-| Merchant users | 7 |
-| Stores | 7 |
-| Menu items | 8 |
-| Group-buy activities | 0 |
-| Promotion tiers | 0 |
-| Orders | 0 |
-| Payment authorizations | 0 |
-| Payment captures | 0 |
-| Pickup credentials | 0 |
+| 資料                     | 筆數 |
+| ------------------------ | ---: |
+| `users`                  | 12   |
+| `user_roles`             | 12   |
+| `merchants`              | 7    |
+| `merchant_users`         | 7    |
+| `stores`                 | 7    |
+| `menu_items`             | 8    |
+| `group_buy_activities`   | 0    |
+| `promotion_tiers`        | 0    |
+| `orders`                 | 0    |
+| `payment_authorizations` | 0    |
+| `payment_captures`       | 0    |
+| `pickup_credentials`     | 0    |
 
 意思：
 
@@ -216,24 +219,24 @@ Firebase Auth / Google Login 與 PostgreSQL 的關係：
 
 重要文件：
 
-| 檔案 | 用途 |
-| --- | --- |
-| `docs/database-design-v1.md` | 目前資料庫設計基準 |
-| `docs/postgresql-migration-plan.md` | SQLite 轉 PostgreSQL 規劃 |
-| `database/migrations/001_initial_postgres.sql` | PostgreSQL v1 schema draft |
+| 檔案                                            | 用途                              |
+| ----------------------------------------------- | --------------------------------- |
+| `docs/database-design-v1.md`                    | 目前資料庫設計基準                |
+| `docs/postgresql-migration-plan.md`             | SQLite 轉 PostgreSQL 規劃         |
+| `database/migrations/001_initial_postgres.sql`  | PostgreSQL v1 schema draft        |
 | `database/migrations/002_seed_dev_postgres.sql` | PostgreSQL development seed draft |
-| `database/docker-compose.postgres.yml` | 本機 PostgreSQL dev container |
+| `database/docker-compose.postgres.yml`          | 本機 PostgreSQL dev container     |
 
 PostgreSQL v1 決策：
 
-| 項目 | 決策 |
-| --- | --- |
-| 主鍵 | `text` |
-| 時間欄位 | `timestamptz` |
-| 布林欄位 | `boolean` |
-| 原始 JSON 欄位 | `jsonb` |
-| 狀態欄位 | `text check (...)` |
-| 金額 | `integer`，台幣整數 |
+| 項目           | 決策                |
+| -------------- | ------------------- |
+| 主鍵           | `text`              |
+| 時間欄位       | `timestamptz`       |
+| 布林欄位       | `boolean`           |
+| 原始 JSON 欄位 | `jsonb`             |
+| 狀態欄位       | `text check (...)`  |
+| 金額           | `integer`，台幣整數 |
 
 重要狀態：
 
@@ -285,7 +288,7 @@ PostgreSQL v1 決策：
 
 1. Mobile 啟動時應從後端載入 activities。
 2. 需要菜單讀取 API。
-3. 訂單列表與訂單明細應改成後端 authoritative。
+3. 訂單列表與訂單明細應改成以後端資料為準。
 4. 需要訂單修改 API。
 5. 真正支援授權後修改訂單前，需要 order revision history。
 6. 需要 deadline settlement job。
@@ -319,4 +322,4 @@ npm install
 
 7. 依照 `backend/README.md` 與 `mobile/README.md` 啟動 backend / mobile。
 
-注意：secrets 與本機 SQLite runtime data 不會自動出現在新電腦，除非你另外複製。
+注意：機密資料 `secrets` 與本機 SQLite runtime data 不會自動出現在新電腦，除非你另外複製。

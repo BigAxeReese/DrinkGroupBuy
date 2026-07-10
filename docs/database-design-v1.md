@@ -28,31 +28,31 @@ The authoritative implementation draft is still `database/schema.sql`. This docu
 
 As of 2026-07-02, the local development database contains:
 
-| Data area | Current count | Notes |
-| --- | ---: | --- |
-| Users | 12 | 4 customers, 7 merchants, 1 admin |
-| User roles | 12 | One active role per seeded user |
-| Merchants | 7 | One merchant organization per test store |
-| Merchant users | 7 | Each merchant account owns one merchant |
-| Stores | 7 | Includes map coordinates |
-| Menu items | 8 | Development menu items |
-| Group-buy activities | 0 | Cleared for clean testing |
-| Promotion tiers | 0 | Cleared with activities |
-| Orders | 0 | Cleared for clean testing |
-| Payment authorizations | 0 | Cleared for clean testing |
-| Payment captures | 0 | Cleared for clean testing |
-| Pickup credentials | 0 | Cleared for clean testing |
+| Data area              | Current count | Notes                                    |
+| ---------------------- | ------------: | ---------------------------------------- |
+| Users                  | 12            | 4 customers, 7 merchants, 1 admin        |
+| User roles             | 12            | One active role per seeded user          |
+| Merchants              | 7             | One merchant organization per test store |
+| Merchant users         | 7             | Each merchant account owns one merchant  |
+| Stores                 | 7             | Includes map coordinates                 |
+| Menu items             | 8             | Development menu items                   |
+| Group-buy activities   | 0             | Cleared for clean testing                |
+| Promotion tiers        | 0             | Cleared with activities                  |
+| Orders                 | 0             | Cleared for clean testing                |
+| Payment authorizations | 0             | Cleared for clean testing                |
+| Payment captures       | 0             | Cleared for clean testing                |
+| Pickup credentials     | 0             | Cleared for clean testing                |
 
 ## Main Entity Groups
 
 ### Identity And Roles
 
-| Table | Purpose | Primary key | Important relationships |
-| --- | --- | --- | --- |
-| `users` | Stores account identity shared by customers, merchants, and admins | `id` | 1 user can have many roles |
-| `user_private_profiles` | Stores internal private identity/contact data | `user_id` | 1 private profile belongs to one user |
-| `user_public_profiles` | Stores merchant/customer-facing alias data | `user_id` | 1 public profile belongs to one user |
-| `user_roles` | Stores the role granted to a user | `id` | Many roles belong to one user |
+| Table                   | Purpose                                                            | Primary key | Important relationships               |
+| ----------------------- | ------------------------------------------------------------------ | ----------- | ------------------------------------- |
+| `users`                 | Stores account identity shared by customers, merchants, and admins | `id`        | 1 user can have many roles            |
+| `user_private_profiles` | Stores internal private identity/contact data                      | `user_id`   | 1 private profile belongs to one user |
+| `user_public_profiles`  | Stores merchant/customer-facing alias data                         | `user_id`   | 1 public profile belongs to one user  |
+| `user_roles`            | Stores the role granted to a user                                  | `id`        | Many roles belong to one user         |
 
 Current login direction as of 2026-07-05:
 
@@ -78,11 +78,11 @@ Future PostgreSQL direction:
 
 ### Merchant And Store
 
-| Table | Purpose | Primary key | Important relationships |
-| --- | --- | --- | --- |
-| `merchants` | Business organization | `id` | 1 merchant can own many stores |
-| `stores` | Physical pickup and map location | `id` | Store belongs to one merchant |
-| `merchant_users` | Links one merchant account to one store | `id` | One store has one merchant account; one merchant account manages one store |
+| Table            | Purpose                                 | Primary key | Important relationships                                                    |
+| ---------------- | --------------------------------------- | ----------- | -------------------------------------------------------------------------- |
+| `merchants`      | Business organization                   | `id`        | 1 merchant can own many stores                                             |
+| `stores`         | Physical pickup and map location        | `id`        | Store belongs to one merchant                                              |
+| `merchant_users` | Links one merchant account to one store | `id`        | One store has one merchant account; one merchant account manages one store |
 
 Design note:
 
@@ -101,10 +101,10 @@ Future PostgreSQL direction:
 
 ### Menu And Customization
 
-| Table | Purpose | Primary key | Important relationships |
-| --- | --- | --- | --- |
-| `menu_items` | Drink/product sold by a store | `id` | Many menu items belong to one store |
-| `customization_options` | Sweetness, ice, topping, size options | `id` | Many options belong to one menu item |
+| Table                   | Purpose                               | Primary key | Important relationships              |
+| ----------------------- | ------------------------------------- | ----------- | ------------------------------------ |
+| `menu_items`            | Drink/product sold by a store         | `id`        | Many menu items belong to one store  |
+| `customization_options` | Sweetness, ice, topping, size options | `id`        | Many options belong to one menu item |
 
 Design note:
 
@@ -124,11 +124,11 @@ Future PostgreSQL direction:
 
 ### Group-Buy Activity
 
-| Table | Purpose | Primary key | Important relationships |
-| --- | --- | --- | --- |
-| `group_buy_activities` | Merchant-created group-buy event | `id` | Activity belongs to one store |
-| `promotion_tiers` | Cup thresholds and discount amount | `id` | Many tiers belong to one activity |
-| `activity_notices` | Merchant notes shown on activity detail | `id` | Many notices belong to one activity |
+| Table                  | Purpose                                 | Primary key | Important relationships             |
+| ---------------------- | --------------------------------------- | ----------- | ----------------------------------- |
+| `group_buy_activities` | Merchant-created group-buy event        | `id`        | Activity belongs to one store       |
+| `promotion_tiers`      | Cup thresholds and discount amount      | `id`        | Many tiers belong to one activity   |
+| `activity_notices`     | Merchant notes shown on activity detail | `id`        | Many notices belong to one activity |
 
 Important rules:
 
@@ -148,11 +148,11 @@ Future PostgreSQL direction:
 
 ### Cart Draft
 
-| Table | Purpose | Primary key | Important relationships |
-| --- | --- | --- | --- |
-| `cart_drafts` | Customer-selected items before order submission | `id` | Cart belongs to one user and one activity |
-| `cart_draft_items` | One drink in the cart | `id` | Many items belong to one cart |
-| `cart_draft_item_customizations` | One selected option for a cart item | `id` | Many customizations belong to one cart item |
+| Table                            | Purpose                                         | Primary key | Important relationships                     |
+| -------------------------------- | ----------------------------------------------- | ----------- | ------------------------------------------- |
+| `cart_drafts`                    | Customer-selected items before order submission | `id`        | Cart belongs to one user and one activity   |
+| `cart_draft_items`               | One drink in the cart                           | `id`        | Many items belong to one cart               |
+| `cart_draft_item_customizations` | One selected option for a cart item             | `id`        | Many customizations belong to one cart item |
 
 Important rules:
 
@@ -168,11 +168,11 @@ Future PostgreSQL direction:
 
 ### Orders
 
-| Table | Purpose | Primary key | Important relationships |
-| --- | --- | --- | --- |
-| `orders` | One customer's submitted participation in one activity | `id` | Order belongs to one activity and one customer |
-| `order_items` | Snapshot of one ordered drink | `id` | Many items belong to one order |
-| `order_item_customizations` | Snapshot of selected options | `id` | Many customizations belong to one order item |
+| Table                       | Purpose                                                | Primary key | Important relationships                        |
+| --------------------------- | ------------------------------------------------------ | ----------- | ---------------------------------------------- |
+| `orders`                    | One customer's submitted participation in one activity | `id`        | Order belongs to one activity and one customer |
+| `order_items`               | Snapshot of one ordered drink                          | `id`        | Many items belong to one order                 |
+| `order_item_customizations` | Snapshot of selected options                           | `id`        | Many customizations belong to one order item   |
 
 Important rules:
 
@@ -190,11 +190,11 @@ Future PostgreSQL direction:
 
 ### Payment
 
-| Table | Purpose | Primary key | Important relationships |
-| --- | --- | --- | --- |
-| `payment_authorizations` | LINE Pay authorization attempt | `id` | Many authorizations can belong to one order |
-| `payment_captures` | Capture after final discount is known | `id` | Capture belongs to one authorization and one order |
-| `payment_provider_events` | Provider events and webhook records | `id` | Logical reference to payment resources |
+| Table                     | Purpose                               | Primary key | Important relationships                            |
+| ------------------------- | ------------------------------------- | ----------- | -------------------------------------------------- |
+| `payment_authorizations`  | LINE Pay authorization attempt        | `id`        | Many authorizations can belong to one order        |
+| `payment_captures`        | Capture after final discount is known | `id`        | Capture belongs to one authorization and one order |
+| `payment_provider_events` | Provider events and webhook records   | `id`        | Logical reference to payment resources             |
 
 Current payment direction:
 
@@ -225,10 +225,10 @@ Future PostgreSQL direction:
 
 ### Settlement And Pickup
 
-| Table | Purpose | Primary key | Important relationships |
-| --- | --- | --- | --- |
-| `activity_settlements` | Deadline result and applied tier | `id` | One settlement per activity |
-| `pickup_credentials` | Pickup code shown to customer | `id` | One credential per order |
+| Table                  | Purpose                          | Primary key | Important relationships     |
+| ---------------------- | -------------------------------- | ----------- | --------------------------- |
+| `activity_settlements` | Deadline result and applied tier | `id`        | One settlement per activity |
+| `pickup_credentials`   | Pickup code shown to customer    | `id`        | One credential per order    |
 
 Important rules:
 
@@ -243,10 +243,10 @@ Future PostgreSQL direction:
 
 ### History And Audit
 
-| Table | Purpose | Primary key | Important relationships |
-| --- | --- | --- | --- |
-| `status_history` | Status transition records | `id` | Polymorphic resource reference |
-| `audit_logs` | Sensitive actor/action record | `id` | Polymorphic resource reference |
+| Table            | Purpose                       | Primary key | Important relationships        |
+| ---------------- | ----------------------------- | ----------- | ------------------------------ |
+| `status_history` | Status transition records     | `id`        | Polymorphic resource reference |
+| `audit_logs`     | Sensitive actor/action record | `id`        | Polymorphic resource reference |
 
 Design note:
 
@@ -306,11 +306,11 @@ PostgreSQL v1 decision: use `boolean` for true/false fields.
 
 Current SQLite fields stored as `0` / `1` should become PostgreSQL booleans:
 
-| Field | PostgreSQL type | Meaning |
-| --- | --- | --- |
-| `menu_items.is_available` | `boolean` | Drink availability |
-| `customization_options.is_available` | `boolean` | Customization option availability |
-| `pickup_credentials.visible_after_merchant_acceptance` | `boolean` | Pickup credential visibility rule |
+| Field                                                  | PostgreSQL type | Meaning                           |
+| ------------------------------------------------------ | --------------- | --------------------------------- |
+| `menu_items.is_available`                              | `boolean`       | Drink availability                |
+| `customization_options.is_available`                   | `boolean`       | Customization option availability |
+| `pickup_credentials.visible_after_merchant_acceptance` | `boolean`       | Pickup credential visibility rule |
 
 API JSON should expose these values as `true` / `false`.
 
@@ -334,10 +334,10 @@ These exceptions are acceptable because they are raw event/audit payloads, not p
 
 PostgreSQL v1 decision: store these fields as `jsonb`.
 
-| Field | PostgreSQL type | Use |
-| --- | --- | --- |
-| `payment_provider_events.payload_json` | `jsonb` | Raw provider event payload |
-| `audit_logs.metadata_json` | `jsonb` | Action-specific audit metadata |
+| Field                                  | PostgreSQL type | Use                            |
+| -------------------------------------- | --------------- | ------------------------------ |
+| `payment_provider_events.payload_json` | `jsonb`         | Raw provider event payload     |
+| `audit_logs.metadata_json`             | `jsonb`         | Action-specific audit metadata |
 
 Do not use JSON fields for core order, drink, customization, promotion, payment status, or pickup status data.
 
@@ -376,20 +376,20 @@ Reason:
 - `text check (...)` keeps valid-value protection while remaining easier to modify.
 - PostgreSQL enum can be reconsidered after activity, order, payment, and pickup flows stabilize.
 
-| Owner | Current status field | Current values |
-| --- | --- | --- |
-| User | `users.status` | `active`, `disabled`, `deleted` |
-| Role | `user_roles.status` | `active`, `disabled` |
-| Merchant | `merchants.status` | `active`, `disabled` |
-| Store | `stores.business_status` | `open`, `closed`, `temporarily_closed` |
-| Activity | `group_buy_activities.status` | `draft`, `recruiting`, `confirmed`, `failed`, `ordering`, `ready_for_pickup`, `completed`, `cancelled` |
-| Cart | `cart_drafts.status` | `active`, `submitted`, `expired`, `cancelled` |
-| Order | `orders.status` | `draft`, `submitted`, `locked`, `cancelled`, `completed` |
-| Payment | `orders.payment_status` | `pending`, `authorized`, `captured`, `authorization_voided`, `failed`, `refunded` |
-| Authorization | `orders.authorization_status`, `payment_authorizations.status` | `pending`, `authorized`, `captured`, `authorization_voided`, `failed` |
-| Merchant acceptance | `orders.merchant_acceptance_status` | `pending`, `accepted`, `rejected`, `cancelled` |
-| Pickup | `orders.pickup_status` | `not_ready`, `ready`, `picked_up`, `cancelled`, `expired` |
-| Settlement | `activity_settlements.outcome` | `qualified`, `failed`, `cancelled` |
+| Owner               | Current status field                                           | Current values                                                                                         |
+| ------------------- | -------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------ |
+| User                | `users.status`                                                 | `active`, `disabled`, `deleted`                                                                        |
+| Role                | `user_roles.status`                                            | `active`, `disabled`                                                                                   |
+| Merchant            | `merchants.status`                                             | `active`, `disabled`                                                                                   |
+| Store               | `stores.business_status`                                       | `open`, `closed`, `temporarily_closed`                                                                 |
+| Activity            | `group_buy_activities.status`                                  | `draft`, `recruiting`, `confirmed`, `failed`, `ordering`, `ready_for_pickup`, `completed`, `cancelled` |
+| Cart                | `cart_drafts.status`                                           | `active`, `submitted`, `expired`, `cancelled`                                                          |
+| Order               | `orders.status`                                                | `draft`, `submitted`, `locked`, `cancelled`, `completed`                                               |
+| Payment             | `orders.payment_status`                                        | `pending`, `authorized`, `captured`, `authorization_voided`, `failed`, `refunded`                      |
+| Authorization       | `orders.authorization_status`, `payment_authorizations.status` | `pending`, `authorized`, `captured`, `authorization_voided`, `failed`                                  |
+| Merchant acceptance | `orders.merchant_acceptance_status`                            | `pending`, `accepted`, `rejected`, `cancelled`                                                         |
+| Pickup              | `orders.pickup_status`                                         | `not_ready`, `ready`, `picked_up`, `cancelled`, `expired`                                              |
+| Settlement          | `activity_settlements.outcome`                                 | `qualified`, `failed`, `cancelled`                                                                     |
 
 ## Recommended Next Database Step
 

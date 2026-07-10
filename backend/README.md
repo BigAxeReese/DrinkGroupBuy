@@ -115,6 +115,17 @@ AUTH_SESSION_SECRET=replace_with_backend_session_secret_at_least_16_chars
 
 不要把 `backend/.env` commit 到 GitHub。
 
+## 付款模組
+
+LINE Pay 相關程式目前集中在：
+
+| 檔案 | 用途 |
+| --- | --- |
+| `backend/payments/linePayClient.js` | 簽章並呼叫 LINE Pay API |
+| `backend/payments/linePayService.js` | 串接訂單檢查、授權建立、confirm 與 cancel |
+| `backend/payments/linePayPendingStore.js` | 暫存 LINE Pay redirect 前後需要比對的付款資料 |
+| `backend/linePayClient.js` | 舊路徑相容匯出 |
+
 ## 目前限制
 
 - 管理員登入尚未設定。

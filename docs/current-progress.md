@@ -1,39 +1,39 @@
 # 目前進度
 
-最後更新：2026-07-08
+最後更新：2026-07-11
 
 換電腦或交接給其他 AI 時，請先閱讀 `docs/handoff-summary.md`。
 
 文件語言規則：會影響程式、API、資料庫或工具辨識的內容使用英文；不影響實作的說明、報告文字與備註可使用中文。若英文技術名稱不容易理解，保留英文並加中文註解。
 
-## 2026-07-05 Login Direction Update
+## 2026-07-05 登入方向更新
 
-- Formal login direction is now Firebase Auth with Google Login only.
-- Password login should be treated as legacy development compatibility, not the final product flow.
-- Customer, merchant, and admin roles must not be chosen by the mobile UI in production. The mobile app should receive a Firebase ID token after Google login, send it to the backend, and let the backend resolve the user role from the database.
-- Backend database remains the source of truth for roles, merchant-store binding, orders, payments, and group-buy activity state.
-- The existing `/api/auth/login` password endpoint remains only as a temporary development bridge until Firebase login is implemented and tested.
+- 正式登入方向已確定為只使用 Firebase Auth + Google Login。
+- 密碼登入應視為舊版開發相容功能，不是最終產品流程。
+- 正式環境中，顧客、商家、管理員角色不得由 mobile UI 選擇。Mobile app 應在 Google Login 後取得 Firebase ID token，送到 backend，並由 backend 從資料庫解析使用者角色。
+- 角色、商家與店家綁定、訂單、付款與團購活動狀態都以 backend database 作為資料來源。
+- 現有 `/api/auth/login` 密碼端點只作為 Firebase 登入實作與測試完成前的暫時開發橋接。
 
-## 2026-07-05 Firebase Google Login Slice
+## 2026-07-05 Firebase Google Login 切片
 
-- Mobile login screen now shows a Google-only Firebase Auth entry point instead of role/password selection.
-- Mobile exchanges the Firebase ID token with backend `POST /api/auth/firebase-session`.
-- Backend verifies the Firebase ID token with Firebase Admin SDK, looks up `users.firebase_uid`, resolves roles/stores from the database, and returns the existing backend bearer token shape.
-- Unmapped Firebase users receive 403 with a development next step to add the Firebase UID to `users.firebase_uid`.
-- Required local setup is still external: create Firebase project/OAuth clients, add mobile public Firebase config, configure backend Firebase Admin credentials, then map test account UIDs in the dev database.
+- Mobile 登入畫面已改為 Google-only Firebase Auth 入口，不再顯示角色與密碼選擇。
+- Mobile 會用 Firebase ID token 呼叫 backend `POST /api/auth/firebase-session` 換取 session。
+- Backend 使用 Firebase Admin SDK 驗證 Firebase ID token，查詢 `users.firebase_uid`，從資料庫解析 roles/stores，並回傳既有 backend bearer token 格式。
+- 尚未對應的 Firebase 使用者會收到 403，並提示開發者將 Firebase UID 加到 `users.firebase_uid`。
+- 仍需要外部本機設定：建立 Firebase project/OAuth clients、加入 mobile 公開 Firebase config、設定 backend Firebase Admin credentials，並在開發資料庫對應測試帳號 UIDs。
 
-## 2026-07-05 Local Role Mapping Helper
+## 2026-07-05 本機角色對應工具
 
-- For local development with only one Google test account, `scripts/map-firebase-user.js` can remap the existing Firebase UID to seeded users in SQLite.
-- Root npm helpers:
+- 本機開發若只有一個 Google 測試帳號，可用 `scripts/map-firebase-user.js` 將目前 Firebase UID 重新對應到 SQLite seed users。
+- Root npm 指令：
   - `npm run auth:map:customer`
   - `npm run auth:map:customer-b`
   - `npm run auth:map:merchant`
   - `npm run auth:map:admin`
-- This is not a production role switcher. The mobile app still does not expose role selection; role resolution remains backend/database controlled.
-- After remapping, sign out and sign in again so the app receives a fresh backend token.
+- 這不是正式環境角色切換器。Mobile app 仍不顯示角色選擇，角色解析仍由 backend/database 控制。
+- 重新對應後，需要登出再登入，讓 app 取得新的 backend token。
 
-## Mobile
+## Mobile 端
 
 技術方向：React Native + Expo，Android-first，目前使用 Expo Web 預覽。
 
@@ -52,46 +52,50 @@
 - 付款畫面可向後端建立 LINE Pay sandbox 授權網址，並開啟 LINE Pay 付款頁。
 - 付款畫面在開啟 LINE Pay 後會短時間自動輪詢 backend 訂單狀態；App / 瀏覽器回到前景時也會安靜刷新，授權完成後同步顯示 `authorized`。
 - 顧客送出預授權後，購物車會保留飲品；只有 backend 訂單同步為 `authorized` / `captured` 後，才清除該團購的購物車飲品。
+- 付款規則已集中記錄在 `docs/payment-rules-and-flow.md`；目前決議是預授權成功即計入杯數，修改授權訂單採先新授權成功、再取消舊授權的替換流程。
 - 商家儀表板、建立活動、接單、完成訂單、商家歷史訂單。
 - 管理員儀表板與取消活動。
-- 在瀏覽器環境可使用 `localStorage` 做 prototype local persistence。
+- 在瀏覽器環境可使用 `localStorage` 做 prototype 本機保存。
 
 目前 mobile 限制：
 
-- App 啟動時尚未完整載入後端 authoritative activity list。
+- App 啟動時尚未完整載入後端權威活動列表。
 - 訂單、付款、取貨與大部分 runtime progress 仍有 mobile-local state。
 - LINE Pay 完成後目前仍回 backend HTML 頁，尚未做正式 app deep link；mobile 端先以 polling / foreground refresh 同步狀態。
 - 部分流程仍保留 fallback 行為。
 
-## Backend
+## Backend 端
 
 技術方向：Node.js built-in HTTP server，目前使用 built-in SQLite driver。
 
 重要檔案：
 
-| 檔案 | 用途 |
-| --- | --- |
-| `backend/server.js` | HTTP API server |
-| `backend/db.js` | SQLite 資料庫存取 |
-| `backend/auth.js` | 開發用登入、token、密碼雜湊 |
-| `backend/linePayClient.js` | LINE Pay sandbox request signing |
-| `backend/README.md` | 後端啟動與設定說明 |
+| 檔案                                      | 用途                                          |
+| ----------------------------------------- | --------------------------------------------- |
+| `backend/server.js`                       | HTTP API server                               |
+| `backend/db.js`                           | SQLite 資料庫存取                             |
+| `backend/auth.js`                         | 開發用登入、token、密碼雜湊                   |
+| `backend/payments/linePayClient.js`       | LINE Pay sandbox request 簽章                 |
+| `backend/payments/linePayService.js`      | LINE Pay 授權 request / confirm / cancel 流程 |
+| `backend/payments/linePayPendingStore.js` | LINE Pay redirect 前後的暫存查找              |
+| `backend/linePayClient.js`                | payment client 相容匯出                       |
+| `backend/README.md`                       | 後端啟動與設定說明                            |
 
 目前 API：
 
-| Method | Path | 用途 |
-| --- | --- | --- |
-| `POST` | `/api/auth/login` | 開發用登入 |
-| `GET` | `/health` | 健康檢查 |
-| `GET` | `/api/group-buy-activities` | 查詢團購活動與優惠級距 |
-| `POST` | `/api/merchant/group-buy-activities` | 商家建立團購活動 |
-| `POST` | `/api/orders` | 建立訂單與訂單品項快照 |
-| `PATCH` | `/api/orders/:orderId` | 更新尚未預授權成功的 pending 訂單明細 |
-| `GET` | `/api/orders/:orderId` | 查詢訂單明細與最新 LINE Pay 授權 |
-| `DELETE` | `/api/admin/group-buy-activities/:activityId` | 管理員 soft-cancel 活動 |
-| `POST` | `/api/payments/line-pay/request` | 建立 LINE Pay sandbox 授權請求 |
-| `GET` | `/api/payments/line-pay/confirm` | LINE Pay confirm redirect |
-| `GET` | `/api/payments/line-pay/cancel` | LINE Pay cancel redirect |
+| 方法     | 路徑                                          | 用途                                  |
+| -------- | --------------------------------------------- | ------------------------------------- |
+| `POST`   | `/api/auth/login`                             | 開發用登入                            |
+| `GET`    | `/health`                                     | 健康檢查                              |
+| `GET`    | `/api/group-buy-activities`                   | 查詢團購活動與優惠級距                |
+| `POST`   | `/api/merchant/group-buy-activities`          | 商家建立團購活動                      |
+| `POST`   | `/api/orders`                                 | 建立訂單與訂單品項快照                |
+| `PATCH`  | `/api/orders/:orderId`                        | 更新尚未預授權成功的 pending 訂單明細 |
+| `GET`    | `/api/orders/:orderId`                        | 查詢訂單明細與最新 LINE Pay 授權      |
+| `DELETE` | `/api/admin/group-buy-activities/:activityId` | 管理員 soft-cancel 活動               |
+| `POST`   | `/api/payments/line-pay/request`              | 建立 LINE Pay sandbox 授權請求        |
+| `GET`    | `/api/payments/line-pay/confirm`              | LINE Pay confirm redirect             |
+| `GET`    | `/api/payments/line-pay/cancel`               | LINE Pay cancel redirect              |
 
 已實作的保護：
 
@@ -103,6 +107,7 @@
 - 活動建立有基本 idempotency 處理。
 - 管理員取消活動會寫入 `status_history` 與 `audit_logs`。
 - LINE Pay Channel ID / Secret 只放後端。
+- LINE Pay request / confirm / cancel 邏輯已拆到 `backend/payments/`，目前 API path 維持不變。
 - LINE Pay request 會檢查後端是否存在對應訂單。
 - LINE Pay confirm 會把付款授權與訂單狀態更新為 `authorized`。
 - 已授權或 pending 的授權會阻擋重複 LINE Pay request。
@@ -118,7 +123,7 @@
 - Backend 驗證 Firebase ID token。
 - `users.firebase_uid` 對應 Firebase identity。
 - 已授權後的訂單修改 / 重新授權流程。
-- 後端重啟後仍可追蹤 LINE Pay redirect 的 durable lookup。
+- 後端重啟後仍可追蹤 LINE Pay redirect 的持久化查找。
 - LINE Pay capture / void / refund。
 - LINE Pay webhook。
 - 取貨 API。
@@ -131,7 +136,7 @@
 - `POST /api/orders` 只適用於已存在於後端 SQLite 的活動。
 - 如果 mobile local activity 已過期或不存在於後端，送單會失敗。
 
-## Database
+## Database / 資料庫
 
 目前開發資料庫：
 
@@ -153,18 +158,18 @@ database/seed-dev.sql
 
 目前 schema 已包含：
 
-- users / user_roles
-- user_private_profiles / user_public_profiles
-- merchants / merchant_users / stores
-- menu_items / customization_options
-- group_buy_activities / promotion_tiers / activity_notices
-- cart_drafts / cart_draft_items / cart_draft_item_customizations
-- orders / order_items / order_item_customizations
-- payment_authorizations / payment_captures / payment_provider_events
-- activity_settlements
-- pickup_credentials
-- status_history
-- audit_logs
+- `users` / `user_roles`
+- `user_private_profiles` / `user_public_profiles`
+- `merchants` / `merchant_users` / `stores`
+- `menu_items` / `customization_options`
+- `group_buy_activities` / `promotion_tiers` / `activity_notices`
+- `cart_drafts` / `cart_draft_items` / `cart_draft_item_customizations`
+- `orders` / `order_items` / `order_item_customizations`
+- `payment_authorizations` / `payment_captures` / `payment_provider_events`
+- `activity_settlements`
+- `pickup_credentials`
+- `status_history`
+- `audit_logs`
 
 資料正規化方向：
 
@@ -190,13 +195,13 @@ PostgreSQL 方向：
 
 目前開發資料概況：
 
-- 12 users 與 12 roles。
-- PostgreSQL seed draft 有 12 private profiles 與 12 public profiles。
-- 7 merchants、7 merchant users、7 stores。
-- PostgreSQL seed draft 有 8 menu items 與 96 customization options。
-- 0 group-buy activities。
-- 0 promotion tiers。
-- 0 orders、payment authorizations、captures、settlements、pickup credentials。
+- 12 筆 `users` 與 12 筆 `roles`。
+- PostgreSQL seed draft 有 12 筆 private profiles 與 12 筆 public profiles。
+- 7 筆 `merchants`、7 筆 `merchant_users`、7 筆 `stores`。
+- PostgreSQL seed draft 有 8 筆 `menu_items` 與 96 筆 `customization_options`。
+- 0 筆 `group_buy_activities`。
+- 0 筆 `promotion_tiers`。
+- 0 筆 `orders`、payment authorizations、captures、settlements、pickup credentials。
 
 測試資料庫：
 
@@ -216,6 +221,6 @@ database/test/drink-group-buy-test.sqlite
 
 1. App 啟動時從後端載入 activities。
 2. 增加菜單讀取 API。
-3. 讓訂單列表與訂單明細改成後端 authoritative。
+3. 讓訂單列表與訂單明細改成以後端資料為準。
 4. 補訂單修改 API。
 5. 補商家接單、完成訂單與取貨憑證 API。

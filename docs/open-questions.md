@@ -1,8 +1,8 @@
-# Open Questions
+# 未決問題
 
-Last updated: 2026-06-26
+最後更新：2026-07-11
 
-## Language / 中文註解規則
+## 語言規則
 
 本文件整理目前還沒完全決定、但會影響實作的問題。
 
@@ -12,94 +12,97 @@ Last updated: 2026-06-26
 - 問題可以用中文補充，但涉及欄位、API、status value 時仍保留英文名稱。
 - 技術決策確認後，應同步更新對應的 API、database 或 status 文件。
 
-Only unresolved decisions that still affect implementation are retained here.
+本文件只保留仍會影響實作的未決決策。
 
-## Identity And Permission
+## 身份與權限
 
-| Priority | Question | Impact |
-| --- | --- | --- |
-| High | Can one user hold customer and merchant roles simultaneously? | Navigation, token claims, `user_roles` |
-| Resolved | Should Firebase be used? | Use Firebase Auth for Google Login only. Do not use Firestore as the primary business database. |
-| Resolved | Should password login remain in the formal product? | No. Formal direction is Google Login only; current password login is legacy development compatibility. |
-| Resolved | Which field maps Firebase Auth users to existing `users` rows? | Use `users.firebase_uid` as the canonical unique Firebase identity field. |
-| High | How should Google accounts be linked to existing seeded users and merchant/store permissions? | Account linking, duplicate email handling, merchant onboarding, and migration from seeded users. |
-| Resolved | How should development/test login work without role-select password accounts? | Use Firebase Google test accounts mapped by `users.firebase_uid`; optional local emulator/dev bypass must be gated by env. |
-| Resolved | How should dev mock login be disabled for production? | Default disabled; only enable by explicit local env such as `AUTH_DEV_MODE=true`, and never expose role selection in production UI. |
-| High | Which actual Google test accounts map to customer A/B/C/D, merchant stores, and admin? | Firebase Console setup and seed data need the real Firebase UIDs. |
-| Resolved | How is a merchant user authorized for one or multiple stores? | One merchant account manages exactly one store through `merchant_users.store_id`; no owner/manager/staff split in the current direction. |
-| High | How are administrator roles granted and audited? | Admin API security and audit logs |
-| Medium | Which customer public profile fields may merchants see besides alias and pickup/order data? | Privacy and merchant order response |
+| 優先級   | 問題                                                                          | 影響                                                                                                                   |
+| -------- | ----------------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------- |
+| High     | 同一個使用者是否可以同時擁有顧客與商家角色？                                  | 導覽邏輯、token claims、`user_roles`                                                                                   |
+| Resolved | 是否使用 Firebase？                                                           | 只使用 Firebase Auth 做 Google Login。Firestore 不作為主要業務資料庫。                                                 |
+| Resolved | 正式產品是否保留密碼登入？                                                    | 不保留。正式方向是只使用 Google Login；目前密碼登入是舊版開發相容功能。                                                |
+| Resolved | 哪個欄位用來對應 Firebase Auth 使用者與既有 `users` rows？                    | 使用 `users.firebase_uid` 作為正式且唯一的 Firebase identity 欄位。                                                    |
+| High     | Google 帳號如何連結到既有 seeded users 與 merchant/store 權限？               | 帳號連結、email 重複處理、merchant onboarding、seeded users 遷移                                                       |
+| Resolved | 沒有角色選擇密碼帳號後，開發與測試登入如何運作？                              | 使用 Firebase Google 測試帳號，並以 `users.firebase_uid` 對應；可選 local emulator/dev bypass，但必須由 env 明確開啟。 |
+| Resolved | dev mock login 如何在 production 停用？                                       | 預設停用；只能透過本機 env 如 `AUTH_DEV_MODE=true` 明確啟用，且 production UI 不得顯示角色選擇。                       |
+| High     | 哪些實際 Google 測試帳號要對應 customer A/B/C/D、各 merchant store 與 admin？ | Firebase Console 設定與 seed data 需要實際 Firebase UID。                                                              |
+| Resolved | 商家使用者如何被授權管理一間或多間店？                                        | 目前方向是一個商家帳號只透過 `merchant_users.store_id` 管理一間店；暫不拆 owner/manager/staff。                        |
+| High     | 管理員角色如何授權與稽核？                                                    | Admin API security 與 audit logs                                                                                       |
+| Medium   | 除了 alias 與取餐/訂單資料外，商家可以看到哪些顧客公開資料？                  | 隱私與 merchant order response                                                                                         |
 
-## Stores And Menu
+## 店家與菜單
 
-| Priority | Question | Impact |
-| --- | --- | --- |
-| High | Is `database/schema.sql` or the seven-store test DB the canonical seed source? | Map/menu consistency |
-| Medium | Are menu options store-wide or item-specific? | Menu schema and customization UI |
-| High | What happens when price or availability changes while an item is in cart? | Submit validation and conflict UX |
-| Medium | How are store coordinates verified against Google Maps/Places? | Map trust and store onboarding |
-| Medium | Should `database/test/` be normalized or replaced by the canonical dev schema? | Test data reliability and map/menu exports |
+| 優先級 | 問題                                                              | 影響                              |
+| ------ | ----------------------------------------------------------------- | --------------------------------- |
+| High   | `database/schema.sql` 還是七間店測試資料庫才是正式 seed 來源？    | 地圖與菜單一致性                  |
+| Medium | 菜單選項是 store-wide 還是 item-specific？                        | Menu schema 與 customization UI   |
+| High   | 商品在購物車內時，如果價格或可販售狀態變更，要如何處理？          | Submit validation 與 conflict UX  |
+| Medium | 店家座標如何與 Google Maps/Places 驗證？                          | 地圖可信度與 store onboarding     |
+| Medium | `database/test/` 是否應正規化，或改由 canonical dev schema 取代？ | 測試資料可靠性與 map/menu exports |
 
-## Activity And Promotion
+## 團購活動與優惠
 
-| Priority | Question | Impact |
-| --- | --- | --- |
-| Resolved | Does reaching the highest tier stop new orders immediately? | Yes. The highest promotion tier cup count is the maximum capacity; new orders must not exceed it. |
-| High | After reaching a tier, can later exits lower the final tier before deadline? | Progress, authorization rollback, settlement |
-| High | Is group discount divided by cups, orders, or item value? | `finalAmount` calculation and snapshots |
-| Medium | Which activity fields may merchants edit after publishing? | API, version history, customer notices |
-| High | Who runs deadline settlement and how are retries recovered? | Background job and transaction design |
+| 優先級   | 問題                                                     | 影響                                                     |
+| -------- | -------------------------------------------------------- | -------------------------------------------------------- |
+| Resolved | 達到最高優惠級距後，是否立即停止新訂單？                 | 是。最高優惠級距杯數就是最大容量；新訂單不得超過此容量。 |
+| Resolved | 商家建立的團購活動最長可以開放多久？                     | 截止時間必須在活動發布或開放招募後 24 小時內。           |
+| High     | 達到某個優惠級距後，截止前有人退出是否會讓最終級距下降？ | 進度顯示、authorization rollback、settlement             |
+| High     | 團購折扣是依杯數、訂單數，還是品項金額分配？             | `finalAmount` calculation 與 snapshots                   |
+| Medium   | 團購發布後，商家可以修改哪些 activity fields？           | API、version history、customer notices                   |
+| High     | 誰負責執行 deadline settlement，失敗重試如何恢復？       | Background job 與 transaction design                     |
 
-## Orders
+## 訂單
 
-| Priority | Question | Impact |
-| --- | --- | --- |
-| High | Is one customer limited to one order per activity? | Unique constraints and edit behavior |
-| High | Is the last 30 minutes join-only for both new and existing customers? | Lock validation and UI messaging |
-| High | Should `readyForPickup` be an order status or only `pickupStatus = ready`? | Current mobile/schema mismatch |
-| High | What immutable order revision data is required after authorization? | Audit and dispute handling |
-| Medium | Can a customer remove all items, and does that equal cancelling the order? | Order lifecycle and cup rollback |
-| Medium | Should order item customization snapshots store option IDs as nullable references, pure snapshots, or both? | Historical accuracy when menu options change |
+| 優先級   | 問題                                                                                       | 影響                                                                                                   |
+| -------- | ------------------------------------------------------------------------------------------ | ------------------------------------------------------------------------------------------------------ |
+| High     | 每位顧客在同一個 activity 是否只能有一筆訂單？                                             | Unique constraints 與 edit behavior                                                                    |
+| High     | 截止前最後 30 分鐘是否對新顧客與既有顧客都只能加入、不能修改？                             | Lock validation 與 UI messaging                                                                        |
+| Resolved | 顧客完成預授權後要如何修改訂單？                                                           | 採用待確認替換流程。舊訂單與舊預授權在新預授權成功前維持有效；如果新預授權失敗或取消，原訂單維持不變。 |
+| High     | `readyForPickup` 應該是 order status，還是只用 `pickupStatus = ready`？                    | 目前 mobile/schema mismatch                                                                            |
+| High     | 預授權後需要保存哪些不可變更的 order revision data？                                       | Audit 與 dispute handling                                                                              |
+| Medium   | 顧客是否可以移除所有品項？這是否等同取消訂單？                                             | Order lifecycle 與 cup rollback                                                                        |
+| Medium   | order item customization snapshots 應保存 nullable option IDs、純 snapshot，還是兩者都存？ | 菜單選項變更後的歷史準確性                                                                             |
 
-## Payment
+## 付款
 
-| Priority | Question | Impact |
-| --- | --- | --- |
-| High | Does the selected LINE Pay product support authorization plus partial capture? | Entire payment model |
-| High | The current sandbox channel rejects `capture:false` with "Parameter is not allowed"; does this merchant account support separated authorization/capture through another setting or product type? | Determines whether partial capture can be implemented with LINE Pay |
-| High | What is the authorization validity period? | Maximum activity duration and reauthorization |
-| High | On failed activity, when is authorization voided? | Customer messaging and settlement job |
-| High | How are capture failures retried or escalated? | Fulfillment eligibility and operations |
-| High | How are webhook signatures, duplicate events, and out-of-order events handled? | Payment correctness |
-| Resolved | Should LINE Pay confirm immediately update the order as `authorized`? | Yes for the first backend slice: confirm updates `payment_authorizations`, `orders.payment_status`, and `orders.authorization_status`. App sync after redirect remains open. |
-| High | How should the mobile app receive the updated `authorized` status after LINE Pay redirect? | Polling, deep link, or order reload flow |
-| High | Where should LINE Pay transaction IDs, request IDs, return codes, and raw provider events be persisted? | `payment_authorizations`, provider event tables, auditability |
-| Medium | How should released amount timing be explained to users? | Payment UI and support |
-| High | If an edited order exceeds the original authorization, must it be reauthorized before counting? | Authorized cup total and order edits |
+| 優先級   | 問題                                                                                                                                              | 影響                                                                                                                                                        |
+| -------- | ------------------------------------------------------------------------------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| High     | 選定的 LINE Pay 產品是否支援 authorization + partial capture？                                                                                    | 整體付款模型                                                                                                                                                |
+| High     | 目前 sandbox channel 對 `capture:false` 回傳 "Parameter is not allowed"；此商家帳號是否能透過其他設定或產品類型支援分離式 authorization/capture？ | 決定是否能用 LINE Pay 實作 partial capture                                                                                                                  |
+| High     | authorization 有效期限是多久？                                                                                                                    | 最大活動時間與 reauthorization                                                                                                                              |
+| Resolved | 團購活動如何降低 authorization 過期風險？                                                                                                         | 團購截止時間限制為 24 小時內；LINE Pay authorization 後，授權到期時間仍必須涵蓋截止時間與結算緩衝時間。                                                     |
+| High     | 活動未達標時，authorization 何時 void？                                                                                                           | 顧客提示與 settlement job                                                                                                                                   |
+| High     | capture 失敗如何重試或升級處理？                                                                                                                  | 履約資格與營運處理                                                                                                                                          |
+| High     | webhook 簽章、重複事件與 out-of-order events 如何處理？                                                                                           | 付款正確性                                                                                                                                                  |
+| Resolved | LINE Pay confirm 是否立即把訂單更新為 `authorized`？                                                                                              | 第一個 backend slice 先這樣做：confirm 更新 `payment_authorizations`、`orders.payment_status`、`orders.authorization_status`。Redirect 後 app sync 仍待決。 |
+| High     | LINE Pay redirect 後，mobile app 如何取得更新後的 `authorized` 狀態？                                                                             | Polling、deep link 或 order reload flow                                                                                                                     |
+| High     | LINE Pay transaction IDs、request IDs、return codes 與 raw provider events 要保存在哪裡？                                                         | `payment_authorizations`、provider event tables、可稽核性                                                                                                   |
+| Medium   | 釋放未請款金額的時間要如何向使用者說明？                                                                                                          | Payment UI 與客服支援                                                                                                                                       |
+| Resolved | 修改後訂單金額或杯數超過原本預授權時，是否需要重新預授權？                                                                                        | 需要。修改內容在新預授權成功前維持待確認；原訂單仍然計入杯數，系統只針對增加的杯數差額做容量檢查或暫時保留。                                                |
 
-## Pickup And Fulfillment
+## 取貨與履約
 
-| Priority | Question | Impact |
-| --- | --- | --- |
-| High | Does merchant “完成訂單” mean preparation complete or customer pickup complete? | Button wording and status transition |
-| High | Who changes `ready` to `picked_up`, and how is the code/QR verified? | Pickup API and audit trail |
-| Medium | Can pickup windows change after customers are charged? | History and notification requirements |
-| Medium | When does a pickup credential expire? | Credential schema and customer history |
-| High | Should `preparing` be stored as pickup status or derived? | Current mobile/schema mismatch |
+| 優先級 | 問題                                                     | 影響                                  |
+| ------ | -------------------------------------------------------- | ------------------------------------- |
+| High   | 商家端「完成訂單」代表製作完成，還是顧客已取貨？         | 按鈕文字與 status transition          |
+| High   | 誰負責把 `ready` 改成 `picked_up`，code/QR 如何驗證？    | Pickup API 與 audit trail             |
+| Medium | 顧客被請款後，取餐時段是否可以變更？                     | 歷史紀錄與通知需求                    |
+| Medium | pickup credential 何時過期？                             | Credential schema 與 customer history |
+| High   | `preparing` 應保存為 pickup status，還是由其他狀態推導？ | 目前 mobile/schema mismatch           |
 
-## Consistency And Operations
+## 一致性與營運
 
-| Priority | Question | Impact |
-| --- | --- | --- |
-| High | How are simultaneous authorizations prevented from exceeding maximum cups? | Database locking/idempotency |
-| High | What is the source of truth for authorized cup progress? | Avoid duplicated mutable counters |
-| High | How does activity cancellation cascade to orders and payment authorizations? | Transactions and recovery |
-| Medium | Which actions require audit logs beyond admin cancellation? | Storage and compliance |
-| Medium | When should SQLite be replaced by PostgreSQL/MySQL, if at all? | Deployment and concurrency |
+| 優先級 | 問題                                                              | 影響                         |
+| ------ | ----------------------------------------------------------------- | ---------------------------- |
+| High   | 多筆 simultaneous authorizations 如何避免超過最大杯數？           | Database locking/idempotency |
+| High   | authorized cup progress 的資料來源以哪裡為準？                    | 避免重複且可變的計數器       |
+| High   | activity cancellation 如何連動 orders 與 payment authorizations？ | Transactions 與 recovery     |
+| Medium | 除了 admin cancellation，哪些操作也需要 audit logs？              | 儲存與 compliance            |
+| Medium | 是否需要、以及何時要用 PostgreSQL/MySQL 取代 SQLite？             | Deployment 與 concurrency    |
 
-## Documentation And Naming
+## 文件與命名
 
-| Priority | Question | Impact |
-| --- | --- | --- |
-| Medium | When will mobile legacy `deal` variables/routes migrate to `groupBuyActivity`? | Cross-layer readability |
-| Medium | Should `PaymentReportScreen` be renamed to `PaymentAuthorizationScreen` now? | UI/navigation naming consistency |
+| 優先級 | 問題                                                                  | 影響                     |
+| ------ | --------------------------------------------------------------------- | ------------------------ |
+| Medium | mobile legacy `deal` 變數與 routes 何時遷移到 `groupBuyActivity`？    | 跨層可讀性               |
+| Medium | `PaymentReportScreen` 是否現在就改名為 `PaymentAuthorizationScreen`？ | UI/navigation 命名一致性 |

@@ -16,24 +16,24 @@ The authoritative development draft is `database/schema.sql`. This document expl
 
 ## Implemented Development Entities
 
-| Entity | Purpose | Important relationships |
-| --- | --- | --- |
-| `users`, `user_roles` | Identity and customer/merchant/admin roles | User 1:N roles |
-| `merchants` | Business organization or brand grouping | Merchant 1:N stores |
-| `stores`, `merchant_users` | Physical store and its merchant login account | Store 1:1 merchant account in PostgreSQL draft |
-| `menu_items`, `customization_options` | Store menu and allowed customization | Store 1:N items; item 1:N options |
-| `group_buy_activities` | Merchant-created group-buy activity | Store 1:N activities |
-| `promotion_tiers` | Cup thresholds and group discount amounts | Activity 1:N tiers |
-| `activity_notices` | Activity notes | Activity 1:N notices |
-| `cart_drafts`, `cart_draft_items`, `cart_draft_item_customizations` | Optional server-side pre-submit cart | User/activity 1:N items; item 1:N selected options |
-| `orders`, `order_items`, `order_item_customizations` | Customer participation and item/customization snapshots | Activity/user 1:N orders; order 1:N items; item 1:N selected options |
-| `payment_authorizations` | Provider authorization attempts | Order 1:N authorizations |
-| `payment_captures` | Partial/full capture result | Authorization/order 1:N captures |
-| `payment_provider_events` | Idempotent provider webhook/event storage | References payment resources logically |
-| `activity_settlements` | Deadline result and applied tier | Activity 1:1 settlement |
-| `pickup_credentials` | Order pickup code | Order 1:1 credential |
-| `status_history` | Status transitions and reasons | Polymorphic resource reference |
-| `audit_logs` | Sensitive actor/action history | Polymorphic resource reference |
+| Entity                                                              | Purpose                                                 | Important relationships                                              |
+| ------------------------------------------------------------------- | ------------------------------------------------------- | -------------------------------------------------------------------- |
+| `users`, `user_roles`                                               | Identity and customer/merchant/admin roles              | User 1:N roles                                                       |
+| `merchants`                                                         | Business organization or brand grouping                 | Merchant 1:N stores                                                  |
+| `stores`, `merchant_users`                                          | Physical store and its merchant login account           | Store 1:1 merchant account in PostgreSQL draft                       |
+| `menu_items`, `customization_options`                               | Store menu and allowed customization                    | Store 1:N items; item 1:N options                                    |
+| `group_buy_activities`                                              | Merchant-created group-buy activity                     | Store 1:N activities                                                 |
+| `promotion_tiers`                                                   | Cup thresholds and group discount amounts               | Activity 1:N tiers                                                   |
+| `activity_notices`                                                  | Activity notes                                          | Activity 1:N notices                                                 |
+| `cart_drafts`, `cart_draft_items`, `cart_draft_item_customizations` | Optional server-side pre-submit cart                    | User/activity 1:N items; item 1:N selected options                   |
+| `orders`, `order_items`, `order_item_customizations`                | Customer participation and item/customization snapshots | Activity/user 1:N orders; order 1:N items; item 1:N selected options |
+| `payment_authorizations`                                            | Provider authorization attempts                         | Order 1:N authorizations                                             |
+| `payment_captures`                                                  | Partial/full capture result                             | Authorization/order 1:N captures                                     |
+| `payment_provider_events`                                           | Idempotent provider webhook/event storage               | References payment resources logically                               |
+| `activity_settlements`                                              | Deadline result and applied tier                        | Activity 1:1 settlement                                              |
+| `pickup_credentials`                                                | Order pickup code                                       | Order 1:1 credential                                                 |
+| `status_history`                                                    | Status transitions and reasons                          | Polymorphic resource reference                                       |
+| `audit_logs`                                                        | Sensitive actor/action history                          | Polymorphic resource reference                                       |
 
 ## Current Persistence Status
 
@@ -46,17 +46,17 @@ The authoritative development draft is `database/schema.sql`. This document expl
 
 ## Known Schema Gaps
 
-| Area | Gap / decision |
-| --- | --- |
-| Order status | Mobile uses `readyForPickup`; schema does not. Decide whether pickup readiness belongs only to `pickup_status`. |
-| Pickup status | Mobile uses `preparing`; schema does not. Add it or derive it from activity/acceptance state. |
-| Order revisions | Authorized order edits need immutable before/after history. |
-| Pricing snapshots | Exact applied tier and per-order discount allocation must be reproducible. |
-| Store/menu source | Seven-store test database and one-store development database are not unified. |
-| Authentication | Formal direction is Firebase Auth with Google Login only. Password fields are legacy development compatibility; database must map Firebase identity to `users` and role/permission tables. |
-| Notification | No notification delivery or event table yet. |
-| Migrations | Current schema is recreated by script; no production migration history exists. |
-| Test fixture normalization | `database/test/` still uses JSON fields for prototype map/menu exports and is not the canonical normalized schema. |
+| Area                       | Gap / decision                                                                                                                                                                             |
+| -------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| Order status               | Mobile uses `readyForPickup`; schema does not. Decide whether pickup readiness belongs only to `pickup_status`.                                                                            |
+| Pickup status              | Mobile uses `preparing`; schema does not. Add it or derive it from activity/acceptance state.                                                                                              |
+| Order revisions            | Authorized order edits need immutable before/after history.                                                                                                                                |
+| Pricing snapshots          | Exact applied tier and per-order discount allocation must be reproducible.                                                                                                                 |
+| Store/menu source          | Seven-store test database and one-store development database are not unified.                                                                                                              |
+| Authentication             | Formal direction is Firebase Auth with Google Login only. Password fields are legacy development compatibility; database must map Firebase identity to `users` and role/permission tables. |
+| Notification               | No notification delivery or event table yet.                                                                                                                                               |
+| Migrations                 | Current schema is recreated by script; no production migration history exists.                                                                                                             |
+| Test fixture normalization | `database/test/` still uses JSON fields for prototype map/menu exports and is not the canonical normalized schema.                                                                         |
 
 ## 2026-07-05 Authentication Database Direction
 

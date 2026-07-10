@@ -90,25 +90,25 @@ API：groupBuyActivity
 - root `src/`
 - root `data/`
 
-## 2026-07-05 Login Direction Update
+## 2026-07-05 登入方向更新
 
-- Formal authentication is Firebase Auth with Google Login only.
-- Do not design new production flows around phone/password, email/password, or role-select login.
-- The current password login and role-select UI are legacy development compatibility and should be removed or hidden once Firebase login works.
-- Mobile app flow: user taps Google Login -> Firebase returns an ID token -> mobile sends the ID token to backend -> backend verifies the Firebase token -> backend maps the Firebase user to `users`, `user_roles`, and `merchant_users`.
-- Firebase is for authentication only. Firestore is not the primary business database for this project.
-- Backend database remains authoritative for customer/merchant/admin roles, store permissions, group-buy activities, orders, payments, pickup credentials, status history, and audit logs.
-- Required database direction: use `users.firebase_uid` as the canonical stable Firebase identity field.
+- 正式登入只使用 Firebase Auth + Google Login。
+- 新的正式產品流程不得以手機密碼、email 密碼或前端角色選擇作為登入設計。
+- 目前的密碼登入與角色選擇 UI 只屬於開發相容功能；Firebase 登入可用後，應移除或隱藏。
+- Mobile app 流程：使用者點選 Google Login -> Firebase 回傳 ID token -> mobile 將 ID token 送到 backend -> backend 驗證 Firebase token -> backend 依 `users`、`user_roles`、`merchant_users` 對應使用者身份。
+- Firebase 只用於身份驗證。Firestore 不是本專案主要業務資料庫。
+- 顧客、商家、管理員角色、店家權限、團購活動、訂單、付款、取貨憑證、狀態歷史與 audit logs 都以 backend database 為準。
+- 資料庫方向：使用 `users.firebase_uid` 作為穩定對應 Firebase identity 的正式欄位。
 
-## Development Role Testing Strategy
+## 開發期角色測試策略
 
-- Production rule: users never choose a role manually in the mobile app.
-- Development rule: test different roles by signing in with different Firebase Google test accounts whose Firebase UIDs are mapped in `users.firebase_uid`.
-- Role selection must happen in backend/database, not in the mobile UI.
-- Recommended seed mapping:
-  - customer A Google test account -> `users.firebase_uid` for customer A -> `user_roles.role = customer`
-  - customer B Google test account -> `users.firebase_uid` for customer B -> `user_roles.role = customer`
-  - merchant store 001 Google test account -> `users.firebase_uid` for merchant 001 -> `user_roles.role = merchant` and `merchant_users.store_id = store-001`
-  - admin Google test account -> `users.firebase_uid` for admin -> `user_roles.role = admin`
-- For local development only, a Firebase Auth emulator or explicitly gated dev-auth bypass may be used, but it must be disabled unless `AUTH_DEV_MODE=true` or equivalent is set in local `.env`.
-- Dev-auth bypass must never be enabled by default and must never be used for production builds.
+- 正式環境規則：使用者永遠不能在 mobile app 手動選擇角色。
+- 開發環境規則：用不同 Firebase Google 測試帳號登入，並透過 `users.firebase_uid` 對應不同測試角色。
+- 角色判斷必須在 backend/database 完成，不由 mobile UI 選擇。
+- 建議 seed 對應：
+  - customer A Google 測試帳號 -> customer A 的 `users.firebase_uid` -> `user_roles.role = customer`
+  - customer B Google 測試帳號 -> customer B 的 `users.firebase_uid` -> `user_roles.role = customer`
+  - merchant store 001 Google 測試帳號 -> merchant 001 的 `users.firebase_uid` -> `user_roles.role = merchant` 與 `merchant_users.store_id = store-001`
+  - admin Google 測試帳號 -> admin 的 `users.firebase_uid` -> `user_roles.role = admin`
+- 只在本機開發時，可以使用 Firebase Auth emulator 或明確由環境變數開啟的 dev-auth bypass；除非本機 `.env` 設定 `AUTH_DEV_MODE=true` 或等效設定，否則必須關閉。
+- dev-auth bypass 不得預設啟用，也不得用於 production build。
