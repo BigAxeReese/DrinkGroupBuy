@@ -10,6 +10,8 @@ const NativeDateTimePicker = Platform.OS === "web"
   ? null
   : require("@react-native-community/datetimepicker").default;
 
+const MAX_ACTIVITY_DEADLINE_MS = 24 * 60 * 60 * 1000;
+
 export function MerchantDealCreateScreen({ navigation, actions, memberAction, selectedMerchantStoreId }) {
   const merchantStore = stores.find((store) => store.id === selectedMerchantStoreId) ?? stores[0];
   const [title, setTitle] = useState("離峰優惠團購");
@@ -21,7 +23,9 @@ export function MerchantDealCreateScreen({ navigation, actions, memberAction, se
   const [notices, setNotices] = useState("截止前可修改或退出");
   const [created, setCreated] = useState(false);
   const [submitMessage, setSubmitMessage] = useState("");
+  const [submitMessageKind, setSubmitMessageKind] = useState("success");
   const [submitting, setSubmitting] = useState(false);
+  const deadlineLimit = getDeadlineLimit();
 
   const updateTier = (tierId, field, value) => {
     setTiers((items) => items.map((tier) => (
@@ -51,8 +55,18 @@ export function MerchantDealCreateScreen({ navigation, actions, memberAction, se
     if (submitting) return;
     setSubmitting(true);
     setSubmitMessage("");
+    setSubmitMessageKind("success");
 
-    const startTime = new Date().toISOString();
+    const startDate = new Date();
+    const deadlineError = getDeadlineValidationError(startDate, deadlineDate);
+    if (deadlineError) {
+      setSubmitMessageKind("error");
+      setSubmitMessage(deadlineError);
+      setSubmitting(false);
+      return;
+    }
+
+    const startTime = startDate.toISOString();
     const deadlineAt = deadlineDate.toISOString();
     let dealId;
 
@@ -71,8 +85,15 @@ export function MerchantDealCreateScreen({ navigation, actions, memberAction, se
         notice: notices
       });
       dealId = actions.addMerchantDealFromApi(activity);
+      setSubmitMessageKind("success");
       setSubmitMessage("活動已建立，並寫入 backend SQLite。");
     } catch (error) {
+      if (error.status) {
+        setSubmitMessageKind("error");
+        setSubmitMessage(`建立失敗：${error.message}`);
+        return;
+      }
+
       dealId = actions.createMerchantDeal({
         storeId: merchantStore.id,
         title,
@@ -83,6 +104,7 @@ export function MerchantDealCreateScreen({ navigation, actions, memberAction, se
         pickupTime,
         notices
       });
+      setSubmitMessageKind("warning");
       setSubmitMessage(`Backend 未連線，已用本機 prototype 建立：${error.message}`);
     } finally {
       setSubmitting(false);
@@ -104,8 +126,11 @@ export function MerchantDealCreateScreen({ navigation, actions, memberAction, se
           label="結束時間"
           value={deadlineDate}
           onChange={setDeadlineDate}
+          maximumDate={deadlineLimit}
         />
-        <Text style={styles.helperText}>開團即開始；系統會在結束時間自動鎖定訂單。</Text>
+        <Text style={styles.helperText}>
+          開團即開始；結束時間需在建立後 24 小時內，最晚約 {formatDeadlineWithoutYear(deadlineLimit)}。
+        </Text>
         <MobileInput label="取貨時間" value={pickupTime} onChangeText={setPickupTime} />
         <MobileInput label="備註" value={notices} onChangeText={setNotices} />
       </Section>
@@ -162,7 +187,15 @@ export function MerchantDealCreateScreen({ navigation, actions, memberAction, se
         label={submitting ? "建立中..." : "建立活動"}
         onPress={handleCreateDeal}
       />
-      {created || submitMessage ? <Text style={styles.success}>{submitMessage || "活動已建立"}</Text> : null}
+      {created || submitMessage ? (
+        <Text style={[
+          styles.submitMessage,
+          submitMessageKind === "error" && styles.errorMessage,
+          submitMessageKind === "warning" && styles.warningMessage
+        ]}>
+          {submitMessage || "活動已建立"}
+        </Text>
+      ) : null}
     </MobileScreen>
   );
 }
@@ -176,7 +209,7 @@ function MobileInput({ label, ...props }) {
   );
 }
 
-function DateTimeInput({ label, value, onChange }) {
+function DateTimeInput({ label, value, onChange, maximumDate }) {
   const [showPicker, setShowPicker] = useState(false);
   const [pickerMode, setPickerMode] = useState("date");
 
@@ -213,7 +246,7 @@ function DateTimeInput({ label, value, onChange }) {
             }}
             style={styles.webDateSelect}
           >
-            {buildDateOptions().map((option) => (
+            {buildDateOptions(maximumDate).map((option) => (
               <option key={option.value} value={option.value}>
                 {option.label}
               </option>
@@ -253,6 +286,7 @@ function DateTimeInput({ label, value, onChange }) {
           mode={pickerMode}
           display="default"
           minimumDate={new Date()}
+          maximumDate={maximumDate}
           onChange={handleNativeChange}
         />
       ) : null}
@@ -260,7 +294,11 @@ function DateTimeInput({ label, value, onChange }) {
   );
 }
 
-function buildDateOptions(days = 31) {
+function buildDateOptions(maximumDate, days = 31) {
+  const maximumKey = maximumDate instanceof Date && !Number.isNaN(maximumDate.getTime())
+    ? toMonthDayKey(maximumDate)
+    : null;
+
   return Array.from({ length: days }, (_, index) => {
     const date = new Date();
     date.setDate(date.getDate() + index);
@@ -268,7 +306,7 @@ function buildDateOptions(days = 31) {
       value: toMonthDayKey(date),
       label: formatMonthDayLabel(date)
     };
-  });
+  }).filter((option) => !maximumKey || option.value <= maximumKey);
 }
 
 function toMonthDayKey(date) {
@@ -315,6 +353,26 @@ function formatMonthDayLabel(date) {
 
 function pad(value) {
   return String(value).padStart(2, "0");
+}
+
+function getDeadlineLimit(referenceDate = new Date()) {
+  return new Date(referenceDate.getTime() + MAX_ACTIVITY_DEADLINE_MS);
+}
+
+function getDeadlineValidationError(startDate, deadlineDate) {
+  if (!(deadlineDate instanceof Date) || Number.isNaN(deadlineDate.getTime())) {
+    return "請選擇有效的結束時間。";
+  }
+
+  const diff = deadlineDate.getTime() - startDate.getTime();
+  if (diff <= 0) {
+    return "結束時間必須晚於目前時間。";
+  }
+  if (diff > MAX_ACTIVITY_DEADLINE_MS) {
+    return "結束時間必須在建立後 24 小時內。";
+  }
+
+  return "";
 }
 
 const styles = StyleSheet.create({
@@ -453,10 +511,16 @@ const styles = StyleSheet.create({
     paddingLeft: 14,
     paddingRight: 14
   },
-  success: {
+  submitMessage: {
     color: "#047857",
     fontSize: 14,
     fontWeight: "800",
     textAlign: "center"
+  },
+  errorMessage: {
+    color: "#dc2626"
+  },
+  warningMessage: {
+    color: "#b45309"
   }
 });

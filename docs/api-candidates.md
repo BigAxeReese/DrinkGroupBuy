@@ -1,6 +1,6 @@
 # API 清單與候選項
 
-最後更新：2026-07-10
+最後更新：2026-07-11
 
 ## 語言規則
 
@@ -69,9 +69,9 @@ API JSON 使用 `camelCase`。已實作 routes 只對目前開發 prototype 具�
 | 相關畫面      | `MerchantDealCreateScreen`                                                                                                                                                                    |
 | Request       | 需要 bearer token。Body: `{ storeId, title, startAt, deadlineAt, pickupStartAt, pickupEndAt, withdrawalLockMinutes?, tiers[], notice?, idempotencyKey? }`                                     |
 | Response      | `{ activity }`                                                                                                                                                                                |
-| 已實作規則    | 需要 merchant role、驗證 merchant-store access、從登入使用者推導 `createdByUserId`、必填欄位驗證、tier normalization、由最高 tier 推導 maximum cups、transaction、簡單 idempotency、audit log |
+| 已實作規則    | 需要 merchant role、驗證 merchant-store access、從登入使用者推導 `createdByUserId`、必填欄位驗證、`deadlineAt` 不可超過 `startAt` 後 24 小時、tier normalization、由最高 tier 推導 maximum cups、transaction、簡單 idempotency、audit log |
 | 最終商業規則  | `deadlineAt` 必須在活動發布或開放招募後 24 小時內                                                                                                                                             |
-| 尚缺規則      | 強制 24 小時 deadline limit、較完整的日期驗證、較完整的 merchant permission model                                                                                                             |
+| 尚缺規則      | 較完整的取貨時間驗證、較完整的 merchant permission model                                                                                                                                      |
 
 ### 管理員取消團購活動
 
@@ -83,6 +83,18 @@ API JSON 使用 `camelCase`。已實作 routes 只對目前開發 prototype 具�
 | Response      | `{ activity }`                                                                                                                              |
 | 已實作規則    | 需要 admin role、從登入使用者推導 `actorUserId`、soft cancellation、status history、audit log、已取消活動重複呼叫時回傳 idempotent response |
 | 尚缺規則      | 取消活動時連動 orders/payment handling                                                                                                      |
+
+### 管理員手動結算團購活動
+
+| 項目          | 內容                                                                                                                                                                                                                                                      |
+| ------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Method / path | `POST /api/admin/group-buy-activities/:activityId/settle`                                                                                                                                                                                                 |
+| 相關畫面      | 目前無正式畫面；本機開發與管理測試用                                                                                                                                                                                                                     |
+| Request       | 需要 admin bearer token。Body: `{ force?: boolean }`；`force` 只用於本機測試尚未截止活動                                                                                                                                                                  |
+| Response      | `{ plan, results, capturedOrderCount, voidedOrderCount, settlement, activity }`；付款失敗時回傳 `{ error: "settlement_payment_failures", plan, results, failures }`                                                                                         |
+| 已實作規則    | 需要 admin role、預設要求活動已過截止時間、鎖定 authorized 訂單、計算有效授權杯數與適用優惠級距、依顧客 fallback preference 對訂單執行 capture 或 void、成功後建立 `activity_settlements` 並更新 activity status、寫入 status history 與 audit log |
+| 本機驗證      | `npm run settlement:smoke` 會用 `mock_line_pay` 建立臨時預授權資料，驗證達標 capture 與未達標 capture/void，測完還原 SQLite                                                                                                                                |
+| 尚缺規則      | provider 失敗重試、折扣分攤正式規則、跨執行個體 idempotency / locking                                                                                                                                                                                     |
 
 ### 顧客建立訂單
 
@@ -104,7 +116,19 @@ API JSON 使用 `camelCase`。已實作 routes 只對目前開發 prototype 具�
 | Request       | 需要 bearer token。Body: `{ fallbackPurchasePreference, items: [{ menuItemId?, itemName, quantity, unitPrice, subtotal, size?, sweetness?, ice?, toppings? }] }`                                                                                                                                            |
 | Response      | `{ order }`                                                                                                                                                                                                                                                                                                 |
 | 已實作規則    | 需要 customer role 與 order ownership；只允許 `status = submitted` 且 `payment_status = pending`；替換 `order_items` 與 `order_item_customizations`；重新計算 `total_cups` 與 `original_amount`；用已 authorized/captured 杯數檢查容量；允許新 request 前，將 pending LINE Pay authorizations 標成 `failed` |
-| 尚缺規則      | 已授權訂單 reauthorization flow、明確 customer cancel/exit API、revision history table                                                                                                                                                                                                                      |
+| 尚缺規則      | 明確 customer cancel/exit API、revision 失敗 / 容量不足 / void 舊授權失敗時的 mobile 錯誤提示                                                                                                                                                                                                                |
+
+### 建立已授權訂單修改版本
+
+| 項目          | 內容                                                                                                                                                                                                                                     |
+| ------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Method / path | `POST /api/orders/:orderId/revisions`                                                                                                                                                                                                    |
+| 相關畫面      | `CustomerOrdersScreen`、`CartScreen`、`PaymentReportScreen`；mobile 第一版已串接                                                                                                                                                          |
+| Request       | 需要 customer bearer token。Body: `{ fallbackPurchasePreference, items: [{ menuItemId?, itemName, quantity, unitPrice, subtotal, size?, sweetness?, ice?, toppings? }] }`                                                                |
+| Response      | `{ revision }`；revision 包含 `id`, `orderId`, `status`, `totalCups`, `originalAmount`, `items`                                                                                                                                          |
+| 已實作規則    | 只允許 owner 修改 `status = submitted` 且 `payment_status = authorized` 的訂單；截止前 30 分鐘內不可建立 revision；檢查活動可加入與容量上限；建立 `order_revisions` 與 revision item snapshots；不直接修改原訂單，也不取消舊預授權 |
+| 後續付款      | 使用 `POST /api/payments/line-pay/request` 並帶入 `{ orderId, orderRevisionId, amount }` 對 revision 金額重新預授權                                                                                                                     |
+| 尚缺規則      | revision 取消 API、完整 revision 歷史查詢 API、失敗狀態的 mobile 告知與重試入口                                                                                                                                                            |
 
 ### 查詢訂單明細
 
@@ -113,8 +137,8 @@ API JSON 使用 `camelCase`。已實作 routes 只對目前開發 prototype 具�
 | Method / path | `GET /api/orders/:orderId`                                                                                                                                |
 | 相關畫面      | `PaymentReportScreen`、`CustomerOrdersScreen`                                                                                                             |
 | Request       | 需要 bearer token                                                                                                                                         |
-| Response      | `{ order: { id, activityId, customerUserId, status, paymentStatus, authorizationStatus, originalAmount, totalCups, items, latestLinePayAuthorization } }` |
-| 已實作規則    | 檢查 owner/admin 權限；回傳 order item snapshots 與最新 LINE Pay authorization，讓 mobile 可在 LINE Pay redirect 後刷新付款狀態                           |
+| Response      | `{ order: { id, activityId, customerUserId, status, paymentStatus, authorizationStatus, originalAmount, totalCups, items, latestLinePayAuthorization, pendingRevision } }` |
+| 已實作規則    | 檢查 owner/admin 權限；回傳 order item snapshots、最新 LINE Pay authorization 與待重新預授權 revision，讓 mobile 可在 LINE Pay redirect 後刷新付款狀態                      |
 | 尚缺規則      | Merchant visibility checks、多筆 authorizations 的 pagination/history                                                                                     |
 
 ### 建立 LINE Pay 預授權
@@ -123,10 +147,10 @@ API JSON 使用 `camelCase`。已實作 routes 只對目前開發 prototype 具�
 | ------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | Method / path | `POST /api/payments/line-pay/request`                                                                                                                                                                                                                                                                                                                     |
 | 相關畫面      | `PaymentReportScreen`                                                                                                                                                                                                                                                                                                                                     |
-| Request       | 需要 bearer token。Body: `{ orderId, amount, currency?, productName?, packageName?, products? }`                                                                                                                                                                                                                                                          |
-| Response      | `{ provider, orderId, transactionId, paymentUrl, paymentAccessToken, status }`                                                                                                                                                                                                                                                                            |
-| 已實作規則    | Owner/admin access check、Channel ID/Secret 只在 backend、LINE Pay request signature、預設 sandbox base URL、確認 SQLite 有對應訂單、確認 request amount 等於 `orders.original_amount`、latest LINE Pay authorization 為 `pending` 或 `authorized` 時阻擋重複 request、建立 `payment_authorizations.status = pending`、暫時使用 in-memory redirect lookup |
-| 尚缺規則      | Durable redirect lookup、idempotency table、webhook verification、mobile callback sync、authorization expiry handling、separated capture support confirmation                                                                                                                                                                                             |
+| Request       | 需要 bearer token。Body: `{ orderId, orderRevisionId?, amount, currency?, productName?, packageName?, products? }`                                                                                                                                                                                                                                          |
+| Response      | `{ provider, orderId, orderRevisionId?, transactionId, paymentUrl, paymentAccessToken, status }`                                                                                                                                                                                                                                                           |
+| 已實作規則    | Owner/admin access check、Channel ID/Secret 只在 backend、LINE Pay request signature、預設 sandbox base URL、確認 SQLite 有對應訂單或 pending revision、確認 request amount 等於訂單或 revision 原價金額、latest LINE Pay authorization 為 `pending` 或 `authorized` 時阻擋重複 request、建立 `payment_authorizations.status = pending`、redirect 以 DB 查找為主且 memory cache 只作輔助 |
+| 尚缺規則      | Idempotency table、webhook verification、mobile callback sync、authorization expiry handling、separated capture support confirmation                                                                                                                                                                                                                     |
 
 ### LINE Pay Confirm Redirect
 
@@ -136,8 +160,8 @@ API JSON 使用 `camelCase`。已實作 routes 只對目前開發 prototype 具�
 | 相關畫面      | LINE Pay hosted page 會 redirect 到這裡                                                                                                                                                                                                                      |
 | Request       | LINE Pay query parameters，加上 confirm URL 裡自行帶入的 `orderId`                                                                                                                                                                                           |
 | Response      | HTML result page                                                                                                                                                                                                                                             |
-| 已實作規則    | 在 memory 查詢 pending payment、用原價金額/currency 呼叫 LINE Pay confirm、更新 `payment_authorizations.status = authorized`、更新 `orders.payment_status = authorized` 與 `orders.authorization_status = authorized`、記錄 provider event 與 status history |
-| 尚缺規則      | 跨 server restart 的 durable redirect lookup、mobile callback sync、處理 provider retries 或 duplicate redirects，不能只依賴簡單 already-authorized behavior                                                                                                 |
+| 已實作規則    | 以 DB 查找 pending authorization，memory cache 只作輔助；用原價金額/currency 呼叫 LINE Pay confirm；寫入 `authorized` 前用交易重新檢查容量；一般訂單成功時更新 `payment_authorizations` 與 `orders`；revision 授權成功時先套用 `order_revisions` 再嘗試 void 舊授權；容量不足時標記 authorization / revision failed，並自動嘗試 LINE Pay void；記錄 provider event、status history 與 audit log |
+| 尚缺規則      | Mobile callback sync、provider retry policy、void 失敗重試與告警、duplicate redirect 更完整的 idempotency table                                                                                                                                                 |
 
 ### LINE Pay Cancel Redirect
 
@@ -146,8 +170,8 @@ API JSON 使用 `camelCase`。已實作 routes 只對目前開發 prototype 具�
 | Method / path | `GET /api/payments/line-pay/cancel?transactionId=&orderId=` |
 | 相關畫面      | LINE Pay hosted page 會 redirect 到這裡                     |
 | Response      | HTML cancellation page                                      |
-| 已實作規則    | 可行時清除 in-memory pending payment                        |
-| 尚缺規則      | 保存 cancellation event，並導回 app                         |
+| 已實作規則    | 以 DB 查找 pending authorization，將 pending authorization 標記為 `failed`；若屬於 order revision，revision 也會標記為 `failed`；寫入 provider event、status history 與 audit log，並清除 memory cache |
+| 尚缺規則      | 導回 app、duplicate cancel redirect 的完整 idempotency table                                                                 |
 
 ## 下一步候選 API
 
@@ -165,7 +189,7 @@ API JSON 使用 `camelCase`。已實作 routes 只對目前開發 prototype 具�
 | `POST /api/group-buy-activities/:activityId/orders` | 訂單建立的替代 nested route      | 目前已實作 route 是 `POST /api/orders`；最終 route shape 尚未決定 |
 | `GET /api/customers/me/orders`                      | 顧客進行中與歷史訂單             | Authentication 與 pagination                                      |
 | `GET /api/orders/:orderId/history`                  | 訂單與付款狀態歷史               | Owner/merchant/admin visibility                                   |
-| `PATCH /api/orders/:orderId/items`                  | 若未來需要，更細的品項修改 route | Reauthorization 與 revision history                               |
+| `PATCH /api/orders/:orderId/items`                  | 若未來需要，更細的品項修改 route | 目前已有 `POST /api/orders/:orderId/revisions` 作為已授權修改入口 |
 | `POST /api/orders/:orderId/cancel`                  | 鎖定前退出團購                   | Deadline race 與 authorized-cup rollback                          |
 
 ### 付款
@@ -174,7 +198,7 @@ API JSON 使用 `camelCase`。已實作 routes 只對目前開發 prototype 具�
 | ----------------------------------------------------------- | ---------------------------- | ---------------------------------------------- |
 | `POST /api/orders/:orderId/payment-authorizations`          | 開始 provider authorization  | LINE Pay capability 與 redirect/deep-link flow |
 | `POST /api/payment-authorizations/:authorizationId/void`    | 取消未使用授權               | Provider expiry 與 idempotency                 |
-| `POST /api/payment-authorizations/:authorizationId/capture` | Partial capture final amount | Provider support 與 retry policy               |
+| `POST /api/payment-authorizations/:authorizationId/capture` | Partial capture final amount | Backend payment module 已有內部 capture service；尚未開公開 API、settlement job 與 retry policy |
 | `POST /api/payments/webhooks/line-pay`                      | 接收 provider events         | Signature verification 與 event ordering       |
 
 ### 商家履約
@@ -190,7 +214,7 @@ API JSON 使用 `camelCase`。已實作 routes 只對目前開發 prototype 具�
 
 | Method / path candidate                        | 用途                                                        | 主要不確定點                                       |
 | ---------------------------------------------- | ----------------------------------------------------------- | -------------------------------------------------- |
-| Internal job/event, not necessarily public API | 鎖定訂單、選擇 tier、capture/void payments、建立 settlement | Scheduler ownership、retries、concurrency/recovery |
+| Internal backend interval job                  | 自動找出已截止團購並觸發 settlement                         | 單一 process interval 已先實作；仍缺跨執行個體 locking、retries、concurrency/recovery |
 
 ## 跨功能需求
 

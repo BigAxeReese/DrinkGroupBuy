@@ -24,7 +24,7 @@ import { getDealCapacityInfo, wouldExceedDealCapacity } from "../utils/dealProgr
 import { normalizeOrderItem } from "../utils/orderItems";
 import { buildOrderItemsChange, rollbackAuthorizedCups } from "../utils/orderState";
 import { clearPrototypeStateOnce, loadPrototypeState, savePrototypeState } from "../utils/prototypeStorage";
-import { createOrder, getOrder, listGroupBuyActivities, updateOrder } from "../utils/apiClient";
+import { createOrder, createOrderRevision, getOrder, listGroupBuyActivities, updateOrder } from "../utils/apiClient";
 
 const initialRoute = { name: "roleSelect", params: {} };
 const backendCustomerUserIds = {
@@ -33,6 +33,38 @@ const backendCustomerUserIds = {
   "customer-lixuan": "user-customer-lixuan",
   "customer-jingwei": "user-customer-jingwei"
 };
+
+function toBackendOrderItems(orderItems) {
+  return orderItems.map((item) => ({
+    menuItemId: item.drinkId,
+    itemName: item.itemName,
+    quantity: item.quantity,
+    unitPrice: item.unitPrice,
+    subtotal: item.subtotal,
+    size: item.size,
+    sweetness: item.sweetness,
+    ice: item.ice,
+    toppings: item.toppings
+  }));
+}
+
+function toLocalOrderItem(item) {
+  return {
+    id: item.id,
+    drinkId: item.menuItemId,
+    itemName: item.itemName,
+    name: item.itemName,
+    quantity: item.quantity,
+    unitPrice: item.unitPrice,
+    subtotal: item.subtotal,
+    size: item.customizations?.find((customization) => customization.optionType === "size")?.label ?? "L",
+    sweetness: item.customizations?.find((customization) => customization.optionType === "sweetness")?.label ?? "",
+    ice: item.customizations?.find((customization) => customization.optionType === "ice")?.label ?? "",
+    toppings: (item.customizations || [])
+      .filter((customization) => customization.optionType === "topping")
+      .map((customization) => customization.label)
+  };
+}
 
 export function AppNavigator() {
   const [stack, setStack] = useState([initialRoute]);
@@ -180,7 +212,9 @@ export function AppNavigator() {
       ));
       const quantity = submittedItems.reduce((sum, item) => sum + item.quantity, 0);
       const deal = deals.find((item) => item.id === dealId);
-      const capacityCheckQuantity = quantity;
+      const capacityCheckQuantity = existingOrder && existingOrder.paymentStatus !== "pending"
+        ? Math.max(0, quantity - (existingOrder.quantity ?? 0))
+        : quantity;
       if (deal && wouldExceedDealCapacity(deal, capacityCheckQuantity)) {
         return {
           error: "capacity_exceeded",
@@ -190,8 +224,64 @@ export function AppNavigator() {
       const subtotal = submittedItems.reduce((sum, item) => sum + item.subtotal, 0);
       const firstItem = submittedItems[0];
       const orderItems = submittedItems.map((item) => normalizeOrderItem(item));
+      const backendItems = toBackendOrderItems(orderItems);
 
       if (existingOrder) {
+        if (existingOrder.paymentStatus !== "pending") {
+          let revision;
+          try {
+            revision = await createOrderRevision(existingOrder.id, {
+              fallbackPurchasePreference,
+              items: backendItems
+            });
+          } catch (error) {
+            return {
+              error: "backend_order_revision_failed",
+              message: error.message,
+              orderId: existingOrder.id
+            };
+          }
+
+          setOrders((items) => items.map((order) => (
+            order.id === existingOrder.id
+              ? {
+                  ...order,
+                  pendingRevisionId: revision.id,
+                  pendingRevisionAmount: revision.originalAmount ?? subtotal,
+                  pendingRevisionItems: orderItems,
+                  pendingRevisionTotalCups: revision.totalCups ?? quantity,
+                  reauthorizationReason: "order_amount_changed"
+                }
+              : order
+          )));
+          setPaymentReports((items) => items.map((report) => (
+            report.orderId === existingOrder.id
+              ? {
+                  ...report,
+                  pendingRevisionId: revision.id,
+                  revisionAmount: revision.originalAmount ?? subtotal,
+                  revisionItems: orderItems,
+                  status: "pending",
+                  paymentStatus: "pending",
+                  authorizationStatus: "pending",
+                  originalAmount: revision.originalAmount ?? subtotal,
+                  authorizedAmount: 0,
+                  finalAmount: null,
+                  captureAmount: null,
+                  releasedAmount: null,
+                  discountStatus: "not_yet_qualified",
+                  note: "Order revision requires replacement LINE Pay authorization."
+                }
+              : report
+          )));
+          return {
+            orderId: existingOrder.id,
+            orderRevisionId: revision.id,
+            revisionAmount: revision.originalAmount ?? subtotal,
+            revisionItems: orderItems
+          };
+        }
+
         if (existingOrder.paymentStatus !== "pending") {
           return {
             error: "existing_order_requires_payment",
@@ -204,17 +294,7 @@ export function AppNavigator() {
         try {
           backendOrder = await updateOrder(existingOrder.id, {
             fallbackPurchasePreference,
-            items: orderItems.map((item) => ({
-              menuItemId: item.drinkId,
-              itemName: item.itemName,
-              quantity: item.quantity,
-              unitPrice: item.unitPrice,
-              subtotal: item.subtotal,
-              size: item.size,
-              sweetness: item.sweetness,
-              ice: item.ice,
-              toppings: item.toppings
-            }))
+            items: backendItems
           });
         } catch (error) {
           return {
@@ -245,6 +325,10 @@ export function AppNavigator() {
                 authorizationStatus: backendOrder.authorizationStatus,
                 merchantAcceptanceStatus: backendOrder.merchantAcceptanceStatus,
                 pickupStatus: backendOrder.pickupStatus,
+                pendingRevisionId: null,
+                pendingRevisionAmount: null,
+                pendingRevisionItems: null,
+                pendingRevisionTotalCups: null,
                 reauthorizationReason: null
               }
             : order
@@ -262,6 +346,9 @@ export function AppNavigator() {
                 paymentStatus: backendOrder.paymentStatus,
                 authorizationStatus: backendOrder.authorizationStatus,
                 discountStatus: "not_yet_qualified",
+                pendingRevisionId: null,
+                revisionAmount: null,
+                revisionItems: null,
                 note: "Pending order updated from cart. Reauthorization required."
               }
             : report
@@ -275,17 +362,7 @@ export function AppNavigator() {
           activityId: dealId,
           customerUserId: backendCustomerUserIds[selectedCustomerId] ?? selectedCustomerId,
           fallbackPurchasePreference,
-          items: orderItems.map((item) => ({
-            menuItemId: item.drinkId,
-            itemName: item.itemName,
-            quantity: item.quantity,
-            unitPrice: item.unitPrice,
-            subtotal: item.subtotal,
-            size: item.size,
-            sweetness: item.sweetness,
-            ice: item.ice,
-            toppings: item.toppings
-          }))
+          items: backendItems
         });
       } catch (error) {
         return {
@@ -341,9 +418,69 @@ export function AppNavigator() {
       ]);
       return orderId;
     },
-    updateOrderItems(orderId, nextItems) {
+    async updateOrderItems(orderId, nextItems) {
       const orderToUpdate = orders.find((order) => order.id === orderId);
       if (!orderToUpdate) return;
+
+      const nextOrderItems = nextItems.map((item) => normalizeOrderItem(item));
+      if (orderToUpdate.paymentStatus !== "pending") {
+        if (nextOrderItems.length === 0) return;
+
+        const revisionAmount = nextOrderItems.reduce((sum, item) => sum + item.subtotal, 0);
+        const revisionCups = nextOrderItems.reduce((sum, item) => sum + item.quantity, 0);
+        let revision;
+        try {
+          revision = await createOrderRevision(orderId, {
+            fallbackPurchasePreference: orderToUpdate.fallbackPurchasePreference ?? "decline_original_price",
+            items: toBackendOrderItems(nextOrderItems)
+          });
+        } catch (error) {
+          setOrders((items) => items.map((order) => (
+            order.id === orderId
+              ? {
+                  ...order,
+                  revisionError: error.message
+                }
+              : order
+          )));
+          return;
+        }
+
+        setOrders((items) => items.map((order) => (
+          order.id === orderId
+            ? {
+                ...order,
+                pendingRevisionId: revision.id,
+                pendingRevisionAmount: revision.originalAmount ?? revisionAmount,
+                pendingRevisionItems: nextOrderItems,
+                pendingRevisionTotalCups: revision.totalCups ?? revisionCups,
+                reauthorizationReason: "order_amount_changed",
+                revisionError: null
+              }
+            : order
+        )));
+        setPaymentReports((items) => items.map((report) => (
+          report.orderId === orderId
+            ? {
+                ...report,
+                pendingRevisionId: revision.id,
+                revisionAmount: revision.originalAmount ?? revisionAmount,
+                revisionItems: nextOrderItems,
+                originalAmount: revision.originalAmount ?? revisionAmount,
+                authorizedAmount: 0,
+                finalAmount: null,
+                captureAmount: null,
+                releasedAmount: null,
+                status: "pending",
+                paymentStatus: "pending",
+                authorizationStatus: "pending",
+                discountStatus: "not_yet_qualified",
+                note: "Order revision requires replacement LINE Pay authorization."
+              }
+            : report
+        )));
+        return revision;
+      }
 
       const change = buildOrderItemsChange({ order: orderToUpdate, nextItems });
 
@@ -489,6 +626,8 @@ export function AppNavigator() {
       const authorizedAmount = authorization?.authorizedAmount ?? backendOrder.originalAmount;
       const backendActivities = await listGroupBuyActivities();
       const backendActivity = backendActivities.find((activity) => activity.id === backendOrder.activityId);
+      const pendingRevision = backendOrder.pendingRevision ?? null;
+      const pendingRevisionItems = pendingRevision?.items?.map(toLocalOrderItem) ?? null;
 
       setOrders((items) => items.map((order) => (
         order.id === orderId
@@ -502,21 +641,12 @@ export function AppNavigator() {
               finalAmount: backendOrder.finalAmount,
               quantity: backendOrder.totalCups,
               subtotal: backendOrder.originalAmount,
-              items: backendOrder.items?.map((item) => ({
-                id: item.id,
-                drinkId: item.menuItemId,
-                itemName: item.itemName,
-                name: item.itemName,
-                quantity: item.quantity,
-                unitPrice: item.unitPrice,
-                subtotal: item.subtotal,
-                size: item.customizations?.find((customization) => customization.optionType === "size")?.label ?? "L",
-                sweetness: item.customizations?.find((customization) => customization.optionType === "sweetness")?.label ?? "",
-                ice: item.customizations?.find((customization) => customization.optionType === "ice")?.label ?? "",
-                toppings: (item.customizations || [])
-                  .filter((customization) => customization.optionType === "topping")
-                  .map((customization) => customization.label)
-              })) ?? order.items
+              items: backendOrder.items?.map(toLocalOrderItem) ?? order.items,
+              pendingRevisionId: pendingRevision?.id ?? null,
+              pendingRevisionAmount: pendingRevision?.originalAmount ?? null,
+              pendingRevisionItems,
+              pendingRevisionTotalCups: pendingRevision?.totalCups ?? null,
+              reauthorizationReason: pendingRevision ? "order_amount_changed" : null
             }
           : order
       )));
@@ -524,13 +654,16 @@ export function AppNavigator() {
         report.orderId === orderId
           ? {
               ...report,
-              status: backendOrder.paymentStatus,
-              paymentStatus: backendOrder.paymentStatus,
-              authorizationStatus: backendOrder.authorizationStatus,
-              originalAmount: backendOrder.originalAmount,
-              authorizedAmount,
+              status: pendingRevision ? "pending" : backendOrder.paymentStatus,
+              paymentStatus: pendingRevision ? "pending" : backendOrder.paymentStatus,
+              authorizationStatus: pendingRevision ? "pending" : backendOrder.authorizationStatus,
+              originalAmount: pendingRevision?.originalAmount ?? backendOrder.originalAmount,
+              authorizedAmount: pendingRevision ? 0 : authorizedAmount,
               provider: authorization?.provider ?? report.provider,
               providerReference: authorization?.providerAuthorizationId ?? report.providerReference,
+              pendingRevisionId: pendingRevision?.id ?? null,
+              revisionAmount: pendingRevision?.originalAmount ?? null,
+              revisionItems: pendingRevisionItems,
               note: "Synced from backend order state."
             }
           : report

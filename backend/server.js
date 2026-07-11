@@ -3,6 +3,7 @@ const {
   cancelGroupBuyActivity,
   createGroupBuyActivity,
   createOrder,
+  createOrderRevision,
   getOrderDetail,
   getUserAuthProfileByFirebaseUid,
   getUserAuthProfileByLoginIdentifier,
@@ -19,6 +20,10 @@ const {
   confirmLinePayAuthorization,
   requestLinePayAuthorization
 } = require("./payments/linePayService");
+const {
+  settleGroupBuyActivity,
+  startDeadlineSettlementScheduler
+} = require("./payments/settlementService");
 
 const port = Number(process.env.PORT ?? 3000);
 
@@ -177,6 +182,84 @@ const server = http.createServer(async (request, response) => {
       return;
     }
 
+    const orderRevisionMatch = url.pathname.match(/^\/api\/orders\/([^/]+)\/revisions$/);
+    if (request.method === "POST" && orderRevisionMatch) {
+      const authUser = getAuthenticatedUser(request);
+      if (!authUser) {
+        sendJson(response, 401, { error: "Authentication required" });
+        return;
+      }
+      if (!authUser.roles.includes("customer")) {
+        sendJson(response, 403, { error: "Customer role required" });
+        return;
+      }
+
+      const body = await readJsonBody(request);
+      const validationError = validateUpdateOrder(body);
+      if (validationError) {
+        sendJson(response, 400, { error: validationError });
+        return;
+      }
+
+      const result = createOrderRevision({
+        ...body,
+        orderId: orderRevisionMatch[1],
+        customerUserId: authUser.id
+      });
+      if (result?.error === "order_not_found") {
+        sendJson(response, 404, { error: "Order not found" });
+        return;
+      }
+      if (result?.error === "order_access_denied") {
+        sendJson(response, 403, { error: "Order access denied" });
+        return;
+      }
+      if (result?.error === "order_not_revisable") {
+        sendJson(response, 409, {
+          error: "Order is not revisable after authorization",
+          status: result.status,
+          paymentStatus: result.paymentStatus,
+          authorizationStatus: result.authorizationStatus
+        });
+        return;
+      }
+      if (result?.error === "activity_not_joinable") {
+        sendJson(response, 409, { error: "Group-buy activity is not joinable", status: result.status });
+        return;
+      }
+      if (result?.error === "order_locked_by_deadline") {
+        sendJson(response, 409, {
+          error: "Order is locked by deadline",
+          deadlineAt: result.deadlineAt,
+          lockMinutes: result.lockMinutes
+        });
+        return;
+      }
+      if (result?.error === "order_revision_already_pending") {
+        sendJson(response, 409, {
+          error: "Order already has a pending revision",
+          orderRevisionId: result.orderRevisionId
+        });
+        return;
+      }
+      if (result?.error === "order_authorization_missing") {
+        sendJson(response, 409, { error: "Order authorization is missing" });
+        return;
+      }
+      if (result?.error === "capacity_exceeded") {
+        sendJson(response, 409, {
+          error: "Group-buy activity capacity exceeded",
+          maximumCups: result.maximumCups,
+          authorizedCups: result.authorizedCups,
+          requestedCups: result.requestedCups
+        });
+        return;
+      }
+
+      sendJson(response, 201, { revision: result.revision });
+      return;
+    }
+
     const orderMatch = url.pathname.match(/^\/api\/orders\/([^/]+)$/);
     if (request.method === "PATCH" && orderMatch) {
       const authUser = getAuthenticatedUser(request);
@@ -291,6 +374,26 @@ const server = http.createServer(async (request, response) => {
       const orderId = url.searchParams.get("orderId");
       const result = await confirmLinePayAuthorization({ transactionId, orderId });
 
+      if (result?.error === "capacity_exceeded") {
+        const voidStatus = result.voidResult?.status
+          || (result.voidError ? `void_failed: ${result.voidError.message}` : "void_not_attempted");
+        sendHtml(response, 409, buildLinePayResultPage({
+          title: "LINE Pay 預授權無法完成",
+          message: "團購已達杯數上限，這筆訂單沒有加入團購。",
+          detail: `Maximum cups: ${result.maximumCups} / Authorized cups: ${result.authorizedCups} / Requested cups: ${result.requestedCups} / Void: ${voidStatus}`
+        }));
+        return;
+      }
+
+      if (result?.error) {
+        sendHtml(response, 409, buildLinePayResultPage({
+          title: "LINE Pay 預授權無法完成",
+          message: result.error,
+          detail: result.authorization ? `Authorization status: ${result.authorization.status}` : undefined
+        }));
+        return;
+      }
+
       if (!result) {
         sendHtml(response, 409, buildLinePayResultPage({
           title: "LINE Pay 預授權無法完成",
@@ -317,6 +420,54 @@ const server = http.createServer(async (request, response) => {
         title: "LINE Pay 預授權已取消",
         message: "你可以回到 App 重新發起預授權。"
       }));
+      return;
+    }
+
+    const adminSettleActivityMatch = url.pathname.match(/^\/api\/admin\/group-buy-activities\/([^/]+)\/settle$/);
+    if (request.method === "POST" && adminSettleActivityMatch) {
+      const authUser = getAuthenticatedUser(request);
+      if (!authUser) {
+        sendJson(response, 401, { error: "Authentication required" });
+        return;
+      }
+      if (!authUser.roles.includes("admin")) {
+        sendJson(response, 403, { error: "Admin role required" });
+        return;
+      }
+
+      const body = await readJsonBody(request);
+      const result = await settleGroupBuyActivity({
+        activityId: adminSettleActivityMatch[1],
+        actorUserId: authUser.id,
+        force: Boolean(body.force)
+      });
+
+      if (!result) {
+        sendJson(response, 404, { error: "Group-buy activity not found" });
+        return;
+      }
+      if (result.error === "settlement_not_due") {
+        sendJson(response, 409, {
+          error: "Group-buy activity deadline has not passed",
+          deadlineAt: result.deadlineAt,
+          now: result.now
+        });
+        return;
+      }
+      if (result.error === "activity_already_settled") {
+        sendJson(response, 200, result);
+        return;
+      }
+      if (result.error === "settlement_payment_failures") {
+        sendJson(response, 409, result);
+        return;
+      }
+      if (result.error) {
+        sendJson(response, 409, result);
+        return;
+      }
+
+      sendJson(response, 200, result);
       return;
     }
 
@@ -352,8 +503,16 @@ const server = http.createServer(async (request, response) => {
   }
 });
 
+let deadlineSettlementScheduler;
+
 server.listen(port, () => {
   console.log(`DrinkGroupBuy backend listening on http://localhost:${port}`);
+  deadlineSettlementScheduler = startDeadlineSettlementScheduler();
+  if (deadlineSettlementScheduler.enabled) {
+    console.log(`Deadline settlement scheduler enabled (${deadlineSettlementScheduler.intervalMs}ms interval)`);
+  } else {
+    console.log(`Deadline settlement scheduler disabled: ${deadlineSettlementScheduler.reason}`);
+  }
 });
 
 function sendJson(response, statusCode, payload) {
@@ -408,6 +567,15 @@ function validateCreateActivity(body) {
   ];
   const missingField = requiredFields.find((field) => !body[field]);
   if (missingField) return `Missing required field: ${missingField}`;
+
+  const startTime = Date.parse(body.startAt);
+  const deadlineTime = Date.parse(body.deadlineAt);
+  if (Number.isNaN(startTime)) return "startAt must be a valid datetime";
+  if (Number.isNaN(deadlineTime)) return "deadlineAt must be a valid datetime";
+  if (deadlineTime <= startTime) return "deadlineAt must be after startAt";
+  if (deadlineTime - startTime > 24 * 60 * 60 * 1000) {
+    return "deadlineAt must be within 24 hours of startAt";
+  }
 
   if (body.tiers != null && !Array.isArray(body.tiers)) {
     return "tiers must be an array";

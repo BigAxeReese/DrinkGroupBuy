@@ -1,6 +1,6 @@
 # 交接總整理
 
-最後更新：2026-07-05
+最後更新：2026-07-11
 
 換電腦、交接給其他人、或開新的 Codex 對話時，請先閱讀本文件。
 
@@ -28,7 +28,7 @@ project-root/
 - Firebase 不作為主要資料庫方向。
 - Firebase 目前只規劃用於 Auth / Google Login。
 - 開發期保留 dev mock login，方便測顧客、商家與管理員流程。
-- LINE Pay sandbox 預授權流程已開始。
+- LINE Pay sandbox 預授權、void、capture、單一團購手動結算與 deadline settlement scheduler 已開始。
 
 文件語言規則：
 
@@ -104,6 +104,7 @@ backend/
 | `backend/payments/linePayClient.js`       | LINE Pay sandbox request 簽章                 |
 | `backend/payments/linePayService.js`      | LINE Pay 授權 request / confirm / cancel 流程 |
 | `backend/payments/linePayPendingStore.js` | LINE Pay redirect 前後的暫存查找              |
+| `backend/payments/settlementService.js`   | 單一團購結算流程，依結果批次 capture / void   |
 | `backend/linePayClient.js`                | payment client 相容匯出                       |
 | `backend/README.md`                       | 後端啟動說明                                  |
 
@@ -112,12 +113,14 @@ backend/
 | 方法     | 路徑                                          | 用途                           |
 | -------- | --------------------------------------------- | ------------------------------ |
 | `POST`   | `/api/auth/login`                             | 登入                           |
+| `POST`   | `/api/auth/firebase-session`                  | Firebase Google Login session   |
 | `GET`    | `/health`                                     | 健康檢查                       |
 | `GET`    | `/api/group-buy-activities`                   | 查詢團購活動                   |
 | `POST`   | `/api/merchant/group-buy-activities`          | 商家建立團購活動               |
 | `POST`   | `/api/orders`                                 | 顧客建立訂單                   |
 | `GET`    | `/api/orders/:orderId`                        | 查詢訂單明細                   |
 | `DELETE` | `/api/admin/group-buy-activities/:activityId` | 管理員取消活動                 |
+| `POST`   | `/api/admin/group-buy-activities/:activityId/settle` | 管理員手動觸發單一團購結算 |
 | `POST`   | `/api/payments/line-pay/request`              | 建立 LINE Pay sandbox 授權請求 |
 | `GET`    | `/api/payments/line-pay/confirm`              | LINE Pay confirm redirect      |
 | `GET`    | `/api/payments/line-pay/cancel`               | LINE Pay cancel redirect       |
@@ -127,10 +130,12 @@ backend/
 - 沒有註冊。
 - 沒有密碼重設。
 - 沒有正式 auth/session 設計。
-- 尚未實作 LINE Pay capture / void / refund。
+- LINE Pay void / capture 已在付款模組內部實作；尚未實作 refund。
 - 尚未實作 payment webhook。
 - 尚未實作 pickup APIs。
-- 尚未實作 deadline settlement job。
+- 已實作 admin 手動觸發單一團購結算，也已接上後端啟動時的 deadline settlement scheduler。
+- Scheduler 預設每 60 秒掃描已截止、尚未結算的團購；若 `LINE_PAY_ENV=production`，必須設定 `SETTLEMENT_SCHEDULER_ALLOW_PRODUCTION=true` 才會啟動。
+- 可用 `npm run settlement:smoke` 以乾淨 schema 與 `mock_line_pay` 驗證本機結算 capture / void / scheduler，測試後會還原開發 SQLite。
 - 後端仍使用 SQLite。
 
 ## 測試登入帳號
@@ -259,12 +264,12 @@ PostgreSQL v1 決策：
 
 目前限制：
 
-- 只完成 authorization / confirm 起步。
-- 尚未實作 capture。
-- 尚未實作 void。
+- 已完成 authorization / confirm 起步。
+- void / capture 已在付款模組內部實作。
+- 已實作 admin 手動觸發單一團購結算。
 - 尚未實作 refund。
 - 尚未實作 webhook。
-- 尚未實作 deadline settlement。
+- 自動 deadline settlement scheduler 已先接上單一 backend process interval；尚未有跨執行個體 locking、重試佇列與告警。
 
 安全規則：
 
@@ -289,10 +294,10 @@ PostgreSQL v1 決策：
 1. Mobile 啟動時應從後端載入 activities。
 2. 需要菜單讀取 API。
 3. 訂單列表與訂單明細應改成以後端資料為準。
-4. 需要訂單修改 API。
-5. 真正支援授權後修改訂單前，需要 order revision history。
-6. 需要 deadline settlement job。
-7. 需要 LINE Pay capture / void / refund。
+4. 已授權訂單修改 API 與 mobile revision + LINE Pay request 第一版已完成；仍需補失敗提示與重試入口。
+5. 仍需要完整 order revision 歷史查詢與 UI 呈現。
+6. 需要跨執行個體 settlement locking、重試佇列與失敗告警。
+7. 需要 LINE Pay refund。
 8. 需要 payment webhook / idempotency 處理。
 9. 需要 pickup credential API。
 10. 尚未建立 PostgreSQL backend runtime adapter。

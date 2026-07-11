@@ -34,8 +34,10 @@ Invoke-RestMethod http://localhost:3000/health
 | `GET` | `/api/group-buy-activities` | 讀取團購活動 |
 | `POST` | `/api/merchant/group-buy-activities` | 商家建立團購 |
 | `POST` | `/api/orders` | 顧客建立訂單 |
+| `POST` | `/api/orders/:orderId/revisions` | 建立已授權訂單的修改版本 |
 | `GET` | `/api/orders/:orderId` | 讀取訂單明細 |
 | `DELETE` | `/api/admin/group-buy-activities/:activityId` | 管理員取消團購 |
+| `POST` | `/api/admin/group-buy-activities/:activityId/settle` | 管理員手動觸發單一團購結算 |
 | `POST` | `/api/payments/line-pay/request` | 建立 LINE Pay sandbox 授權請求 |
 | `GET` | `/api/payments/line-pay/confirm` | LINE Pay redirect confirm |
 | `GET` | `/api/payments/line-pay/cancel` | LINE Pay redirect cancel |
@@ -122,15 +124,37 @@ LINE Pay 相關程式目前集中在：
 | 檔案 | 用途 |
 | --- | --- |
 | `backend/payments/linePayClient.js` | 簽章並呼叫 LINE Pay API |
-| `backend/payments/linePayService.js` | 串接訂單檢查、授權建立、confirm 與 cancel |
-| `backend/payments/linePayPendingStore.js` | 暫存 LINE Pay redirect 前後需要比對的付款資料 |
+| `backend/payments/linePayService.js` | 串接訂單檢查、授權建立、confirm、cancel、void 與 capture |
+| `backend/payments/linePayPendingStore.js` | LINE Pay redirect 前後的記憶體快取；實際 confirm/cancel 以 DB 查找為主 |
+| `backend/payments/settlementService.js` | 單一團購結算流程，依結果批次 capture / void |
 | `backend/linePayClient.js` | 舊路徑相容匯出 |
+
+商家建立團購時，`deadlineAt` 必須晚於 `startAt`，且不得超過 `startAt` 後 24 小時。
+
+本機可用 smoke script 驗證截止結算：
+
+```powershell
+npm run settlement:smoke
+```
+
+這個指令會備份並還原 `database/drink-group-buy-dev.sqlite`，中途使用乾淨 schema 建立 `mock_line_pay` 預授權資料，確認達標時 capture、未達標時依顧客選項 capture 或 void，驗證 scheduler 會抓到已截止團購，也會驗證已授權訂單 revision 在新授權成功後才套用並 void 舊授權。它不會呼叫外部 LINE Pay API，也不是正式付款流程。
+
+後端啟動時會啟動 deadline settlement scheduler。預設每 60 秒掃描已截止、尚未結算的團購，並呼叫同一套 settlement service。相關設定：
+
+```env
+SETTLEMENT_SCHEDULER_ENABLED=true
+SETTLEMENT_SCHEDULER_INTERVAL_MS=60000
+SETTLEMENT_SCHEDULER_BATCH_SIZE=20
+SETTLEMENT_SCHEDULER_ALLOW_PRODUCTION=false
+```
+
+若 `LINE_PAY_ENV=production`，scheduler 會被 production guard 擋下；必須明確設定 `SETTLEMENT_SCHEDULER_ALLOW_PRODUCTION=true` 才會啟動，避免意外真實請款。
 
 ## 目前限制
 
 - 管理員登入尚未設定。
-- 訂單修改 API 尚未完成。
-- LINE Pay capture / void / refund 尚未完成。
+- 已授權訂單修改 API 與 mobile 重新預授權第一版已完成；仍需補正式 webhook、失敗重試與更完整的錯誤提示。
+- LINE Pay refund 尚未完成。
 - LINE Pay webhook 尚未完成。
-- deadline 自動結算與正式排程尚未完成。
+- deadline 自動結算已先以單一 backend process interval 實作；跨執行個體 locking、重試佇列與告警尚未完成。
 - 目前仍是開發資料庫，不是 production migration。

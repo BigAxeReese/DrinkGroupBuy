@@ -2,7 +2,7 @@ import { useState } from "react";
 import { Pressable, StyleSheet, Text, View } from "react-native";
 import { MobileScreen, Section } from "../components/MobileScreen";
 import { PrimaryButton } from "../components/PrimaryButton";
-import { formatCurrency, getDealById } from "../utils/calculations";
+import { formatCurrency, getDealById, isWithdrawalLocked } from "../utils/calculations";
 import { isDeadlineReached } from "../utils/deadlineTime";
 import { getDealCapacityInfo } from "../utils/dealProgress";
 
@@ -37,10 +37,14 @@ export function CartScreen({ navigation, route, appState, actions, memberAction,
     && order.dealId === deal.id
     && !["cancelled", "completed"].includes(order.status)
   ));
-  const canUpdatePendingOrder = Boolean(existingOrder && existingOrder.paymentStatus === "pending");
-  const blocksOrderUpdate = Boolean(existingOrder && !canUpdatePendingOrder);
+  const withdrawalLocked = Boolean(existingOrder && isWithdrawalLocked(deal));
+  const canUpdatePendingOrder = Boolean(existingOrder && existingOrder.paymentStatus === "pending" && !withdrawalLocked);
+  const canCreateRevision = Boolean(existingOrder && existingOrder.paymentStatus === "authorized" && !withdrawalLocked);
+  const blocksOrderUpdate = Boolean(existingOrder && !canUpdatePendingOrder && !canCreateRevision);
   const capacityInfo = getDealCapacityInfo(deal);
-  const capacityCheckQuantity = totalQuantity;
+  const capacityCheckQuantity = existingOrder && existingOrder.paymentStatus !== "pending"
+    ? Math.max(0, totalQuantity - (existingOrder.quantity ?? 0))
+    : totalQuantity;
   const exceedsCapacity = capacityInfo.maximumCups > 0 && capacityCheckQuantity > capacityInfo.remainingCapacity;
 
   return (
@@ -157,12 +161,16 @@ export function CartScreen({ navigation, route, appState, actions, memberAction,
           const fallbackPreference = acceptOriginalPrice ? "accept_original_price" : "decline_original_price";
           setIsSubmitting(true);
           try {
-            const orderId = await actions.submitCart(deal.id, fallbackPreference);
-            if (orderId?.error) {
-              setSubmitError(orderId.message);
+            const submitResult = await actions.submitCart(deal.id, fallbackPreference);
+            if (submitResult?.error) {
+              setSubmitError(submitResult.message);
               return;
             }
-            if (orderId) navigation.go("paymentReport", { dealId: deal.id, orderId });
+            const orderId = typeof submitResult === "string" ? submitResult : submitResult?.orderId;
+            const orderRevisionId = typeof submitResult === "object" ? submitResult.orderRevisionId : null;
+            const revisionAmount = typeof submitResult === "object" ? submitResult.revisionAmount : null;
+            const revisionItems = typeof submitResult === "object" ? submitResult.revisionItems : null;
+            if (orderId) navigation.go("paymentReport", { dealId: deal.id, orderId, orderRevisionId, revisionAmount, revisionItems });
           } finally {
             setIsSubmitting(false);
           }

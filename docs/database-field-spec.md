@@ -361,7 +361,7 @@ PostgreSQL draft 另有 `phone_verified_at`、`email_verified_at`、`last_login_
 
 | 範圍                    | 目前問題                                                                                          |
 | ----------------------- | ------------------------------------------------------------------------------------------------- |
-| Order revisions         | 已預授權訂單修改需要 `order_revisions` 或同等不可變更歷史設計。                                   |
+| Order revisions         | SQLite 第一版已建立 `order_revisions` 與 revision item tables；仍缺完整欄位字典與歷史查詢 API。    |
 | Merchant acceptance     | 最新規則不需要店家逐筆確認接單，`merchant_acceptance_status` 與相關欄位需後續 review。            |
 | Pickup visibility       | `visible_after_merchant_acceptance` 可能需要改名或改為與付款/可取餐狀態連動。                     |
 | Activity deadline       | 24 小時截止限制與截止前 30 分鐘鎖定規則需落實到 API validation 與可能的 DB constraint。           |

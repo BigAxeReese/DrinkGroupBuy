@@ -27,6 +27,7 @@
 | `activity_notices`                                                  | 團購活動備註                   | Activity 1:N notices                                       |
 | `cart_drafts`, `cart_draft_items`, `cart_draft_item_customizations` | 送出前的伺服器端購物車草稿     | User/activity 1:N items；item 1:N selected options         |
 | `orders`, `order_items`, `order_item_customizations`                | 顧客參與團購與品項快照         | Activity/user 1:N orders；order 1:N items                  |
+| `order_revisions`, `order_revision_items`, `order_revision_item_customizations` | 已授權訂單修改版本             | Order 1:N revisions；revision 1:N items                    |
 | `payment_authorizations`                                            | 付款預授權紀錄                 | Order 1:N authorizations                                   |
 | `payment_captures`                                                  | 請款結果                       | Authorization/order 1:N captures                           |
 | `payment_provider_events`                                           | 金流 webhook/event 原始紀錄    | 以邏輯方式關聯付款資源                                     |
@@ -39,7 +40,8 @@
 
 - Backend 已經會讀寫 `group_buy_activities`、`promotion_tiers`、`activity_notices`、`status_history` 與 `audit_logs`，用於目前已實作的活動 API。
 - Seed data 會建立 users、roles、一組或多組 merchant/store、menu items、activities 與 tiers。
-- `orders`、payment、settlement、pickup 相關資料表目前仍偏向候選設計與付款模組串接準備，尚未完整連到所有 mobile 流程。
+- `orders`、`order_revisions`、payment、settlement、pickup 相關資料表目前仍偏向候選設計與付款模組串接準備，尚未完整連到所有 mobile 流程。
+- `payment_authorizations.provider` 目前支援 `line_pay` 與本機測試用 `mock_line_pay`；`mock_line_pay` 只用於開發 smoke 測試，不代表正式金流。
 - `database/test/` 是舊 prototype fixture database，不應視為正式 schema 或目前 mobile 的權威資料來源。
 - 購物車與訂單客製化資料已朝 first normal form 調整：甜度、冰塊、加料與尺寸以 child rows 表示，不以 JSON array 當主要資料結構。
 - 活動容量目前由最高 `promotion_tiers.target_cups` 推導；除非未來明確新增獨立容量規則，`group_buy_activities.maximum_cups` 應與最高門檻一致。
@@ -60,9 +62,9 @@
 
 | 範圍                    | 缺口或待決策項目                                                                                                      |
 | ----------------------- | --------------------------------------------------------------------------------------------------------------------- |
-| Order revision          | 已預授權訂單修改需要不可變更的 before/after 歷史紀錄，尚未建立 `order_revisions`。                                    |
+| Order revision          | `order_revisions` 第一版已建立並支援 replacement authorization；仍缺完整歷史查詢 API 與 mobile UI 串接。              |
 | Pricing snapshot        | 實際適用門檻、折扣分配與請款金額需要可重現，目前仍需補強欄位或 settlement 設計。                                      |
-| Activity deadline       | 24 小時截止限制與截止前 30 分鐘鎖定規則需落到 schema/API validation。                                                 |
+| Activity deadline       | 24 小時截止限制已先落到商家建立團購 API；截止前 30 分鐘鎖定規則仍需落到訂單修改 / 退出與取消 API。                   |
 | Merchant acceptance     | `orders.merchant_acceptance_status` 是早期候選欄位；最新規則不需要店家逐筆確認接單，未來可考慮移除或固定為 accepted。 |
 | Pickup status           | Mobile 曾使用 `preparing`，目前 schema 沒有該值；應優先用 activity/order 狀態與 `pickup_status = ready` 表示。        |
 | Store/menu source       | 七間店家的測試資料與正式開發資料需統一來源。                                                                          |

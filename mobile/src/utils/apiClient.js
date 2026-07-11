@@ -71,7 +71,10 @@ export async function createGroupBuyActivity(input) {
 
     const payload = await response.json();
     if (!response.ok) {
-      throw new Error(payload.error ?? "Create group-buy activity failed");
+      const error = new Error(payload.error ?? "Create group-buy activity failed");
+      error.status = response.status;
+      error.payload = payload;
+      throw error;
     }
 
     return payload.activity;
@@ -165,6 +168,28 @@ export async function updateOrder(orderId, input) {
     }
 
     return payload.order;
+  });
+}
+
+export async function createOrderRevision(orderId, input) {
+  const requestKey = `createOrderRevision:${orderId}:${stableStringify(input)}`;
+  return dedupeRequest(requestKey, async () => {
+    const response = await fetch(`${backendBaseUrl}/api/orders/${encodeURIComponent(orderId)}/revisions`, {
+      method: "POST",
+      headers: withAuthHeaders({
+        "Content-Type": "application/json"
+      }),
+      body: JSON.stringify(input)
+    });
+
+    const payload = await response.json();
+    if (!response.ok) {
+      const error = new Error(payload.error ?? "Create order revision failed");
+      error.payload = payload;
+      throw error;
+    }
+
+    return payload.revision;
   });
 }
 

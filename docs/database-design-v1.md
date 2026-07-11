@@ -192,7 +192,7 @@ PostgreSQL 方向：
 PostgreSQL 方向：
 
 - 保留 orders 與 order item snapshot tables。
-- 實作已預授權訂單修改前，需新增 `order_revisions` 或同等不可變更歷史紀錄。
+- SQLite 第一版已新增 `order_revisions` 與 revision item snapshot tables；PostgreSQL draft 仍需同步同等設計。
 - 使用 PostgreSQL transaction 防止超過容量，以及避免訂單與付款狀態不一致。
 
 ### 付款
@@ -218,9 +218,9 @@ PostgreSQL 方向：
 
 尚未完成：
 
-- Automatic deadline settlement job。
-- LINE Pay capture。
-- LINE Pay void。
+- Deadline settlement scheduler 已先以單一 backend process interval 實作；仍缺跨執行個體 locking、重試佇列與告警。
+- LINE Pay capture 已在付款模組內部實作。
+- LINE Pay void 已在付款模組內部實作。
 - LINE Pay refund。
 - Payment webhook processing。
 - Order replacement authorization 的完整 DB 歷史紀錄。
@@ -407,7 +407,7 @@ PostgreSQL v1 決策：status 欄位使用 `text check (...)`，第一版不使�
 ## 建議下一步
 
 1. 確認目前資料表清單是否作為 database design v1。
-2. 為已預授權訂單修改設計 `order_revisions`。
+2. 將 SQLite `order_revisions` 第一版同步到 PostgreSQL migration draft。
 3. 為截止結算設計 locking 與 promotion tier 選擇規則。
 4. 將 24 小時截止限制與截止前 30 分鐘鎖定規則落到 API validation。
 5. 依 `docs/postgresql-migration-plan.md` 規劃 runtime database 切換。
@@ -415,7 +415,7 @@ PostgreSQL v1 決策：status 欄位使用 `text check (...)`，第一版不使�
 ## 開放問題
 
 1. `group_buy_activities.maximum_cups` 是否永遠等於最高 `promotion_tiers.target_cups`，或未來允許獨立容量？
-2. 實作真實訂單修改前，是否必須先新增 `order_revisions`？
+2. `order_revisions` 是否需要公開完整歷史查詢 API，以及是否需要保存更完整的 before/after JSON snapshot？
 3. Pickup 狀態是否需要 `preparing`，或以 activity/order status 表示即可？
 4. `orders.merchant_acceptance_status` 是否應移除，或在預授權成功後固定為 `accepted`？
 5. 未達團購門檻但顧客接受原價購買時，是否在 deadline 直接 capture 原價？

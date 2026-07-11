@@ -87,9 +87,29 @@ async function confirmLinePayPayment(transactionId, input) {
   return linePayPost(`/v3/payments/${encodedTransactionId}/confirm`, { amount, currency }, config);
 }
 
+async function captureLinePayPaymentAuthorization(transactionId, input) {
+  const config = getLinePayConfig();
+  assertLinePayConfig(config);
+
+  const amount = toPositiveInteger(input.amount, "amount");
+  const currency = input.currency || config.currency;
+  const encodedTransactionId = encodeURIComponent(requiredString(transactionId, "transactionId"));
+
+  return linePayPost(`/v3/payments/authorizations/${encodedTransactionId}/capture`, { amount, currency }, config);
+}
+
+async function voidLinePayPaymentAuthorization(transactionId) {
+  const config = getLinePayConfig();
+  assertLinePayConfig(config);
+
+  const encodedTransactionId = encodeURIComponent(requiredString(transactionId, "transactionId"));
+
+  return linePayPost(`/v3/payments/authorizations/${encodedTransactionId}/void`, null, config);
+}
+
 async function linePayPost(uri, body, config = getLinePayConfig()) {
   const nonce = crypto.randomUUID();
-  const bodyText = JSON.stringify(body);
+  const bodyText = body == null ? "" : JSON.stringify(body);
   const signature = signLinePayRequest({
     channelSecret: config.channelSecret,
     uri,
@@ -97,18 +117,22 @@ async function linePayPost(uri, body, config = getLinePayConfig()) {
     nonce
   });
 
-  const response = await fetch(`${config.baseUrl}${uri}`, {
+  const requestOptions = {
     method: "POST",
     headers: {
       "Content-Type": "application/json",
       "X-LINE-ChannelId": config.channelId,
       "X-LINE-Authorization-Nonce": nonce,
       "X-LINE-Authorization": signature
-    },
-    body: bodyText
-  });
+    }
+  };
+  if (bodyText) {
+    requestOptions.body = bodyText;
+  }
 
-  const payload = await response.json().catch(() => ({}));
+  const response = await fetch(`${config.baseUrl}${uri}`, requestOptions);
+
+  const payload = await parseLinePayResponse(response);
   if (!response.ok || payload.returnCode !== "0000") {
     const reason = payload.returnMessage || payload.message || response.statusText;
     const error = new Error(`LINE Pay request failed: ${reason}`);
@@ -118,6 +142,17 @@ async function linePayPost(uri, body, config = getLinePayConfig()) {
   }
 
   return payload;
+}
+
+async function parseLinePayResponse(response) {
+  const text = await response.text().catch(() => "");
+  if (!text) return {};
+
+  try {
+    return JSON.parse(text.replace(/:\s*(\d{16,})\b/g, ': "$1"'));
+  } catch {
+    return {};
+  }
 }
 
 function signLinePayRequest({ channelSecret, uri, bodyText, nonce }) {
@@ -181,7 +216,9 @@ function appendQuery(url, query) {
 }
 
 module.exports = {
+  captureLinePayPaymentAuthorization,
   confirmLinePayPayment,
   getLinePayConfig,
-  requestLinePayPayment
+  requestLinePayPayment,
+  voidLinePayPaymentAuthorization
 };

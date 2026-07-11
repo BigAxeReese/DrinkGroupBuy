@@ -125,6 +125,11 @@ export function PaymentReportScreen({ navigation, route, appState, actions, memb
               startLinePayAuthorization({
                 payment,
                 order,
+                routeRevision: {
+                  id: route.params?.orderRevisionId,
+                  amount: route.params?.revisionAmount,
+                  items: route.params?.revisionItems
+                },
                 actions,
                 pollIntervalRef,
                 pollTimeoutRef,
@@ -204,6 +209,7 @@ async function syncBackendOrder({
 async function startLinePayAuthorization({
   payment,
   order,
+  routeRevision = null,
   actions,
   pollIntervalRef,
   pollTimeoutRef,
@@ -213,6 +219,7 @@ async function startLinePayAuthorization({
   setSyncStatus,
   setSyncMessage
 }) {
+  let revisionPayment = null;
   try {
     if (!payment || !order) {
       throw new Error("找不到可預授權的訂單資料");
@@ -221,11 +228,14 @@ async function startLinePayAuthorization({
     setLinePayStatus("loading");
     setLinePayMessage("");
 
-    const products = buildLinePayProducts(order, payment);
+    revisionPayment = getRevisionPaymentContext(order, payment, routeRevision);
+    const paymentAmount = revisionPayment?.amount ?? payment.originalAmount;
+    const products = buildLinePayProducts(order, payment, revisionPayment);
 
     const payload = await requestLinePayAuthorization({
       orderId: order.id,
-      amount: payment.originalAmount,
+      orderRevisionId: revisionPayment?.id,
+      amount: paymentAmount,
       productName: order.itemName || "DrinkGroupBuy 飲料訂單",
       packageName: payment.recipientName || "DrinkGroupBuy",
       products
@@ -240,6 +250,7 @@ async function startLinePayAuthorization({
     setLinePayMessage("已開啟 LINE Pay。完成授權後回到 App，付款狀態會自動刷新。");
     startLinePaySyncPolling({
       orderId: payment.orderId,
+      orderRevisionId: revisionPayment?.id,
       actions,
       pollIntervalRef,
       pollTimeoutRef,
@@ -265,6 +276,7 @@ async function startLinePayAuthorization({
       setLinePayMessage("此訂單已有一筆 LINE Pay 授權流程進行中，會自動等待 backend 結果。");
       startLinePaySyncPolling({
         orderId: payment.orderId,
+        orderRevisionId: revisionPayment?.id,
         actions,
         pollIntervalRef,
         pollTimeoutRef,
@@ -282,6 +294,7 @@ async function startLinePayAuthorization({
 
 function startLinePaySyncPolling({
   orderId,
+  orderRevisionId,
   actions,
   pollIntervalRef,
   pollTimeoutRef,
@@ -302,8 +315,9 @@ function startLinePaySyncPolling({
     try {
       const result = await actions.syncOrderFromBackend(orderId);
       const paymentStatus = result.order.paymentStatus;
+      const revisionStillPending = orderRevisionId && result.order.pendingRevision?.id === orderRevisionId;
 
-      if (PAYMENT_SYNC_FINISHED_STATUSES.has(paymentStatus)) {
+      if (PAYMENT_SYNC_FINISHED_STATUSES.has(paymentStatus) && !revisionStillPending) {
         stopLinePaySyncPolling({ pollIntervalRef, pollTimeoutRef });
         setSyncStatus("ready");
         setSyncMessage(`已同步後端狀態：${paymentStatus}`);
@@ -349,8 +363,33 @@ function getLinePayErrorMessage(error) {
   return error.message;
 }
 
-function buildLinePayProducts(order, payment) {
-  const items = order.items || [];
+function getRevisionPaymentContext(order, payment, routeRevision = null) {
+  const id = routeRevision?.id
+    ?? payment.pendingRevisionId
+    ?? order.pendingRevisionId
+    ?? order.pendingRevision?.id
+    ?? null;
+  if (!id) return null;
+
+  return {
+    id,
+    amount: routeRevision?.amount
+      ?? payment.revisionAmount
+      ?? order.pendingRevisionAmount
+      ?? order.pendingRevision?.originalAmount
+      ?? payment.originalAmount,
+    items: routeRevision?.items
+      ?? payment.revisionItems
+      ?? order.pendingRevisionItems
+      ?? order.pendingRevision?.items
+      ?? order.items
+      ?? []
+  };
+}
+
+function buildLinePayProducts(order, payment, revisionPayment = null) {
+  const paymentAmount = revisionPayment?.amount ?? payment.originalAmount;
+  const items = revisionPayment?.items || order.items || [];
   const products = items
     .map((item) => {
       const quantity = item.quantity || 1;
@@ -367,7 +406,7 @@ function buildLinePayProducts(order, payment) {
     .filter(Boolean);
   const productTotal = products.reduce((sum, item) => sum + item.price * item.quantity, 0);
 
-  if (products.length > 0 && productTotal === payment.originalAmount) {
+  if (products.length > 0 && productTotal === paymentAmount) {
     return products;
   }
 
@@ -375,7 +414,7 @@ function buildLinePayProducts(order, payment) {
     {
       name: order.itemName || "DrinkGroupBuy 飲料訂單",
       quantity: 1,
-      price: payment.originalAmount
+      price: paymentAmount
     }
   ];
 }

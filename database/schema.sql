@@ -199,9 +199,53 @@ CREATE TABLE order_item_customizations (
   sort_order INTEGER NOT NULL DEFAULT 0
 );
 
+CREATE TABLE order_revisions (
+  id TEXT PRIMARY KEY,
+  order_id TEXT NOT NULL REFERENCES orders(id) ON DELETE CASCADE,
+  status TEXT NOT NULL DEFAULT 'pending_authorization'
+    CHECK (status IN ('pending_authorization', 'applied', 'failed', 'cancelled')),
+  original_payment_authorization_id TEXT REFERENCES payment_authorizations(id),
+  replacement_payment_authorization_id TEXT REFERENCES payment_authorizations(id),
+  fallback_purchase_preference TEXT NOT NULL DEFAULT 'decline_original_price'
+    CHECK (fallback_purchase_preference IN ('decline_original_price', 'accept_original_price')),
+  previous_total_cups INTEGER NOT NULL CHECK (previous_total_cups > 0),
+  previous_original_amount INTEGER NOT NULL CHECK (previous_original_amount >= 0),
+  total_cups INTEGER NOT NULL CHECK (total_cups > 0),
+  original_amount INTEGER NOT NULL CHECK (original_amount >= 0),
+  failure_reason TEXT,
+  created_at TEXT NOT NULL,
+  updated_at TEXT NOT NULL,
+  applied_at TEXT,
+  cancelled_at TEXT
+);
+
+CREATE INDEX idx_order_revisions_order ON order_revisions(order_id);
+CREATE INDEX idx_order_revisions_status ON order_revisions(status);
+
+CREATE TABLE order_revision_items (
+  id TEXT PRIMARY KEY,
+  order_revision_id TEXT NOT NULL REFERENCES order_revisions(id) ON DELETE CASCADE,
+  menu_item_id TEXT REFERENCES menu_items(id),
+  item_name_snapshot TEXT NOT NULL,
+  quantity INTEGER NOT NULL CHECK (quantity > 0),
+  unit_price_snapshot INTEGER NOT NULL CHECK (unit_price_snapshot >= 0),
+  subtotal INTEGER NOT NULL CHECK (subtotal >= 0)
+);
+
+CREATE TABLE order_revision_item_customizations (
+  id TEXT PRIMARY KEY,
+  order_revision_item_id TEXT NOT NULL REFERENCES order_revision_items(id) ON DELETE CASCADE,
+  customization_option_id TEXT REFERENCES customization_options(id),
+  option_type TEXT NOT NULL CHECK (option_type IN ('sweetness', 'ice', 'topping', 'size')),
+  label_snapshot TEXT NOT NULL,
+  price_delta_snapshot INTEGER NOT NULL DEFAULT 0,
+  sort_order INTEGER NOT NULL DEFAULT 0
+);
+
 CREATE TABLE payment_authorizations (
   id TEXT PRIMARY KEY,
   order_id TEXT NOT NULL REFERENCES orders(id),
+  order_revision_id TEXT REFERENCES order_revisions(id),
   provider TEXT NOT NULL CHECK (provider IN ('line_pay', 'mock_line_pay')),
   status TEXT NOT NULL DEFAULT 'pending'
     CHECK (status IN ('pending', 'authorized', 'captured', 'authorization_voided', 'failed')),
@@ -217,6 +261,7 @@ CREATE TABLE payment_authorizations (
 );
 
 CREATE INDEX idx_payment_authorizations_order ON payment_authorizations(order_id);
+CREATE INDEX idx_payment_authorizations_order_revision ON payment_authorizations(order_revision_id);
 
 CREATE TABLE payment_captures (
   id TEXT PRIMARY KEY,

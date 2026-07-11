@@ -77,7 +77,8 @@
 | `backend/auth.js`                         | 開發用登入、token、密碼雜湊                   |
 | `backend/payments/linePayClient.js`       | LINE Pay sandbox request 簽章                 |
 | `backend/payments/linePayService.js`      | LINE Pay 授權 request / confirm / cancel 流程 |
-| `backend/payments/linePayPendingStore.js` | LINE Pay redirect 前後的暫存查找              |
+| `backend/payments/linePayPendingStore.js` | LINE Pay redirect 前後的記憶體快取；confirm/cancel 以 DB 查找為主 |
+| `backend/payments/settlementService.js`   | 單一團購結算流程，依結果批次 capture / void   |
 | `backend/linePayClient.js`                | payment client 相容匯出                       |
 | `backend/README.md`                       | 後端啟動與設定說明                            |
 
@@ -91,8 +92,10 @@
 | `POST`   | `/api/merchant/group-buy-activities`          | 商家建立團購活動                      |
 | `POST`   | `/api/orders`                                 | 建立訂單與訂單品項快照                |
 | `PATCH`  | `/api/orders/:orderId`                        | 更新尚未預授權成功的 pending 訂單明細 |
+| `POST`   | `/api/orders/:orderId/revisions`              | 建立已授權訂單的待重新預授權修改版本  |
 | `GET`    | `/api/orders/:orderId`                        | 查詢訂單明細與最新 LINE Pay 授權      |
 | `DELETE` | `/api/admin/group-buy-activities/:activityId` | 管理員 soft-cancel 活動               |
+| `POST`   | `/api/admin/group-buy-activities/:activityId/settle` | 管理員手動觸發單一團購結算   |
 | `POST`   | `/api/payments/line-pay/request`              | 建立 LINE Pay sandbox 授權請求        |
 | `GET`    | `/api/payments/line-pay/confirm`              | LINE Pay confirm redirect             |
 | `GET`    | `/api/payments/line-pay/cancel`               | LINE Pay cancel redirect              |
@@ -102,6 +105,7 @@
 - 活動建立與取消使用交易。
 - 訂單建立會保存品項與客製化快照。
 - 尚未預授權成功的 pending 訂單可以用目前購物車內容更新；更新時會把舊的 pending LINE Pay 授權標成 `failed`，避免下一次預授權被阻擋。
+- 已授權訂單修改第一版已加入：`POST /api/orders/:orderId/revisions` 會建立 pending revision 與 item snapshots，不會立即修改原訂單；mobile 購物車與訂單明細修改會建立 revision，付款頁會帶 `orderRevisionId` 重新發起 LINE Pay 預授權；新預授權 confirm 成功後才套用 revision，並嘗試 void 舊授權。
 - 付款畫面可在 LINE Pay redirect 後透過自動輪詢、回前景刷新或手動刷新同步後端訂單狀態。
 - 團購列表會回傳 `authorizedCups` 與 `participantCount`。
 - 活動建立有基本 idempotency 處理。
@@ -110,6 +114,15 @@
 - LINE Pay request / confirm / cancel 邏輯已拆到 `backend/payments/`，目前 API path 維持不變。
 - LINE Pay request 會檢查後端是否存在對應訂單。
 - LINE Pay confirm 會把付款授權與訂單狀態更新為 `authorized`。
+- LINE Pay cancel redirect 會把對應 pending authorization 標記為 `failed`，並寫入 provider event、status history 與 audit log，讓顧客可重新付款。
+- LINE Pay confirm/cancel redirect 可用資料庫的 `provider_authorization_id` 找回 pending authorization；記憶體暫存只作快取，後端重啟後仍可處理 redirect。
+- LINE Pay confirm 在寫入 `authorized` 前會用資料庫交易重新檢查團購容量；容量不足時會把 authorization 標記為 `failed`，訂單不會計入團購。
+- LINE Pay void 已加入付款模組；容量不足但 provider confirm 已成功時，系統會自動嘗試 void，成功後寫入 `authorization_voided`、provider event、status history 與 audit log；void 失敗時會留下 provider event 與 audit log。
+- LINE Pay capture 已加入付款模組；成功後會寫入 `payment_captures`、更新 authorization/order 狀態與 `orders.final_amount`，失敗時會留下 failed capture、provider event 與 audit log。
+- 單一團購手動結算 API 已加入；admin 可觸發已截止活動結算，系統會計算最終級距，對有效授權訂單執行 capture 或 void，並寫入 `activity_settlements`。
+- deadline settlement scheduler 已加入後端啟動流程；預設每 60 秒掃描已截止、尚未結算的團購並呼叫同一套 settlement service。`LINE_PAY_ENV=production` 時需要明確允許才會啟動。
+- 本機付款結算 smoke script 已加入：`npm run settlement:smoke` 會用乾淨 schema 與 `mock_line_pay` 驗證達標 capture、未達標 fallback capture / void，以及 scheduler due activity 結算，並在測試後還原開發 SQLite。
+- 商家建立團購 API 已強制 `deadlineAt` 必須晚於 `startAt`，且不得超過 `startAt` 後 24 小時；mobile 建立團購表單也會先提示與阻擋。
 - 已授權或 pending 的授權會阻擋重複 LINE Pay request。
 - 顧客下單、訂單查詢與 LINE Pay request 需要 bearer token。
 - 商家建立活動需要 merchant bearer token，並檢查該商家帳號是否綁定店家。
@@ -122,14 +135,13 @@
 - Firebase Auth + Google Login 實作。
 - Backend 驗證 Firebase ID token。
 - `users.firebase_uid` 對應 Firebase identity。
-- 已授權後的訂單修改 / 重新授權流程。
-- 後端重啟後仍可追蹤 LINE Pay redirect 的持久化查找。
-- LINE Pay capture / void / refund。
+- 已授權後的訂單修改 / 重新授權 mobile 第一版已串接；仍需把訂單列表完全改為後端權威資料。
+- LINE Pay refund。
 - LINE Pay webhook。
 - 取貨 API。
-- 截止時間自動結算 job。
+- 跨執行個體 deadline settlement locking、重試佇列與告警。
 - 正式 migration 系統。
-- 自動化測試。
+- 完整自動化測試；目前只有付款結算 smoke script。
 
 目前重要限制：
 
@@ -165,6 +177,7 @@ database/seed-dev.sql
 - `group_buy_activities` / `promotion_tiers` / `activity_notices`
 - `cart_drafts` / `cart_draft_items` / `cart_draft_item_customizations`
 - `orders` / `order_items` / `order_item_customizations`
+- `order_revisions` / `order_revision_items` / `order_revision_item_customizations`
 - `payment_authorizations` / `payment_captures` / `payment_provider_events`
 - `activity_settlements`
 - `pickup_credentials`
@@ -219,8 +232,8 @@ database/test/drink-group-buy-test.sqlite
 
 建議下一步：
 
-1. App 啟動時從後端載入 activities。
-2. 增加菜單讀取 API。
-3. 讓訂單列表與訂單明細改成以後端資料為準。
-4. 補訂單修改 API。
-5. 補商家接單、完成訂單與取貨憑證 API。
+1. 讓訂單列表與訂單明細改成以後端資料為準，避免 localStorage 與後端狀態分歧。
+2. 補 LINE Pay webhook 與 provider 失敗重試。
+3. 補 revision 失敗、容量不足、舊授權 void 失敗時的 mobile 錯誤提示。
+4. 補取貨憑證與取貨完成 API。
+5. 補跨執行個體 settlement locking 與失敗告警。
