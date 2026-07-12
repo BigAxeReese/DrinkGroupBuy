@@ -259,6 +259,24 @@ function insertScenario(database, scenario) {
       scenario.discountAmount
     );
 
+    (scenario.extraTiers || []).forEach((tier, index) => {
+      database.prepare(`
+        INSERT INTO promotion_tiers (
+          id,
+          activity_id,
+          target_cups,
+          discount_amount,
+          sort_order
+        ) VALUES (?, ?, ?, ?, ?)
+      `).run(
+        `tier-${scenario.id}-extra-${index + 1}`,
+        scenario.activityId,
+        tier.targetCups,
+        tier.discountAmount,
+        index + 2
+      );
+    });
+
     scenario.orders.forEach((order) => insertOrder(database, scenario, order, now));
 
     database.exec("COMMIT;");
@@ -268,7 +286,7 @@ function insertScenario(database, scenario) {
   }
 }
 
-function buildScenario(name, targetCups, orders) {
+function buildScenario(name, targetCups, orders, options = {}) {
   const id = `settlement-smoke-${name}-${randomUUID()}`;
   const now = Date.now();
 
@@ -282,8 +300,9 @@ function buildScenario(name, targetCups, orders) {
     activityId: `activity-${id}`,
     tierId: `tier-${id}`,
     targetCups,
-    discountAmount: 30,
-    maximumCups: 20,
+    discountAmount: options.discountAmount ?? 30,
+    maximumCups: options.maximumCups ?? 20,
+    extraTiers: options.extraTiers || [],
     startAt: new Date(now - 60 * 60 * 1000).toISOString(),
     deadlineAt: new Date(now - 5 * 60 * 1000).toISOString(),
     pickupStartAt: new Date(now + 30 * 60 * 1000).toISOString(),
@@ -309,7 +328,8 @@ function getOrderPaymentSummary(orderIds) {
         authorization.provider,
         authorization.status AS authorization_status_row,
         capture.status AS capture_status,
-        capture.final_amount AS capture_final_amount
+        capture.final_amount AS capture_final_amount,
+        capture.capture_amount AS capture_amount
       FROM orders
       LEFT JOIN payment_authorizations authorization ON authorization.order_id = orders.id
       LEFT JOIN payment_captures capture ON capture.order_id = orders.id
@@ -352,6 +372,44 @@ function insertMockPendingRevisionAuthorization(orderId, revision) {
   return providerTransactionId;
 }
 
+function insertMockPendingAuthorization(orderId, amount) {
+  const providerTransactionId = `mock-line-pay-pending-${orderId}`;
+  withDatabase((database) => {
+    const now = new Date().toISOString();
+    database.prepare(`
+      INSERT INTO payment_authorizations (
+        id,
+        order_id,
+        provider,
+        status,
+        original_amount,
+        authorized_amount,
+        provider_authorization_id,
+        expires_at,
+        created_at,
+        updated_at
+      ) VALUES (?, ?, 'mock_line_pay', 'pending', ?, 0, ?, ?, ?, ?)
+    `).run(
+      `payment-authorization-pending-${orderId}`,
+      orderId,
+      amount,
+      providerTransactionId,
+      new Date(Date.now() + 12 * 60 * 60 * 1000).toISOString(),
+      now,
+      now
+    );
+
+    database.prepare(`
+      UPDATE orders
+      SET payment_status = 'pending',
+          authorization_status = 'pending'
+      WHERE id = ?
+    `).run(orderId);
+  });
+
+  return providerTransactionId;
+}
+
 async function main() {
   if (!fs.existsSync(databasePath)) {
     throw new Error(`Development database not found: ${databasePath}`);
@@ -361,7 +419,7 @@ async function main() {
   resetDatabaseForSmoke();
 
   try {
-    const qualifiedScenario = buildScenario("qualified", 3, [
+    const qualifiedScenario = buildScenario("qualified", 2, [
       {
         fallbackPurchasePreference: "decline_original_price",
         totalCups: 2,
@@ -374,7 +432,16 @@ async function main() {
         originalAmount: 65,
         itemName: "青山烏龍拿鐵"
       }
-    ]);
+    ], {
+      discountAmount: 31,
+      maximumCups: 5,
+      extraTiers: [
+        {
+          targetCups: 5,
+          discountAmount: 80
+        }
+      ]
+    });
     const failedScenario = buildScenario("failed", 5, [
       {
         fallbackPurchasePreference: "accept_original_price",
@@ -408,12 +475,24 @@ async function main() {
     revisionScenario.deadlineAt = new Date(Date.now() + 2 * 60 * 60 * 1000).toISOString();
     revisionScenario.pickupStartAt = new Date(Date.now() + 3 * 60 * 60 * 1000).toISOString();
     revisionScenario.pickupEndAt = new Date(Date.now() + 4 * 60 * 60 * 1000).toISOString();
+    const cutoffScenario = buildScenario("cutoff", 2, [
+      {
+        fallbackPurchasePreference: "decline_original_price",
+        totalCups: 1,
+        originalAmount: 65,
+        itemName: "青山烏龍拿鐵"
+      }
+    ]);
+    cutoffScenario.deadlineAt = new Date(Date.now() + 60 * 1000).toISOString();
+    cutoffScenario.pickupStartAt = new Date(Date.now() + 45 * 60 * 1000).toISOString();
+    cutoffScenario.pickupEndAt = new Date(Date.now() + 75 * 60 * 1000).toISOString();
 
     withDatabase((database) => {
       insertScenario(database, qualifiedScenario);
       insertScenario(database, failedScenario);
       insertScenario(database, scheduledScenario);
       insertScenario(database, revisionScenario);
+      insertScenario(database, cutoffScenario);
     });
 
     const qualifiedResult = await settleGroupBuyActivity({
@@ -447,6 +526,12 @@ async function main() {
     assert(
       qualifiedSummary.every((row) => row.provider === "mock_line_pay" && row.payment_status === "captured"),
       "qualified orders should be captured through mock_line_pay",
+      qualifiedSummary
+    );
+    assert(
+      qualifiedSummary.find((row) => row.id === qualifiedScenario.orders[0].id)?.capture_amount === 110
+        && qualifiedSummary.find((row) => row.id === qualifiedScenario.orders[1].id)?.capture_amount === 55,
+      "qualified settlement should split total discount by actual authorized cups and keep remainder undistributed",
       qualifiedSummary
     );
     assert(
@@ -521,11 +606,33 @@ async function main() {
     assert(revisedOrderDetail.paymentStatus === "authorized", "revised order should remain authorized after old authorization void", revisedOrderDetail);
     assert(!revisedOrderDetail.pendingRevision, "applied revision should no longer be pending", revisedOrderDetail);
 
+    const cutoffOrder = cutoffScenario.orders[0];
+    const cutoffTransactionId = insertMockPendingAuthorization(cutoffOrder.id, cutoffOrder.originalAmount);
+    const cutoffAuthorizationResult = authorizeLinePayPaymentInDatabase({
+      orderId: cutoffOrder.id,
+      provider: "mock_line_pay",
+      providerTransactionId: cutoffTransactionId,
+      amount: cutoffOrder.originalAmount,
+      now: new Date(Date.parse(cutoffScenario.deadlineAt) + 1000).toISOString(),
+      providerPayload: { returnCode: "0000", returnMessage: "mock_cutoff_confirm" }
+    });
+    assert(
+      cutoffAuthorizationResult?.error === "authorization_confirmed_after_deadline",
+      "authorization confirmed after deadline should be rejected",
+      cutoffAuthorizationResult
+    );
+    assert(
+      getOrderDetail(cutoffOrder.id).paymentStatus === "pending",
+      "deadline-rejected order should not become authorized",
+      getOrderDetail(cutoffOrder.id)
+    );
+
     console.log("Settlement smoke passed");
     console.log(`qualified: captured=${qualifiedResult.capturedOrderCount}, voided=${qualifiedResult.voidedOrderCount}`);
     console.log(`failed: captured=${failedResult.capturedOrderCount}, voided=${failedResult.voidedOrderCount}`);
     console.log(`scheduler: settled=${scheduledResult.settledCount}, failed=${scheduledResult.failedCount}`);
     console.log("revision: applied=1, old_authorization_voided=1");
+    console.log("cutoff: rejected_after_deadline=1");
   } finally {
     fs.copyFileSync(backupPath, databasePath);
     fs.rmSync(backupPath, { force: true });

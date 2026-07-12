@@ -3,11 +3,11 @@ import { MobileScreen, Section } from "../components/MobileScreen";
 import { PrimaryButton } from "../components/PrimaryButton";
 import { ProgressSummary } from "../components/ProgressSummary";
 import { StatusBadge } from "../components/StatusBadge";
-import { getDealById, formatCurrency } from "../utils/calculations";
+import { getGroupBuyActivityById, formatCurrency } from "../utils/calculations";
 
 export function GroupProgressScreen({ navigation, route, appState, memberAction, selectedCustomerId }) {
-  const deal = getDealById(appState.deals, route.params?.dealId);
-  if (!deal) {
+  const groupBuyActivity = getGroupBuyActivityById(appState.groupBuyActivities, route.params?.groupBuyActivityId);
+  if (!groupBuyActivity) {
     return (
       <MobileScreen
         title="團購進度"
@@ -23,15 +23,15 @@ export function GroupProgressScreen({ navigation, route, appState, memberAction,
   }
 
   const order = appState.orders.find((item) => item.id === route.params?.orderId && item.customerId === selectedCustomerId)
-    ?? appState.orders.find((item) => item.dealId === deal.id && item.customerId === selectedCustomerId);
-  const payment = appState.paymentReports.find((item) => item.orderId === order?.id);
-  const authorizedCups = deal.currentCups;
-  const tierTargets = (deal.tiers ?? [])
+    ?? appState.orders.find((item) => item.groupBuyActivityId === groupBuyActivity.id && item.customerId === selectedCustomerId);
+  const payment = appState.paymentAuthorizations.find((item) => item.orderId === order?.id);
+  const authorizedCups = groupBuyActivity.currentCups;
+  const tierTargets = (groupBuyActivity.tiers ?? [])
     .map((tier) => Number(tier.cups))
     .filter((cups) => Number.isFinite(cups) && cups > 0)
     .sort((left, right) => left - right);
   const targetCups = tierTargets.find((cups) => authorizedCups < cups)
-    ?? deal.targetCups
+    ?? groupBuyActivity.targetCups
     ?? tierTargets[tierTargets.length - 1]
     ?? 0;
   const reachedTiers = tierTargets.filter((cups) => authorizedCups >= cups);
@@ -50,12 +50,12 @@ export function GroupProgressScreen({ navigation, route, appState, memberAction,
       onMemberPress={memberAction}
     >
       <Section title="狀態">
-        <StatusBadge value={deal.status} />
+        <StatusBadge value={groupBuyActivity.status} />
         <ProgressSummary
           currentCups={authorizedCups}
           targetCups={targetCups}
-          participantCount={deal.participantCount}
-          remainingTimeText={deal.remainingTimeText}
+          participantCount={groupBuyActivity.participantCount}
+          remainingTimeText={groupBuyActivity.remainingTimeText}
         />
         <Text style={styles.explain}>只有預授權成功的杯數才計入優惠門檻。</Text>
         <Text style={styles.meta}>{nextTierText}</Text>
@@ -86,11 +86,11 @@ export function GroupProgressScreen({ navigation, route, appState, memberAction,
       <View style={styles.actions}>
         {order ? (
           <>
-            <PrimaryButton label="Line Pay 預授權" onPress={() => navigation.go("paymentReport", { dealId: deal.id, orderId: order.id })} />
-            <PrimaryButton label="取貨資訊" variant="secondary" onPress={() => navigation.go("pickupInfo", { dealId: deal.id, orderId: order.id })} />
+            <PrimaryButton label="Line Pay 預授權" onPress={() => navigation.go("paymentAuthorization", { groupBuyActivityId: groupBuyActivity.id, orderId: order.id })} />
+            <PrimaryButton label="取貨資訊" variant="secondary" onPress={() => navigation.go("pickupInfo", { groupBuyActivityId: groupBuyActivity.id, orderId: order.id })} />
           </>
         ) : (
-          <PrimaryButton label="先選擇飲料" variant="secondary" onPress={() => navigation.go("drinkSelection", { dealId: deal.id })} />
+          <PrimaryButton label="先選擇飲料" variant="secondary" onPress={() => navigation.go("drinkSelection", { groupBuyActivityId: groupBuyActivity.id })} />
         )}
       </View>
     </MobileScreen>

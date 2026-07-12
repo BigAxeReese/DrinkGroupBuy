@@ -9,12 +9,12 @@ export function LiveMapScreen({ navigation, appState }) {
   const [zoom, setZoom] = useState(mapDefaults.zoom);
   const [selectedStoreId, setSelectedStoreId] = useState(null);
   const mapStores = databaseMapStores.map((store) => {
-    const runtimeDeal = appState?.deals?.find((deal) => deal.storeId === store.id && deal.status === "recruiting");
-    const progressText = runtimeDeal ? getDealProgressText(runtimeDeal) : "";
+    const runtimeGroupBuyActivity = appState?.groupBuyActivities?.find((groupBuyActivity) => groupBuyActivity.storeId === store.id && groupBuyActivity.status === "recruiting");
+    const progressText = runtimeGroupBuyActivity ? getGroupBuyActivityProgressText(runtimeGroupBuyActivity) : "";
     return {
       ...store,
-      hasRecruitingDeal: store.hasRecruitingDeal || Boolean(runtimeDeal),
-      recruitingDealId: store.recruitingDealId || runtimeDeal?.id || null,
+      hasRecruitingGroupBuyActivity: store.hasRecruitingGroupBuyActivity || Boolean(runtimeGroupBuyActivity),
+      recruitingGroupBuyActivityId: store.recruitingGroupBuyActivityId || runtimeGroupBuyActivity?.id || null,
       progressText
     };
   });
@@ -52,27 +52,27 @@ export function LiveMapScreen({ navigation, appState }) {
           pinColor="#2563eb"
         />
         {mapStores.map((store) => {
-          const hasRecruitingDeal = store.hasRecruitingDeal;
+          const hasRecruitingGroupBuyActivity = store.hasRecruitingGroupBuyActivity;
           return (
             <Marker
               key={store.id}
               coordinate={{ latitude: store.latitude, longitude: store.longitude }}
               title={store.name}
-              description={hasRecruitingDeal ? "有招募中的團購" : "測試店家"}
+              description={hasRecruitingGroupBuyActivity ? "有招募中的團購" : "測試店家"}
               onPress={() => setSelectedStoreId(store.id)}
             >
               <View style={styles.storeMarkerWrap}>
                 <View
                   style={[
                     styles.storeMarker,
-                    { backgroundColor: hasRecruitingDeal ? "#facc15" : "#2563eb" }
+                    { backgroundColor: hasRecruitingGroupBuyActivity ? "#facc15" : "#2563eb" }
                   ]}
                 >
-                  <Text style={[styles.storeMarkerText, hasRecruitingDeal && styles.activeStoreMarkerText]}>店</Text>
+                  <Text style={[styles.storeMarkerText, hasRecruitingGroupBuyActivity && styles.activeStoreMarkerText]}>店</Text>
                 </View>
                 <View style={styles.storeMarkerLabel}>
                   <Text numberOfLines={1} style={styles.storeMarkerLabelText}>{store.name}</Text>
-                  {hasRecruitingDeal && store.progressText ? (
+                  {hasRecruitingGroupBuyActivity && store.progressText ? (
                     <Text numberOfLines={1} style={styles.storeMarkerProgressText}>{store.progressText}</Text>
                   ) : null}
                 </View>
@@ -106,17 +106,17 @@ export function LiveMapScreen({ navigation, appState }) {
           <View style={styles.storeInfo}>
             <Text style={styles.storeName}>{selectedStore.name}</Text>
             <Text style={styles.storeMeta}>
-              {selectedStore.distanceText} · {selectedStore.hasRecruitingDeal ? `招募中的團購 ${selectedStore.progressText}` : "目前沒有招募中團購"}
+              {selectedStore.distanceText} · {selectedStore.hasRecruitingGroupBuyActivity ? `招募中的團購 ${selectedStore.progressText}` : "目前沒有招募中團購"}
             </Text>
           </View>
           <Pressable
             accessibilityRole="button"
-            onPress={() => selectedStore.recruitingDealId
-              ? navigation.go("dealDetail", { dealId: selectedStore.recruitingDealId })
+            onPress={() => selectedStore.recruitingGroupBuyActivityId
+              ? navigation.go("groupBuyActivityDetail", { groupBuyActivityId: selectedStore.recruitingGroupBuyActivityId })
               : navigation.go("storeMenu", { storeId: selectedStore.id })}
-            style={styles.viewDealsButton}
+            style={styles.viewGroupBuyActivitiesButton}
           >
-            <Text style={styles.viewDealsText}>查看詳情</Text>
+            <Text style={styles.viewGroupBuyActivitiesText}>查看詳情</Text>
           </Pressable>
         </View>
       ) : null}
@@ -124,16 +124,16 @@ export function LiveMapScreen({ navigation, appState }) {
   );
 }
 
-function getDealProgressText(deal) {
-  const tierTargets = (deal.tiers ?? [])
+function getGroupBuyActivityProgressText(groupBuyActivity) {
+  const tierTargets = (groupBuyActivity.tiers ?? [])
     .map((tier) => Number(tier.cups))
     .filter((cups) => Number.isFinite(cups) && cups > 0)
     .sort((left, right) => left - right);
-  const nextTarget = tierTargets.find((cups) => deal.currentCups < cups)
-    ?? deal.targetCups
+  const nextTarget = tierTargets.find((cups) => groupBuyActivity.currentCups < cups)
+    ?? groupBuyActivity.targetCups
     ?? tierTargets[tierTargets.length - 1]
     ?? 0;
-  return `${deal.currentCups}/${nextTarget}杯`;
+  return `${groupBuyActivity.currentCups}/${nextTarget}杯`;
 }
 
 function LegendDot({ color, label }) {
@@ -296,7 +296,7 @@ const styles = StyleSheet.create({
     fontSize: 11,
     fontWeight: "700"
   },
-  viewDealsButton: {
+  viewGroupBuyActivitiesButton: {
     minHeight: 42,
     borderRadius: 12,
     alignItems: "center",
@@ -304,7 +304,7 @@ const styles = StyleSheet.create({
     backgroundColor: "#1f6feb",
     paddingHorizontal: 14
   },
-  viewDealsText: {
+  viewGroupBuyActivitiesText: {
     color: "#ffffff",
     fontSize: 12,
     fontWeight: "900"

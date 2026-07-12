@@ -62,18 +62,18 @@ export function formatDateTimeInput(date) {
   return `${date.getFullYear()}/${pad(date.getMonth() + 1)}/${pad(date.getDate())} ${meridiem} ${pad(hours12)}:${pad(date.getMinutes())}:${pad(date.getSeconds())}`;
 }
 
-export function getMinutesUntilDeadline(deal, now = new Date()) {
-  const deadlineAt = deal?.deadlineAt ?? deal?.endTime;
+export function getMinutesUntilDeadline(groupBuyActivity, now = new Date()) {
+  const deadlineAt = groupBuyActivity?.deadlineAt ?? groupBuyActivity?.endTime;
   const deadline = new Date(deadlineAt);
   if (Number.isNaN(deadline.getTime())) {
-    return deal?.minutesUntilDeadline ?? null;
+    return groupBuyActivity?.minutesUntilDeadline ?? null;
   }
 
   return Math.max(0, Math.ceil((deadline.getTime() - now.getTime()) / 60000));
 }
 
-export function isDeadlineReached(deal, now = new Date()) {
-  const minutes = getMinutesUntilDeadline(deal, now);
+export function isDeadlineReached(groupBuyActivity, now = new Date()) {
+  const minutes = getMinutesUntilDeadline(groupBuyActivity, now);
   return minutes != null && minutes <= 0;
 }
 

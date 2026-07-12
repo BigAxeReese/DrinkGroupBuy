@@ -2,16 +2,16 @@ import { useState } from "react";
 import { Pressable, StyleSheet, Text, View } from "react-native";
 import { MobileScreen, Section } from "../components/MobileScreen";
 import { PrimaryButton } from "../components/PrimaryButton";
-import { formatCurrency, getDealById, isWithdrawalLocked } from "../utils/calculations";
+import { formatCurrency, getGroupBuyActivityById, isWithdrawalLocked } from "../utils/calculations";
 import { isDeadlineReached } from "../utils/deadlineTime";
-import { getDealCapacityInfo } from "../utils/dealProgress";
+import { getGroupBuyActivityCapacityInfo } from "../utils/groupBuyActivityProgress";
 
 export function CartScreen({ navigation, route, appState, actions, memberAction, selectedCustomerId }) {
   const [acceptOriginalPrice, setAcceptOriginalPrice] = useState(true);
   const [submitError, setSubmitError] = useState("");
   const [isSubmitting, setIsSubmitting] = useState(false);
-  const deal = getDealById(appState.deals, route.params?.dealId);
-  if (!deal) {
+  const groupBuyActivity = getGroupBuyActivityById(appState.groupBuyActivities, route.params?.groupBuyActivityId);
+  if (!groupBuyActivity) {
     return (
       <MobileScreen
         title="購物車"
@@ -27,21 +27,21 @@ export function CartScreen({ navigation, route, appState, actions, memberAction,
   }
 
   const cartItems = appState.cartItems.filter((item) => (
-    item.dealId === deal.id && (!item.customerId || item.customerId === selectedCustomerId)
+    item.groupBuyActivityId === groupBuyActivity.id && (!item.customerId || item.customerId === selectedCustomerId)
   ));
   const totalQuantity = cartItems.reduce((sum, item) => sum + item.quantity, 0);
   const totalAmount = cartItems.reduce((sum, item) => sum + item.subtotal, 0);
-  const dealClosed = deal.canJoin === false || isDeadlineReached(deal);
+  const groupBuyActivityClosed = groupBuyActivity.canJoin === false || isDeadlineReached(groupBuyActivity);
   const existingOrder = appState.orders.find((order) => (
     order.customerId === selectedCustomerId
-    && order.dealId === deal.id
+    && order.groupBuyActivityId === groupBuyActivity.id
     && !["cancelled", "completed"].includes(order.status)
   ));
-  const withdrawalLocked = Boolean(existingOrder && isWithdrawalLocked(deal));
+  const withdrawalLocked = Boolean(existingOrder && isWithdrawalLocked(groupBuyActivity));
   const canUpdatePendingOrder = Boolean(existingOrder && existingOrder.paymentStatus === "pending" && !withdrawalLocked);
   const canCreateRevision = Boolean(existingOrder && existingOrder.paymentStatus === "authorized" && !withdrawalLocked);
   const blocksOrderUpdate = Boolean(existingOrder && !canUpdatePendingOrder && !canCreateRevision);
-  const capacityInfo = getDealCapacityInfo(deal);
+  const capacityInfo = getGroupBuyActivityCapacityInfo(groupBuyActivity);
   const capacityCheckQuantity = existingOrder && existingOrder.paymentStatus !== "pending"
     ? Math.max(0, totalQuantity - (existingOrder.quantity ?? 0))
     : totalQuantity;
@@ -50,7 +50,7 @@ export function CartScreen({ navigation, route, appState, actions, memberAction,
   return (
     <MobileScreen
       title="購物車"
-      subtitle={deal.title}
+      subtitle={groupBuyActivity.title}
       onBack={() => navigation.back()}
       onMemberPress={memberAction}
     >
@@ -77,10 +77,10 @@ export function CartScreen({ navigation, route, appState, actions, memberAction,
         )}
       </Section>
 
-      {dealClosed ? (
+      {groupBuyActivityClosed ? (
         <Text style={styles.closedNotice}>活動已截止，系統已鎖定訂單，不能再送出或修改購物車。</Text>
       ) : null}
-      {!dealClosed && exceedsCapacity ? (
+      {!groupBuyActivityClosed && exceedsCapacity ? (
         <Text style={styles.closedNotice}>
           此團購最高 {capacityInfo.maximumCups} 杯，目前剩餘容量不足，請調整購物車數量。
         </Text>
@@ -100,7 +100,7 @@ export function CartScreen({ navigation, route, appState, actions, memberAction,
       <PrimaryButton
         label="繼續選購飲料"
         variant="secondary"
-        onPress={() => !dealClosed && navigation.go("drinkSelection", { dealId: deal.id })}
+        onPress={() => !groupBuyActivityClosed && navigation.go("drinkSelection", { groupBuyActivityId: groupBuyActivity.id })}
       />
 
       <Section title="訂單金額">
@@ -145,13 +145,13 @@ export function CartScreen({ navigation, route, appState, actions, memberAction,
         onPress={async () => {
           if (isSubmitting) return;
           setSubmitError("");
-          if (dealClosed) return;
+          if (groupBuyActivityClosed) return;
           if (cartItems.length === 0) {
-            if (existingOrder) navigation.go("paymentReport", { dealId: deal.id, orderId: existingOrder.id });
+            if (existingOrder) navigation.go("paymentAuthorization", { groupBuyActivityId: groupBuyActivity.id, orderId: existingOrder.id });
             return;
           }
           if (blocksOrderUpdate) {
-            navigation.go("paymentReport", { dealId: deal.id, orderId: existingOrder.id });
+            navigation.go("paymentAuthorization", { groupBuyActivityId: groupBuyActivity.id, orderId: existingOrder.id });
             return;
           }
           if (exceedsCapacity) {
@@ -161,7 +161,7 @@ export function CartScreen({ navigation, route, appState, actions, memberAction,
           const fallbackPreference = acceptOriginalPrice ? "accept_original_price" : "decline_original_price";
           setIsSubmitting(true);
           try {
-            const submitResult = await actions.submitCart(deal.id, fallbackPreference);
+            const submitResult = await actions.submitCart(groupBuyActivity.id, fallbackPreference);
             if (submitResult?.error) {
               setSubmitError(submitResult.message);
               return;
@@ -170,7 +170,7 @@ export function CartScreen({ navigation, route, appState, actions, memberAction,
             const orderRevisionId = typeof submitResult === "object" ? submitResult.orderRevisionId : null;
             const revisionAmount = typeof submitResult === "object" ? submitResult.revisionAmount : null;
             const revisionItems = typeof submitResult === "object" ? submitResult.revisionItems : null;
-            if (orderId) navigation.go("paymentReport", { dealId: deal.id, orderId, orderRevisionId, revisionAmount, revisionItems });
+            if (orderId) navigation.go("paymentAuthorization", { groupBuyActivityId: groupBuyActivity.id, orderId, orderRevisionId, revisionAmount, revisionItems });
           } finally {
             setIsSubmitting(false);
           }

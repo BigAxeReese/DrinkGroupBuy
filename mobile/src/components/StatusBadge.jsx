@@ -1,12 +1,12 @@
 import { StyleSheet, Text, View } from "react-native";
-import { dealStatusLabels, paymentStatusLabels, pickupStatusLabels } from "../types/prototypeTypes";
+import { groupBuyActivityStatusLabels, paymentStatusLabels, pickupStatusLabels } from "../types/prototypeTypes";
 
-export function StatusBadge({ owner = "deal", value }) {
+export function StatusBadge({ owner = "groupBuyActivity", value }) {
   const fallbackLabels = {
     ordering: "訂單製作中"
   };
   const labelMaps = {
-    deal: dealStatusLabels,
+    groupBuyActivity: groupBuyActivityStatusLabels,
     payment: paymentStatusLabels,
     pickup: pickupStatusLabels
   };

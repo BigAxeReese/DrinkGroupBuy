@@ -5,7 +5,7 @@ import { PrimaryButton } from "../components/PrimaryButton";
 import { StatusBadge } from "../components/StatusBadge";
 import { stores } from "../mock/stores";
 import { formatCurrency, isWithdrawalLocked } from "../utils/calculations";
-import { getDealProgress } from "../utils/dealProgress";
+import { getGroupBuyActivityProgress } from "../utils/groupBuyActivityProgress";
 import { normalizeOrderItem } from "../utils/orderItems";
 
 export function CustomerOrdersScreen({ navigation, appState, actions, memberAction, selectedCustomerId }) {
@@ -13,16 +13,16 @@ export function CustomerOrdersScreen({ navigation, appState, actions, memberActi
   const [selectedOrderId, setSelectedOrderId] = useState(null);
   const customerOrders = appState.orders.filter((order) => order.customerId === selectedCustomerId);
   const cartItems = appState.cartItems.filter((item) => item.customerId === selectedCustomerId);
-  const activeOrders = customerOrders.filter((order) => !isHistoryOrder(order, appState.deals));
-  const historyOrders = customerOrders.filter((order) => isHistoryOrder(order, appState.deals));
+  const activeOrders = customerOrders.filter((order) => !isHistoryOrder(order, appState.groupBuyActivities));
+  const historyOrders = customerOrders.filter((order) => isHistoryOrder(order, appState.groupBuyActivities));
   const displayTab = tab;
   const visibleOrders = displayTab === "history" ? historyOrders : activeOrders;
   const selectedOrder = useMemo(
     () => visibleOrders.find((order) => order.id === selectedOrderId) ?? null,
     [selectedOrderId, visibleOrders]
   );
-  const cartDeal = cartItems.length > 0
-    ? appState.deals.find((deal) => deal.id === cartItems[0].dealId) ?? null
+  const cartGroupBuyActivity = cartItems.length > 0
+    ? appState.groupBuyActivities.find((groupBuyActivity) => groupBuyActivity.id === cartItems[0].groupBuyActivityId) ?? null
     : null;
   const cartTotalQuantity = cartItems.reduce((sum, item) => sum + item.quantity, 0);
   const cartTotalAmount = cartItems.reduce((sum, item) => sum + item.subtotal, 0);
@@ -42,8 +42,8 @@ export function CustomerOrdersScreen({ navigation, appState, actions, memberActi
       >
         <OrderDetailCard
           order={selectedOrder}
-          deals={appState.deals}
-          payments={appState.paymentReports}
+          groupBuyActivities={appState.groupBuyActivities}
+          payments={appState.paymentAuthorizations}
           actions={actions}
           navigation={navigation}
           historical={displayTab === "history"}
@@ -62,7 +62,7 @@ export function CustomerOrdersScreen({ navigation, appState, actions, memberActi
         <>
           {cartItems.length > 0 ? (
             <CartDraftSection
-              cartDeal={cartDeal}
+              cartGroupBuyActivity={cartGroupBuyActivity}
               cartItems={cartItems}
               cartTotalQuantity={cartTotalQuantity}
               cartTotalAmount={cartTotalAmount}
@@ -72,8 +72,8 @@ export function CustomerOrdersScreen({ navigation, appState, actions, memberActi
           <OrderListSection
             title="訂單列表"
             orders={activeOrders}
-            deals={appState.deals}
-            payments={appState.paymentReports}
+            groupBuyActivities={appState.groupBuyActivities}
+            payments={appState.paymentAuthorizations}
             emptyText="目前沒有進行中的訂單。加入團購後會顯示在這裡。"
             onSelectOrder={setSelectedOrderId}
           />
@@ -90,8 +90,8 @@ export function CustomerOrdersScreen({ navigation, appState, actions, memberActi
         <OrderListSection
           title={`歷史訂單 ${historyOrders.length} 筆`}
           orders={historyOrders}
-          deals={appState.deals}
-          payments={appState.paymentReports}
+          groupBuyActivities={appState.groupBuyActivities}
+          payments={appState.paymentAuthorizations}
           emptyText="目前沒有歷史訂單。管理員刪除團購、流團、完成或取消的訂單會顯示在這裡。"
           onSelectOrder={setSelectedOrderId}
           historical
@@ -101,7 +101,7 @@ export function CustomerOrdersScreen({ navigation, appState, actions, memberActi
   );
 }
 
-function OrderListSection({ title, orders, deals, payments, emptyText, onSelectOrder, historical = false }) {
+function OrderListSection({ title, orders, groupBuyActivities, payments, emptyText, onSelectOrder, historical = false }) {
   return (
     <Section title={title}>
       {orders.length === 0 ? (
@@ -112,7 +112,7 @@ function OrderListSection({ title, orders, deals, payments, emptyText, onSelectO
             <OrderListCard
               key={order.id}
               order={order}
-              deals={deals}
+              groupBuyActivities={groupBuyActivities}
               payments={payments}
               historical={historical}
               onPress={() => onSelectOrder(order.id)}
@@ -124,13 +124,13 @@ function OrderListSection({ title, orders, deals, payments, emptyText, onSelectO
   );
 }
 
-function OrderListCard({ order, deals, payments, historical, onPress }) {
-  const deal = deals.find((item) => item.id === order.dealId) ?? null;
-  const store = deal ? stores.find((item) => item.id === deal.storeId) : null;
+function OrderListCard({ order, groupBuyActivities, payments, historical, onPress }) {
+  const groupBuyActivity = groupBuyActivities.find((item) => item.id === order.groupBuyActivityId) ?? null;
+  const store = groupBuyActivity ? stores.find((item) => item.id === groupBuyActivity.storeId) : null;
   const payment = payments.find((item) => item.orderId === order.id);
   const orderItems = (order.items ?? []).map(normalizeOrderItem);
   const total = payment?.captureAmount ?? getOrderSubtotal(order);
-  const progress = deal ? getDealProgress(deal) : null;
+  const progress = groupBuyActivity ? getGroupBuyActivityProgress(groupBuyActivity) : null;
   const progressText = progress ? `${progress.currentCups} / ${progress.nextTarget} 杯` : "團購資料已不存在";
 
   return (
@@ -143,7 +143,7 @@ function OrderListCard({ order, deals, payments, historical, onPress }) {
         <View style={styles.flex}>
           <Text style={styles.storeNameSmall}>{store?.name ?? "店家資料"}</Text>
           <Text style={styles.orderSubtitle}>
-            {historical ? getHistoryReason(order, deal) : `團購進度：${progressText}`}
+            {historical ? getHistoryReason(order, groupBuyActivity) : `團購進度：${progressText}`}
           </Text>
         </View>
         <Text style={styles.listAmount}>{formatCurrency(total)}</Text>
@@ -161,10 +161,10 @@ function OrderListCard({ order, deals, payments, historical, onPress }) {
   );
 }
 
-function OrderDetailCard({ order, deals, payments, actions, navigation, historical }) {
-  const deal = deals.find((item) => item.id === order.dealId) ?? null;
+function OrderDetailCard({ order, groupBuyActivities, payments, actions, navigation, historical }) {
+  const groupBuyActivity = groupBuyActivities.find((item) => item.id === order.groupBuyActivityId) ?? null;
   const payment = payments.find((item) => item.orderId === order.id);
-  const store = deal ? stores.find((item) => item.id === deal.storeId) : null;
+  const store = groupBuyActivity ? stores.find((item) => item.id === groupBuyActivity.storeId) : null;
   const orderItems = (order.items ?? []).map(normalizeOrderItem);
   const displaySubtotal = getOrderSubtotal(order);
   const displayTotal = payment?.captureAmount ?? displaySubtotal;
@@ -172,8 +172,8 @@ function OrderDetailCard({ order, deals, payments, actions, navigation, historic
   const merchantAccepted = order.merchantAcceptanceStatus === "accepted";
   const pickupReady = ["ready", "picked_up"].includes(order.pickupStatus);
   const orderLocked = order.status === "locked";
-  const withdrawalLocked = !historical && (orderLocked || isWithdrawalLocked(deal));
-  const progress = deal ? getDealProgress(deal) : null;
+  const withdrawalLocked = !historical && (orderLocked || isWithdrawalLocked(groupBuyActivity));
+  const progress = groupBuyActivity ? getGroupBuyActivityProgress(groupBuyActivity) : null;
   const progressText = progress ? `${progress.currentCups} / ${progress.nextTarget} 杯` : "團購資料已不存在";
 
   return (
@@ -183,7 +183,7 @@ function OrderDetailCard({ order, deals, payments, actions, navigation, historic
           <StatusBadge owner="payment" value={order.paymentStatus} />
           <Text style={styles.statusText}>團購進度：{progressText}</Text>
         </View>
-        {historical ? <Text style={styles.historyReason}>{getHistoryReason(order, deal)}</Text> : null}
+        {historical ? <Text style={styles.historyReason}>{getHistoryReason(order, groupBuyActivity)}</Text> : null}
       </View>
 
       <View style={styles.summaryRow}>
@@ -191,7 +191,7 @@ function OrderDetailCard({ order, deals, payments, actions, navigation, historic
           <Text style={styles.storeName}>{store?.name ?? "店家資料"}</Text>
           <Pressable
             accessibilityRole="button"
-            onPress={() => navigation.go("dealDetail", { dealId: order.dealId })}
+            onPress={() => navigation.go("groupBuyActivityDetail", { groupBuyActivityId: order.groupBuyActivityId })}
             style={styles.smallDetailButton}
           >
             <Text style={styles.smallDetailText}>團購詳情</Text>
@@ -212,7 +212,7 @@ function OrderDetailCard({ order, deals, payments, actions, navigation, historic
               key={item.id}
               disabled={withdrawalLocked || historical}
               onPress={() => navigation.go("drinkSelection", {
-                dealId: order.dealId,
+                groupBuyActivityId: order.groupBuyActivityId,
                 editMode: true,
                 editOrderItem: item,
                 onSaveOrderItem: (updatedItem) => {
@@ -276,7 +276,7 @@ function OrderDetailCard({ order, deals, payments, actions, navigation, historic
           label={historical ? "歷史訂單不可修改" : withdrawalLocked ? "訂單已鎖定" : "修改訂單"}
           variant="secondary"
           onPress={() => !withdrawalLocked && !historical && navigation.go("drinkSelection", {
-            dealId: order.dealId,
+            groupBuyActivityId: order.groupBuyActivityId,
             editOrderId: order.id
           })}
         />
@@ -295,7 +295,7 @@ function OrderDetailCard({ order, deals, payments, actions, navigation, historic
             <Text style={styles.reauthorizationText}>修改後需重新完成 Line Pay 預授權，訂單才會重新計入團購杯數。</Text>
             <PrimaryButton
               label="重新預授權"
-              onPress={() => navigation.go("paymentReport", { dealId: order.dealId, orderId: order.id })}
+              onPress={() => navigation.go("paymentAuthorization", { groupBuyActivityId: order.groupBuyActivityId, orderId: order.id })}
             />
           </View>
         ) : null}
@@ -349,12 +349,12 @@ function OrderTabs({ tab, setTab }) {
   );
 }
 
-function CartDraftSection({ cartDeal, cartItems, cartTotalQuantity, cartTotalAmount, navigation }) {
+function CartDraftSection({ cartGroupBuyActivity, cartItems, cartTotalQuantity, cartTotalAmount, navigation }) {
   return (
     <Section title={`購物車草稿，共 ${cartTotalQuantity} 杯`}>
       <View style={styles.cartDraftHeader}>
         <View style={styles.flex}>
-          <Text style={styles.cartDraftTitle}>{cartDeal?.title ?? "尚未選擇團購"}</Text>
+          <Text style={styles.cartDraftTitle}>{cartGroupBuyActivity?.title ?? "尚未選擇團購"}</Text>
           <Text style={styles.meta}>送出購物車後才會建立訂單，並進入 Line Pay 預授權流程。</Text>
         </View>
         <Text style={styles.cartDraftAmount}>{formatCurrency(cartTotalAmount)}</Text>
@@ -369,7 +369,7 @@ function CartDraftSection({ cartDeal, cartItems, cartTotalQuantity, cartTotalAmo
       </View>
       <PrimaryButton
         label="查看購物車"
-        onPress={() => cartDeal && navigation.go("cart", { dealId: cartDeal.id })}
+        onPress={() => cartGroupBuyActivity && navigation.go("cart", { groupBuyActivityId: cartGroupBuyActivity.id })}
       />
     </Section>
   );
@@ -381,17 +381,17 @@ function getOrderSubtotal(order) {
   return items.reduce((sum, item) => sum + item.subtotal, 0);
 }
 
-function isHistoryOrder(order, deals) {
-  const deal = deals.find((item) => item.id === order.dealId);
-  const historyDealStatuses = ["cancelled", "failed", "completed"];
+function isHistoryOrder(order, groupBuyActivities) {
+  const groupBuyActivity = groupBuyActivities.find((item) => item.id === order.groupBuyActivityId);
+  const historyGroupBuyActivityStatuses = ["cancelled", "failed", "completed"];
   const historyOrderStatuses = ["cancelled", "completed"];
-  return historyDealStatuses.includes(deal?.status) || historyOrderStatuses.includes(order.status);
+  return historyGroupBuyActivityStatuses.includes(groupBuyActivity?.status) || historyOrderStatuses.includes(order.status);
 }
 
-function getHistoryReason(order, deal) {
-  if (deal?.status === "cancelled") return "此團購已由管理員取消，訂單已移至歷史訂單。";
-  if (deal?.status === "failed") return "此團購未達門檻，訂單已移至歷史訂單。";
-  if (deal?.status === "completed" || order.status === "completed") return "此訂單已完成。";
+function getHistoryReason(order, groupBuyActivity) {
+  if (groupBuyActivity?.status === "cancelled") return "此團購已由管理員取消，訂單已移至歷史訂單。";
+  if (groupBuyActivity?.status === "failed") return "此團購未達門檻，訂單已移至歷史訂單。";
+  if (groupBuyActivity?.status === "completed" || order.status === "completed") return "此訂單已完成。";
   if (order.status === "cancelled") return "此訂單已取消。";
   return "此訂單已歸入歷史訂單。";
 }

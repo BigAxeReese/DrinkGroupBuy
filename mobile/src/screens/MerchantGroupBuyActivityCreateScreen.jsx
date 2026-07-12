@@ -11,21 +11,32 @@ const NativeDateTimePicker = Platform.OS === "web"
   : require("@react-native-community/datetimepicker").default;
 
 const MAX_ACTIVITY_DEADLINE_MS = 24 * 60 * 60 * 1000;
+const MIN_PICKUP_AFTER_DEADLINE_MS = 15 * 60 * 1000;
+const DEFAULT_PICKUP_AFTER_DEADLINE_MS = 30 * 60 * 1000;
+const DEFAULT_PICKUP_WINDOW_MS = 30 * 60 * 1000;
 
-export function MerchantDealCreateScreen({ navigation, actions, memberAction, selectedMerchantStoreId }) {
+export function MerchantGroupBuyActivityCreateScreen({ navigation, actions, memberAction, selectedMerchantStoreId }) {
   const merchantStore = stores.find((store) => store.id === selectedMerchantStoreId) ?? stores[0];
+  const initialDeadlineDate = new Date(createDeadlineIsoFromInput(getDefaultDeadlineInput()));
   const [title, setTitle] = useState("離峰優惠團購");
   const [tiers, setTiers] = useState([
     { id: "tier-draft-1", cups: "20", discountAmount: "200" }
   ]);
-  const [deadlineDate, setDeadlineDate] = useState(() => new Date(createDeadlineIsoFromInput(getDefaultDeadlineInput())));
-  const [pickupTime, setPickupTime] = useState("今日 16:30 - 17:00");
+  const [deadlineDate, setDeadlineDate] = useState(initialDeadlineDate);
+  const [pickupStartDate, setPickupStartDate] = useState(() => getDefaultPickupStartDate(initialDeadlineDate));
+  const [pickupEndDate, setPickupEndDate] = useState(() => getDefaultPickupEndDate(initialDeadlineDate));
   const [notices, setNotices] = useState("截止前可修改或退出");
   const [created, setCreated] = useState(false);
   const [submitMessage, setSubmitMessage] = useState("");
   const [submitMessageKind, setSubmitMessageKind] = useState("success");
   const [submitting, setSubmitting] = useState(false);
   const deadlineLimit = getDeadlineLimit();
+
+  const handleDeadlineChange = (nextDate) => {
+    setDeadlineDate(nextDate);
+    setPickupStartDate(getDefaultPickupStartDate(nextDate));
+    setPickupEndDate(getDefaultPickupEndDate(nextDate));
+  };
 
   const updateTier = (tierId, field, value) => {
     setTiers((items) => items.map((tier) => (
@@ -51,7 +62,7 @@ export function MerchantDealCreateScreen({ navigation, actions, memberAction, se
     setTiers((items) => items.filter((tier) => tier.id !== tierId));
   };
 
-  async function handleCreateDeal() {
+  async function handleCreateGroupBuyActivity() {
     if (submitting) return;
     setSubmitting(true);
     setSubmitMessage("");
@@ -65,10 +76,20 @@ export function MerchantDealCreateScreen({ navigation, actions, memberAction, se
       setSubmitting(false);
       return;
     }
+    const pickupError = getPickupValidationError(deadlineDate, pickupStartDate, pickupEndDate);
+    if (pickupError) {
+      setSubmitMessageKind("error");
+      setSubmitMessage(pickupError);
+      setSubmitting(false);
+      return;
+    }
 
     const startTime = startDate.toISOString();
     const deadlineAt = deadlineDate.toISOString();
-    let dealId;
+    const pickupStartAt = pickupStartDate.toISOString();
+    const pickupEndAt = pickupEndDate.toISOString();
+    const pickupTime = `${formatDeadlineWithoutYear(pickupStartDate)} - ${formatDeadlineWithoutYear(pickupEndDate)}`;
+    let groupBuyActivityId;
 
     try {
       const activity = await createGroupBuyActivity({
@@ -76,15 +97,15 @@ export function MerchantDealCreateScreen({ navigation, actions, memberAction, se
         title,
         startAt: startTime,
         deadlineAt,
-        pickupStartAt: pickupTime,
-        pickupEndAt: pickupTime,
+        pickupStartAt,
+        pickupEndAt,
         tiers: tiers.map((tier) => ({
           targetCups: Number(tier.cups),
           discountAmount: Number(tier.discountAmount)
         })),
         notice: notices
       });
-      dealId = actions.addMerchantDealFromApi(activity);
+      groupBuyActivityId = actions.addMerchantGroupBuyActivityFromApi(activity);
       setSubmitMessageKind("success");
       setSubmitMessage("活動已建立，並寫入 backend SQLite。");
     } catch (error) {
@@ -94,13 +115,15 @@ export function MerchantDealCreateScreen({ navigation, actions, memberAction, se
         return;
       }
 
-      dealId = actions.createMerchantDeal({
+      groupBuyActivityId = actions.createMerchantGroupBuyActivity({
         storeId: merchantStore.id,
         title,
         tiers,
         startTime,
         deadlineAt,
         endTime: formatDeadlineWithoutYear(new Date(deadlineAt)),
+        pickupStartAt,
+        pickupEndAt,
         pickupTime,
         notices
       });
@@ -111,7 +134,7 @@ export function MerchantDealCreateScreen({ navigation, actions, memberAction, se
     }
 
     setCreated(true);
-    navigation.replace("merchantDashboard", { createdDealId: dealId });
+    navigation.replace("merchantDashboard", { createdGroupBuyActivityId: groupBuyActivityId });
   }
 
   return (
@@ -125,13 +148,25 @@ export function MerchantDealCreateScreen({ navigation, actions, memberAction, se
         <DateTimeInput
           label="結束時間"
           value={deadlineDate}
-          onChange={setDeadlineDate}
+          onChange={handleDeadlineChange}
           maximumDate={deadlineLimit}
         />
         <Text style={styles.helperText}>
           開團即開始；結束時間需在建立後 24 小時內，最晚約 {formatDeadlineWithoutYear(deadlineLimit)}。
         </Text>
-        <MobileInput label="取貨時間" value={pickupTime} onChangeText={setPickupTime} />
+        <DateTimeInput
+          label="取餐開始"
+          value={pickupStartDate}
+          onChange={setPickupStartDate}
+        />
+        <DateTimeInput
+          label="取餐結束"
+          value={pickupEndDate}
+          onChange={setPickupEndDate}
+        />
+        <Text style={styles.helperText}>
+          取餐開始至少需晚於結束時間 15 分鐘，預設為結束後 30 分鐘。
+        </Text>
         <MobileInput label="備註" value={notices} onChangeText={setNotices} />
       </Section>
 
@@ -185,7 +220,7 @@ export function MerchantDealCreateScreen({ navigation, actions, memberAction, se
 
       <PrimaryButton
         label={submitting ? "建立中..." : "建立活動"}
-        onPress={handleCreateDeal}
+        onPress={handleCreateGroupBuyActivity}
       />
       {created || submitMessage ? (
         <Text style={[
@@ -359,6 +394,17 @@ function getDeadlineLimit(referenceDate = new Date()) {
   return new Date(referenceDate.getTime() + MAX_ACTIVITY_DEADLINE_MS);
 }
 
+function getDefaultPickupStartDate(deadlineDate) {
+  const baseTime = deadlineDate instanceof Date && !Number.isNaN(deadlineDate.getTime())
+    ? deadlineDate.getTime()
+    : Date.now();
+  return new Date(baseTime + DEFAULT_PICKUP_AFTER_DEADLINE_MS);
+}
+
+function getDefaultPickupEndDate(deadlineDate) {
+  return new Date(getDefaultPickupStartDate(deadlineDate).getTime() + DEFAULT_PICKUP_WINDOW_MS);
+}
+
 function getDeadlineValidationError(startDate, deadlineDate) {
   if (!(deadlineDate instanceof Date) || Number.isNaN(deadlineDate.getTime())) {
     return "請選擇有效的結束時間。";
@@ -372,6 +418,22 @@ function getDeadlineValidationError(startDate, deadlineDate) {
     return "結束時間必須在建立後 24 小時內。";
   }
 
+  return "";
+}
+
+function getPickupValidationError(deadlineDate, pickupStartDate, pickupEndDate) {
+  if (!(pickupStartDate instanceof Date) || Number.isNaN(pickupStartDate.getTime())) {
+    return "請選擇有效的取餐開始時間。";
+  }
+  if (!(pickupEndDate instanceof Date) || Number.isNaN(pickupEndDate.getTime())) {
+    return "請選擇有效的取餐結束時間。";
+  }
+  if (pickupStartDate.getTime() - deadlineDate.getTime() < MIN_PICKUP_AFTER_DEADLINE_MS) {
+    return "取餐開始時間至少要晚於結束時間 15 分鐘。";
+  }
+  if (pickupEndDate.getTime() <= pickupStartDate.getTime()) {
+    return "取餐結束時間必須晚於取餐開始時間。";
+  }
   return "";
 }
 

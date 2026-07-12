@@ -10,21 +10,21 @@ import { formatCurrency, getStoreById } from "../utils/calculations";
 export function MerchantDashboardScreen({ navigation, appState, actions, memberAction, selectedMerchantStoreId }) {
   const [tab, setTab] = useState("active");
   const merchantStore = stores.find((store) => store.id === selectedMerchantStoreId) ?? stores[0];
-  const merchantDeals = appState.deals.filter((deal) => deal.storeId === merchantStore.id);
-  const activeDeals = merchantDeals.filter((deal) => ["recruiting", "confirmed", "ordering"].includes(deal.status));
-  const activeDealIds = new Set(activeDeals.map((deal) => deal.id));
-  const merchantDealIds = new Set(merchantDeals.map((deal) => deal.id));
+  const merchantGroupBuyActivities = appState.groupBuyActivities.filter((groupBuyActivity) => groupBuyActivity.storeId === merchantStore.id);
+  const activeGroupBuyActivities = merchantGroupBuyActivities.filter((groupBuyActivity) => ["recruiting", "confirmed", "ordering"].includes(groupBuyActivity.status));
+  const activeGroupBuyActivityIds = new Set(activeGroupBuyActivities.map((groupBuyActivity) => groupBuyActivity.id));
+  const merchantGroupBuyActivityIds = new Set(merchantGroupBuyActivities.map((groupBuyActivity) => groupBuyActivity.id));
   const activeOrders = appState.orders.filter((order) => (
-    activeDealIds.has(order.dealId)
+    activeGroupBuyActivityIds.has(order.groupBuyActivityId)
     && order.status !== "cancelled"
     && order.merchantAcceptanceStatus !== "cancelled"
   ));
   const historyOrders = appState.orders.filter((order) => {
-    const deal = appState.deals.find((item) => item.id === order.dealId);
-    return merchantDealIds.has(order.dealId) && (
+    const groupBuyActivity = appState.groupBuyActivities.find((item) => item.id === order.groupBuyActivityId);
+    return merchantGroupBuyActivityIds.has(order.groupBuyActivityId) && (
       ["readyForPickup", "completed", "cancelled"].includes(order.status)
       || ["ready", "picked_up", "cancelled"].includes(order.pickupStatus)
-      || ["cancelled", "failed", "completed"].includes(deal?.status)
+      || ["cancelled", "failed", "completed"].includes(groupBuyActivity?.status)
     );
   });
   const pendingAcceptanceCount = activeOrders.filter((order) => order.merchantAcceptanceStatus === "pending").length;
@@ -46,7 +46,7 @@ export function MerchantDashboardScreen({ navigation, appState, actions, memberA
           </Pressable>
         </View>
         <View style={styles.metricRow}>
-          <MetricCard label="進行中活動" value={activeDeals.length} />
+          <MetricCard label="進行中活動" value={activeGroupBuyActivities.length} />
           <MetricCard label="待確認接單" value={pendingAcceptanceCount} />
           <MetricCard label="已預授權" value={authorizedOrderCount} />
         </View>
@@ -81,13 +81,13 @@ export function MerchantDashboardScreen({ navigation, appState, actions, memberA
 
       {tab === "active" ? (
         <Section title="活動清單">
-        {activeDeals.length === 0 ? (
+        {activeGroupBuyActivities.length === 0 ? (
           <Text style={styles.emptyText}>目前沒有進行中的團購。點右上「＋ 開團」建立測試活動。</Text>
         ) : null}
-        {activeDeals.map((deal) => {
-          const store = getStoreById(stores, deal.storeId);
+        {activeGroupBuyActivities.map((groupBuyActivity) => {
+          const store = getStoreById(stores, groupBuyActivity.storeId);
           const relatedOrders = appState.orders.filter((order) => (
-            order.dealId === deal.id
+            order.groupBuyActivityId === groupBuyActivity.id
             && order.status !== "cancelled"
             && order.merchantAcceptanceStatus !== "cancelled"
           ));
@@ -101,19 +101,19 @@ export function MerchantDashboardScreen({ navigation, appState, actions, memberA
           )).length;
 
           return (
-            <View key={deal.id} style={styles.card}>
+            <View key={groupBuyActivity.id} style={styles.card}>
               <View style={styles.header}>
                 <View style={styles.flex}>
-                  <Text style={styles.title}>{deal.title}</Text>
+                  <Text style={styles.title}>{groupBuyActivity.title}</Text>
                   <Text style={styles.meta}>{store?.name}</Text>
                 </View>
-                <StatusBadge value={deal.status} />
+                <StatusBadge value={groupBuyActivity.status} />
               </View>
               <ProgressSummary
-                currentCups={deal.currentCups}
-                targetCups={deal.targetCups}
-                participantCount={deal.participantCount}
-                remainingTimeText={deal.remainingTimeText}
+                currentCups={groupBuyActivity.currentCups}
+                targetCups={groupBuyActivity.targetCups}
+                participantCount={groupBuyActivity.participantCount}
+                remainingTimeText={groupBuyActivity.remainingTimeText}
               />
               <View style={styles.summaryRow}>
                 <Text style={styles.summary}>訂單 {relatedOrders.length} 筆</Text>
@@ -126,7 +126,7 @@ export function MerchantDashboardScreen({ navigation, appState, actions, memberA
                   variant="secondary"
                   onPress={(event) => {
                     event.stopPropagation?.();
-                    actions.acceptMerchantOrdersForDeal(deal.id);
+                    actions.acceptMerchantOrdersForGroupBuyActivity(groupBuyActivity.id);
                   }}
                 />
               ) : (
@@ -137,7 +137,7 @@ export function MerchantDashboardScreen({ navigation, appState, actions, memberA
                   label={`完成訂單（${preparingOrders} 筆）`}
                   onPress={(event) => {
                     event.stopPropagation?.();
-                    actions.completeMerchantOrdersForDeal(deal.id);
+                    actions.completeMerchantOrdersForGroupBuyActivity(groupBuyActivity.id);
                   }}
                 />
               ) : readyPickups > 0 ? (
@@ -153,14 +153,14 @@ export function MerchantDashboardScreen({ navigation, appState, actions, memberA
             <Text style={styles.emptyText}>目前沒有歷史訂單。店家完成訂單、顧客取貨、取消或流團後會顯示在這裡。</Text>
           ) : null}
           {historyOrders.map((order) => {
-            const deal = appState.deals.find((item) => item.id === order.dealId);
+            const groupBuyActivity = appState.groupBuyActivities.find((item) => item.id === order.groupBuyActivityId);
             const total = order.captureAmount ?? order.finalAmount ?? order.subtotal ?? order.originalAmount ?? 0;
 
             return (
               <View key={order.id} style={styles.historyCard}>
                 <View style={styles.header}>
                   <View style={styles.flex}>
-                    <Text style={styles.title}>{deal?.title ?? "團購活動"}</Text>
+                    <Text style={styles.title}>{groupBuyActivity?.title ?? "團購活動"}</Text>
                     <Text style={styles.meta}>顧客：{order.customerSurname ?? order.customerId} · {order.quantity ?? 0} 杯</Text>
                   </View>
                   <Text style={styles.historyAmount}>{formatCurrency(total)}</Text>

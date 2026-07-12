@@ -11,8 +11,8 @@ export const databaseMapStores = [
     "distanceText": "280m",
     "latitude": 24.1511,
     "longitude": 120.6817,
-    "hasRecruitingDeal": false,
-    "recruitingDealId": null
+    "hasRecruitingGroupBuyActivity": false,
+    "recruitingGroupBuyActivityId": null
   },
   {
     "id": "store-002",
@@ -23,8 +23,8 @@ export const databaseMapStores = [
     "distanceText": "420m",
     "latitude": 24.1481,
     "longitude": 120.6862,
-    "hasRecruitingDeal": false,
-    "recruitingDealId": null
+    "hasRecruitingGroupBuyActivity": false,
+    "recruitingGroupBuyActivityId": null
   },
   {
     "id": "store-003",
@@ -35,8 +35,8 @@ export const databaseMapStores = [
     "distanceText": "650m",
     "latitude": 24.1525,
     "longitude": 120.6868,
-    "hasRecruitingDeal": false,
-    "recruitingDealId": null
+    "hasRecruitingGroupBuyActivity": false,
+    "recruitingGroupBuyActivityId": null
   },
   {
     "id": "store-004",
@@ -47,8 +47,8 @@ export const databaseMapStores = [
     "distanceText": "350m",
     "latitude": 24.1505,
     "longitude": 120.6859,
-    "hasRecruitingDeal": false,
-    "recruitingDealId": null
+    "hasRecruitingGroupBuyActivity": false,
+    "recruitingGroupBuyActivityId": null
   },
   {
     "id": "store-005",
@@ -59,8 +59,8 @@ export const databaseMapStores = [
     "distanceText": "520m",
     "latitude": 24.1522,
     "longitude": 120.6827,
-    "hasRecruitingDeal": false,
-    "recruitingDealId": null
+    "hasRecruitingGroupBuyActivity": false,
+    "recruitingGroupBuyActivityId": null
   },
   {
     "id": "store-006",
@@ -71,8 +71,8 @@ export const databaseMapStores = [
     "distanceText": "780m",
     "latitude": 24.1472,
     "longitude": 120.6809,
-    "hasRecruitingDeal": false,
-    "recruitingDealId": null
+    "hasRecruitingGroupBuyActivity": false,
+    "recruitingGroupBuyActivityId": null
   },
   {
     "id": "store-007",
@@ -83,7 +83,7 @@ export const databaseMapStores = [
     "distanceText": "860m",
     "latitude": 24.1541,
     "longitude": 120.6892,
-    "hasRecruitingDeal": false,
-    "recruitingDealId": null
+    "hasRecruitingGroupBuyActivity": false,
+    "recruitingGroupBuyActivityId": null
   }
 ];

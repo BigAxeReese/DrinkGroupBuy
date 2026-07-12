@@ -20,7 +20,8 @@ function getLinePayConfig() {
     channelSecret: process.env.LINE_PAY_CHANNEL_SECRET,
     currency: process.env.LINE_PAY_CURRENCY || "TWD",
     confirmUrl: process.env.LINE_PAY_CONFIRM_URL,
-    cancelUrl: process.env.LINE_PAY_CANCEL_URL
+    cancelUrl: process.env.LINE_PAY_CANCEL_URL,
+    captureSeparated: isLinePayCaptureSeparatedEnabled()
   };
 }
 
@@ -72,8 +73,19 @@ async function requestLinePayPayment(input) {
       cancelUrl: appendQuery(config.cancelUrl, { orderId })
     }
   };
+  if (config.captureSeparated) {
+    body.options = {
+      payment: {
+        capture: false
+      }
+    };
+  }
 
   return linePayPost("/v3/payments/request", body, config);
+}
+
+function isLinePayCaptureSeparatedEnabled() {
+  return readBooleanEnv(process.env.LINE_PAY_CAPTURE_SEPARATED, false);
 }
 
 async function confirmLinePayPayment(transactionId, input) {
@@ -192,6 +204,11 @@ function stripEnvQuotes(value) {
   return value;
 }
 
+function readBooleanEnv(value, fallback = false) {
+  if (value == null || value === "") return fallback;
+  return ["1", "true", "yes", "on"].includes(String(value).trim().toLowerCase());
+}
+
 function requiredString(value, fieldName) {
   if (typeof value !== "string" || value.trim() === "") {
     throw new Error(`${fieldName} is required`);
@@ -219,6 +236,7 @@ module.exports = {
   captureLinePayPaymentAuthorization,
   confirmLinePayPayment,
   getLinePayConfig,
+  isLinePayCaptureSeparatedEnabled,
   requestLinePayPayment,
   voidLinePayPaymentAuthorization
 };

@@ -3,14 +3,14 @@ import { MobileScreen, Section } from "../components/MobileScreen";
 import { PlaceholderBox } from "../components/PlaceholderBox";
 import { StatusBadge } from "../components/StatusBadge";
 import { stores } from "../mock/stores";
-import { formatCurrency, getDealById } from "../utils/calculations";
+import { formatCurrency, getGroupBuyActivityById } from "../utils/calculations";
 
 export function PickupInfoScreen({ navigation, route, appState, memberAction, selectedCustomerId }) {
   const order = appState.orders.find((item) => item.id === route.params?.orderId && item.customerId === selectedCustomerId)
     ?? appState.orders.find((item) => item.customerId === selectedCustomerId);
-  const deal = order ? getDealById(appState.deals, route.params?.dealId ?? order.dealId) : null;
-  const store = deal ? stores.find((item) => item.id === deal.storeId) : null;
-  if (!order || !deal || !store) {
+  const groupBuyActivity = order ? getGroupBuyActivityById(appState.groupBuyActivities, route.params?.groupBuyActivityId ?? order.groupBuyActivityId) : null;
+  const store = groupBuyActivity ? stores.find((item) => item.id === groupBuyActivity.storeId) : null;
+  if (!order || !groupBuyActivity || !store) {
     return (
       <MobileScreen
         title="取貨資訊"
@@ -38,7 +38,7 @@ export function PickupInfoScreen({ navigation, route, appState, memberAction, se
 
       <Section title="到店資訊">
         <Text style={styles.meta}>地址：{store.address}</Text>
-        <Text style={styles.meta}>時間：{deal.pickupTime}</Text>
+        <Text style={styles.meta}>時間：{groupBuyActivity.pickupTime}</Text>
         <PlaceholderBox title="地圖導航" />
       </Section>
 

@@ -17,7 +17,7 @@ const PAYMENT_SYNC_FINISHED_STATUSES = new Set([
   "refunded"
 ]);
 
-export function PaymentReportScreen({ navigation, route, appState, actions, memberAction, selectedCustomerId }) {
+export function PaymentAuthorizationScreen({ navigation, route, appState, actions, memberAction, selectedCustomerId }) {
   const [linePayStatus, setLinePayStatus] = useState("idle");
   const [linePayMessage, setLinePayMessage] = useState("");
   const [syncStatus, setSyncStatus] = useState("idle");
@@ -26,8 +26,8 @@ export function PaymentReportScreen({ navigation, route, appState, actions, memb
   const pollTimeoutRef = useRef(null);
   const pollInFlightRef = useRef(false);
   const allowedOrderIds = new Set(appState.orders.filter((order) => order.customerId === selectedCustomerId).map((order) => order.id));
-  const payment = appState.paymentReports.find((item) => item.orderId === route.params?.orderId && allowedOrderIds.has(item.orderId))
-    ?? appState.paymentReports.find((item) => allowedOrderIds.has(item.orderId));
+  const payment = appState.paymentAuthorizations.find((item) => item.orderId === route.params?.orderId && allowedOrderIds.has(item.orderId))
+    ?? appState.paymentAuthorizations.find((item) => allowedOrderIds.has(item.orderId));
   const order = payment ? appState.orders.find((item) => item.id === payment.orderId) : null;
 
   useEffect(() => () => {

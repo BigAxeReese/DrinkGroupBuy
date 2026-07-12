@@ -43,11 +43,11 @@ export function buildOrderItemsChange({ order, nextItems }) {
   };
 }
 
-export function rollbackAuthorizedCups(deal, order) {
+export function rollbackAuthorizedCups(groupBuyActivity, order) {
   return {
-    ...deal,
-    currentCups: Math.max(0, deal.currentCups - order.quantity),
-    participantCount: Math.max(0, deal.participantCount - 1),
+    ...groupBuyActivity,
+    currentCups: Math.max(0, groupBuyActivity.currentCups - order.quantity),
+    participantCount: Math.max(0, groupBuyActivity.participantCount - 1),
     status: "recruiting"
   };
 }

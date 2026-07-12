@@ -1,6 +1,6 @@
 # 專案方向
 
-最後更新：2026-07-05
+最後更新：2026-07-12
 
 ## 產品方向
 
@@ -65,14 +65,14 @@ API：groupBuyActivity
 
 - 購物車完整後端同步。
 - 顧客訂單列表與訂單修改完整後端同步。
-- LINE Pay refund / webhook。
+- LINE Pay refund、provider 狀態查詢與付款重試佇列。
 - 商家接單、完成訂單、取貨憑證 API。
 - App 啟動時完整載入後端活動、菜單與訂單。
 
 ## 架構原則
 
 1. 新的後端與資料庫設計使用 `groupBuyActivity` / `group_buy_activity` 命名。
-2. 既有 mobile prototype 可能仍有 `deal` 變數，但新介面不要繼續擴大這個命名。
+2. Mobile prototype 的主要 state、route、screen 與 mock 已改用 `groupBuyActivity`；舊 `deal` 名稱只允許作本機儲存相容或測試資料表脈絡。
 3. Mobile 與 API 欄位使用 `camelCase`。
 4. 資料庫表名與欄位使用 `snake_case`。
 5. 機密資料只放在本機 `.env` 類檔案，不提交到 Git。

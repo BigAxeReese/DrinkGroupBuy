@@ -1,4 +1,4 @@
 // prototype only, not final API contract
 
-export const deals = [
+export const paymentAuthorizations = [
 ];

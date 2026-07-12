@@ -23,14 +23,14 @@
 | `stores`, `merchant_users`                                          | 實體門市與店家登入帳號         | PostgreSQL draft 中 Store 1:1 merchant account             |
 | `menu_items`, `customization_options`                               | 門市菜單與可選客製化項目       | Store 1:N items；item 1:N options                          |
 | `group_buy_activities`                                              | 店家建立的團購活動             | Store 1:N activities                                       |
-| `promotion_tiers`                                                   | 杯數門檻與折扣金額             | Activity 1:N tiers                                         |
+| `promotion_tiers`                                                   | 杯數門檻與總折扣金額           | Activity 1:N tiers                                         |
 | `activity_notices`                                                  | 團購活動備註                   | Activity 1:N notices                                       |
 | `cart_drafts`, `cart_draft_items`, `cart_draft_item_customizations` | 送出前的伺服器端購物車草稿     | User/activity 1:N items；item 1:N selected options         |
 | `orders`, `order_items`, `order_item_customizations`                | 顧客參與團購與品項快照         | Activity/user 1:N orders；order 1:N items                  |
 | `order_revisions`, `order_revision_items`, `order_revision_item_customizations` | 已授權訂單修改版本             | Order 1:N revisions；revision 1:N items                    |
 | `payment_authorizations`                                            | 付款預授權紀錄                 | Order 1:N authorizations                                   |
 | `payment_captures`                                                  | 請款結果                       | Authorization/order 1:N captures                           |
-| `payment_provider_events`                                           | 金流 webhook/event 原始紀錄    | 以邏輯方式關聯付款資源                                     |
+| `payment_provider_events`                                           | 金流 provider event 原始紀錄   | 以邏輯方式關聯付款資源，保留未來 webhook 擴充空間           |
 | `activity_settlements`                                              | 截止後結算結果與適用門檻       | Activity 1:1 settlement                                    |
 | `pickup_credentials`                                                | 訂單取貨憑證                   | Order 1:1 credential                                       |
 | `status_history`                                                    | 狀態變更歷程與原因             | Polymorphic resource reference                             |
@@ -56,6 +56,9 @@
 - 顧客可在截止前 30 分鐘以前修改訂單或退出團購；進入截止前 30 分鐘後不可修改或退出。
 - 店家可在截止前 30 分鐘以前取消整個團購；進入截止前 30 分鐘後不可取消。
 - 團購截止時間必須在建立或發布後 24 小時內。
+- 取餐時間由店家開團時設定，顧客加入前可見；取餐開始至少晚於截止時間 15 分鐘，表單預設為截止後 30 分鐘。
+- 取貨憑證自取餐開始時間起保留 3 小時；若店家當日營業結束早於 3 小時，則保留至當日營業結束；24 小時營業店家保留 3 小時。
+- 取貨憑證到期後，訂單移至歷史訂單；逾期未取不自動退款，店家不再負原飲品保管責任。
 - 若顧客修改已預授權訂單，採 replacement flow：舊預授權先保留，新預授權成功後才替換；新預授權失敗時，原訂單與原預授權維持有效。
 
 ## 已知 schema 缺口
@@ -67,6 +70,7 @@
 | Activity deadline       | 24 小時截止限制已先落到商家建立團購 API；截止前 30 分鐘鎖定規則仍需落到訂單修改 / 退出與取消 API。                   |
 | Merchant acceptance     | `orders.merchant_acceptance_status` 是早期候選欄位；最新規則不需要店家逐筆確認接單，未來可考慮移除或固定為 accepted。 |
 | Pickup status           | Mobile 曾使用 `preparing`，目前 schema 沒有該值；應優先用 activity/order 狀態與 `pickup_status = ready` 表示。        |
+| Pickup credential expiry | `pickup_credentials` 目前缺 `expires_at` / `expired_at`；取貨 API 實作時需補憑證到期時間與逾期處理紀錄。              |
 | Store/menu source       | 七間店家的測試資料與正式開發資料需統一來源。                                                                          |
 | Authentication          | Password 欄位屬於開發相容；正式方向以 Firebase UID 對應 backend user 與角色權限。                                     |
 | Notification            | 尚未有通知 delivery 或 notification event 資料表。                                                                    |
@@ -89,4 +93,5 @@
 2. 修改已預授權訂單：保存 revision，進行 replacement authorization，避免杯數重複計算或超過上限。
 3. 截止結算：鎖定活動與合格訂單，計算 authorized cups，選擇適用 tier，保存 settlement，並以 idempotent 方式 capture/void payment。
 4. 取消活動：只允許截止前 30 分鐘以前取消，取消 eligible orders，處理 authorizations，寫入 history 與 audit log。
-5. 取貨：驗證 pickup credential，更新 pickup/order completion，並寫入 status history。
+5. 取貨：驗證 pickup credential，確認尚未過期，更新 pickup/order completion，並寫入 status history。
+6. 取貨逾期：依 `expires_at` 或等效規則將未取貨訂單更新為 `pickup_status = expired`，移至歷史訂單並寫入 status history。

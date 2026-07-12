@@ -4,11 +4,11 @@ import { PrimaryButton } from "../components/PrimaryButton";
 import { ProgressSummary } from "../components/ProgressSummary";
 import { StatusBadge } from "../components/StatusBadge";
 import { stores } from "../mock/stores";
-import { getDealById, getStoreById, formatCurrency, isWithdrawalLocked } from "../utils/calculations";
+import { getGroupBuyActivityById, getStoreById, formatCurrency, isWithdrawalLocked } from "../utils/calculations";
 
-export function DealDetailScreen({ navigation, route, appState, memberAction }) {
-  const deal = getDealById(appState.deals, route.params?.dealId);
-  if (!deal) {
+export function GroupBuyActivityDetailScreen({ navigation, route, appState, memberAction }) {
+  const groupBuyActivity = getGroupBuyActivityById(appState.groupBuyActivities, route.params?.groupBuyActivityId);
+  if (!groupBuyActivity) {
     return (
       <MobileScreen
         title="團購詳情"
@@ -23,8 +23,8 @@ export function DealDetailScreen({ navigation, route, appState, memberAction }) 
     );
   }
 
-  const store = getStoreById(stores, deal.storeId);
-  const withdrawalLocked = isWithdrawalLocked(deal);
+  const store = getStoreById(stores, groupBuyActivity.storeId);
+  const withdrawalLocked = isWithdrawalLocked(groupBuyActivity);
 
   return (
     <MobileScreen
@@ -39,24 +39,24 @@ export function DealDetailScreen({ navigation, route, appState, memberAction }) 
             <Text style={styles.meta}>{store?.address}</Text>
             <Text style={styles.meta}>{store?.phone} · {store?.distanceText}</Text>
           </View>
-          <StatusBadge value={deal.status} />
+          <StatusBadge value={groupBuyActivity.status} />
         </View>
       </Section>
 
       <Section title="目前進度">
-        <Text style={styles.title}>{deal.title}</Text>
+        <Text style={styles.title}>{groupBuyActivity.title}</Text>
         <ProgressSummary
-          currentCups={deal.currentCups}
-          targetCups={deal.targetCups}
-          participantCount={deal.participantCount}
-          remainingTimeText={deal.remainingTimeText}
+          currentCups={groupBuyActivity.currentCups}
+          targetCups={groupBuyActivity.targetCups}
+          participantCount={groupBuyActivity.participantCount}
+          remainingTimeText={groupBuyActivity.remainingTimeText}
         />
-        <Text style={styles.meta}>截止：{deal.endTime}</Text>
-        <Text style={styles.meta}>取貨：{deal.pickupTime}</Text>
+        <Text style={styles.meta}>截止：{groupBuyActivity.endTime}</Text>
+        <Text style={styles.meta}>取貨：{groupBuyActivity.pickupTime}</Text>
       </Section>
 
       <Section title="杯數級距">
-        {deal.tiers.map((tier) => (
+        {groupBuyActivity.tiers.map((tier) => (
           <View key={tier.cups} style={styles.tierRow}>
             <Text style={styles.tierText}>滿 {tier.cups} 杯</Text>
             <Text style={styles.tierValue}>折 {formatCurrency(tier.discountAmount)}</Text>
@@ -66,18 +66,18 @@ export function DealDetailScreen({ navigation, route, appState, memberAction }) 
 
       <Section title="注意事項">
         {withdrawalLocked ? <Text style={styles.lockNotice}>目前距截止時間 30 分鐘內：仍可加入，但既有訂單不可修改或退出。</Text> : null}
-        {deal.cancellationReason ? <Text style={styles.warning}>取消原因：{deal.cancellationReason}</Text> : null}
-        {deal.notices.map((notice) => <Text key={notice} style={styles.meta}>· {notice}</Text>)}
+        {groupBuyActivity.cancellationReason ? <Text style={styles.warning}>取消原因：{groupBuyActivity.cancellationReason}</Text> : null}
+        {groupBuyActivity.notices.map((notice) => <Text key={notice} style={styles.meta}>· {notice}</Text>)}
       </Section>
 
       <PrimaryButton
-        label={deal.canJoin ? "選擇飲料並加入" : "目前不可加入"}
-        onPress={() => deal.canJoin && navigation.go("drinkSelection", { dealId: deal.id })}
+        label={groupBuyActivity.canJoin ? "選擇飲料並加入" : "目前不可加入"}
+        onPress={() => groupBuyActivity.canJoin && navigation.go("drinkSelection", { groupBuyActivityId: groupBuyActivity.id })}
       />
       <PrimaryButton
         label="查看團購進度"
         variant="secondary"
-        onPress={() => navigation.go("groupProgress", { dealId: deal.id })}
+        onPress={() => navigation.go("groupProgress", { groupBuyActivityId: groupBuyActivity.id })}
       />
     </MobileScreen>
   );

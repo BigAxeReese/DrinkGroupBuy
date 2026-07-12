@@ -1,6 +1,6 @@
 // Frontend/mobile prototype shapes only, not final API contract.
 
-export const dealStatusLabels = {
+export const groupBuyActivityStatusLabels = {
   recruiting: "招募中",
   confirmed: "已成團",
   formed: "已成團",

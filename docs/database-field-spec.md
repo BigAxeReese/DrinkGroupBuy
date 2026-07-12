@@ -152,8 +152,8 @@ PostgreSQL draft 另有 `phone_verified_at`、`email_verified_at`、`last_login_
 | 5   | `status`                  | 活動狀態         | TEXT    | INDEX pair     | `draft`, `recruiting`, `confirmed`, `failed`, `ordering`, `ready_for_pickup`, `completed`, `cancelled` | `recruiting`                |
 | 6   | `start_at`                | 開始時間         | TEXT    |                | 目前規則為建立/發布時間或店家設定時間                                                                  | `2026-06-25T14:00:00+08:00` |
 | 7   | `deadline_at`             | 截止時間         | TEXT    | INDEX          | 用於鎖單與結算；產品規則要求發布後 24 小時內                                                           | `2026-06-25T15:30:00+08:00` |
-| 8   | `pickup_start_at`         | 取貨開始時間     | TEXT    |                | 顧客取貨資訊必填                                                                                       | `2026-06-25T16:00:00+08:00` |
-| 9   | `pickup_end_at`           | 取貨結束時間     | TEXT    |                | 顧客取貨資訊必填                                                                                       | `2026-06-25T17:00:00+08:00` |
+| 8   | `pickup_start_at`         | 取貨開始時間     | TEXT    |                | 顧客取貨資訊必填；至少晚於 `deadline_at` 15 分鐘，表單預設截止後 30 分鐘                                | `2026-06-25T16:00:00+08:00` |
+| 9   | `pickup_end_at`           | 取貨結束時間     | TEXT    |                | 顧客取貨資訊必填；必須晚於 `pickup_start_at`                                                            | `2026-06-25T17:00:00+08:00` |
 | 10  | `maximum_cups`            | 最大杯數         | INTEGER |                | 可為 NULL；目前應等於最高 promotion tier，除非未來另定容量規則                                         | `40`                        |
 | 11  | `withdrawal_lock_minutes` | 退出鎖定分鐘數   | INTEGER |                | 預設 `30`；截止前 30 分鐘不能修改或退出                                                                | `30`                        |
 | 12  | `cancellation_reason`     | 取消原因         | TEXT    |                | 活動取消時填寫                                                                                         | `店家臨時設備維修`          |
@@ -167,7 +167,7 @@ PostgreSQL draft 另有 `phone_verified_at`、`email_verified_at`、`last_login_
 | 1   | `id`              | 優惠門檻編號 | TEXT    | PK              | 建議使用 `tier_` 加唯一後綴                                  | `tier_001`     |
 | 2   | `activity_id`     | 團購活動編號 | TEXT    | FK, UNIQUE pair | References `group_buy_activities(id)`；與 `target_cups` 唯一 | `activity_001` |
 | 3   | `target_cups`     | 目標杯數     | INTEGER | UNIQUE pair     | `> 0`                                                        | `20`           |
-| 4   | `discount_amount` | 折扣金額     | INTEGER |                 | `>= 0`，以 NTD 整數保存                                      | `200`          |
+| 4   | `discount_amount` | 總折扣金額   | INTEGER |                 | `>= 0`，以 NTD 整數保存；結算時平均分攤到有效杯數，未整除餘額作維運補貼 | `200`          |
 | 5   | `sort_order`      | 排序         | INTEGER |                 | 數字越小越前面                                               | `1`            |
 
 ## `activity_notices`
@@ -271,7 +271,7 @@ PostgreSQL draft 另有 `phone_verified_at`、`email_verified_at`、`last_login_
 | 5   | `original_amount`           | 原始金額            | INTEGER |           | `>= 0`                                                                | `280`                       |
 | 6   | `authorized_amount`         | 預授權金額          | INTEGER |           | `>= 0`；通常等於 original amount                                      | `280`                       |
 | 7   | `provider_authorization_id` | Provider 預授權編號 | TEXT    |           | Mock flow 可為 NULL                                                   | `linepay-auth-123`          |
-| 8   | `expires_at`                | 預授權到期時間      | TEXT    |           | 可為 NULL；依 provider 規則                                           | `2026-06-26T10:00:00+08:00` |
+| 8   | `expires_at`                | 預授權到期時間      | TEXT    |           | 可為 NULL；LINE Pay 分離式請款時取自 `authorizationExpireDate`          | `2026-06-26T10:00:00+08:00` |
 | 9   | `authorized_at`             | 預授權成功時間      | TEXT    |           | 預授權成功前可為 NULL                                                 | `2026-06-25T10:16:00+08:00` |
 | 10  | `voided_at`                 | 取消預授權時間      | TEXT    |           | void 前可為 NULL                                                      | `2026-06-25T15:30:00+08:00` |
 | 11  | `failure_reason`            | 失敗原因            | TEXT    |           | 可為 NULL                                                             | `provider_timeout`          |
@@ -318,7 +318,7 @@ PostgreSQL draft 另有 `phone_verified_at`、`email_verified_at`、`last_login_
 | 3   | `outcome`         | 結算結果         | TEXT    |            | `qualified`, `failed`, `cancelled`    | `qualified`                 |
 | 4   | `authorized_cups` | 預授權杯數       | INTEGER |            | `>= 0`；結算時的權威杯數              | `25`                        |
 | 5   | `applied_tier_id` | 適用優惠門檻編號 | TEXT    | FK         | 未達標或取消時可為 NULL               | `tier_002`                  |
-| 6   | `discount_amount` | 適用折扣金額     | INTEGER |            | `>= 0`                                | `300`                       |
+| 6   | `discount_amount` | 適用總折扣金額   | INTEGER |            | `>= 0`；保存結算時套用級距的總折扣金額 | `300`                       |
 | 7   | `settled_at`      | 結算時間         | TEXT    |            | ISO datetime string                   | `2026-06-25T15:30:00+08:00` |
 | 8   | `reason`          | 結算原因         | TEXT    |            | 可為 NULL                             | `deadline_reached`          |
 
@@ -331,6 +331,13 @@ PostgreSQL draft 另有 `phone_verified_at`、`email_verified_at`、`last_login_
 | 3   | `pickup_code`                       | 取貨代碼       | TEXT    |            | 必填；格式待定                              | `A7924`                     |
 | 4   | `visible_after_merchant_acceptance` | 接單後才顯示   | INTEGER |            | 舊欄位；最新規則不需逐筆接單，需後續 review | `1`                         |
 | 5   | `created_at`                        | 建立時間       | TEXT    |            | ISO datetime string                         | `2026-06-25T15:40:00+08:00` |
+
+候選補充欄位：
+
+| Field name   | 中文名稱       | Type | 規則 / 格式 / 範圍 |
+| ------------ | -------------- | ---- | ------------------ |
+| `expires_at` | 憑證到期時間   | TEXT | 由取餐開始時間、店家當日營業結束時間與 24 小時營業規則計算；到期後訂單移至歷史訂單 |
+| `expired_at` | 實際逾期處理時間 | TEXT | 可為 NULL；系統實際把取貨狀態改為 `expired` 的時間 |
 
 ## `status_history`
 

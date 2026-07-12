@@ -22,7 +22,7 @@ try {
         FROM deals
         WHERE deals.store_id = stores.id
           AND deals.status = 'recruiting'
-      ) AS hasRecruitingDeal,
+      ) AS hasRecruitingGroupBuyActivity,
       (
         SELECT deals.id
         FROM deals
@@ -30,12 +30,12 @@ try {
           AND deals.status = 'recruiting'
         ORDER BY deals.created_at DESC
         LIMIT 1
-      ) AS recruitingDealId
+      ) AS recruitingGroupBuyActivityId
     FROM stores
     ORDER BY stores.id
   `).all().map((store) => ({
     ...store,
-    hasRecruitingDeal: Boolean(store.hasRecruitingDeal)
+    hasRecruitingGroupBuyActivity: Boolean(store.hasRecruitingGroupBuyActivity)
   }));
 
   const contents = [

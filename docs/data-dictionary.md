@@ -24,8 +24,8 @@
 | 門市 / 店家      | 實體下單與取貨地點              | `store`, `storeId`               | `stores`, `store_id`                  | 優先使用 `store`，避免再引入 `shop`          |
 | 菜單品項         | 店家販售的飲品或商品            | `menuItem`, `menuItemId`         | `menu_items`, `menu_item_id`          | 基本價格存放於此                             |
 | 客製化選項       | 甜度、冰塊、加料或尺寸選項      | `customizationOption`            | `customization_options`               | 部分選項可能加價                             |
-| 團購活動         | 商家建立的團購事件              | `groupBuyActivity`, `activityId` | `group_buy_activities`, `activity_id` | Mobile prototype 仍可能使用 `deal`           |
-| 優惠級距         | 杯數門檻與折扣金額              | `promotionTier`, `tierId`        | `promotion_tiers`, `tier_id`          | 例如 20 杯折 200 元                          |
+| 團購活動         | 商家建立的團購事件              | `groupBuyActivity`, `activityId` | `group_buy_activities`, `activity_id` | Mobile prototype 已改用此命名；舊 `deal` 僅作相容或測試表脈絡 |
+| 優惠級距         | 杯數門檻與總折扣金額            | `promotionTier`, `tierId`        | `promotion_tiers`, `tier_id`          | 例如 20 杯共折 200 元                        |
 | 活動注意事項     | 顯示於活動詳情的商家備註        | `activityNotice`                 | `activity_notices`                    | 多筆注意事項分開儲存                         |
 | 購物車草稿       | 已選擇但尚未送出成訂單的品項    | `cartDraft`, `cartDraftId`       | `cart_drafts`, `cart_draft_id`        | 用於付款預授權前                             |
 | 購物車品項       | 購物車草稿中的一杯飲料          | `cartDraftItem`                  | `cart_draft_items`                    | 客製化內容以 child rows 儲存                 |
@@ -40,7 +40,7 @@
 | 釋放金額         | 已授權但未請款的金額            | `releasedAmount`                 | `released_amount`                     | 實際釋放時間取決於 provider/bank             |
 | 付款預授權       | 金流服務商的付款授權嘗試        | `paymentAuthorization`           | `payment_authorizations`              | 目標流程類似 LINE Pay authorization          |
 | 付款請款         | 活動結算後的 capture            | `paymentCapture`                 | `payment_captures`                    | 可能是 partial capture                       |
-| 金流事件         | Provider webhook 或事件 payload | `paymentProviderEvent`           | `payment_provider_events`             | 用於 idempotency 與 reconciliation           |
+| 金流事件         | Provider event payload          | `paymentProviderEvent`           | `payment_provider_events`             | 用於 idempotency 與 reconciliation；未來可包含 webhook |
 | 活動結算         | 截止結果與套用級距              | `activitySettlement`             | `activity_settlements`                | 應只建立一次且可稽核                         |
 | 商家接單狀態     | 商家是否接受製作                | `merchantAcceptanceStatus`       | `merchant_acceptance_status`          | 與訂單狀態、取貨狀態分開                     |
 | 取貨狀態         | 製作與取貨生命週期              | `pickupStatus`                   | `pickup_status`                       | `ready` 代表可以顯示取貨碼                   |

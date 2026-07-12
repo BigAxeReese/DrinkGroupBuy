@@ -1,6 +1,6 @@
 # 目前進度
 
-最後更新：2026-07-11
+最後更新：2026-07-12
 
 換電腦或交接給其他 AI 時，請先閱讀 `docs/handoff-summary.md`。
 
@@ -52,6 +52,7 @@
 - 付款畫面可向後端建立 LINE Pay sandbox 授權網址，並開啟 LINE Pay 付款頁。
 - 付款畫面在開啟 LINE Pay 後會短時間自動輪詢 backend 訂單狀態；App / 瀏覽器回到前景時也會安靜刷新，授權完成後同步顯示 `authorized`。
 - 顧客送出預授權後，購物車會保留飲品；只有 backend 訂單同步為 `authorized` / `captured` 後，才清除該團購的購物車飲品。
+- Mobile 主要團購命名已從 `deal` 遷移到 `groupBuyActivity`，付款預授權畫面已從 `PaymentReportScreen` 改為 `PaymentAuthorizationScreen`；舊 localStorage key 只保留相容讀取。
 - 付款規則已集中記錄在 `docs/payment-rules-and-flow.md`；目前決議是預授權成功即計入杯數，修改授權訂單採先新授權成功、再取消舊授權的替換流程。
 - 商家儀表板、建立活動、接單、完成訂單、商家歷史訂單。
 - 管理員儀表板與取消活動。
@@ -113,7 +114,10 @@
 - LINE Pay Channel ID / Secret 只放後端。
 - LINE Pay request / confirm / cancel 邏輯已拆到 `backend/payments/`，目前 API path 維持不變。
 - LINE Pay request 會檢查後端是否存在對應訂單。
+- 真 LINE Pay request 目前需要 `LINE_PAY_CAPTURE_SEPARATED=true` 才能送出；台灣 LINE Pay channel 預設自動請款，必須先向 LINE Pay 開通分離式請款，避免自動請款被誤當預授權。
 - LINE Pay confirm 會把付款授權與訂單狀態更新為 `authorized`。
+- LINE Pay confirm 寫入 `authorized` 前會檢查是否已達團購截止時間；若 confirm 時已達或超過截止時間，該授權不計入團購並會嘗試 void。
+- LINE Pay confirm 若回傳 `authorizationExpireDate`，後端會保存到 `payment_authorizations.expires_at`；該時間必須晚於團購截止時間加結算緩衝時間，否則會標記失敗並嘗試 void。
 - LINE Pay cancel redirect 會把對應 pending authorization 標記為 `failed`，並寫入 provider event、status history 與 audit log，讓顧客可重新付款。
 - LINE Pay confirm/cancel redirect 可用資料庫的 `provider_authorization_id` 找回 pending authorization；記憶體暫存只作快取，後端重啟後仍可處理 redirect。
 - LINE Pay confirm 在寫入 `authorized` 前會用資料庫交易重新檢查團購容量；容量不足時會把 authorization 標記為 `failed`，訂單不會計入團購。
@@ -122,7 +126,8 @@
 - 單一團購手動結算 API 已加入；admin 可觸發已截止活動結算，系統會計算最終級距，對有效授權訂單執行 capture 或 void，並寫入 `activity_settlements`。
 - deadline settlement scheduler 已加入後端啟動流程；預設每 60 秒掃描已截止、尚未結算的團購並呼叫同一套 settlement service。`LINE_PAY_ENV=production` 時需要明確允許才會啟動。
 - 本機付款結算 smoke script 已加入：`npm run settlement:smoke` 會用乾淨 schema 與 `mock_line_pay` 驗證達標 capture、未達標 fallback capture / void，以及 scheduler due activity 結算，並在測試後還原開發 SQLite。
-- 商家建立團購 API 已強制 `deadlineAt` 必須晚於 `startAt`，且不得超過 `startAt` 後 24 小時；mobile 建立團購表單也會先提示與阻擋。
+- 商家建立團購 API 已強制 `deadlineAt` 必須晚於 `startAt`，且不得超過 `startAt` 後 24 小時；`pickupStartAt` 至少晚於 `deadlineAt` 15 分鐘，`pickupEndAt` 必須晚於 `pickupStartAt`。
+- Mobile 建立團購表單已將取餐開始預設為截止後 30 分鐘，並先阻擋低於 15 分鐘的取餐開始時間。
 - 已授權或 pending 的授權會阻擋重複 LINE Pay request。
 - 顧客下單、訂單查詢與 LINE Pay request 需要 bearer token。
 - 商家建立活動需要 merchant bearer token，並檢查該商家帳號是否綁定店家。
@@ -137,9 +142,10 @@
 - `users.firebase_uid` 對應 Firebase identity。
 - 已授權後的訂單修改 / 重新授權 mobile 第一版已串接；仍需把訂單列表完全改為後端權威資料。
 - LINE Pay refund。
-- LINE Pay webhook。
+- LINE Pay webhook 第一版不列為必要入口；目前付款同步以 confirm/cancel redirect、polling 與後續 provider 狀態查詢為主。
 - 取貨 API。
-- 跨執行個體 deadline settlement locking、重試佇列與告警。
+- 付款結算失敗規則已決定：第一版以自動重試為主，不做人工處理介面；失敗中的訂單不進入製作或取貨。
+- 尚未實作跨執行個體 deadline settlement locking、provider 狀態查詢、重試佇列與告警。
 - 正式 migration 系統。
 - 完整自動化測試；目前只有付款結算 smoke script。
 
@@ -233,7 +239,7 @@ database/test/drink-group-buy-test.sqlite
 建議下一步：
 
 1. 讓訂單列表與訂單明細改成以後端資料為準，避免 localStorage 與後端狀態分歧。
-2. 補 LINE Pay webhook 與 provider 失敗重試。
+2. 補 LINE Pay provider 狀態查詢與自動重試 queue。
 3. 補 revision 失敗、容量不足、舊授權 void 失敗時的 mobile 錯誤提示。
 4. 補取貨憑證與取貨完成 API。
 5. 補跨執行個體 settlement locking 與失敗告警。

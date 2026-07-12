@@ -479,9 +479,11 @@ function createGroupBuySettlementPlan(activityId, input = {}) {
       .filter((tier) => authorizedCups >= tier.target_cups)
       .at(-1) || null;
     const outcome = appliedTier ? "qualified" : "failed";
+    const orderDiscounts = calculateOrderDiscountAllocations(orderRows, appliedTier, authorizedCups);
     const settlementOrders = orderRows.map((order) => mapSettlementOrder(order, {
       outcome,
-      appliedTier
+      appliedTier,
+      orderDiscount: orderDiscounts.get(order.id) || 0
     }));
     const capturedOrderCount = settlementOrders
       .filter((order) => order.action === "already_captured")
@@ -1750,7 +1752,7 @@ function createPendingLinePayAuthorization(input) {
 
 function authorizeLinePayPaymentInDatabase(input) {
   const database = openDatabase();
-  const now = new Date().toISOString();
+  const now = input.now || new Date().toISOString();
   let transactionStarted = false;
 
   try {
@@ -1776,6 +1778,7 @@ function authorizeLinePayPaymentInDatabase(input) {
         orders.activity_id,
         orders.total_cups,
         orders.original_amount,
+        activity.deadline_at,
         activity.maximum_cups
       FROM orders
       JOIN group_buy_activities activity ON activity.id = orders.activity_id
@@ -1815,6 +1818,16 @@ function authorizeLinePayPaymentInDatabase(input) {
 
     const requestedCups = revision?.total_cups || order.total_cups;
     const requestedAmount = revision?.original_amount || order.original_amount;
+    const authorizationExpiresAt = extractLinePayAuthorizationExpiresAt(input.providerPayload);
+    const authorizationExpiryError = validateLinePayAuthorizationExpiry({
+      provider: authorization.provider,
+      expiresAt: authorizationExpiresAt,
+      deadlineAt: order.deadline_at
+    });
+    const deadlineError = validateLinePayConfirmBeforeDeadline({
+      now,
+      deadlineAt: order.deadline_at
+    });
     const authorizedCups = database.prepare(`
       SELECT COALESCE(SUM(total_cups), 0) AS cups
       FROM orders
@@ -1823,6 +1836,215 @@ function authorizeLinePayPaymentInDatabase(input) {
         AND payment_status IN ('authorized', 'captured')
         AND status NOT IN ('cancelled')
     `).get(order.activity_id, order.id).cups;
+
+    if (deadlineError) {
+      database.prepare(`
+        UPDATE payment_authorizations
+        SET status = 'failed',
+            expires_at = ?,
+            failure_reason = ?,
+            updated_at = ?
+        WHERE id = ?
+      `).run(authorizationExpiresAt, deadlineError, now, authorization.id);
+
+      if (revision) {
+        database.prepare(`
+          UPDATE order_revisions
+          SET status = 'failed',
+              failure_reason = ?,
+              updated_at = ?,
+              cancelled_at = ?
+          WHERE id = ?
+        `).run(deadlineError, now, now, revision.id);
+      }
+
+      database.prepare(`
+        INSERT INTO payment_provider_events (
+          id,
+          provider,
+          resource_type,
+          resource_id,
+          event_type,
+          idempotency_key,
+          payload_json,
+          received_at,
+          processed_at
+        ) VALUES (?, ?, 'authorization', ?, 'confirm_deadline_rejected', ?, ?, ?, ?)
+      `).run(
+        `provider-event-${randomUUID()}`,
+        authorization.provider,
+        authorization.id,
+        input.providerTransactionId
+          ? `${authorization.provider}_confirm_deadline_rejected:${input.providerTransactionId}`
+          : null,
+        JSON.stringify({
+          providerPayload: input.providerPayload || {},
+          orderRevisionId: revision?.id || null,
+          confirmAt: now,
+          deadlineAt: order.deadline_at
+        }),
+        now,
+        now
+      );
+
+      database.prepare(`
+        INSERT INTO status_history (
+          id,
+          resource_type,
+          resource_id,
+          from_status,
+          to_status,
+          reason,
+          actor_user_id,
+          created_at
+        ) VALUES (?, 'payment_authorization', ?, ?, 'failed', ?, NULL, ?)
+      `).run(
+        `status-history-${randomUUID()}`,
+        authorization.id,
+        authorization.status,
+        deadlineError,
+        now
+      );
+
+      database.prepare(`
+        INSERT INTO audit_logs (
+          id,
+          actor_user_id,
+          action_type,
+          resource_type,
+          resource_id,
+          metadata_json,
+          created_at
+        ) VALUES (?, NULL, 'line_pay_confirm_deadline_rejected', 'payment_authorization', ?, ?, ?)
+      `).run(
+        `audit-log-${randomUUID()}`,
+        authorization.id,
+        JSON.stringify({
+          orderId: authorization.order_id,
+          orderRevisionId: revision?.id || null,
+          providerTransactionId: input.providerTransactionId,
+          confirmAt: now,
+          deadlineAt: order.deadline_at
+        }),
+        now
+      );
+
+      database.exec("COMMIT;");
+      transactionStarted = false;
+
+      return {
+        error: deadlineError,
+        confirmAt: now,
+        deadlineAt: order.deadline_at,
+        authorization: getPaymentAuthorizationById(authorization.id)
+      };
+    }
+
+    if (authorizationExpiryError) {
+      database.prepare(`
+        UPDATE payment_authorizations
+        SET status = 'failed',
+            expires_at = ?,
+            failure_reason = ?,
+            updated_at = ?
+        WHERE id = ?
+      `).run(authorizationExpiresAt, authorizationExpiryError, now, authorization.id);
+
+      if (revision) {
+        database.prepare(`
+          UPDATE order_revisions
+          SET status = 'failed',
+              failure_reason = ?,
+              updated_at = ?,
+              cancelled_at = ?
+          WHERE id = ?
+        `).run(authorizationExpiryError, now, now, revision.id);
+      }
+
+      database.prepare(`
+        INSERT INTO payment_provider_events (
+          id,
+          provider,
+          resource_type,
+          resource_id,
+          event_type,
+          idempotency_key,
+          payload_json,
+          received_at,
+          processed_at
+        ) VALUES (?, ?, 'authorization', ?, 'confirm_expiry_rejected', ?, ?, ?, ?)
+      `).run(
+        `provider-event-${randomUUID()}`,
+        authorization.provider,
+        authorization.id,
+        input.providerTransactionId
+          ? `${authorization.provider}_confirm_expiry_rejected:${input.providerTransactionId}`
+          : null,
+        JSON.stringify({
+          providerPayload: input.providerPayload || {},
+          orderRevisionId: revision?.id || null,
+          authorizationExpiresAt,
+          deadlineAt: order.deadline_at,
+          requiredExpiresAfter: getRequiredLinePayAuthorizationExpiry(order.deadline_at)
+        }),
+        now,
+        now
+      );
+
+      database.prepare(`
+        INSERT INTO status_history (
+          id,
+          resource_type,
+          resource_id,
+          from_status,
+          to_status,
+          reason,
+          actor_user_id,
+          created_at
+        ) VALUES (?, 'payment_authorization', ?, ?, 'failed', ?, NULL, ?)
+      `).run(
+        `status-history-${randomUUID()}`,
+        authorization.id,
+        authorization.status,
+        authorizationExpiryError,
+        now
+      );
+
+      database.prepare(`
+        INSERT INTO audit_logs (
+          id,
+          actor_user_id,
+          action_type,
+          resource_type,
+          resource_id,
+          metadata_json,
+          created_at
+        ) VALUES (?, NULL, 'line_pay_confirm_expiry_rejected', 'payment_authorization', ?, ?, ?)
+      `).run(
+        `audit-log-${randomUUID()}`,
+        authorization.id,
+        JSON.stringify({
+          orderId: authorization.order_id,
+          orderRevisionId: revision?.id || null,
+          providerTransactionId: input.providerTransactionId,
+          authorizationExpiresAt,
+          deadlineAt: order.deadline_at,
+          requiredExpiresAfter: getRequiredLinePayAuthorizationExpiry(order.deadline_at)
+        }),
+        now
+      );
+
+      database.exec("COMMIT;");
+      transactionStarted = false;
+
+      return {
+        error: authorizationExpiryError,
+        authorizationExpiresAt,
+        deadlineAt: order.deadline_at,
+        requiredExpiresAfter: getRequiredLinePayAuthorizationExpiry(order.deadline_at),
+        authorization: getPaymentAuthorizationById(authorization.id)
+      };
+    }
 
     if (order.maximum_cups && authorizedCups + requestedCups > order.maximum_cups) {
       database.prepare(`
@@ -1932,11 +2154,13 @@ function authorizeLinePayPaymentInDatabase(input) {
       UPDATE payment_authorizations
       SET status = 'authorized',
           authorized_amount = ?,
+          expires_at = ?,
           authorized_at = ?,
           updated_at = ?
       WHERE id = ?
     `).run(
       input.amount,
+      authorizationExpiresAt,
       now,
       now,
       authorization.id
@@ -3038,9 +3262,10 @@ function mapSettlementTier(row) {
 
 function mapSettlementOrder(row, context) {
   const appliedTier = context.appliedTier;
+  const orderDiscount = Number(context.orderDiscount || 0);
   const isAlreadyCaptured = row.payment_status === "captured";
   const finalAmount = appliedTier
-    ? calculateDiscountedFinalAmount(row, appliedTier)
+    ? calculateDiscountedFinalAmount(row, orderDiscount)
     : row.original_amount;
   let action = "void";
   let actionReason = "discount_not_qualified";
@@ -3079,12 +3304,89 @@ function mapSettlementOrder(row, context) {
   };
 }
 
-function calculateDiscountedFinalAmount(order, tier) {
-  if (!tier) return order.original_amount;
+function calculateOrderDiscountAllocations(orderRows, tier, authorizedCups) {
+  const allocations = new Map();
+  if (!tier || !Number.isFinite(authorizedCups) || authorizedCups <= 0) {
+    return allocations;
+  }
 
-  const discountPerCup = Math.floor(tier.discount_amount / tier.target_cups);
-  const orderDiscount = Math.min(order.original_amount, discountPerCup * order.total_cups);
-  return Math.max(order.original_amount - orderDiscount, 0);
+  const totalOriginalAmount = orderRows.reduce((sum, order) => sum + order.original_amount, 0);
+  const totalDiscount = Math.min(Number(tier.discount_amount || 0), totalOriginalAmount);
+  const baseDiscountPerCup = Math.floor(totalDiscount / authorizedCups);
+
+  orderRows.forEach((order) => {
+    const orderDiscount = Math.min(
+      order.original_amount,
+      baseDiscountPerCup * order.total_cups
+    );
+    allocations.set(order.id, orderDiscount);
+  });
+
+  return allocations;
+}
+
+function calculateDiscountedFinalAmount(order, orderDiscount) {
+  const normalizedDiscount = Math.max(Number(orderDiscount || 0), 0);
+  const cappedDiscount = Math.min(order.original_amount, normalizedDiscount);
+  return Math.max(order.original_amount - cappedDiscount, 0);
+}
+
+function extractLinePayAuthorizationExpiresAt(providerPayload) {
+  const rawValue = providerPayload?.info?.authorizationExpireDate
+    || providerPayload?.authorizationExpireDate
+    || null;
+  if (!rawValue) return null;
+
+  const timestamp = Date.parse(rawValue);
+  if (Number.isNaN(timestamp)) return null;
+  return new Date(timestamp).toISOString();
+}
+
+function validateLinePayConfirmBeforeDeadline({ now, deadlineAt }) {
+  const nowTime = Date.parse(now);
+  const deadlineTime = Date.parse(deadlineAt);
+  if (Number.isNaN(nowTime) || Number.isNaN(deadlineTime)) return null;
+  return nowTime >= deadlineTime ? "authorization_confirmed_after_deadline" : null;
+}
+
+function validateLinePayAuthorizationExpiry({ provider, expiresAt, deadlineAt }) {
+  if (provider !== "line_pay") return null;
+  if (!readBooleanEnv(process.env.LINE_PAY_CAPTURE_SEPARATED, false)) return null;
+
+  if (!expiresAt) return "authorization_expiry_missing";
+
+  const expiresAtTime = Date.parse(expiresAt);
+  if (Number.isNaN(expiresAtTime)) return "authorization_expiry_invalid";
+
+  const requiredExpiresAfter = getRequiredLinePayAuthorizationExpiry(deadlineAt);
+  if (!requiredExpiresAfter) return null;
+
+  if (expiresAtTime <= Date.parse(requiredExpiresAfter)) {
+    return "authorization_expiry_too_short";
+  }
+
+  return null;
+}
+
+function getRequiredLinePayAuthorizationExpiry(deadlineAt) {
+  const deadlineTime = Date.parse(deadlineAt);
+  if (Number.isNaN(deadlineTime)) return null;
+
+  const bufferMinutes = readPositiveIntegerEnv(
+    process.env.LINE_PAY_AUTHORIZATION_SETTLEMENT_BUFFER_MINUTES,
+    30
+  );
+  return new Date(deadlineTime + bufferMinutes * 60 * 1000).toISOString();
+}
+
+function readPositiveIntegerEnv(value, fallback) {
+  const number = Number(value);
+  return Number.isInteger(number) && number > 0 ? number : fallback;
+}
+
+function readBooleanEnv(value, fallback = false) {
+  if (value == null || value === "") return fallback;
+  return ["1", "true", "yes", "on"].includes(String(value).trim().toLowerCase());
 }
 
 function hydrateUserAuthProfile(database, user) {

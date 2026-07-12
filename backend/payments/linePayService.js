@@ -15,6 +15,7 @@ const {
 const {
   captureLinePayPaymentAuthorization,
   confirmLinePayPayment,
+  getLinePayConfig,
   requestLinePayPayment,
   voidLinePayPaymentAuthorization
 } = require("./linePayClient");
@@ -95,6 +96,14 @@ async function requestLinePayAuthorization({ authUser, body }) {
       error: "LINE Pay authorization amount does not match order original amount",
       orderOriginalAmount: order.originalAmount,
       requestedAmount: Number(body.amount)
+    });
+  }
+  const linePayConfig = getLinePayConfig();
+  if (!linePayConfig.captureSeparated) {
+    throw new PaymentServiceError(409, {
+      error: "LINE Pay capture-separated payment is not enabled",
+      status: "capture_separated_not_enabled",
+      nextStep: "Set LINE_PAY_CAPTURE_SEPARATED=true only after LINE Pay has enabled capture-separated payments for this channel."
     });
   }
 
@@ -229,19 +238,25 @@ async function confirmLinePayAuthorization({ transactionId, orderId }) {
     let voidResult = null;
     let voidError = null;
 
-    if (authorizationResult.error === "capacity_exceeded") {
+    if ([
+      "capacity_exceeded",
+      "authorization_confirmed_after_deadline",
+      "authorization_expiry_missing",
+      "authorization_expiry_invalid",
+      "authorization_expiry_too_short"
+    ].includes(authorizationResult.error)) {
       try {
         voidResult = await voidLinePayAuthorization({
           orderId: resolvedOrderId,
           transactionId,
-          reason: "capacity_exceeded_at_confirm"
+          reason: `${authorizationResult.error}_at_confirm`
         });
       } catch (error) {
         try {
           recordLinePayVoidFailureInDatabase({
             orderId: resolvedOrderId,
             providerTransactionId: transactionId,
-            reason: "capacity_exceeded_at_confirm_void_failed",
+            reason: `${authorizationResult.error}_at_confirm_void_failed`,
             providerPayload: error.linePayPayload || { message: error.message }
           });
         } catch {

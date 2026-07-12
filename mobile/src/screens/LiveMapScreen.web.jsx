@@ -15,12 +15,12 @@ export function LiveMapScreen({ navigation, appState }) {
   const [mapReady, setMapReady] = useState(false);
 
   const mapStores = databaseMapStores.map((store) => {
-    const runtimeDeal = appState?.deals?.find((deal) => deal.storeId === store.id && deal.status === "recruiting");
-    const progressText = runtimeDeal ? getDealProgressText(runtimeDeal) : "";
+    const runtimeGroupBuyActivity = appState?.groupBuyActivities?.find((groupBuyActivity) => groupBuyActivity.storeId === store.id && groupBuyActivity.status === "recruiting");
+    const progressText = runtimeGroupBuyActivity ? getGroupBuyActivityProgressText(runtimeGroupBuyActivity) : "";
     return {
       ...store,
-      hasRecruitingDeal: store.hasRecruitingDeal || Boolean(runtimeDeal),
-      recruitingDealId: store.recruitingDealId || runtimeDeal?.id || null,
+      hasRecruitingGroupBuyActivity: store.hasRecruitingGroupBuyActivity || Boolean(runtimeGroupBuyActivity),
+      recruitingGroupBuyActivityId: store.recruitingGroupBuyActivityId || runtimeGroupBuyActivity?.id || null,
       progressText
     };
   });
@@ -115,7 +115,7 @@ export function LiveMapScreen({ navigation, appState }) {
         map,
         position: { lat: store.latitude, lng: store.longitude },
         title: store.name,
-        color: store.hasRecruitingDeal ? "#facc15" : "#2563eb",
+        color: store.hasRecruitingGroupBuyActivity ? "#facc15" : "#2563eb",
         markerText: "店",
         labelText: getStoreMarkerLabel(store),
         onPress: () => focusStore(store)
@@ -143,11 +143,11 @@ export function LiveMapScreen({ navigation, appState }) {
       if (!marker) return;
       marker.update({
         title: store.name,
-        color: store.hasRecruitingDeal ? "#facc15" : "#2563eb",
+        color: store.hasRecruitingGroupBuyActivity ? "#facc15" : "#2563eb",
         labelText: getStoreMarkerLabel(store)
       });
     });
-  }, [mapReady, appState?.deals]);
+  }, [mapReady, appState?.groupBuyActivities]);
 
   useEffect(() => {
     const mapElement = mapElementRef.current;
@@ -214,17 +214,17 @@ export function LiveMapScreen({ navigation, appState }) {
           <View style={styles.storeInfo}>
             <Text style={styles.storeName}>{selectedStore.name}</Text>
             <Text style={styles.storeMeta}>
-              {selectedStore.distanceText} · {selectedStore.hasRecruitingDeal ? `團購進行中 ${selectedStore.progressText}` : "目前沒有進行中的團購"}
+              {selectedStore.distanceText} · {selectedStore.hasRecruitingGroupBuyActivity ? `團購進行中 ${selectedStore.progressText}` : "目前沒有進行中的團購"}
             </Text>
           </View>
           <Pressable
             accessibilityRole="button"
-            onPress={() => selectedStore.recruitingDealId
-              ? navigation.go("dealDetail", { dealId: selectedStore.recruitingDealId })
+            onPress={() => selectedStore.recruitingGroupBuyActivityId
+              ? navigation.go("groupBuyActivityDetail", { groupBuyActivityId: selectedStore.recruitingGroupBuyActivityId })
               : navigation.go("storeMenu", { storeId: selectedStore.id })}
-            style={styles.viewDealsButton}
+            style={styles.viewGroupBuyActivitiesButton}
           >
-            <Text style={styles.viewDealsText}>查看詳情</Text>
+            <Text style={styles.viewGroupBuyActivitiesText}>查看詳情</Text>
           </Pressable>
         </View>
       ) : null}
@@ -281,20 +281,20 @@ function loadGoogleMaps(apiKey) {
   return window.__drinkGroupBuyGoogleMapsPromise;
 }
 
-function getDealProgressText(deal) {
-  const tierTargets = (deal.tiers ?? [])
+function getGroupBuyActivityProgressText(groupBuyActivity) {
+  const tierTargets = (groupBuyActivity.tiers ?? [])
     .map((tier) => Number(tier.cups))
     .filter((cups) => Number.isFinite(cups) && cups > 0)
     .sort((left, right) => left - right);
-  const nextTarget = tierTargets.find((cups) => deal.currentCups < cups)
-    ?? deal.targetCups
+  const nextTarget = tierTargets.find((cups) => groupBuyActivity.currentCups < cups)
+    ?? groupBuyActivity.targetCups
     ?? tierTargets[tierTargets.length - 1]
     ?? 0;
-  return `${deal.currentCups}/${nextTarget}杯`;
+  return `${groupBuyActivity.currentCups}/${nextTarget}杯`;
 }
 
 function getStoreMarkerLabel(store) {
-  return store.hasRecruitingDeal && store.progressText
+  return store.hasRecruitingGroupBuyActivity && store.progressText
     ? `${store.name} ${store.progressText}`
     : store.name;
 }
@@ -533,7 +533,7 @@ const styles = StyleSheet.create({
     fontSize: 11,
     fontWeight: "700"
   },
-  viewDealsButton: {
+  viewGroupBuyActivitiesButton: {
     minHeight: 38,
     borderRadius: 12,
     alignItems: "center",
@@ -541,7 +541,7 @@ const styles = StyleSheet.create({
     backgroundColor: "#1f6feb",
     paddingHorizontal: 14
   },
-  viewDealsText: {
+  viewGroupBuyActivitiesText: {
     color: "#ffffff",
     fontSize: 12,
     fontWeight: "900"

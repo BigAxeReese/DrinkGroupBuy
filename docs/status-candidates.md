@@ -1,6 +1,6 @@
 # 狀態模型
 
-最後更新：2026-06-24
+最後更新：2026-07-12
 
 ## 語言規則
 
@@ -28,7 +28,7 @@ recruiting/confirmed/ordering -> cancelled
 
 - `confirmed`：至少達到一個優惠門檻；在截止時間或最大容量前仍可能繼續開放加入。
 - `ordering`：截止時間已過，商家正在準備已成立訂單。
-- `cancelled`：商家或管理員明確取消，不代表刪除資料。
+- `cancelled`：商家或系統後台明確取消，不代表刪除資料。
 
 需要 history：是。
 
@@ -36,7 +36,7 @@ recruiting/confirmed/ordering -> cancelled
 
 目前 schema 支援的狀態值：`draft`、`submitted`、`locked`、`cancelled`、`completed`。
 
-目前 mobile 也使用 `readyForPickup`，但 database schema 不接受此值。建議決議方向：訂單維持 `locked`，並以 `pickupStatus = ready` 表示可取餐；或正式將 `ready_for_pickup` 加入 order status schema。在決定前不要再新增其他拼法。
+訂單不使用 `readyForPickup` 作為 order status。正式方向是訂單維持 `locked`，並以 `pickupStatus = ready` 表示可取餐。mobile 若仍有 `readyForPickup` 顯示或 route 轉換，應在後續整理時移除。
 
 預期流程：
 
@@ -69,11 +69,13 @@ captured -> refunded
 
 預期流程：`pending -> accepted/rejected/cancelled`。
 
+最新產品規則不需要店家逐筆確認接單。顧客預授權成功後即視為有效加入團購，因此 `merchant_acceptance_status` 是早期候選欄位；第一階段可在預授權成功後固定為 `accepted`，後續 schema review 可考慮移除。
+
 ## 取貨
 
 schema 狀態值：`not_ready`、`ready`、`picked_up`、`cancelled`、`expired`。
 
-目前 mobile 也顯示 `preparing`；開發 schema 不接受此值。建議決議方向：正式將 `preparing` 加入 schema，或由 `merchantAcceptanceStatus = accepted` 與 activity `ordering` 推導製作中狀態。
+不保存 `preparing` 作為 pickup status。製作中由 activity/order/payment 狀態推導；取貨狀態只保存 schema 中的狀態值。
 
 預期流程：
 
@@ -84,6 +86,17 @@ ready -> expired
 ```
 
 取貨碼從 `ready` 開始顯示，不只是商家接單後就顯示。
+
+- `ready`：店家已標記可取餐，顧客可以看到取貨憑證。
+- `picked_up`：店家核對取貨憑證或取貨代碼後，已交付飲品。
+- `expired`：取貨憑證已到期，訂單移至歷史訂單；逾期不自動退款，店家不再負原飲品保管責任。
+
+取貨憑證到期規則：
+
+1. 自取餐開始時間起保留 3 小時。
+2. 若店家當日營業結束早於 3 小時，保留至當日營業結束。
+3. 24 小時營業店家保留 3 小時。
+4. 若顧客在有效期間到店但店家無法交付，不得將訂單改為 `expired`。
 
 ## 優惠達標
 

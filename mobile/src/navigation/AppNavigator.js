@@ -1,17 +1,17 @@
 import { useEffect, useMemo, useState } from "react";
 import { View, StyleSheet } from "react-native";
 import { BottomNav } from "../components/BottomNav";
-import { deals as initialDeals } from "../mock/deals";
+import { groupBuyActivities as initialGroupBuyActivities } from "../mock/groupBuyActivities";
 import { orders as initialOrders } from "../mock/orders";
-import { paymentReports as initialPaymentReports } from "../mock/paymentReports";
+import { paymentAuthorizations as initialPaymentAuthorizations } from "../mock/paymentAuthorizations";
 import { RoleSelectScreen } from "../screens/RoleSelectScreen";
-import { NearbyDealsScreen } from "../screens/NearbyDealsScreen";
-import { DealDetailScreen } from "../screens/DealDetailScreen";
+import { NearbyGroupBuyActivitiesScreen } from "../screens/NearbyGroupBuyActivitiesScreen";
+import { GroupBuyActivityDetailScreen } from "../screens/GroupBuyActivityDetailScreen";
 import { DrinkSelectionScreen } from "../screens/DrinkSelectionScreen";
 import { GroupProgressScreen } from "../screens/GroupProgressScreen";
-import { PaymentReportScreen } from "../screens/PaymentReportScreen";
+import { PaymentAuthorizationScreen } from "../screens/PaymentAuthorizationScreen";
 import { PickupInfoScreen } from "../screens/PickupInfoScreen";
-import { MerchantDealCreateScreen } from "../screens/MerchantDealCreateScreen";
+import { MerchantGroupBuyActivityCreateScreen } from "../screens/MerchantGroupBuyActivityCreateScreen";
 import { MerchantDashboardScreen } from "../screens/MerchantDashboardScreen";
 import { CustomerPlaceholderScreen } from "../screens/CustomerPlaceholderScreen";
 import { CustomerOrdersScreen } from "../screens/CustomerOrdersScreen";
@@ -20,7 +20,7 @@ import { CartScreen } from "../screens/CartScreen";
 import { LiveMapScreen } from "../screens/LiveMapScreen";
 import { StoreMenuScreen } from "../screens/StoreMenuScreen";
 import { formatDeadlineLabel, getMinutesUntilDeadline, isDeadlineReached } from "../utils/deadlineTime";
-import { getDealCapacityInfo, wouldExceedDealCapacity } from "../utils/dealProgress";
+import { getGroupBuyActivityCapacityInfo, wouldExceedGroupBuyActivityCapacity } from "../utils/groupBuyActivityProgress";
 import { normalizeOrderItem } from "../utils/orderItems";
 import { buildOrderItemsChange, rollbackAuthorizedCups } from "../utils/orderState";
 import { clearPrototypeStateOnce, loadPrototypeState, savePrototypeState } from "../utils/prototypeStorage";
@@ -66,14 +66,36 @@ function toLocalOrderItem(item) {
   };
 }
 
+function getStoredArray(storedState, key, legacyKey, fallback) {
+  if (Array.isArray(storedState[key])) return storedState[key];
+  if (legacyKey && Array.isArray(storedState[legacyKey])) return storedState[legacyKey];
+  return fallback;
+}
+
+function normalizeStoredOrder(order) {
+  if (!order || typeof order !== "object") return order;
+  return {
+    ...order,
+    groupBuyActivityId: order.groupBuyActivityId ?? order.dealId ?? order.activityId
+  };
+}
+
+function normalizeStoredCartItem(item) {
+  if (!item || typeof item !== "object") return item;
+  return {
+    ...item,
+    groupBuyActivityId: item.groupBuyActivityId ?? item.dealId ?? item.activityId
+  };
+}
+
 export function AppNavigator() {
   const [stack, setStack] = useState([initialRoute]);
   const [currentRole, setCurrentRole] = useState(null);
   const [selectedCustomerId, setSelectedCustomerId] = useState("customer-yinji");
   const [selectedMerchantStoreId, setSelectedMerchantStoreId] = useState("store-001");
-  const [deals, setDeals] = useState(initialDeals);
+  const [groupBuyActivities, setGroupBuyActivities] = useState(initialGroupBuyActivities);
   const [orders, setOrders] = useState(initialOrders);
-  const [paymentReports, setPaymentReports] = useState(initialPaymentReports);
+  const [paymentAuthorizations, setPaymentAuthorizations] = useState(initialPaymentAuthorizations);
   // Prototype only, not final API contract. Cart contents are saved locally when available.
   const [cartItems, setCartItems] = useState([]);
   const [storageLoaded, setStorageLoaded] = useState(false);
@@ -83,10 +105,10 @@ export function AppNavigator() {
     clearPrototypeStateOnce("2026-07-08-clear-group-buys-orders-cart");
     const storedState = loadPrototypeState();
     if (storedState) {
-      setDeals(Array.isArray(storedState.deals) ? storedState.deals : initialDeals);
-      setOrders(Array.isArray(storedState.orders) ? storedState.orders : initialOrders);
-      setPaymentReports(Array.isArray(storedState.paymentReports) ? storedState.paymentReports : initialPaymentReports);
-      setCartItems(Array.isArray(storedState.cartItems) ? storedState.cartItems : []);
+      setGroupBuyActivities(getStoredArray(storedState, "groupBuyActivities", "deals", initialGroupBuyActivities));
+      setOrders(getStoredArray(storedState, "orders", null, initialOrders).map(normalizeStoredOrder));
+      setPaymentAuthorizations(getStoredArray(storedState, "paymentAuthorizations", "paymentReports", initialPaymentAuthorizations));
+      setCartItems(getStoredArray(storedState, "cartItems", null, []).map(normalizeStoredCartItem));
     }
     setStorageLoaded(true);
   }, []);
@@ -94,46 +116,46 @@ export function AppNavigator() {
   useEffect(() => {
     if (!storageLoaded) return;
     savePrototypeState({
-      deals,
+      groupBuyActivities,
       orders,
-      paymentReports,
+      paymentAuthorizations,
       cartItems
     });
-  }, [cartItems, deals, orders, paymentReports, storageLoaded]);
+  }, [cartItems, groupBuyActivities, orders, paymentAuthorizations, storageLoaded]);
 
   useEffect(() => {
     if (!storageLoaded) return undefined;
 
     function lockExpiredOrders() {
       const now = new Date();
-      const expiredDealIds = new Set(
-        deals
-          .filter((deal) => isDeadlineReached(deal, now))
-          .map((deal) => deal.id)
+      const expiredGroupBuyActivityIds = new Set(
+        groupBuyActivities
+          .filter((groupBuyActivity) => isDeadlineReached(groupBuyActivity, now))
+          .map((groupBuyActivity) => groupBuyActivity.id)
       );
 
-      setDeals((items) => items.map((deal) => {
-        const minutesUntilDeadline = getMinutesUntilDeadline(deal, now);
-        if (minutesUntilDeadline == null) return deal;
+      setGroupBuyActivities((items) => items.map((groupBuyActivity) => {
+        const minutesUntilDeadline = getMinutesUntilDeadline(groupBuyActivity, now);
+        if (minutesUntilDeadline == null) return groupBuyActivity;
 
         const expired = minutesUntilDeadline <= 0;
-        const nextStatus = expired && ["recruiting", "confirmed"].includes(deal.status)
+        const nextStatus = expired && ["recruiting", "confirmed"].includes(groupBuyActivity.status)
           ? "ordering"
-          : deal.status;
-        const nextCanJoin = expired ? false : deal.canJoin;
+          : groupBuyActivity.status;
+        const nextCanJoin = expired ? false : groupBuyActivity.canJoin;
         const nextRemainingTimeText = expired ? "已截止" : `剩 ${minutesUntilDeadline} 分鐘`;
 
         if (
-          deal.minutesUntilDeadline === minutesUntilDeadline
-          && deal.status === nextStatus
-          && deal.canJoin === nextCanJoin
-          && deal.remainingTimeText === nextRemainingTimeText
+          groupBuyActivity.minutesUntilDeadline === minutesUntilDeadline
+          && groupBuyActivity.status === nextStatus
+          && groupBuyActivity.canJoin === nextCanJoin
+          && groupBuyActivity.remainingTimeText === nextRemainingTimeText
         ) {
-          return deal;
+          return groupBuyActivity;
         }
 
         return {
-          ...deal,
+          ...groupBuyActivity,
           minutesUntilDeadline,
           remainingTimeText: nextRemainingTimeText,
           canJoin: nextCanJoin,
@@ -141,9 +163,9 @@ export function AppNavigator() {
         };
       }));
 
-      if (expiredDealIds.size === 0) return;
+      if (expiredGroupBuyActivityIds.size === 0) return;
       setOrders((items) => items.map((order) => (
-        expiredDealIds.has(order.dealId)
+        expiredGroupBuyActivityIds.has(order.groupBuyActivityId)
           && !["cancelled", "completed", "locked"].includes(order.status)
           ? {
               ...order,
@@ -163,7 +185,7 @@ export function AppNavigator() {
     lockExpiredOrders();
     const intervalId = setInterval(lockExpiredOrders, 30000);
     return () => clearInterval(intervalId);
-  }, [deals, storageLoaded]);
+  }, [groupBuyActivities, storageLoaded]);
 
   const navigation = useMemo(() => ({
     selectRole(role, routeName, params = {}) {
@@ -201,24 +223,24 @@ export function AppNavigator() {
     removeCartItem(cartItemId) {
       setCartItems((items) => items.filter((item) => item.id !== cartItemId));
     },
-    async submitCart(dealId, fallbackPurchasePreference = "decline_original_price") {
-      const submittedItems = cartItems.filter((item) => item.dealId === dealId && item.customerId === selectedCustomerId);
+    async submitCart(groupBuyActivityId, fallbackPurchasePreference = "decline_original_price") {
+      const submittedItems = cartItems.filter((item) => item.groupBuyActivityId === groupBuyActivityId && item.customerId === selectedCustomerId);
       if (submittedItems.length === 0) return null;
 
       const existingOrder = orders.find((order) => (
         order.customerId === selectedCustomerId
-        && order.dealId === dealId
+        && order.groupBuyActivityId === groupBuyActivityId
         && !["cancelled", "completed"].includes(order.status)
       ));
       const quantity = submittedItems.reduce((sum, item) => sum + item.quantity, 0);
-      const deal = deals.find((item) => item.id === dealId);
+      const groupBuyActivity = groupBuyActivities.find((item) => item.id === groupBuyActivityId);
       const capacityCheckQuantity = existingOrder && existingOrder.paymentStatus !== "pending"
         ? Math.max(0, quantity - (existingOrder.quantity ?? 0))
         : quantity;
-      if (deal && wouldExceedDealCapacity(deal, capacityCheckQuantity)) {
+      if (groupBuyActivity && wouldExceedGroupBuyActivityCapacity(groupBuyActivity, capacityCheckQuantity)) {
         return {
           error: "capacity_exceeded",
-          message: `此團購最多 ${getDealCapacityInfo(deal).maximumCups} 杯，已無法再加入 ${capacityCheckQuantity} 杯。`
+          message: `此團購最多 ${getGroupBuyActivityCapacityInfo(groupBuyActivity).maximumCups} 杯，已無法再加入 ${capacityCheckQuantity} 杯。`
         };
       }
       const subtotal = submittedItems.reduce((sum, item) => sum + item.subtotal, 0);
@@ -254,7 +276,7 @@ export function AppNavigator() {
                 }
               : order
           )));
-          setPaymentReports((items) => items.map((report) => (
+          setPaymentAuthorizations((items) => items.map((report) => (
             report.orderId === existingOrder.id
               ? {
                   ...report,
@@ -333,7 +355,7 @@ export function AppNavigator() {
               }
             : order
         )));
-        setPaymentReports((items) => items.map((report) => (
+        setPaymentAuthorizations((items) => items.map((report) => (
           report.orderId === existingOrder.id
             ? {
                 ...report,
@@ -359,7 +381,7 @@ export function AppNavigator() {
       let backendOrder;
       try {
         backendOrder = await createOrder({
-          activityId: dealId,
+          activityId: groupBuyActivityId,
           customerUserId: backendCustomerUserIds[selectedCustomerId] ?? selectedCustomerId,
           fallbackPurchasePreference,
           items: backendItems
@@ -375,7 +397,7 @@ export function AppNavigator() {
       const newOrder = {
         id: orderId,
         customerId: selectedCustomerId,
-        dealId,
+        groupBuyActivityId,
         customerSurname: "測",
         itemName: submittedItems.length > 1 ? `${firstItem.itemName} 等 ${submittedItems.length} 項` : firstItem.itemName,
         items: orderItems,
@@ -398,7 +420,7 @@ export function AppNavigator() {
       };
 
       setOrders((items) => [...items, newOrder]);
-      setPaymentReports((items) => [
+      setPaymentAuthorizations((items) => [
         ...items,
         {
           orderId,
@@ -459,7 +481,7 @@ export function AppNavigator() {
               }
             : order
         )));
-        setPaymentReports((items) => items.map((report) => (
+        setPaymentAuthorizations((items) => items.map((report) => (
           report.orderId === orderId
             ? {
                 ...report,
@@ -492,7 +514,7 @@ export function AppNavigator() {
             }
           : order
       )));
-      setPaymentReports((items) => items.map((report) => (
+      setPaymentAuthorizations((items) => items.map((report) => (
         report.orderId === orderId
           ? {
               ...report,
@@ -501,10 +523,10 @@ export function AppNavigator() {
           : report
       )));
       if (change.wasCounted) {
-        setDeals((items) => items.map((deal) => (
-          deal.id === orderToUpdate.dealId
-            ? rollbackAuthorizedCups(deal, orderToUpdate)
-            : deal
+        setGroupBuyActivities((items) => items.map((groupBuyActivity) => (
+          groupBuyActivity.id === orderToUpdate.groupBuyActivityId
+            ? rollbackAuthorizedCups(groupBuyActivity, orderToUpdate)
+            : groupBuyActivity
         )));
       }
     },
@@ -524,7 +546,7 @@ export function AppNavigator() {
             }
           : order
       )));
-      setPaymentReports((items) => items.map((report) => (
+      setPaymentAuthorizations((items) => items.map((report) => (
         report.orderId === orderId
           ? {
               ...report,
@@ -533,22 +555,22 @@ export function AppNavigator() {
           : report
       )));
       if (change.wasCounted) {
-        setDeals((items) => items.map((deal) => (
-          deal.id === orderToUpdate.dealId
-            ? rollbackAuthorizedCups(deal, orderToUpdate)
-            : deal
+        setGroupBuyActivities((items) => items.map((groupBuyActivity) => (
+          groupBuyActivity.id === orderToUpdate.groupBuyActivityId
+            ? rollbackAuthorizedCups(groupBuyActivity, orderToUpdate)
+            : groupBuyActivity
         )));
       }
     },
     authorizeLinePayPayment(orderId, providerReference = "linepay-auth") {
       const orderToAuthorize = orders.find((order) => order.id === orderId);
-      const dealToAuthorize = orderToAuthorize ? deals.find((deal) => deal.id === orderToAuthorize.dealId) : null;
+      const groupBuyActivityToAuthorize = orderToAuthorize ? groupBuyActivities.find((groupBuyActivity) => groupBuyActivity.id === orderToAuthorize.groupBuyActivityId) : null;
       const willQualify = Boolean(
         orderToAuthorize &&
-        dealToAuthorize &&
-        dealToAuthorize.currentCups + orderToAuthorize.quantity >= dealToAuthorize.targetCups
+        groupBuyActivityToAuthorize &&
+        groupBuyActivityToAuthorize.currentCups + orderToAuthorize.quantity >= groupBuyActivityToAuthorize.targetCups
       );
-      setPaymentReports((items) => items.map((report) => (
+      setPaymentAuthorizations((items) => items.map((report) => (
         report.orderId === orderId
           ? {
               ...report,
@@ -574,25 +596,25 @@ export function AppNavigator() {
           : order
       )));
       if (orderToAuthorize && orderToAuthorize.paymentStatus === "pending") {
-        setDeals((items) => items.map((deal) => {
-          if (deal.id !== orderToAuthorize.dealId) return deal;
-          const maximumCups = getDealCapacityInfo(deal).maximumCups;
-          const nextCups = Math.min(maximumCups, deal.currentCups + orderToAuthorize.quantity);
+        setGroupBuyActivities((items) => items.map((groupBuyActivity) => {
+          if (groupBuyActivity.id !== orderToAuthorize.groupBuyActivityId) return groupBuyActivity;
+          const maximumCups = getGroupBuyActivityCapacityInfo(groupBuyActivity).maximumCups;
+          const nextCups = Math.min(maximumCups, groupBuyActivity.currentCups + orderToAuthorize.quantity);
           return {
-            ...deal,
+            ...groupBuyActivity,
             currentCups: nextCups,
-            participantCount: deal.participantCount + 1,
-            status: nextCups >= deal.targetCups ? "confirmed" : deal.status,
+            participantCount: groupBuyActivity.participantCount + 1,
+            status: nextCups >= groupBuyActivity.targetCups ? "confirmed" : groupBuyActivity.status,
             canJoin: nextCups < maximumCups
           };
         }));
         setCartItems((items) => items.filter((item) => (
-          item.dealId !== orderToAuthorize.dealId || item.customerId !== selectedCustomerId
+          item.groupBuyActivityId !== orderToAuthorize.groupBuyActivityId || item.customerId !== selectedCustomerId
         )));
       }
     },
     captureQualifiedPayment(orderId, captureAmount, providerReference = "linepay-capture") {
-      setPaymentReports((items) => items.map((report) => (
+      setPaymentAuthorizations((items) => items.map((report) => (
         report.orderId === orderId
           ? {
               ...report,
@@ -650,7 +672,7 @@ export function AppNavigator() {
             }
           : order
       )));
-      setPaymentReports((items) => items.map((report) => (
+      setPaymentAuthorizations((items) => items.map((report) => (
         report.orderId === orderId
           ? {
               ...report,
@@ -669,37 +691,37 @@ export function AppNavigator() {
           : report
       )));
       if (backendActivity) {
-        setDeals((items) => items.map((deal) => (
-          deal.id === backendActivity.id
+        setGroupBuyActivities((items) => items.map((groupBuyActivity) => (
+          groupBuyActivity.id === backendActivity.id
             ? {
-                ...deal,
+                ...groupBuyActivity,
                 status: backendActivity.status,
-                currentCups: backendActivity.authorizedCups ?? backendActivity.currentCups ?? deal.currentCups,
-                participantCount: backendActivity.participantCount ?? deal.participantCount,
-                targetCups: backendActivity.targetCups ?? deal.targetCups,
-                maximumCups: backendActivity.maximumCups ?? deal.maximumCups,
+                currentCups: backendActivity.authorizedCups ?? backendActivity.currentCups ?? groupBuyActivity.currentCups,
+                participantCount: backendActivity.participantCount ?? groupBuyActivity.participantCount,
+                targetCups: backendActivity.targetCups ?? groupBuyActivity.targetCups,
+                maximumCups: backendActivity.maximumCups ?? groupBuyActivity.maximumCups,
                 tiers: backendActivity.tiers?.map((tier) => ({
                   id: tier.id,
                   cups: tier.targetCups ?? tier.cups,
                   targetCups: tier.targetCups ?? tier.cups,
                   discountAmount: tier.discountAmount,
                   sortOrder: tier.sortOrder
-                })) ?? deal.tiers
+                })) ?? groupBuyActivity.tiers
               }
-            : deal
+            : groupBuyActivity
         )));
       }
       if (["authorized", "captured"].includes(backendOrder.paymentStatus)) {
         setCartItems((items) => items.filter((item) => (
-          item.dealId !== backendOrder.activityId || item.customerId !== selectedCustomerId
+          item.groupBuyActivityId !== backendOrder.activityId || item.customerId !== selectedCustomerId
         )));
       }
 
       return { order: backendOrder, activity: backendActivity };
     },
-    acceptMerchantOrdersForDeal(dealId) {
+    acceptMerchantOrdersForGroupBuyActivity(groupBuyActivityId) {
       setOrders((items) => items.map((order) => (
-        order.dealId === dealId
+        order.groupBuyActivityId === groupBuyActivityId
           && order.status !== "cancelled"
           && order.merchantAcceptanceStatus === "pending"
           ? {
@@ -710,9 +732,9 @@ export function AppNavigator() {
           : order
       )));
     },
-    completeMerchantOrdersForDeal(dealId) {
+    completeMerchantOrdersForGroupBuyActivity(groupBuyActivityId) {
       setOrders((items) => items.map((order) => (
-        order.dealId === dealId
+        order.groupBuyActivityId === groupBuyActivityId
           && order.status !== "cancelled"
           && order.merchantAcceptanceStatus === "accepted"
           && !["ready", "picked_up", "cancelled"].includes(order.pickupStatus)
@@ -724,8 +746,8 @@ export function AppNavigator() {
           : order
       )));
     },
-    createMerchantDeal(form) {
-      const dealId = `deal-merchant-${Date.now()}`;
+    createMerchantGroupBuyActivity(form) {
+      const groupBuyActivityId = `groupBuyActivity-merchant-${Date.now()}`;
       const normalizedTiers = (form.tiers || [])
         .map((tier) => ({
           cups: Number(tier.cups),
@@ -736,8 +758,8 @@ export function AppNavigator() {
       const promotionTiers = normalizedTiers.length > 0
         ? normalizedTiers
         : [{ cups: 20, discountAmount: 200 }];
-      const newDeal = {
-        id: dealId,
+      const newGroupBuyActivity = {
+        id: groupBuyActivityId,
         storeId: form.storeId,
         title: form.title || "商家優惠活動",
         status: "recruiting",
@@ -756,15 +778,15 @@ export function AppNavigator() {
         tiers: promotionTiers,
         notices: [form.notices || "Prototype 建立活動，不會寫入後端。"]
       };
-      setDeals((items) => [newDeal, ...items]);
-      return dealId;
+      setGroupBuyActivities((items) => [newGroupBuyActivity, ...items]);
+      return groupBuyActivityId;
     },
-    addMerchantDealFromApi(activity) {
+    addMerchantGroupBuyActivityFromApi(activity) {
       const tiers = activity.tiers.map((tier) => ({
         cups: tier.targetCups,
         discountAmount: tier.discountAmount
       }));
-      const newDeal = {
+      const newGroupBuyActivity = {
         id: activity.id,
         storeId: activity.storeId,
         title: activity.title,
@@ -784,22 +806,22 @@ export function AppNavigator() {
         tiers,
         notices: ["由 backend API 建立，並同步到 mobile prototype state。"]
       };
-      setDeals((items) => [newDeal, ...items.filter((item) => item.id !== newDeal.id)]);
-      return newDeal.id;
+      setGroupBuyActivities((items) => [newGroupBuyActivity, ...items.filter((item) => item.id !== newGroupBuyActivity.id)]);
+      return newGroupBuyActivity.id;
     },
-    cancelGroupBuyActivity(dealId, cancellationReason = "管理員刪除團購") {
-      setDeals((items) => items.map((deal) => (
-        deal.id === dealId
+    cancelGroupBuyActivity(groupBuyActivityId, cancellationReason = "管理員刪除團購") {
+      setGroupBuyActivities((items) => items.map((groupBuyActivity) => (
+        groupBuyActivity.id === groupBuyActivityId
           ? {
-              ...deal,
+              ...groupBuyActivity,
               status: "cancelled",
               canJoin: false,
               cancellationReason
             }
-            : deal
+            : groupBuyActivity
       )));
       setOrders((items) => items.map((order) => (
-        order.dealId === dealId
+        order.groupBuyActivityId === groupBuyActivityId
           ? {
               ...order,
               status: "cancelled",
@@ -811,18 +833,18 @@ export function AppNavigator() {
       )));
     },
     cancelGroupBuyActivityFromApi(activity) {
-      setDeals((items) => items.map((deal) => (
-        deal.id === activity.id
+      setGroupBuyActivities((items) => items.map((groupBuyActivity) => (
+        groupBuyActivity.id === activity.id
           ? {
-              ...deal,
+              ...groupBuyActivity,
               status: activity.status,
               canJoin: activity.status === "recruiting",
               cancellationReason: activity.cancellationReason
             }
-            : deal
+            : groupBuyActivity
       )));
       setOrders((items) => items.map((order) => (
-        order.dealId === activity.id
+        order.groupBuyActivityId === activity.id
           ? {
               ...order,
               status: "cancelled",
@@ -833,9 +855,9 @@ export function AppNavigator() {
           : order
       )));
     }
-  }), [cartItems, deals, orders, selectedCustomerId]);
+  }), [cartItems, groupBuyActivities, orders, selectedCustomerId]);
 
-  const appState = { deals, orders, paymentReports, cartItems };
+  const appState = { groupBuyActivities, orders, paymentAuthorizations, cartItems };
   const screenProps = {
     navigation,
     route: current,
@@ -851,16 +873,16 @@ export function AppNavigator() {
     <View style={styles.container}>
       <View style={styles.screen}>
         {current.name === "roleSelect" && <RoleSelectScreen {...screenProps} />}
-        {current.name === "nearby" && <NearbyDealsScreen {...screenProps} />}
+        {current.name === "nearby" && <NearbyGroupBuyActivitiesScreen {...screenProps} />}
         {current.name === "liveMap" && <LiveMapScreen {...screenProps} />}
         {current.name === "storeMenu" && <StoreMenuScreen {...screenProps} />}
-        {current.name === "dealDetail" && <DealDetailScreen {...screenProps} />}
+        {current.name === "groupBuyActivityDetail" && <GroupBuyActivityDetailScreen {...screenProps} />}
         {current.name === "drinkSelection" && <DrinkSelectionScreen {...screenProps} />}
         {current.name === "cart" && <CartScreen {...screenProps} />}
         {current.name === "groupProgress" && <GroupProgressScreen {...screenProps} />}
-        {current.name === "paymentReport" && <PaymentReportScreen {...screenProps} />}
+        {current.name === "paymentAuthorization" && <PaymentAuthorizationScreen {...screenProps} />}
         {current.name === "pickupInfo" && <PickupInfoScreen {...screenProps} />}
-        {current.name === "merchantCreate" && <MerchantDealCreateScreen {...screenProps} />}
+        {current.name === "merchantCreate" && <MerchantGroupBuyActivityCreateScreen {...screenProps} />}
         {current.name === "merchantDashboard" && <MerchantDashboardScreen {...screenProps} />}
         {current.name === "customerPlaceholder" && <CustomerPlaceholderScreen {...screenProps} />}
         {current.name === "customerOrders" && <CustomerOrdersScreen {...screenProps} />}

@@ -131,7 +131,7 @@ backend/
 - 沒有密碼重設。
 - 沒有正式 auth/session 設計。
 - LINE Pay void / capture 已在付款模組內部實作；尚未實作 refund。
-- 尚未實作 payment webhook。
+- LINE Pay webhook 第一版不列為必要入口；付款同步先以 confirm/cancel redirect、資料庫狀態與後續 provider 狀態查詢為主。
 - 尚未實作 pickup APIs。
 - 已實作 admin 手動觸發單一團購結算，也已接上後端啟動時的 deadline settlement scheduler。
 - Scheduler 預設每 60 秒掃描已截止、尚未結算的團購；若 `LINE_PAY_ENV=production`，必須設定 `SETTLEMENT_SCHEDULER_ALLOW_PRODUCTION=true` 才會啟動。
@@ -268,7 +268,7 @@ PostgreSQL v1 決策：
 - void / capture 已在付款模組內部實作。
 - 已實作 admin 手動觸發單一團購結算。
 - 尚未實作 refund。
-- 尚未實作 webhook。
+- 第一版不做 LINE Pay webhook endpoint；後續需要補 provider 狀態查詢、重試佇列與對帳。
 - 自動 deadline settlement scheduler 已先接上單一 backend process interval；尚未有跨執行個體 locking、重試佇列與告警。
 
 安全規則：
@@ -298,7 +298,7 @@ PostgreSQL v1 決策：
 5. 仍需要完整 order revision 歷史查詢與 UI 呈現。
 6. 需要跨執行個體 settlement locking、重試佇列與失敗告警。
 7. 需要 LINE Pay refund。
-8. 需要 payment webhook / idempotency 處理。
+8. 需要 provider 狀態查詢、重試佇列與 idempotency 處理。
 9. 需要 pickup credential API。
 10. 尚未建立 PostgreSQL backend runtime adapter。
 

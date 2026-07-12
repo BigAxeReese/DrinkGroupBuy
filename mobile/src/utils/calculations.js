@@ -4,8 +4,8 @@ export function getStoreById(stores, storeId) {
   return stores.find((store) => store.id === storeId);
 }
 
-export function getDealById(deals, dealId) {
-  return deals.find((deal) => deal.id === dealId) ?? deals[0];
+export function getGroupBuyActivityById(groupBuyActivities, groupBuyActivityId) {
+  return groupBuyActivities.find((groupBuyActivity) => groupBuyActivity.id === groupBuyActivityId) ?? groupBuyActivities[0];
 }
 
 export function getDrinkById(drinks, drinkId) {
@@ -21,10 +21,10 @@ export function formatCurrency(amount) {
   return `$${amount}`;
 }
 
-export function isWithdrawalLocked(deal) {
-  const minutesUntilDeadline = getMinutesUntilDeadline(deal);
-  return Boolean(deal)
-    && deal.status === "recruiting"
+export function isWithdrawalLocked(groupBuyActivity) {
+  const minutesUntilDeadline = getMinutesUntilDeadline(groupBuyActivity);
+  return Boolean(groupBuyActivity)
+    && groupBuyActivity.status === "recruiting"
     && minutesUntilDeadline != null
-    && minutesUntilDeadline <= (deal.withdrawalLockMinutes ?? 30);
+    && minutesUntilDeadline <= (groupBuyActivity.withdrawalLockMinutes ?? 30);
 }

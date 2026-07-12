@@ -184,14 +184,14 @@
 
 ## `promotion_tiers` 優惠門檻資料表
 
-用途：保存團購杯數門檻與對應折扣金額。
+用途：保存團購杯數門檻與對應總折扣金額。
 
 | 欄位名稱          | 中文名稱     | 型別    | NULL | PK/FK                                |
 | ----------------- | ------------ | ------- | ---- | ------------------------------------ |
 | `id`              | 優惠門檻編號 | TEXT    | N    | PK                                   |
 | `activity_id`     | 團購活動編號 | TEXT    | N    | FK, UNIQUE(activity_id, target_cups) |
 | `target_cups`     | 目標杯數     | INTEGER | N    | UNIQUE(activity_id, target_cups)     |
-| `discount_amount` | 折扣金額     | INTEGER | N    |                                      |
+| `discount_amount` | 總折扣金額   | INTEGER | N    | 結算時平均分攤到有效杯數，未整除餘額作維運補貼 |
 | `sort_order`      | 排序         | INTEGER | N    |                                      |
 
 ## `activity_notices` 活動備註資料表
@@ -313,7 +313,7 @@
 | `original_amount`           | 原始金額            | INTEGER | N    |       |
 | `authorized_amount`         | 預授權金額          | INTEGER | N    |       |
 | `provider_authorization_id` | Provider 預授權編號 | TEXT    | Y    |       |
-| `expires_at`                | 預授權到期時間      | TEXT    | Y    |       |
+| `expires_at`                | 預授權到期時間      | TEXT    | Y    | LINE Pay 分離式請款時取自 `authorizationExpireDate` |
 | `authorized_at`             | 預授權成功時間      | TEXT    | Y    |       |
 | `voided_at`                 | 取消預授權時間      | TEXT    | Y    |       |
 | `failure_reason`            | 失敗原因            | TEXT    | Y    |       |
@@ -341,7 +341,7 @@
 
 ## `payment_provider_events` 金流事件資料表
 
-用途：保存金流 provider webhook 或事件原始資料，並支援冪等處理。
+用途：保存金流 provider 事件原始資料，並支援冪等處理；未來若接 webhook，也保存於此。
 
 | 欄位名稱          | 中文名稱          | 型別 | NULL | PK/FK  |
 | ----------------- | ----------------- | ---- | ---- | ------ |
@@ -366,7 +366,7 @@
 | `outcome`         | 結算結果         | TEXT    | N    |            |
 | `authorized_cups` | 預授權杯數       | INTEGER | N    |            |
 | `applied_tier_id` | 適用優惠門檻編號 | TEXT    | Y    | FK         |
-| `discount_amount` | 適用折扣金額     | INTEGER | N    |            |
+| `discount_amount` | 適用總折扣金額   | INTEGER | N    |            |
 | `settled_at`      | 結算時間         | TEXT    | N    |            |
 | `reason`          | 結算原因         | TEXT    | Y    |            |
 
@@ -382,7 +382,11 @@
 | `visible_after_merchant_acceptance` | 接單後才顯示   | INTEGER | N    |            |
 | `created_at`                        | 建立時間       | TEXT    | N    |            |
 
-備註：最新產品規則不需要店家逐筆確認接單，此欄位名稱與規則需後續 review。
+備註：
+
+- 最新產品規則不需要店家逐筆確認接單，`visible_after_merchant_acceptance` 欄位名稱與規則需後續 review。
+- 取貨憑證需要補 `expires_at` 或等效欄位：自取餐開始時間起保留 3 小時；若店家當日營業結束早於 3 小時，則保留至當日營業結束；24 小時營業店家保留 3 小時。
+- 憑證到期後，訂單取貨狀態應更新為 `expired` 並移至歷史訂單。
 
 ## `status_history` 狀態歷程資料表
 

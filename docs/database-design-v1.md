@@ -126,7 +126,7 @@ PostgreSQL 方向：
 | 資料表                  | 用途                         | Primary key | 重要關係                       |
 | ----------------------- | ---------------------------- | ----------- | ------------------------------ |
 | `group_buy_activities`  | 店家建立的團購活動           | `id`        | Activity 屬於 1 store          |
-| `promotion_tiers`       | 杯數門檻與折扣金額           | `id`        | 多個 tier 屬於 1 activity      |
+| `promotion_tiers`       | 杯數門檻與總折扣金額         | `id`        | 多個 tier 屬於 1 activity      |
 | `activity_notices`      | 顯示於活動詳情的店家備註     | `id`        | 多個 notice 屬於 1 activity    |
 
 重要規則：
@@ -134,6 +134,7 @@ PostgreSQL 方向：
 - 店家建立並發布團購後，活動進入招募中。
 - 團購截止時間必須在建立或發布後 24 小時內。
 - 店家設定 `deadline_at`、取貨時間、最低成團杯數、優惠門檻與適用飲品。
+- 取貨開始時間至少晚於截止時間 15 分鐘；建立團購表單預設為截止後 30 分鐘。
 - 顧客完成 LINE Pay 預授權後，杯數才納入團購統計。
 - 截止前 30 分鐘後，顧客不能修改訂單或退出團購。
 - 截止前 30 分鐘後，店家不能取消整個團購。
@@ -201,7 +202,7 @@ PostgreSQL 方向：
 | ------------------------- | -------------------------------- | ----------- | --------------------------------------- |
 | `payment_authorizations`  | LINE Pay 預授權嘗試              | `id`        | 多筆 authorization 可屬於 1 order       |
 | `payment_captures`        | 截止後確認折扣後的請款結果       | `id`        | Capture 屬於 1 authorization 與 1 order |
-| `payment_provider_events` | 金流 provider event/webhook 紀錄 | `id`        | 以邏輯方式關聯付款資源                  |
+| `payment_provider_events` | 金流 provider event 紀錄 | `id`        | 以邏輯方式關聯付款資源，保留未來 webhook 擴充空間 |
 
 目前付款方向：
 
@@ -222,7 +223,7 @@ PostgreSQL 方向：
 - LINE Pay capture 已在付款模組內部實作。
 - LINE Pay void 已在付款模組內部實作。
 - LINE Pay refund。
-- Payment webhook processing。
+- Provider 狀態查詢、付款重試與 reconciliation。
 - Order replacement authorization 的完整 DB 歷史紀錄。
 
 PostgreSQL 方向：
@@ -230,7 +231,7 @@ PostgreSQL 方向：
 - Mobile 不直接呼叫金流 provider。
 - Backend 保存 LINE Pay secrets 並進行 request signing。
 - 付款狀態保存在 `payment_authorizations`、`payment_captures` 與 `payment_provider_events`。
-- PostgreSQL 是 authorization、capture、void、refund 與 webhook reconciliation 的 source of truth。
+- PostgreSQL 是 authorization、capture、void、refund、provider event 與付款 reconciliation 的 source of truth。
 
 ### 結算與取貨
 
@@ -246,6 +247,9 @@ PostgreSQL 方向：
 - 店家完成製作後，可標記可取餐。
 - 顧客到店取餐時，店家核對取貨憑證或取貨代碼。
 - 店家可標記訂單已取貨。
+- 取貨憑證自取餐開始時間起保留 3 小時；若店家當日營業結束早於 3 小時，保留至當日營業結束；24 小時營業店家保留 3 小時。
+- 憑證到期後，訂單取貨狀態改為 `expired` 並移至歷史訂單；逾期未取不自動退款，店家不再負原飲品保管責任。
+- 若顧客在有效取餐期間到店但店家無法交付，不得將訂單標記為 `expired`。
 - 顧客歷史訂單應包含 completed、cancelled、failed 或 admin-cancelled 的訂單。
 
 PostgreSQL 方向：
@@ -322,6 +326,8 @@ PostgreSQL v1 決策：true/false 欄位使用 `boolean`。
 | `menu_items.is_available`                              | `boolean`       | 飲品是否開放販售     |
 | `customization_options.is_available`                   | `boolean`       | 客製化選項是否可使用 |
 | `pickup_credentials.visible_after_merchant_acceptance` | `boolean`       | 取貨憑證顯示規則     |
+| `pickup_credentials.expires_at`                        | `timestamptz`   | 候選欄位；取貨憑證到期時間 |
+| `pickup_credentials.expired_at`                        | `timestamptz`   | 候選欄位；實際逾期處理時間 |
 
 API JSON 應回傳 `true` / `false`。
 

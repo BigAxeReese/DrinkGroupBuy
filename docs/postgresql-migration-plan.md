@@ -19,7 +19,7 @@
 DrinkGroupBuy 後續會處理訂單、付款、截止結算與多使用者同時加入團購，PostgreSQL 比 SQLite 更適合正式 backend 使用。
 
 - 支援更可靠的 transaction 與 row lock。
-- 適合處理 LINE Pay authorization、capture、void、refund 與 webhook 狀態。
+- 適合處理 LINE Pay authorization、capture、void、refund、provider event 與付款 reconciliation 狀態。
 - 適合保存 audit log 與 status history。
 - 適合處理活動截止時的結算批次。
 - 適合防止多人同時下單造成杯數超過上限。

@@ -1,6 +1,6 @@
 # 付款規則與流程
 
-最後更新：2026-07-11
+最後更新：2026-07-12
 
 本文件紀錄目前已確認的付款商業規則，作為下一階段 LINE Pay 實作依據。
 
@@ -18,6 +18,10 @@
 8. 顧客若在 LINE Pay 頁面取消或返回，該次 pending authorization 必須在後端標記為 `failed`，訂單維持 `pending`，顧客可以重新發起付款。
 9. LINE Pay confirm 回跳後，後端寫入 `authorized` 前仍必須重新檢查團購容量；若容量已滿，該次 authorization 標記為 `failed`，訂單不得計入團購。
 10. 若 LINE Pay provider confirm 已成功，但後端最後容量檢查失敗，系統必須立即嘗試取消該筆授權 `void`。
+11. LINE Pay 官方支援分離式 confirm/capture 與 partial capture；但台灣 channel 預設是自動請款，使用前需向 LINE Pay 申請開通分離式請款。
+12. 後端只有在 `LINE_PAY_CAPTURE_SEPARATED=true` 時才會送出 `options.payment.capture=false`；未開啟時會阻擋真 LINE Pay request，避免自動請款被誤當預授權。
+13. 顧客必須在團購截止前完成 LINE Pay confirm，且後端成功寫入 `authorized`，才算加入團購。
+14. 若顧客截止前進入 LINE Pay，但 confirm 回到後端時已達或超過截止時間，該授權視為逾時，不計入團購，系統會標記失敗並嘗試 void。
 
 ### 優惠與原價購買
 
@@ -27,6 +31,10 @@
 4. 如果團購未達優惠門檻，且顧客有勾選接受原價購買，系統依原價金額請款。
 5. 如果團購未達優惠門檻，且顧客沒有勾選接受原價購買，系統取消授權 `void`，並取消該訂單。
 6. 顧客端保留「未達優惠時接受原價購買」選項。
+7. 顧客端對未請款金額的說明使用：「未請款金額會由 LINE Pay 或發卡銀行依規定釋放，實際時間以付款服務為準」。
+8. `promotion_tiers.discount_amount` 代表該優惠級距的總折扣金額，不是單杯折扣。
+9. 達標結算時，系統會把適用級距的總折扣金額平均分攤給每一杯有效授權飲品。
+10. 若總折扣無法被有效杯數整除，顧客折扣以整數每杯折扣計算；未分配的餘額不進入任何訂單折扣，作為系統維運補貼。
 
 ### 活動時間限制
 
@@ -36,6 +44,9 @@
 4. 如果授權有效時間無法涵蓋團購截止時間與結算緩衝時間，系統不能把該授權視為有效加入團購。
 5. 團購截止後，系統應立即進行結算。
 6. 目前 `POST /api/merchant/group-buy-activities` 已先強制 `deadlineAt` 不可超過 `startAt` 後 24 小時；mobile 建立團購表單也會先做相同提醒與阻擋。
+7. LINE Pay 授權有效期限不由本系統寫死固定時數；以 confirm 回傳的 `info.authorizationExpireDate` 為準。
+8. 第一階段結算緩衝時間預設 30 分鐘，可由 `LINE_PAY_AUTHORIZATION_SETTLEMENT_BUFFER_MINUTES` 調整。
+9. 若 `authorizationExpireDate` 缺失、格式無效，或早於 `deadlineAt + settlement buffer`，後端會把該 authorization 標記為 `failed`，並嘗試呼叫 LINE Pay void。
 
 ### 顧客修改與退出時間
 
@@ -66,6 +77,35 @@
 10. 因為新舊預授權會短時間重疊，顧客可能需要足夠額度才能完成增加金額的修改。
 11. 目前第一版已用 `order_revisions` 保存待確認修改內容；`POST /api/orders/:orderId/revisions` 建立 revision，mobile 付款頁會在 `POST /api/payments/line-pay/request` 帶 `orderRevisionId` 發起新預授權。
 12. 新預授權 confirm 成功後，backend 在同一個資料庫交易中套用 revision，再嘗試 void 被替換的舊授權；若 void 舊授權失敗，會保留新訂單狀態並記錄失敗事件。
+
+### 付款結果同步
+
+1. LINE Pay confirm/cancel redirect 後，以後端資料庫狀態為準。
+2. Mobile 付款結果頁第一階段使用 polling 讀取訂單與付款狀態。
+3. App 從外部付款頁回到前景時，應重新讀取訂單狀態。
+4. 若自動同步失敗，顧客可以手動重新整理付款結果。
+5. Deep link 可留到後續優化，不是第一階段必要條件。
+
+### Provider 事件與 webhook
+
+1. 第一版不建立 `POST /api/payments/webhooks/line-pay` 作為必要流程。
+2. LINE Pay Online API 第一版以 confirm/cancel redirect、後端資料庫狀態與 provider 狀態查詢作為付款同步依據。
+3. `payment_provider_events` 仍保存 LINE Pay request、confirm、cancel、capture、void 與未來 provider event 的原始結果，方便追蹤與重試。
+4. 若未來 LINE Pay 或其他 provider 提供 webhook，接收前必須先用 provider secret 驗證簽章；簽章驗證前不可修改 raw request body。
+5. webhook 不直接覆蓋訂單狀態，只能作為「需要查詢 provider 狀態」的訊號。
+6. webhook 或 redirect 重複送達時，系統必須用 provider transaction id、event type、idempotency key 與資料庫狀態轉換規則去重。
+7. 若較舊事件晚到，例如已 `captured` 後又收到 `authorized` 類事件，系統不得倒退狀態，只保存事件並略過狀態更新。
+
+### 結算失敗與自動重試
+
+1. 第一版以系統自動重試為主，不做人工處理介面。
+2. 團購截止結算時，若 `capture` 或 `void` 失敗，訂單不得進入製作，也不得產生取貨憑證。
+3. 重試期間，顧客端顯示「付款處理中」或「授權釋放處理中」，店家端只看得到已付款成功且可製作的訂單。
+4. 每次重試前，系統必須先查詢或確認目前 provider 狀態，避免重複請款或重複取消授權。
+5. `capture` 失敗時，系統在授權仍有效期間自動重試。
+6. 若授權快過期或已過期仍無法完成請款，該訂單取消，不進入製作與取貨流程。
+7. `void` 失敗時，系統持續重試；若授權自然過期，可視為釋放完成，但必須保留 provider event 與 status history。
+8. 若系統仍無法判斷最終狀態，保留失敗狀態與稽核紀錄；這不是一般使用者操作流程，也不先做管理員介面。
 
 ### 容量規則
 
@@ -109,21 +149,16 @@
 4. 需要保存預授權、請款、取消授權、provider event 與訂單替換紀錄。
 5. 預授權、請款、取消授權與結算 job 需要 idempotency，避免重複執行造成金額錯誤。
 6. 預授權前與訂單替換正式生效前，都需要交易安全的容量檢查。
-7. 上正式金流請款前，需要補齊結算重試與 audit log。
+7. 上正式金流請款前，需要補齊結算重試 queue、provider 狀態查詢與 audit log。
 8. LINE Pay cancel redirect 不可只清除記憶體暫存，也必須更新 `payment_authorizations`、`payment_provider_events` 與 `status_history`。
 9. LINE Pay confirm/cancel redirect 應以後端資料庫查找 pending authorization；記憶體快取只能當加速輔助，不能是唯一依據。
 10. LINE Pay confirm 寫入成功前需使用交易鎖定容量檢查；容量不足時需留下 provider event、status history 與 audit log。
 11. LINE Pay void 使用官方 `POST /v3/payments/authorizations/{transactionId}/void`；成功後更新 `payment_authorizations.status = authorization_voided`，並同步更新訂單付款狀態與稽核紀錄；失敗時至少記錄 provider event 與 audit log。
 12. LINE Pay capture 使用官方 `POST /v3/payments/authorizations/{transactionId}/capture`；成功後新增 `payment_captures`，更新 `payment_authorizations.status = captured`、`orders.payment_status = captured` 與 `orders.final_amount`，並記錄 provider event、status history 與 audit log。
-13. 目前結算的折扣分攤暫行規則：將 `promotion_tiers.discount_amount` 平均到該級距 `target_cups`，再依各訂單杯數計算折扣；正式折扣分配規則仍需確認。
+13. 結算的折扣分攤規則：將適用級距的 `promotion_tiers.discount_amount` 平均到截止時有效授權總杯數，再依各訂單杯數計算折扣；若無法整除，未分配餘額作為系統維運補貼。
 14. 本機開發可使用 `mock_line_pay` 測試截止結算，不呼叫外部 LINE Pay API；`npm run settlement:smoke` 會使用乾淨 schema 暫時建立 mock 預授權訂單，驗證達標 capture、未達標 fallback capture、void、scheduler due activity 結算與 order revision 套用，並在測試後還原開發資料庫。
 
 ## 尚未決定
 
-1. 目前 LINE Pay 商家產品是否支援分離式預授權與請款。
-2. 選定 LINE Pay 產品的實際預授權有效期限。
-3. 團購截止後需要保留多久的結算緩衝時間。
-4. webhook 簽章、重複事件與事件順序錯亂要如何處理。
-5. 請款失敗時要如何重試或升級處理。
-6. void 失敗時的自動重試次數、告警方式與人工處理流程尚未設計。
-7. Deadline settlement scheduler 目前是單一 backend process interval；跨執行個體 locking、失敗重試佇列與告警尚未完成。
+1. void 失敗時的具體重試間隔、最大重試時間與告警方式尚未設計。
+2. Deadline settlement scheduler 目前是單一 backend process interval；跨執行個體 locking、失敗重試佇列與告警尚未完成。

@@ -5,7 +5,7 @@ const databasePath = path.join(__dirname, "drink-group-buy-test.sqlite");
 const database = new DatabaseSync(databasePath, { readOnly: true });
 
 try {
-  const deals = database.prepare(`
+  const groupBuyActivities = database.prepare(`
     SELECT
       deals.id,
       stores.name AS store_name,
@@ -42,7 +42,7 @@ try {
       EXISTS (
         SELECT 1 FROM deals
         WHERE deals.store_id = stores.id AND deals.status = 'recruiting'
-      ) AS has_recruiting_deal,
+      ) AS has_recruiting_group_buy_activity,
       CASE
         WHEN EXISTS (
           SELECT 1 FROM deals
@@ -56,7 +56,7 @@ try {
     ORDER BY stores.id
   `).all();
 
-  console.log(JSON.stringify({ stores, deals, orders }, null, 2));
+  console.log(JSON.stringify({ stores, groupBuyActivities, orders }, null, 2));
 } finally {
   database.close();
 }

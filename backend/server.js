@@ -570,11 +570,21 @@ function validateCreateActivity(body) {
 
   const startTime = Date.parse(body.startAt);
   const deadlineTime = Date.parse(body.deadlineAt);
+  const pickupStartTime = Date.parse(body.pickupStartAt);
+  const pickupEndTime = Date.parse(body.pickupEndAt);
   if (Number.isNaN(startTime)) return "startAt must be a valid datetime";
   if (Number.isNaN(deadlineTime)) return "deadlineAt must be a valid datetime";
+  if (Number.isNaN(pickupStartTime)) return "pickupStartAt must be a valid datetime";
+  if (Number.isNaN(pickupEndTime)) return "pickupEndAt must be a valid datetime";
   if (deadlineTime <= startTime) return "deadlineAt must be after startAt";
   if (deadlineTime - startTime > 24 * 60 * 60 * 1000) {
     return "deadlineAt must be within 24 hours of startAt";
+  }
+  if (pickupStartTime - deadlineTime < 15 * 60 * 1000) {
+    return "pickupStartAt must be at least 15 minutes after deadlineAt";
+  }
+  if (pickupEndTime <= pickupStartTime) {
+    return "pickupEndAt must be after pickupStartAt";
   }
 
   if (body.tiers != null && !Array.isArray(body.tiers)) {

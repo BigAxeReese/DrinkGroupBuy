@@ -4,11 +4,11 @@ import { MobileScreen, Section } from "../components/MobileScreen";
 import { PrimaryButton } from "../components/PrimaryButton";
 import { drinks } from "../mock/drinks";
 import { stores } from "../mock/stores";
-import { calculateDrinkSubtotal, formatCurrency, getDealById, getDrinkById, getStoreById } from "../utils/calculations";
+import { calculateDrinkSubtotal, formatCurrency, getGroupBuyActivityById, getDrinkById, getStoreById } from "../utils/calculations";
 
 export function DrinkSelectionScreen({ navigation, route, appState, actions, memberAction, selectedCustomerId }) {
-  const deal = getDealById(appState.deals, route.params?.dealId);
-  if (!deal) {
+  const groupBuyActivity = getGroupBuyActivityById(appState.groupBuyActivities, route.params?.groupBuyActivityId);
+  if (!groupBuyActivity) {
     return (
       <MobileScreen
         title="選擇飲料"
@@ -23,8 +23,8 @@ export function DrinkSelectionScreen({ navigation, route, appState, actions, mem
     );
   }
 
-  const store = getStoreById(stores, deal.storeId);
-  const storeDrinks = drinks.filter((drink) => drink.storeId === deal.storeId);
+  const store = getStoreById(stores, groupBuyActivity.storeId);
+  const storeDrinks = drinks.filter((drink) => drink.storeId === groupBuyActivity.storeId);
   if (storeDrinks.length === 0) {
     return (
       <MobileScreen
@@ -52,11 +52,11 @@ export function DrinkSelectionScreen({ navigation, route, appState, actions, mem
   const [quantity, setQuantity] = useState(editOrderItem?.quantity ?? 1);
   const [submitted, setSubmitted] = useState(false);
   const [customizing, setCustomizing] = useState(Boolean(editOrderItem));
-  const cartItemsForDeal = (appState.cartItems ?? []).filter((item) => (
-    item.dealId === deal.id && (!item.customerId || item.customerId === selectedCustomerId)
+  const cartItemsForGroupBuyActivity = (appState.cartItems ?? []).filter((item) => (
+    item.groupBuyActivityId === groupBuyActivity.id && (!item.customerId || item.customerId === selectedCustomerId)
   ));
-  const cartQuantity = cartItemsForDeal.reduce((sum, item) => sum + item.quantity, 0);
-  const cartTotal = cartItemsForDeal.reduce((sum, item) => sum + item.subtotal, 0);
+  const cartQuantity = cartItemsForGroupBuyActivity.reduce((sum, item) => sum + item.quantity, 0);
+  const cartTotal = cartItemsForGroupBuyActivity.reduce((sum, item) => sum + item.subtotal, 0);
 
   const subtotal = useMemo(() => calculateDrinkSubtotal(drink, toppingId, quantity), [drink, toppingId, quantity]);
   const categories = [
@@ -74,13 +74,13 @@ export function DrinkSelectionScreen({ navigation, route, appState, actions, mem
     <View style={styles.screenWrap}>
       <MobileScreen
         title={editOrderItem ? "修改飲料" : "選擇飲料"}
-        subtitle={`${store?.name} · ${deal.title}`}
+        subtitle={`${store?.name} · ${groupBuyActivity.title}`}
         onBack={() => navigation.back()}
         onMemberPress={memberAction}
       >
       <View style={styles.menuHero}>
         <Text style={styles.shopName}>{store?.name}</Text>
-        <Text style={styles.dealName}>{deal.title}</Text>
+        <Text style={styles.groupBuyActivityName}>{groupBuyActivity.title}</Text>
       </View>
 
       <View style={styles.categoryRow}>
@@ -189,7 +189,7 @@ export function DrinkSelectionScreen({ navigation, route, appState, actions, mem
                 }
                 if (editOrderId) {
                   actions.addToCart({
-                    dealId: deal.id,
+                    groupBuyActivityId: groupBuyActivity.id,
                     drinkId: drink.id,
                     targetOrderId: editOrderId,
                     storeName: store?.name ?? "Mock store",
@@ -208,7 +208,7 @@ export function DrinkSelectionScreen({ navigation, route, appState, actions, mem
                   return;
                 }
                 actions.addToCart({
-                  dealId: deal.id,
+                  groupBuyActivityId: groupBuyActivity.id,
                   drinkId: drink.id,
                   storeName: store?.name ?? "Mock store",
                   name: drink.name,
@@ -235,7 +235,7 @@ export function DrinkSelectionScreen({ navigation, route, appState, actions, mem
       {cartQuantity > 0 ? (
         <Pressable
           accessibilityRole="button"
-          onPress={() => navigation.go("cart", { dealId: deal.id })}
+          onPress={() => navigation.go("cart", { groupBuyActivityId: groupBuyActivity.id })}
           style={({ pressed }) => [styles.floatingCart, pressed && styles.pressed]}
         >
           <View style={styles.cartBadge}>
@@ -292,7 +292,7 @@ const styles = StyleSheet.create({
     fontSize: 22,
     fontWeight: "900"
   },
-  dealName: {
+  groupBuyActivityName: {
     color: "#64748b",
     fontSize: 14,
     fontWeight: "700"

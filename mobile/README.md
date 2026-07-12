@@ -187,9 +187,9 @@ Group-buy activity not found
 ```text
 src/mock/stores.js
 src/mock/drinks.js
-src/mock/deals.js
+src/mock/groupBuyActivities.js
 src/mock/orders.js
-src/mock/paymentReports.js
+src/mock/paymentAuthorizations.js
 src/mock/customerUsers.js
 ```
 

@@ -3,20 +3,20 @@ import { MobileScreen, Section } from "../components/MobileScreen";
 import { customerUsers } from "../mock/customerUsers";
 import { stores } from "../mock/stores";
 import { getStoreById } from "../utils/calculations";
-import { getDealProgress } from "../utils/dealProgress";
+import { getGroupBuyActivityProgress } from "../utils/groupBuyActivityProgress";
 
-export function NearbyDealsScreen({ navigation, appState, memberAction, selectedCustomerId }) {
-  const { deals, orders } = appState;
+export function NearbyGroupBuyActivitiesScreen({ navigation, appState, memberAction, selectedCustomerId }) {
+  const { groupBuyActivities, orders } = appState;
   const currentCustomer = customerUsers.find((user) => user.id === selectedCustomerId) ?? customerUsers[0];
-  const recruitingDeals = deals.filter(isVisibleRecruitingDeal);
-  const joinedDealIds = new Set(
+  const recruitingGroupBuyActivities = groupBuyActivities.filter(isVisibleRecruitingGroupBuyActivity);
+  const joinedGroupBuyActivityIds = new Set(
     (orders ?? [])
       .filter((order) => order.customerId === selectedCustomerId && isActiveJoinedOrder(order))
-      .map((order) => order.dealId)
+      .map((order) => order.groupBuyActivityId)
   );
-  const activeDeal = deals.find((deal) => joinedDealIds.has(deal.id) && isOngoingJoinedDeal(deal)) ?? null;
-  const activeStore = activeDeal ? getStoreById(stores, activeDeal.storeId) : null;
-  const activeProgress = activeDeal ? getDealProgress(activeDeal) : null;
+  const activeGroupBuyActivity = groupBuyActivities.find((groupBuyActivity) => joinedGroupBuyActivityIds.has(groupBuyActivity.id) && isOngoingJoinedGroupBuyActivity(groupBuyActivity)) ?? null;
+  const activeStore = activeGroupBuyActivity ? getStoreById(stores, activeGroupBuyActivity.storeId) : null;
+  const activeProgress = activeGroupBuyActivity ? getGroupBuyActivityProgress(activeGroupBuyActivity) : null;
 
   return (
     <MobileScreen title="" compactHeader>
@@ -37,33 +37,33 @@ export function NearbyDealsScreen({ navigation, appState, memberAction, selected
 
       <View style={styles.sectionHeader}>
         <Text style={styles.sectionTitle}>進行中的團購</Text>
-        {activeDeal ? (
-          <Pressable accessibilityRole="button" onPress={() => navigation.go("groupProgress", { dealId: activeDeal.id })}>
+        {activeGroupBuyActivity ? (
+          <Pressable accessibilityRole="button" onPress={() => navigation.go("groupProgress", { groupBuyActivityId: activeGroupBuyActivity.id })}>
             <Text style={styles.manageLink}>管理 &gt;</Text>
           </Pressable>
         ) : null}
       </View>
 
-      {activeDeal && activeProgress ? (
+      {activeGroupBuyActivity && activeProgress ? (
         <Pressable
           accessibilityRole="button"
-          onPress={() => navigation.go("dealDetail", { dealId: activeDeal.id })}
+          onPress={() => navigation.go("groupBuyActivityDetail", { groupBuyActivityId: activeGroupBuyActivity.id })}
           style={({ pressed }) => [styles.activeCard, pressed && styles.pressed]}
         >
           <View style={styles.orangeRail} />
           <View style={styles.activeContent}>
             <View style={styles.cardHeader}>
               <View style={styles.cardTitleGroup}>
-                <Text style={styles.dealTitle}>{activeDeal.title}</Text>
-                <Text style={styles.deadline}>剩餘 {activeDeal.remainingTimeText}</Text>
+                <Text style={styles.groupBuyActivityTitle}>{activeGroupBuyActivity.title}</Text>
+                <Text style={styles.deadline}>剩餘 {activeGroupBuyActivity.remainingTimeText}</Text>
               </View>
               <Text style={styles.cupCount}>
                 {activeProgress.currentCups} / {activeProgress.nextTarget}
                 <Text style={styles.cupUnit}> 杯</Text>
               </Text>
             </View>
-            <View style={styles.dealMetaRow}>
-              <Text style={styles.meta}>{getTargetSummary(activeDeal, activeProgress.nextTarget)}</Text>
+            <View style={styles.groupBuyActivityMetaRow}>
+              <Text style={styles.meta}>{getTargetSummary(activeGroupBuyActivity, activeProgress.nextTarget)}</Text>
               <Text style={styles.meta}>剩餘 {activeProgress.remainingCups} 杯</Text>
             </View>
             <View style={styles.progressTrack}>
@@ -81,25 +81,25 @@ export function NearbyDealsScreen({ navigation, appState, memberAction, selected
 
       <Section title="附近熱門活動推薦">
         <View style={styles.recommendList}>
-          {recruitingDeals.map((deal) => {
-            const store = getStoreById(stores, deal.storeId);
-            const progress = getDealProgress(deal);
+          {recruitingGroupBuyActivities.map((groupBuyActivity) => {
+            const store = getStoreById(stores, groupBuyActivity.storeId);
+            const progress = getGroupBuyActivityProgress(groupBuyActivity);
             return (
               <Pressable
                 accessibilityRole="button"
-                key={deal.id}
-                onPress={() => navigation.go("dealDetail", { dealId: deal.id })}
+                key={groupBuyActivity.id}
+                onPress={() => navigation.go("groupBuyActivityDetail", { groupBuyActivityId: groupBuyActivity.id })}
                 style={({ pressed }) => [styles.recommendRow, pressed && styles.pressed]}
               >
                 <View style={styles.flex}>
                   <Text style={styles.recommendStore}>{store?.name}</Text>
-                  <Text style={styles.recommendTitle}>{deal.title}</Text>
+                  <Text style={styles.recommendTitle}>{groupBuyActivity.title}</Text>
                 </View>
                 <Text style={styles.recommendCups}>{progress.currentCups} / {progress.nextTarget} 杯</Text>
               </Pressable>
             );
           })}
-          {recruitingDeals.length === 0 ? (
+          {recruitingGroupBuyActivities.length === 0 ? (
             <View style={styles.emptyRecommendCard}>
               <Text style={styles.emptyRecommendText}>目前沒有招募中的團購。</Text>
             </View>
@@ -110,25 +110,25 @@ export function NearbyDealsScreen({ navigation, appState, memberAction, selected
   );
 }
 
-function getTargetSummary(deal, targetCups) {
-  const tier = (deal.tiers ?? []).find((item) => Number(item.cups ?? item.targetCups) === Number(targetCups));
-  const discountAmount = tier?.discountAmount ?? deal.tiers?.[0]?.discountAmount ?? 0;
+function getTargetSummary(groupBuyActivity, targetCups) {
+  const tier = (groupBuyActivity.tiers ?? []).find((item) => Number(item.cups ?? item.targetCups) === Number(targetCups));
+  const discountAmount = tier?.discountAmount ?? groupBuyActivity.tiers?.[0]?.discountAmount ?? 0;
   return `目標：滿 ${targetCups} 杯折 ${discountAmount}`;
 }
 
-function isVisibleRecruitingDeal(deal) {
-  return deal.status === "recruiting"
-    && deal.canJoin !== false
-    && !deal.cancellationReason;
+function isVisibleRecruitingGroupBuyActivity(groupBuyActivity) {
+  return groupBuyActivity.status === "recruiting"
+    && groupBuyActivity.canJoin !== false
+    && !groupBuyActivity.cancellationReason;
 }
 
 function isActiveJoinedOrder(order) {
   return !["cancelled", "completed"].includes(order.status);
 }
 
-function isOngoingJoinedDeal(deal) {
-  return !["cancelled", "completed", "failed"].includes(deal.status)
-    && !deal.cancellationReason;
+function isOngoingJoinedGroupBuyActivity(groupBuyActivity) {
+  return !["cancelled", "completed", "failed"].includes(groupBuyActivity.status)
+    && !groupBuyActivity.cancellationReason;
 }
 
 const styles = StyleSheet.create({
@@ -244,7 +244,7 @@ const styles = StyleSheet.create({
     fontSize: 11,
     fontWeight: "700"
   },
-  dealTitle: {
+  groupBuyActivityTitle: {
     color: "#0f172a",
     fontSize: 16,
     fontWeight: "900"
@@ -265,7 +265,7 @@ const styles = StyleSheet.create({
     fontSize: 12,
     fontWeight: "800"
   },
-  dealMetaRow: {
+  groupBuyActivityMetaRow: {
     flexDirection: "row",
     justifyContent: "space-between",
     gap: 10

@@ -110,10 +110,16 @@ LINE_PAY_MERCHANT_ID=your_merchant_id
 LINE_PAY_CHANNEL_ID=your_channel_id
 LINE_PAY_CHANNEL_SECRET=your_channel_secret
 LINE_PAY_CURRENCY=TWD
+LINE_PAY_CAPTURE_SEPARATED=false
+LINE_PAY_AUTHORIZATION_SETTLEMENT_BUFFER_MINUTES=30
 LINE_PAY_CONFIRM_URL=http://localhost:3000/api/payments/line-pay/confirm
 LINE_PAY_CANCEL_URL=http://localhost:3000/api/payments/line-pay/cancel
 AUTH_SESSION_SECRET=replace_with_backend_session_secret_at_least_16_chars
 ```
+
+LINE Pay 台灣 channel 預設是自動請款。只有在 LINE Pay 已替該 channel 開通分離式請款後，才可把 `LINE_PAY_CAPTURE_SEPARATED=true`。未開啟時，後端會阻擋真 LINE Pay request，避免自動請款被誤當預授權。
+
+分離式請款開啟後，後端會送出 `options.payment.capture=false`。Confirm 成功時若 LINE Pay 回傳 `authorizationExpireDate`，系統會保存到 `payment_authorizations.expires_at`，且到期時間必須晚於團購截止時間加 `LINE_PAY_AUTHORIZATION_SETTLEMENT_BUFFER_MINUTES`。
 
 不要把 `backend/.env` commit 到 GitHub。
 
@@ -129,7 +135,7 @@ LINE Pay 相關程式目前集中在：
 | `backend/payments/settlementService.js` | 單一團購結算流程，依結果批次 capture / void |
 | `backend/linePayClient.js` | 舊路徑相容匯出 |
 
-商家建立團購時，`deadlineAt` 必須晚於 `startAt`，且不得超過 `startAt` 後 24 小時。
+商家建立團購時，`deadlineAt` 必須晚於 `startAt`，且不得超過 `startAt` 後 24 小時。`pickupStartAt` 至少要晚於 `deadlineAt` 15 分鐘，`pickupEndAt` 必須晚於 `pickupStartAt`。
 
 本機可用 smoke script 驗證截止結算：
 
@@ -153,8 +159,8 @@ SETTLEMENT_SCHEDULER_ALLOW_PRODUCTION=false
 ## 目前限制
 
 - 管理員登入尚未設定。
-- 已授權訂單修改 API 與 mobile 重新預授權第一版已完成；仍需補正式 webhook、失敗重試與更完整的錯誤提示。
+- 已授權訂單修改 API 與 mobile 重新預授權第一版已完成；仍需補 provider 狀態查詢、自動重試 queue 與更完整的錯誤提示。
 - LINE Pay refund 尚未完成。
-- LINE Pay webhook 尚未完成。
-- deadline 自動結算已先以單一 backend process interval 實作；跨執行個體 locking、重試佇列與告警尚未完成。
+- LINE Pay webhook 第一版不列為必要入口；付款同步先以 confirm/cancel redirect、資料庫狀態與後續 provider 狀態查詢為主。
+- deadline 自動結算已先以單一 backend process interval 實作；失敗處理規則已決定以自動重試為主，不做人工處理介面；跨執行個體 locking、重試佇列與告警尚未完成。
 - 目前仍是開發資料庫，不是 production migration。
