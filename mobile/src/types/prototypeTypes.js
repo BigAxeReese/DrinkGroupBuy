@@ -11,12 +11,12 @@ export const groupBuyActivityStatusLabels = {
 };
 
 export const paymentStatusLabels = {
-  pending: "待預授權",
+  pending: "待付款",
   submitted: "付款回報已送出（舊流程）",
   confirmed: "付款已確認（舊流程）",
   not_required: "無需付款",
-  authorized: "已預授權",
-  captured: "已請款",
+  authorized: "已付款",
+  captured: "已付款",
   authorization_voided: "授權已取消",
   released: "已釋放授權",
   failed: "付款失敗"
