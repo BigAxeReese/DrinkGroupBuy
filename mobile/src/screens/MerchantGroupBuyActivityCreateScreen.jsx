@@ -11,7 +11,7 @@ const NativeDateTimePicker = Platform.OS === "web"
   : require("@react-native-community/datetimepicker").default;
 
 const MAX_ACTIVITY_DEADLINE_MS = 24 * 60 * 60 * 1000;
-const MIN_PICKUP_AFTER_DEADLINE_MS = 15 * 60 * 1000;
+const MIN_PICKUP_AFTER_DEADLINE_MS = 30 * 60 * 1000;
 const DEFAULT_PICKUP_AFTER_DEADLINE_MS = 30 * 60 * 1000;
 const DEFAULT_PICKUP_WINDOW_MS = 30 * 60 * 1000;
 
@@ -165,7 +165,7 @@ export function MerchantGroupBuyActivityCreateScreen({ navigation, actions, memb
           onChange={setPickupEndDate}
         />
         <Text style={styles.helperText}>
-          取餐開始至少需晚於結束時間 15 分鐘，預設為結束後 30 分鐘。
+          取餐開始至少需晚於結束時間 30 分鐘，預設為結束後 30 分鐘。
         </Text>
         <MobileInput label="備註" value={notices} onChangeText={setNotices} />
       </Section>
@@ -429,7 +429,7 @@ function getPickupValidationError(deadlineDate, pickupStartDate, pickupEndDate) 
     return "請選擇有效的取餐結束時間。";
   }
   if (pickupStartDate.getTime() - deadlineDate.getTime() < MIN_PICKUP_AFTER_DEADLINE_MS) {
-    return "取餐開始時間至少要晚於結束時間 15 分鐘。";
+    return "取餐開始時間至少要晚於結束時間 30 分鐘。";
   }
   if (pickupEndDate.getTime() <= pickupStartDate.getTime()) {
     return "取餐結束時間必須晚於取餐開始時間。";

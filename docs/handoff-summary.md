@@ -134,7 +134,7 @@ backend/
 - LINE Pay webhook 第一版不列為必要入口；付款同步先以 confirm/cancel redirect、資料庫狀態與後續 provider 狀態查詢為主。
 - 尚未實作 pickup APIs。
 - 已實作 admin 手動觸發單一團購結算，也已接上後端啟動時的 deadline settlement scheduler。
-- Scheduler 預設每 60 秒掃描已截止、尚未結算的團購；若 `LINE_PAY_ENV=production`，必須設定 `SETTLEMENT_SCHEDULER_ALLOW_PRODUCTION=true` 才會啟動。
+- Scheduler 預設每 30 秒掃描已截止、尚未結算的團購；若 `LINE_PAY_ENV=production`，必須設定 `SETTLEMENT_SCHEDULER_ALLOW_PRODUCTION=true` 才會啟動。
 - 可用 `npm run settlement:smoke` 以乾淨 schema 與 `mock_line_pay` 驗證本機結算 capture / void / scheduler，測試後會還原開發 SQLite。
 - 後端仍使用 SQLite。
 

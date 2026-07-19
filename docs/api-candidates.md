@@ -69,8 +69,8 @@ API JSON 使用 `camelCase`。已實作 routes 只對目前開發 prototype 具�
 | 相關畫面      | `MerchantGroupBuyActivityCreateScreen`                                                                                                                                                        |
 | Request       | 需要 bearer token。Body: `{ storeId, title, startAt, deadlineAt, pickupStartAt, pickupEndAt, withdrawalLockMinutes?, tiers[], notice?, idempotencyKey? }`                                     |
 | Response      | `{ activity }`                                                                                                                                                                                |
-| 已實作規則    | 需要 merchant role、驗證 merchant-store access、從登入使用者推導 `createdByUserId`、必填欄位驗證、`deadlineAt` 不可超過 `startAt` 後 24 小時、`pickupStartAt` 至少晚於 `deadlineAt` 15 分鐘、`pickupEndAt` 必須晚於 `pickupStartAt`、tier normalization、由最高 tier 推導 maximum cups、transaction、簡單 idempotency、audit log |
-| 最終商業規則  | `deadlineAt` 必須在活動發布或開放招募後 24 小時內；取餐時間由店家開團時設定，顧客加入前可見；取餐開始至少晚於截止時間 15 分鐘，表單預設為截止後 30 分鐘 |
+| 已實作規則    | 需要 merchant role、驗證 merchant-store access、從登入使用者推導 `createdByUserId`、必填欄位驗證、`deadlineAt` 不可超過 `startAt` 後 24 小時、`pickupStartAt` 至少晚於 `deadlineAt` 30 分鐘、`pickupEndAt` 必須晚於 `pickupStartAt`、tier normalization、由最高 tier 推導 maximum cups、transaction、簡單 idempotency、audit log |
+| 最終商業規則  | `deadlineAt` 必須在活動發布或開放招募後 24 小時內；取餐時間由店家開團時設定，顧客加入前可見；取餐開始至少晚於截止時間 30 分鐘，表單預設為截止後 30 分鐘 |
 | 尚缺規則      | 較完整的 merchant permission model                                                                                                                                                            |
 
 ### 管理員取消團購活動
@@ -91,10 +91,10 @@ API JSON 使用 `camelCase`。已實作 routes 只對目前開發 prototype 具�
 | Method / path | `POST /api/admin/group-buy-activities/:activityId/settle`                                                                                                                                                                                                 |
 | 相關畫面      | 目前無正式畫面；本機開發與管理測試用                                                                                                                                                                                                                     |
 | Request       | 需要 admin bearer token。Body: `{ force?: boolean }`；`force` 只用於本機測試尚未截止活動                                                                                                                                                                  |
-| Response      | `{ plan, results, capturedOrderCount, voidedOrderCount, settlement, activity }`；付款失敗時回傳 `{ error: "settlement_payment_failures", plan, results, failures }`                                                                                         |
-| 已實作規則    | 需要 admin role、預設要求活動已過截止時間、鎖定 authorized 訂單、計算有效授權杯數與適用優惠級距、依顧客 fallback preference 對訂單執行 capture 或 void、成功後建立 `activity_settlements` 並更新 activity status、寫入 status history 與 audit log |
-| 本機驗證      | `npm run settlement:smoke` 會用 `mock_line_pay` 建立臨時預授權資料，驗證達標 capture 與未達標 capture/void，測完還原 SQLite                                                                                                                                |
-| 尚缺實作      | provider 失敗自動重試 queue、provider 狀態查詢、跨執行個體 idempotency / locking                                                                                                                                                                            |
+| Response      | 完成時回傳 `{ plan, results, capturedOrderCount, voidedOrderCount, failedOrderCount, settlement, activity }`；等待下次請款時以 `202` 回傳 `{ error: "settlement_retry_pending", pendingRetries }`；非請款流程錯誤回傳 `settlement_payment_failures` |
+| 已實作規則    | 需要 admin role、預設要求活動已過截止時間、鎖定 authorized 訂單、計算有效授權杯數與適用優惠級距、依顧客 fallback preference 執行 capture 或 void、可重試請款每 30 秒最多三次、重試前查 provider 狀態、完成後建立 settlement 與稽核紀錄 |
+| 本機驗證      | `npm run settlement:smoke` 使用 `mock_line_pay` 驗證達標 capture、未達標 capture/void、排程、訂單 revision，以及 30 秒重試與三次上限，測完還原 SQLite |
+| 尚缺實作      | 跨執行個體 idempotency / locking、持久化工作佇列與失敗告警                                                                                                                                                                                                |
 
 ### 顧客建立訂單
 
@@ -198,7 +198,7 @@ API JSON 使用 `camelCase`。已實作 routes 只對目前開發 prototype 具�
 | ----------------------------------------------------------- | ---------------------------- | ---------------------------------------------- |
 | `POST /api/orders/:orderId/payment-authorizations`          | 開始 provider authorization  | LINE Pay capability 與 redirect/deep-link flow |
 | `POST /api/payment-authorizations/:authorizationId/void`    | 取消未使用授權               | Provider expiry 與 idempotency                 |
-| `POST /api/payment-authorizations/:authorizationId/capture` | Partial capture final amount | Backend payment module 已有內部 capture service；尚未開公開 API；settlement 失敗自動重試 queue 尚未實作 |
+| `POST /api/payment-authorizations/:authorizationId/capture` | Partial capture final amount | Backend payment module 已有內部 capture service 與單一 process 重試控制；尚未開公開 API |
 | `GET /api/payments/line-pay/status/:transactionId`          | 查詢 provider 狀態並對帳     | 正式上線前用於重試、redirect 遺失與付款狀態 reconciliation |
 
 ### 商家履約
@@ -215,7 +215,7 @@ API JSON 使用 `camelCase`。已實作 routes 只對目前開發 prototype 具�
 
 | Method / path candidate                        | 用途                                                        | 主要不確定點                                       |
 | ---------------------------------------------- | ----------------------------------------------------------- | -------------------------------------------------- |
-| Internal backend interval job                  | 自動找出已截止團購並觸發 settlement                         | 單一 process interval 已先實作；仍缺跨執行個體 locking、retries、concurrency/recovery |
+| Internal backend interval job                  | 自動找出已截止團購並觸發 settlement                         | 單一 process 每 30 秒執行且請款最多三次；仍缺跨執行個體 locking、持久化 queue 與 recovery |
 
 ## 跨功能需求
 

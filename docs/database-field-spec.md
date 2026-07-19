@@ -152,7 +152,7 @@ PostgreSQL draft 另有 `phone_verified_at`、`email_verified_at`、`last_login_
 | 5   | `status`                  | 活動狀態         | TEXT    | INDEX pair     | `draft`, `recruiting`, `confirmed`, `failed`, `ordering`, `ready_for_pickup`, `completed`, `cancelled` | `recruiting`                |
 | 6   | `start_at`                | 開始時間         | TEXT    |                | 目前規則為建立/發布時間或店家設定時間                                                                  | `2026-06-25T14:00:00+08:00` |
 | 7   | `deadline_at`             | 截止時間         | TEXT    | INDEX          | 用於鎖單與結算；產品規則要求發布後 24 小時內                                                           | `2026-06-25T15:30:00+08:00` |
-| 8   | `pickup_start_at`         | 取貨開始時間     | TEXT    |                | 顧客取貨資訊必填；至少晚於 `deadline_at` 15 分鐘，表單預設截止後 30 分鐘                                | `2026-06-25T16:00:00+08:00` |
+| 8   | `pickup_start_at`         | 取貨開始時間     | TEXT    |                | 顧客取貨資訊必填；至少晚於 `deadline_at` 30 分鐘，表單預設截止後 30 分鐘                                | `2026-06-25T16:00:00+08:00` |
 | 9   | `pickup_end_at`           | 取貨結束時間     | TEXT    |                | 顧客取貨資訊必填；必須晚於 `pickup_start_at`                                                            | `2026-06-25T17:00:00+08:00` |
 | 10  | `maximum_cups`            | 最大杯數         | INTEGER |                | 可為 NULL；目前應等於最高 promotion tier，除非未來另定容量規則                                         | `40`                        |
 | 11  | `withdrawal_lock_minutes` | 退出鎖定分鐘數   | INTEGER |                | 預設 `30`；截止前 30 分鐘不能修改或退出                                                                | `30`                        |
@@ -291,9 +291,12 @@ PostgreSQL draft 另有 `phone_verified_at`、`email_verified_at`、`last_login_
 | 7   | `released_amount`          | 釋放金額          | INTEGER |     | `>= 0`；預授權金額減請款金額             | `32`                         |
 | 8   | `provider_capture_id`      | Provider 請款編號 | TEXT    |     | Mock flow 可為 NULL                      | `linepay-capture-123`        |
 | 9   | `captured_at`              | 請款時間          | TEXT    |     | 請款前可為 NULL                          | `2026-06-25T15:31:00+08:00`  |
-| 10  | `failure_reason`           | 失敗原因          | TEXT    |     | 可為 NULL                                | `insufficient_authorization` |
-| 11  | `created_at`               | 建立時間          | TEXT    |     | ISO datetime string                      | `2026-06-25T15:30:00+08:00`  |
-| 12  | `updated_at`               | 更新時間          | TEXT    |     | ISO datetime string                      | `2026-06-25T15:31:00+08:00`  |
+| 10  | `failure_reason`           | 失敗原因          | TEXT    |     | 可為 NULL                                | `provider_timeout`           |
+| 11  | `attempt_number`           | 請款嘗試序號      | INTEGER |     | 從 `1` 開始；自動請款最多 `3` 次          | `2`                          |
+| 12  | `retryable`                | 可否自動重試      | INTEGER |     | SQLite 使用 `0` / `1`                    | `1`                          |
+| 13  | `next_retry_at`            | 下次重試時間      | TEXT    |     | 可重試失敗後 30 秒；否則為 NULL           | `2026-06-25T15:30:30+08:00`  |
+| 14  | `created_at`               | 建立時間          | TEXT    |     | ISO datetime string                      | `2026-06-25T15:30:00+08:00`  |
+| 15  | `updated_at`               | 更新時間          | TEXT    |     | ISO datetime string                      | `2026-06-25T15:31:00+08:00`  |
 
 ## `payment_provider_events`
 

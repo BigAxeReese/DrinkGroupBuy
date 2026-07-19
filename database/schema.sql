@@ -274,9 +274,15 @@ CREATE TABLE payment_captures (
   provider_capture_id TEXT,
   captured_at TEXT,
   failure_reason TEXT,
+  attempt_number INTEGER NOT NULL DEFAULT 1 CHECK (attempt_number > 0),
+  retryable INTEGER NOT NULL DEFAULT 0 CHECK (retryable IN (0, 1)),
+  next_retry_at TEXT,
   created_at TEXT NOT NULL,
   updated_at TEXT NOT NULL
 );
+
+CREATE INDEX idx_payment_captures_authorization_attempt
+ON payment_captures(payment_authorization_id, attempt_number);
 
 CREATE TABLE payment_provider_events (
   id TEXT PRIMARY KEY,

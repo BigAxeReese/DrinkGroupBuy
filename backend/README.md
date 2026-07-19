@@ -135,7 +135,7 @@ LINE Pay 相關程式目前集中在：
 | `backend/payments/settlementService.js` | 單一團購結算流程，依結果批次 capture / void |
 | `backend/linePayClient.js` | 舊路徑相容匯出 |
 
-商家建立團購時，`deadlineAt` 必須晚於 `startAt`，且不得超過 `startAt` 後 24 小時。`pickupStartAt` 至少要晚於 `deadlineAt` 15 分鐘，`pickupEndAt` 必須晚於 `pickupStartAt`。
+商家建立團購時，`deadlineAt` 必須晚於 `startAt`，且不得超過 `startAt` 後 24 小時。`pickupStartAt` 至少要晚於 `deadlineAt` 30 分鐘，`pickupEndAt` 必須晚於 `pickupStartAt`。
 
 本機可用 smoke script 驗證截止結算：
 
@@ -143,13 +143,13 @@ LINE Pay 相關程式目前集中在：
 npm run settlement:smoke
 ```
 
-這個指令會備份並還原 `database/drink-group-buy-dev.sqlite`，中途使用乾淨 schema 建立 `mock_line_pay` 預授權資料，確認達標時 capture、未達標時依顧客選項 capture 或 void，驗證 scheduler 會抓到已截止團購，也會驗證已授權訂單 revision 在新授權成功後才套用並 void 舊授權。它不會呼叫外部 LINE Pay API，也不是正式付款流程。
+這個指令會備份並還原 `database/drink-group-buy-dev.sqlite`，中途使用乾淨 schema 建立 `mock_line_pay` 預授權資料，確認達標時 capture、未達標時依顧客選項 capture 或 void，驗證 scheduler 會抓到已截止團購、已授權訂單 revision 會在新授權成功後才套用並 void 舊授權，也會驗證失敗請款每 30 秒重試且最多建立三筆嘗試。它不會呼叫外部 LINE Pay API，也不是正式付款流程。
 
-後端啟動時會啟動 deadline settlement scheduler。預設每 60 秒掃描已截止、尚未結算的團購，並呼叫同一套 settlement service。相關設定：
+後端啟動時會啟動 deadline settlement scheduler。預設每 30 秒掃描已截止、尚未結算的團購，並呼叫同一套 settlement service。相關設定：
 
 ```env
 SETTLEMENT_SCHEDULER_ENABLED=true
-SETTLEMENT_SCHEDULER_INTERVAL_MS=60000
+SETTLEMENT_SCHEDULER_INTERVAL_MS=30000
 SETTLEMENT_SCHEDULER_BATCH_SIZE=20
 SETTLEMENT_SCHEDULER_ALLOW_PRODUCTION=false
 ```

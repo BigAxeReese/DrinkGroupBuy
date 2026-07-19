@@ -119,6 +119,14 @@ async function voidLinePayPaymentAuthorization(transactionId) {
   return linePayPost(`/v3/payments/authorizations/${encodedTransactionId}/void`, null, config);
 }
 
+async function retrieveLinePayPaymentDetails(transactionId) {
+  const config = getLinePayConfig();
+  assertLinePayConfig(config);
+
+  const encodedTransactionId = encodeURIComponent(requiredString(transactionId, "transactionId"));
+  return linePayGet(`/v3/payments?transactionId=${encodedTransactionId}`, config);
+}
+
 async function linePayPost(uri, body, config = getLinePayConfig()) {
   const nonce = crypto.randomUUID();
   const bodyText = body == null ? "" : JSON.stringify(body);
@@ -153,6 +161,34 @@ async function linePayPost(uri, body, config = getLinePayConfig()) {
     throw error;
   }
 
+  return payload;
+}
+
+async function linePayGet(uri, config = getLinePayConfig()) {
+  const nonce = crypto.randomUUID();
+  const signature = signLinePayRequest({
+    channelSecret: config.channelSecret,
+    uri,
+    bodyText: "",
+    nonce
+  });
+  const response = await fetch(`${config.baseUrl}${uri}`, {
+    method: "GET",
+    headers: {
+      "Content-Type": "application/json",
+      "X-LINE-ChannelId": config.channelId,
+      "X-LINE-Authorization-Nonce": nonce,
+      "X-LINE-Authorization": signature
+    }
+  });
+  const payload = await parseLinePayResponse(response);
+  if (!response.ok || payload.returnCode !== "0000") {
+    const reason = payload.returnMessage || payload.message || response.statusText;
+    const error = new Error(`LINE Pay request failed: ${reason}`);
+    error.statusCode = response.status || 502;
+    error.linePayPayload = payload;
+    throw error;
+  }
   return payload;
 }
 
@@ -238,5 +274,6 @@ module.exports = {
   getLinePayConfig,
   isLinePayCaptureSeparatedEnabled,
   requestLinePayPayment,
+  retrieveLinePayPaymentDetails,
   voidLinePayPaymentAuthorization
 };

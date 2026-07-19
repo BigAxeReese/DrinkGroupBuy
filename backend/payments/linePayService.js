@@ -17,6 +17,7 @@ const {
   confirmLinePayPayment,
   getLinePayConfig,
   requestLinePayPayment,
+  retrieveLinePayPaymentDetails,
   voidLinePayPaymentAuthorization
 } = require("./linePayClient");
 const {
@@ -43,6 +44,114 @@ function createMockLinePayPayload(returnMessage, transactionId, orderId) {
       orderId
     }
   };
+}
+
+function classifyLinePayCaptureError(error) {
+  const returnCode = String(error?.linePayPayload?.returnCode || "").toUpperCase();
+  const retryable = !returnCode
+    || returnCode === "1145"
+    || returnCode === "1179"
+    || returnCode === "1198"
+    || returnCode === "9000"
+    || returnCode.startsWith("190");
+
+  return {
+    returnCode: returnCode || null,
+    retryable,
+    reason: retryable ? "temporary_capture_failure" : "non_retryable_capture_failure"
+  };
+}
+
+async function getLinePayCaptureProviderState({ transactionId, orderId, provider = "line_pay" }) {
+  const context = getLinePayAuthorizationContext({
+    orderId,
+    providerTransactionId: transactionId,
+    provider
+  });
+  if (!context) {
+    return { state: "missing", payload: null };
+  }
+
+  if (provider === "mock_line_pay") {
+    return {
+      state: context.authorization.status === "captured" ? "captured" : "authorized",
+      payload: createMockLinePayPayload("mock_payment_details", transactionId, orderId)
+    };
+  }
+
+  try {
+    const payload = await retrieveLinePayPaymentDetails(transactionId);
+    return {
+      state: inferLinePayPaymentState(payload),
+      payload
+    };
+  } catch (error) {
+    const returnCode = String(error?.linePayPayload?.returnCode || "").toUpperCase();
+    if (returnCode === "1150") {
+      return {
+        state: "not_capturable",
+        payload: error.linePayPayload,
+        returnCode
+      };
+    }
+    if (
+      ["1155", "1159", "1180", "1199"].includes(returnCode)
+      || /^12(?:8[0-9]|9[0-8])$/.test(returnCode)
+    ) {
+      return {
+        state: "not_capturable",
+        payload: error.linePayPayload,
+        returnCode
+      };
+    }
+    return {
+      state: "unknown",
+      payload: error.linePayPayload || { message: error.message },
+      returnCode: returnCode || null
+    };
+  }
+}
+
+function inferLinePayPaymentState(payload) {
+  const infoItems = Array.isArray(payload?.info)
+    ? payload.info
+    : payload?.info
+      ? [payload.info]
+      : [];
+  const explicitStatusValues = infoItems.flatMap((info) => [
+    info.payStatus,
+    info.paymentStatus,
+    info.status
+  ]).filter(Boolean).map((value) => String(value).toUpperCase());
+  const transactionTypes = infoItems
+    .map((info) => info.transactionType)
+    .filter(Boolean)
+    .map((value) => String(value).toUpperCase());
+
+  if (explicitStatusValues.some((value) => value.includes("CAPTURE") || value === "PAID")) {
+    return "captured";
+  }
+  if (explicitStatusValues.some((value) => (
+    value.includes("VOID")
+    || value.includes("CANCEL")
+    || value.includes("EXPIRE")
+    || value.includes("REFUND")
+  ))) {
+    return "not_capturable";
+  }
+  if (explicitStatusValues.some((value) => value.includes("AUTHORIZATION") || value === "AUTHORIZED")) {
+    return "authorized";
+  }
+  if (transactionTypes.some((value) => value.includes("REFUND"))) {
+    return "not_capturable";
+  }
+  if (transactionTypes.some((value) => value.includes("CAPTURE"))) {
+    return "captured";
+  }
+  if (transactionTypes.includes("PAYMENT")) {
+    return infoItems.some((info) => info.authorizationExpireDate) ? "authorized" : "captured";
+  }
+  return infoItems.length === 0 ? "missing" : "unknown";
 }
 
 async function requestLinePayAuthorization({ authUser, body }) {
@@ -410,19 +519,24 @@ async function captureLinePayAuthorization({
           currency: resolvedCurrency
         });
   } catch (error) {
+    const classification = classifyLinePayCaptureError(error);
+    let captureFailure = null;
     try {
-      recordLinePayCaptureFailureInDatabase({
+      captureFailure = recordLinePayCaptureFailureInDatabase({
         orderId: authorization.orderId,
         providerTransactionId: resolvedTransactionId,
         provider,
         amount: captureAmount,
         finalAmount: resolvedFinalAmount,
         reason: `${reason}_failed`,
+        retryable: classification.retryable,
         providerPayload: error.linePayPayload || { message: error.message }
       });
     } catch {
       // Keep the original LINE Pay capture error visible to the caller.
     }
+    error.captureFailure = captureFailure;
+    error.captureClassification = classification;
     throw error;
   }
 
@@ -563,8 +677,11 @@ module.exports = {
   PaymentServiceError,
   cancelLinePayAuthorization,
   captureLinePayAuthorization,
+  classifyLinePayCaptureError,
   clearPendingLinePayAuthorizationsForOrderUpdate,
   confirmLinePayAuthorization,
+  getLinePayCaptureProviderState,
+  inferLinePayPaymentState,
   requestLinePayAuthorization,
   voidLinePayAuthorization
 };

@@ -324,20 +324,23 @@
 
 用途：保存截止結算後的 capture 結果。
 
-| 欄位名稱                   | 中文名稱          | 型別    | NULL | PK/FK |
-| -------------------------- | ----------------- | ------- | ---- | ----- |
-| `id`                       | 請款編號          | TEXT    | N    | PK    |
-| `payment_authorization_id` | 預授權編號        | TEXT    | N    | FK    |
-| `order_id`                 | 訂單編號          | TEXT    | N    | FK    |
-| `status`                   | 請款狀態          | TEXT    | N    |       |
-| `final_amount`             | 最終金額          | INTEGER | N    |       |
-| `capture_amount`           | 請款金額          | INTEGER | N    |       |
-| `released_amount`          | 釋放金額          | INTEGER | N    |       |
-| `provider_capture_id`      | Provider 請款編號 | TEXT    | Y    |       |
-| `captured_at`              | 請款時間          | TEXT    | Y    |       |
-| `failure_reason`           | 失敗原因          | TEXT    | Y    |       |
-| `created_at`               | 建立時間          | TEXT    | N    |       |
-| `updated_at`               | 更新時間          | TEXT    | N    |       |
+| 欄位名稱                   | 中文名稱            | 型別    | NULL | PK/FK |
+| -------------------------- | ------------------- | ------- | ---- | ----- |
+| `id`                       | 請款編號            | TEXT    | N    | PK    |
+| `payment_authorization_id` | 預授權編號          | TEXT    | N    | FK    |
+| `order_id`                 | 訂單編號            | TEXT    | N    | FK    |
+| `status`                   | 請款狀態            | TEXT    | N    |       |
+| `final_amount`             | 最終金額            | INTEGER | N    |       |
+| `capture_amount`           | 請款金額            | INTEGER | N    |       |
+| `released_amount`          | 釋放金額            | INTEGER | N    |       |
+| `provider_capture_id`      | Provider 請款編號   | TEXT    | Y    |       |
+| `captured_at`              | 請款時間            | TEXT    | Y    |       |
+| `failure_reason`           | 失敗原因            | TEXT    | Y    |       |
+| `attempt_number`           | 本次請款嘗試序號    | INTEGER | N    |       |
+| `retryable`                | 是否允許自動重試    | INTEGER | N    |       |
+| `next_retry_at`            | 下次允許重試時間    | TEXT    | Y    |       |
+| `created_at`               | 建立時間            | TEXT    | N    |       |
+| `updated_at`               | 更新時間            | TEXT    | N    |       |
 
 ## `payment_provider_events` 金流事件資料表
 

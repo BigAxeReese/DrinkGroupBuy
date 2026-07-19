@@ -98,7 +98,7 @@ postgres://drink_group_buy:drink_group_buy_dev_password@localhost:5432/drink_gro
 - `order_items`：訂單內的飲品項目。
 - `order_item_customizations`：每個飲品的客製化選項快照。
 - `payment_authorizations`：LINE Pay 預授權紀錄。
-- `payment_captures`：未來 partial capture 請款紀錄。
+- `payment_captures`：partial capture 請款結果、嘗試次數與下次重試時間。
 - `payment_provider_events`：金流 provider 回傳事件。
 - `activity_settlements`：團購截止後結算結果。
 - `pickup_credentials`：取貨代碼。

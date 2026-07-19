@@ -66,6 +66,21 @@ function ensureRuntimeSchema(database) {
     CREATE INDEX IF NOT EXISTS idx_payment_authorizations_order_revision
     ON payment_authorizations(order_revision_id);
   `);
+
+  const paymentCaptureColumns = database.prepare("PRAGMA table_info(payment_captures)").all();
+  if (!paymentCaptureColumns.some((column) => column.name === "attempt_number")) {
+    database.exec("ALTER TABLE payment_captures ADD COLUMN attempt_number INTEGER NOT NULL DEFAULT 1;");
+  }
+  if (!paymentCaptureColumns.some((column) => column.name === "retryable")) {
+    database.exec("ALTER TABLE payment_captures ADD COLUMN retryable INTEGER NOT NULL DEFAULT 0;");
+  }
+  if (!paymentCaptureColumns.some((column) => column.name === "next_retry_at")) {
+    database.exec("ALTER TABLE payment_captures ADD COLUMN next_retry_at TEXT;");
+  }
+  database.exec(`
+    CREATE INDEX IF NOT EXISTS idx_payment_captures_authorization_attempt
+    ON payment_captures(payment_authorization_id, attempt_number);
+  `);
 }
 
 function listGroupBuyActivities() {
@@ -680,6 +695,7 @@ function completeGroupBuySettlement(activityId, input = {}) {
         finalStatus,
         capturedOrderCount,
         voidedOrderCount: Number(input.voidedOrderCount || 0),
+        failedOrderCount: Number(input.failedOrderCount || 0),
         appliedTierId: input.appliedTierId || null,
         discountAmount: Number(input.discountAmount || 0)
       }),
@@ -1558,6 +1574,52 @@ function getLinePayAuthorizationContext(input) {
         : null,
       amount: authorization.original_amount,
       currency: process.env.LINE_PAY_CURRENCY || "TWD"
+    };
+  } finally {
+    database.close();
+  }
+}
+
+function getLinePayCaptureRetryState(input = {}) {
+  const database = openDatabase();
+  const now = input.now || new Date().toISOString();
+  const maxAttempts = normalizePositiveInteger(input.maxAttempts, 3);
+
+  try {
+    const authorization = findLinePayAuthorization(database, input);
+    if (!authorization) {
+      return null;
+    }
+
+    const attempts = database.prepare(`
+      SELECT *
+      FROM payment_captures
+      WHERE payment_authorization_id = ?
+        AND status = 'failed'
+      ORDER BY created_at DESC, id DESC
+    `).all(authorization.id);
+    const latestAttempt = attempts[0] || null;
+    const attemptCount = attempts.length;
+    const retryable = Boolean(latestAttempt?.retryable);
+    const nextRetryAt = latestAttempt?.next_retry_at || null;
+    const nextRetryTime = nextRetryAt ? Date.parse(nextRetryAt) : null;
+    const nowTime = Date.parse(now);
+    const exhausted = attemptCount >= maxAttempts || (attemptCount > 0 && !retryable);
+    const retryDue = attemptCount === 0 || (
+      !exhausted
+      && !Number.isNaN(nowTime)
+      && (nextRetryTime == null || Number.isNaN(nextRetryTime) || nextRetryTime <= nowTime)
+    );
+
+    return {
+      authorization: mapPaymentAuthorization(authorization),
+      attemptCount,
+      maxAttempts,
+      retryable,
+      exhausted,
+      retryDue,
+      nextRetryAt,
+      latestAttempt: latestAttempt ? mapPaymentCapture(latestAttempt) : null
     };
   } finally {
     database.close();
@@ -2851,11 +2913,13 @@ function captureLinePayAuthorizationInDatabase(input) {
 
 function recordLinePayCaptureFailureInDatabase(input) {
   const database = openDatabase();
-  const now = new Date().toISOString();
+  const now = input.now || new Date().toISOString();
   const captureAmount = Number(input.amount || 0);
   const finalAmount = Number(input.finalAmount ?? input.amount ?? 0);
   const reason = input.reason || "line_pay_capture_failed";
   const captureId = `payment-capture-${randomUUID()}`;
+  const maxAttempts = normalizePositiveInteger(input.maxAttempts, 3);
+  const retryIntervalMs = normalizePositiveInteger(input.retryIntervalMs, 30_000);
   let transactionStarted = false;
 
   try {
@@ -2864,8 +2928,42 @@ function recordLinePayCaptureFailureInDatabase(input) {
       return null;
     }
 
-    database.exec("BEGIN;");
+    database.exec("BEGIN IMMEDIATE;");
     transactionStarted = true;
+
+    const previousAttempts = database.prepare(`
+      SELECT *
+      FROM payment_captures
+      WHERE payment_authorization_id = ?
+        AND status = 'failed'
+      ORDER BY created_at DESC, id DESC
+    `).all(authorization.id);
+    if (previousAttempts.length >= maxAttempts) {
+      database.prepare(`
+        UPDATE orders
+        SET payment_status = 'failed',
+            updated_at = ?
+        WHERE id = ?
+          AND payment_status != 'captured'
+      `).run(now, authorization.order_id);
+      database.exec("COMMIT;");
+      transactionStarted = false;
+      return {
+        authorization: mapPaymentAuthorization(authorization),
+        capture: previousAttempts[0] ? mapPaymentCapture(previousAttempts[0]) : null,
+        status: "retry_exhausted",
+        attemptCount: previousAttempts.length,
+        maxAttempts,
+        retryable: false,
+        nextRetryAt: null
+      };
+    }
+
+    const attemptNumber = previousAttempts.length + 1;
+    const retryable = Boolean(input.retryable) && attemptNumber < maxAttempts;
+    const nextRetryAt = retryable
+      ? new Date(Date.parse(now) + retryIntervalMs).toISOString()
+      : null;
 
     database.prepare(`
       INSERT INTO payment_captures (
@@ -2878,9 +2976,12 @@ function recordLinePayCaptureFailureInDatabase(input) {
         released_amount,
         provider_capture_id,
         failure_reason,
+        attempt_number,
+        retryable,
+        next_retry_at,
         created_at,
         updated_at
-      ) VALUES (?, ?, ?, 'failed', ?, ?, 0, ?, ?, ?, ?)
+      ) VALUES (?, ?, ?, 'failed', ?, ?, 0, ?, ?, ?, ?, ?, ?, ?)
     `).run(
       captureId,
       authorization.id,
@@ -2889,9 +2990,22 @@ function recordLinePayCaptureFailureInDatabase(input) {
       Number.isInteger(captureAmount) && captureAmount >= 0 ? captureAmount : 0,
       input.providerCaptureId || input.providerTransactionId || authorization.provider_authorization_id || null,
       reason,
+      attemptNumber,
+      retryable ? 1 : 0,
+      nextRetryAt,
       now,
       now
     );
+
+    if (!retryable) {
+      database.prepare(`
+        UPDATE orders
+        SET payment_status = 'failed',
+            updated_at = ?
+        WHERE id = ?
+          AND payment_status != 'captured'
+      `).run(now, authorization.order_id);
+    }
 
     database.prepare(`
       INSERT OR IGNORE INTO payment_provider_events (
@@ -2910,12 +3024,16 @@ function recordLinePayCaptureFailureInDatabase(input) {
       authorization.provider,
       captureId,
       input.providerTransactionId
-        ? `${authorization.provider}_capture_failed:${input.providerTransactionId}:${captureAmount}`
+        ? `${authorization.provider}_capture_failed:${input.providerTransactionId}:${captureAmount}:${attemptNumber}`
         : null,
       JSON.stringify({
         orderId: input.orderId || authorization.order_id,
         providerTransactionId: input.providerTransactionId || authorization.provider_authorization_id || null,
         reason,
+        attemptNumber,
+        maxAttempts,
+        retryable,
+        nextRetryAt,
         providerPayload: input.providerPayload || {}
       }),
       now,
@@ -2942,6 +3060,10 @@ function recordLinePayCaptureFailureInDatabase(input) {
         finalAmount,
         captureAmount,
         reason,
+        attemptNumber,
+        maxAttempts,
+        retryable,
+        nextRetryAt,
         providerPayload: input.providerPayload || {}
       }),
       now
@@ -2953,7 +3075,11 @@ function recordLinePayCaptureFailureInDatabase(input) {
     return {
       authorization: mapPaymentAuthorization(authorization),
       capture: getPaymentCaptureById(captureId),
-      status: "failed"
+      status: retryable ? "retry_pending" : "retry_exhausted",
+      attemptCount: attemptNumber,
+      maxAttempts,
+      retryable,
+      nextRetryAt
     };
   } catch (error) {
     if (transactionStarted) {
@@ -3224,6 +3350,9 @@ function mapPaymentCapture(row) {
     providerCaptureId: row.provider_capture_id,
     capturedAt: row.captured_at,
     failureReason: row.failure_reason,
+    attemptNumber: row.attempt_number,
+    retryable: Boolean(row.retryable),
+    nextRetryAt: row.next_retry_at,
     createdAt: row.created_at,
     updatedAt: row.updated_at
   };
@@ -3522,6 +3651,7 @@ module.exports = {
   getOrderDetail,
   getLatestLinePayAuthorizationForOrder,
   getLatestLinePayAuthorizationForOrderRevision,
+  getLinePayCaptureRetryState,
   getOrderPaymentContext,
   getOrderRevisionById,
   getOrderRevisionPaymentContext,

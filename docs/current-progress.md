@@ -1,10 +1,19 @@
 # 目前進度
 
-最後更新：2026-07-12
+最後更新：2026-07-19
 
 換電腦或交接給其他 AI 時，請先閱讀 `docs/handoff-summary.md`。
 
 文件語言規則：會影響程式、API、資料庫或工具辨識的內容使用英文；不影響實作的說明、報告文字與備註可使用中文。若英文技術名稱不容易理解，保留英文並加中文註解。
+
+## 進度摘要
+
+- Firebase Auth + Google Login 已實作，backend 會驗證 Firebase ID token，再依開發資料庫的 `users.firebase_uid`、`user_roles` 與 `merchant_users` 判斷身份。
+- 開發資料庫仍使用 SQLite，主要 schema、seed 與付款相關資料表已建立；PostgreSQL schema / seed 草稿已在本機容器驗證，但尚未接入 backend runtime，目前還不是正式資料庫。
+- LINE Pay 付款主幹已拆成獨立模組，已有 request、confirm、cancel、capture、void、訂單修改後重新預授權與截止結算排程。
+- 付款結算 smoke test 已於 2026-07-18 通過，包含達標請款、未達標原價請款／取消授權、排程結算、修改訂單替換授權與截止後拒絕預授權。
+- 開發資料庫曾暴露同一筆 LINE Pay 失敗請款被無限重試的問題；目前已改為截止時第一次請款，暫時性失敗後每 30 秒重試，總計最多三次，並在重試前查詢 provider 狀態。
+- 系統分析書已整理為五大功能，五組描述性綱目已更新，並已抽出 `docs/system-analysis-extracted.md`；各小節使用個案描述與活動圖仍待更新。
 
 ## 2026-07-05 登入方向更新
 
@@ -39,16 +48,15 @@
 
 已完成或已開始的畫面與流程：
 
-- 登入頁面已會呼叫後端登入 API，並在 mobile API client 保存 bearer token。
-- 顧客登入使用手機號碼與密碼。
-- 商家與管理員登入使用 email 與密碼。
-- 已決定未來正式登入方向為 Firebase Auth + Google Login。
+- 登入頁面使用 Firebase Auth + Google Login，並將 Firebase ID token 送到 backend 建立應用程式 session。
+- 顧客與商家使用相同的 Google 登入入口；角色不由 mobile UI 選擇，而是由 backend/database 判斷。
+- 密碼登入只保留為舊版開發相容功能，不屬於最終產品流程。
 - 開發期仍保留 dev mock login / 測試帳號概念，方便切換身份測流程。
 - 顧客首頁、Google Maps 即時地圖、店家菜單、飲料客製化、購物車。
 - 顧客首頁會區分「目前顧客已加入的團購」與「附近招募中的團購推薦」。
 - 顧客可查看進行中訂單、訂單明細、修改訂單、團購進度、取貨碼與歷史訂單。
 - 活動容量依最高優惠級距判斷，例如 20 / 30 / 40 杯代表最多接受 40 杯。
-- LINE Pay 預授權與 partial capture 的 UI / 狀態模擬已開始。
+- LINE Pay 預授權與 partial capture 的 mobile UI / 狀態流程已串接第一版。
 - 付款畫面可向後端建立 LINE Pay sandbox 授權網址，並開啟 LINE Pay 付款頁。
 - 付款畫面在開啟 LINE Pay 後會短時間自動輪詢 backend 訂單狀態；App / 瀏覽器回到前景時也會安靜刷新，授權完成後同步顯示 `authorized`。
 - 顧客送出預授權後，購物車會保留飲品；只有 backend 訂單同步為 `authorized` / `captured` 後，才清除該團購的購物車飲品。
@@ -124,10 +132,10 @@
 - LINE Pay void 已加入付款模組；容量不足但 provider confirm 已成功時，系統會自動嘗試 void，成功後寫入 `authorization_voided`、provider event、status history 與 audit log；void 失敗時會留下 provider event 與 audit log。
 - LINE Pay capture 已加入付款模組；成功後會寫入 `payment_captures`、更新 authorization/order 狀態與 `orders.final_amount`，失敗時會留下 failed capture、provider event 與 audit log。
 - 單一團購手動結算 API 已加入；admin 可觸發已截止活動結算，系統會計算最終級距，對有效授權訂單執行 capture 或 void，並寫入 `activity_settlements`。
-- deadline settlement scheduler 已加入後端啟動流程；預設每 60 秒掃描已截止、尚未結算的團購並呼叫同一套 settlement service。`LINE_PAY_ENV=production` 時需要明確允許才會啟動。
+- deadline settlement scheduler 已加入後端啟動流程；預設每 30 秒掃描已截止、尚未結算的團購並呼叫同一套 settlement service。`LINE_PAY_ENV=production` 時需要明確允許才會啟動。
 - 本機付款結算 smoke script 已加入：`npm run settlement:smoke` 會用乾淨 schema 與 `mock_line_pay` 驗證達標 capture、未達標 fallback capture / void，以及 scheduler due activity 結算，並在測試後還原開發 SQLite。
-- 商家建立團購 API 已強制 `deadlineAt` 必須晚於 `startAt`，且不得超過 `startAt` 後 24 小時；`pickupStartAt` 至少晚於 `deadlineAt` 15 分鐘，`pickupEndAt` 必須晚於 `pickupStartAt`。
-- Mobile 建立團購表單已將取餐開始預設為截止後 30 分鐘，並先阻擋低於 15 分鐘的取餐開始時間。
+- 商家建立團購 API 已強制 `deadlineAt` 必須晚於 `startAt`，且不得超過 `startAt` 後 24 小時；`pickupStartAt` 至少晚於 `deadlineAt` 30 分鐘，`pickupEndAt` 必須晚於 `pickupStartAt`。
+- Mobile 建立團購表單已將取餐開始預設為截止後 30 分鐘，並阻擋低於 30 分鐘的取餐開始時間。
 - 已授權或 pending 的授權會阻擋重複 LINE Pay request。
 - 顧客下單、訂單查詢與 LINE Pay request 需要 bearer token。
 - 商家建立活動需要 merchant bearer token，並檢查該商家帳號是否綁定店家。
@@ -135,17 +143,12 @@
 
 尚未完成：
 
-- 註冊。
-- 忘記密碼 / 密碼重設。
-- Firebase Auth + Google Login 實作。
-- Backend 驗證 Firebase ID token。
-- `users.firebase_uid` 對應 Firebase identity。
 - 已授權後的訂單修改 / 重新授權 mobile 第一版已串接；仍需把訂單列表完全改為後端權威資料。
 - LINE Pay refund。
 - LINE Pay webhook 第一版不列為必要入口；目前付款同步以 confirm/cancel redirect、polling 與後續 provider 狀態查詢為主。
 - 取貨 API。
 - 付款結算失敗規則已決定：第一版以自動重試為主，不做人工處理介面；失敗中的訂單不進入製作或取貨。
-- 尚未實作跨執行個體 deadline settlement locking、provider 狀態查詢、重試佇列與告警。
+- 尚未實作跨執行個體 deadline settlement locking、持久化重試 queue 與失敗告警；單一 backend process 內的 provider 狀態查詢、三次上限與 30 秒重試已實作。
 - 正式 migration 系統。
 - 完整自動化測試；目前只有付款結算 smoke script。
 
@@ -153,6 +156,7 @@
 
 - `POST /api/orders` 只適用於已存在於後端 SQLite 的活動。
 - 如果 mobile local activity 已過期或不存在於後端，送單會失敗。
+- 開發 SQLite 仍保留過去無限重試所產生的 6,496 筆 `failed` payment capture 紀錄；新邏輯會將這筆授權視為已超過三次上限，不再呼叫 LINE Pay 或新增失敗紀錄，但舊紀錄尚未清理。
 
 ## Database / 資料庫
 
@@ -243,3 +247,10 @@ database/test/drink-group-buy-test.sqlite
 3. 補 revision 失敗、容量不足、舊授權 void 失敗時的 mobile 錯誤提示。
 4. 補取貨憑證與取貨完成 API。
 5. 補跨執行個體 settlement locking 與失敗告警。
+
+## 系統分析書進度
+
+- Word 主檔：`系統分析書_使用個案及活動圖範本.docx`。
+- Markdown 抽出版：`docs/system-analysis-extracted.md`。
+- 已完成五大功能分類與描述性綱目。
+- 尚待更新 4.1.1 至 4.5.4 的使用個案描述表、使用個案圖與活動圖，並移除舊範本內容。

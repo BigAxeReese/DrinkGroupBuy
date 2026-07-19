@@ -458,6 +458,10 @@ const server = http.createServer(async (request, response) => {
         sendJson(response, 200, result);
         return;
       }
+      if (result.error === "settlement_retry_pending") {
+        sendJson(response, 202, result);
+        return;
+      }
       if (result.error === "settlement_payment_failures") {
         sendJson(response, 409, result);
         return;
@@ -580,8 +584,8 @@ function validateCreateActivity(body) {
   if (deadlineTime - startTime > 24 * 60 * 60 * 1000) {
     return "deadlineAt must be within 24 hours of startAt";
   }
-  if (pickupStartTime - deadlineTime < 15 * 60 * 1000) {
-    return "pickupStartAt must be at least 15 minutes after deadlineAt";
+  if (pickupStartTime - deadlineTime < 30 * 60 * 1000) {
+    return "pickupStartAt must be at least 30 minutes after deadlineAt";
   }
   if (pickupEndTime <= pickupStartTime) {
     return "pickupEndAt must be after pickupStartAt";

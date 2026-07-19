@@ -8,9 +8,15 @@ const {
   settleGroupBuyActivity
 } = require("../backend/payments/settlementService");
 const {
+  classifyLinePayCaptureError,
+  inferLinePayPaymentState
+} = require("../backend/payments/linePayService");
+const {
   authorizeLinePayPaymentInDatabase,
   createOrderRevision,
   getOrderDetail,
+  getLinePayCaptureRetryState,
+  recordLinePayCaptureFailureInDatabase,
   voidLinePayAuthorizationInDatabase
 } = require("../backend/db");
 
@@ -486,6 +492,17 @@ async function main() {
     cutoffScenario.deadlineAt = new Date(Date.now() + 60 * 1000).toISOString();
     cutoffScenario.pickupStartAt = new Date(Date.now() + 45 * 60 * 1000).toISOString();
     cutoffScenario.pickupEndAt = new Date(Date.now() + 75 * 60 * 1000).toISOString();
+    const retryScenario = buildScenario("capture-retry", 1, [
+      {
+        fallbackPurchasePreference: "decline_original_price",
+        totalCups: 1,
+        originalAmount: 65,
+        itemName: "青山烏龍拿鐵"
+      }
+    ]);
+    retryScenario.deadlineAt = new Date(Date.now() + 2 * 60 * 60 * 1000).toISOString();
+    retryScenario.pickupStartAt = new Date(Date.now() + 3 * 60 * 60 * 1000).toISOString();
+    retryScenario.pickupEndAt = new Date(Date.now() + 4 * 60 * 60 * 1000).toISOString();
 
     withDatabase((database) => {
       insertScenario(database, qualifiedScenario);
@@ -493,6 +510,7 @@ async function main() {
       insertScenario(database, scheduledScenario);
       insertScenario(database, revisionScenario);
       insertScenario(database, cutoffScenario);
+      insertScenario(database, retryScenario);
     });
 
     const qualifiedResult = await settleGroupBuyActivity({
@@ -627,12 +645,120 @@ async function main() {
       getOrderDetail(cutoffOrder.id)
     );
 
+    const retryOrder = retryScenario.orders[0];
+    const retryTransactionId = `mock-line-pay-${retryOrder.id}`;
+    const retryStartedAt = Date.now();
+    const recordRetryFailure = (attemptOffsetMs) => recordLinePayCaptureFailureInDatabase({
+      orderId: retryOrder.id,
+      provider: "mock_line_pay",
+      providerTransactionId: retryTransactionId,
+      amount: retryOrder.originalAmount,
+      finalAmount: retryOrder.originalAmount,
+      reason: "settlement_smoke_retryable_capture_failed",
+      retryable: true,
+      maxAttempts: 3,
+      retryIntervalMs: 30_000,
+      now: new Date(retryStartedAt + attemptOffsetMs).toISOString(),
+      providerPayload: { returnCode: "9000", returnMessage: "mock temporary error" }
+    });
+    const firstRetryFailure = recordRetryFailure(0);
+    assert(firstRetryFailure.status === "retry_pending", "first capture failure should schedule retry", firstRetryFailure);
+    assert(firstRetryFailure.attemptCount === 1, "first capture failure attempt count mismatch", firstRetryFailure);
+
+    const retryPendingSettlement = await settleGroupBuyActivity({
+      activityId: retryScenario.activityId,
+      actorUserId: retryScenario.adminUserId,
+      force: true,
+      now: new Date(retryStartedAt + 29_000).toISOString()
+    });
+    assert(
+      retryPendingSettlement.error === "settlement_retry_pending",
+      "settlement should wait until the 30-second retry interval passes",
+      retryPendingSettlement
+    );
+    assert(
+      retryPendingSettlement.pendingRetries?.[0]?.attemptCount === 1,
+      "pending settlement should expose the current capture attempt count",
+      retryPendingSettlement
+    );
+
+    const earlyRetryState = getLinePayCaptureRetryState({
+      orderId: retryOrder.id,
+      provider: "mock_line_pay",
+      providerTransactionId: retryTransactionId,
+      maxAttempts: 3,
+      now: new Date(retryStartedAt + 29_000).toISOString()
+    });
+    assert(!earlyRetryState.retryDue, "retry should not be due before 30 seconds", earlyRetryState);
+
+    const dueRetryState = getLinePayCaptureRetryState({
+      orderId: retryOrder.id,
+      provider: "mock_line_pay",
+      providerTransactionId: retryTransactionId,
+      maxAttempts: 3,
+      now: new Date(retryStartedAt + 30_000).toISOString()
+    });
+    assert(dueRetryState.retryDue, "retry should be due at 30 seconds", dueRetryState);
+
+    const secondRetryFailure = recordRetryFailure(30_000);
+    const thirdRetryFailure = recordRetryFailure(60_000);
+    const fourthRetryFailure = recordRetryFailure(90_000);
+    assert(secondRetryFailure.attemptCount === 2, "second capture failure attempt count mismatch", secondRetryFailure);
+    assert(thirdRetryFailure.status === "retry_exhausted", "third capture failure should exhaust retries", thirdRetryFailure);
+    assert(thirdRetryFailure.attemptCount === 3, "third capture failure attempt count mismatch", thirdRetryFailure);
+    assert(fourthRetryFailure.status === "retry_exhausted", "fourth capture call should remain exhausted", fourthRetryFailure);
+
+    const retryCaptureCount = withDatabase((database) => database.prepare(`
+      SELECT COUNT(*) AS count
+      FROM payment_captures
+      WHERE order_id = ?
+        AND status = 'failed'
+    `).get(retryOrder.id).count);
+    assert(retryCaptureCount === 3, "retry exhaustion must not create a fourth capture row", { retryCaptureCount });
+    assert(
+      getOrderDetail(retryOrder.id).paymentStatus === "failed",
+      "retry-exhausted order should become payment failed",
+      getOrderDetail(retryOrder.id)
+    );
+    assert(
+      classifyLinePayCaptureError({ linePayPayload: { returnCode: "9000" } }).retryable,
+      "LINE Pay temporary errors should be retryable"
+    );
+    assert(
+      !classifyLinePayCaptureError({ linePayPayload: { returnCode: "1153" } }).retryable,
+      "LINE Pay amount mismatch should not be retryable"
+    );
+    assert(
+      !classifyLinePayCaptureError({ linePayPayload: { returnCode: "1150" } }).retryable,
+      "LINE Pay missing transaction should not be retryable"
+    );
+    assert(
+      !classifyLinePayCaptureError({ linePayPayload: { returnCode: "1199" } }).retryable,
+      "LINE Pay auto-cancel internal error should not be retryable"
+    );
+    assert(
+      !classifyLinePayCaptureError({ linePayPayload: { returnCode: "1280" } }).retryable,
+      "LINE Pay auto-cancel card errors should not be retryable"
+    );
+    assert(
+      inferLinePayPaymentState({
+        info: [{ transactionType: "PAYMENT", payStatus: "AUTHORIZATION" }]
+      }) === "authorized",
+      "explicit authorization status must not be treated as captured"
+    );
+    assert(
+      inferLinePayPaymentState({
+        info: [{ transactionType: "PAYMENT", payStatus: "VOIDED_AUTHORIZATION" }]
+      }) === "not_capturable",
+      "voided authorization must not be retried"
+    );
     console.log("Settlement smoke passed");
     console.log(`qualified: captured=${qualifiedResult.capturedOrderCount}, voided=${qualifiedResult.voidedOrderCount}`);
     console.log(`failed: captured=${failedResult.capturedOrderCount}, voided=${failedResult.voidedOrderCount}`);
     console.log(`scheduler: settled=${scheduledResult.settledCount}, failed=${scheduledResult.failedCount}`);
     console.log("revision: applied=1, old_authorization_voided=1");
     console.log("cutoff: rejected_after_deadline=1");
+    console.log("capture retry: interval=30s, attempts=3, fourth_attempt_suppressed=1");
   } finally {
     fs.copyFileSync(backupPath, databasePath);
     fs.rmSync(backupPath, { force: true });
