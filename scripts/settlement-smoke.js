@@ -9,13 +9,17 @@ const {
 } = require("../backend/payments/settlementService");
 const {
   classifyLinePayCaptureError,
-  inferLinePayPaymentState
+  inferLinePayPaymentState,
+  refundLinePayPayment
 } = require("../backend/payments/linePayService");
 const {
   authorizeLinePayPaymentInDatabase,
+  completeManualLinePayRepaymentInDatabase,
+  createPendingLinePayAuthorization,
   createOrderRevision,
   getOrderDetail,
   getLinePayCaptureRetryState,
+  getManualLinePayRepaymentContext,
   recordLinePayCaptureFailureInDatabase,
   voidLinePayAuthorizationInDatabase
 } = require("../backend/db");
@@ -573,6 +577,48 @@ async function main() {
       scheduledSummary
     );
 
+    const refundOrder = qualifiedScenario.orders[0];
+    const refundIdempotencyKey = `settlement-smoke-refund-${refundOrder.id}`;
+    const refundResult = await refundLinePayPayment({
+      authUser: {
+        id: qualifiedScenario.adminUserId,
+        roles: ["admin"]
+      },
+      body: {
+        orderId: refundOrder.id,
+        provider: "mock_line_pay",
+        idempotencyKey: refundIdempotencyKey,
+        reason: "settlement_smoke_full_refund"
+      }
+    });
+    assert(refundResult?.status === "refunded", "captured order should be refundable", refundResult);
+    assert(refundResult.fullyRefunded, "full refund should mark the payment fully refunded", refundResult);
+    assert(
+      getOrderDetail(refundOrder.id).paymentStatus === "refunded",
+      "fully refunded order should update payment status",
+      getOrderDetail(refundOrder.id)
+    );
+    const repeatedRefundResult = await refundLinePayPayment({
+      authUser: {
+        id: qualifiedScenario.adminUserId,
+        roles: ["admin"]
+      },
+      body: {
+        orderId: refundOrder.id,
+        provider: "mock_line_pay",
+        idempotencyKey: refundIdempotencyKey,
+        reason: "settlement_smoke_full_refund"
+      }
+    });
+    assert(repeatedRefundResult?.idempotent, "duplicate refund key should return idempotently", repeatedRefundResult);
+    const refundRecordCount = withDatabase((database) => database.prepare(`
+      SELECT COUNT(*) AS count
+      FROM payment_refunds
+      WHERE order_id = ?
+        AND status = 'refunded'
+    `).get(refundOrder.id).count);
+    assert(refundRecordCount === 1, "duplicate refund must not create another refunded row", { refundRecordCount });
+
     const revisionOrder = revisionScenario.orders[0];
     const revisionResult = createOrderRevision({
       orderId: revisionOrder.id,
@@ -740,6 +786,78 @@ async function main() {
       !classifyLinePayCaptureError({ linePayPayload: { returnCode: "1280" } }).retryable,
       "LINE Pay auto-cancel card errors should not be retryable"
     );
+
+    const repaymentEligibleAt = new Date(retryStartedAt + 90_000).toISOString();
+    const repaymentContext = getManualLinePayRepaymentContext(retryOrder.id, {
+      now: repaymentEligibleAt
+    });
+    assert(repaymentContext?.eligible, "retry-exhausted order should allow manual repayment", repaymentContext);
+    assert(
+      repaymentContext.finalAmount === retryOrder.originalAmount,
+      "manual repayment should use the settled final amount",
+      repaymentContext
+    );
+    const expiredRepaymentContext = getManualLinePayRepaymentContext(retryOrder.id, {
+      now: new Date(Date.parse(retryScenario.pickupStartAt) - 14 * 60 * 1000).toISOString()
+    });
+    assert(
+      expiredRepaymentContext?.reason === "manual_repayment_expired",
+      "manual repayment should close 15 minutes before pickup",
+      expiredRepaymentContext
+    );
+
+    const repaymentTransactionId = `mock-line-pay-repayment-${retryOrder.id}`;
+    const pendingRepayment = createPendingLinePayAuthorization({
+      orderId: retryOrder.id,
+      provider: "mock_line_pay",
+      providerTransactionId: repaymentTransactionId,
+      paymentFlow: "direct_repayment",
+      amount: repaymentContext.finalAmount
+    });
+    assert(
+      pendingRepayment?.paymentFlow === "direct_repayment" && pendingRepayment.status === "pending",
+      "manual repayment should persist as a separate pending payment flow",
+      pendingRepayment
+    );
+    const repaymentPendingContext = getManualLinePayRepaymentContext(retryOrder.id, {
+      now: repaymentEligibleAt
+    });
+    assert(
+      repaymentPendingContext?.reason === "repayment_already_pending",
+      "a second manual repayment request should be blocked while one is pending",
+      repaymentPendingContext
+    );
+
+    const completedRepayment = completeManualLinePayRepaymentInDatabase({
+      orderId: retryOrder.id,
+      provider: "mock_line_pay",
+      providerTransactionId: repaymentTransactionId,
+      providerCaptureId: repaymentTransactionId,
+      amount: repaymentContext.finalAmount,
+      now: new Date(retryStartedAt + 91_000).toISOString(),
+      providerPayload: { returnCode: "0000", returnMessage: "mock direct repayment" }
+    });
+    assert(completedRepayment?.status === "captured", "manual repayment should be captured", completedRepayment);
+    assert(
+      completedRepayment.order?.paymentStatus === "captured",
+      "manual repayment should update the order payment status",
+      completedRepayment
+    );
+    const repeatedRepayment = completeManualLinePayRepaymentInDatabase({
+      orderId: retryOrder.id,
+      provider: "mock_line_pay",
+      providerTransactionId: repaymentTransactionId,
+      amount: repaymentContext.finalAmount,
+      now: new Date(retryStartedAt + 92_000).toISOString()
+    });
+    assert(repeatedRepayment?.status === "captured", "manual repayment confirm should be idempotent", repeatedRepayment);
+    const repaymentCaptureCount = withDatabase((database) => database.prepare(`
+      SELECT COUNT(*) AS count
+      FROM payment_captures
+      WHERE payment_authorization_id = ?
+        AND status = 'captured'
+    `).get(pendingRepayment.id).count);
+    assert(repaymentCaptureCount === 1, "manual repayment must create only one captured record", { repaymentCaptureCount });
     assert(
       inferLinePayPaymentState({
         info: [{ transactionType: "PAYMENT", payStatus: "AUTHORIZATION" }]
@@ -759,6 +877,8 @@ async function main() {
     console.log("revision: applied=1, old_authorization_voided=1");
     console.log("cutoff: rejected_after_deadline=1");
     console.log("capture retry: interval=30s, attempts=3, fourth_attempt_suppressed=1");
+    console.log("manual repayment: cutoff=15m, captured=1, duplicate_capture_suppressed=1");
+    console.log("refund: full_refund=1, duplicate_refund_suppressed=1");
   } finally {
     fs.copyFileSync(backupPath, databasePath);
     fs.rmSync(backupPath, { force: true });

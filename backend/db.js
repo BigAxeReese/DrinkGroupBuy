@@ -77,9 +77,33 @@ function ensureRuntimeSchema(database) {
   if (!paymentCaptureColumns.some((column) => column.name === "next_retry_at")) {
     database.exec("ALTER TABLE payment_captures ADD COLUMN next_retry_at TEXT;");
   }
+  if (!paymentAuthorizationColumns.some((column) => column.name === "payment_flow")) {
+    database.exec("ALTER TABLE payment_authorizations ADD COLUMN payment_flow TEXT NOT NULL DEFAULT 'authorization';");
+  }
   database.exec(`
     CREATE INDEX IF NOT EXISTS idx_payment_captures_authorization_attempt
     ON payment_captures(payment_authorization_id, attempt_number);
+  `);
+
+  database.exec(`
+    CREATE TABLE IF NOT EXISTS payment_refunds (
+      id TEXT PRIMARY KEY,
+      payment_capture_id TEXT NOT NULL REFERENCES payment_captures(id),
+      payment_authorization_id TEXT NOT NULL REFERENCES payment_authorizations(id),
+      order_id TEXT NOT NULL REFERENCES orders(id),
+      provider TEXT NOT NULL CHECK (provider IN ('line_pay', 'mock_line_pay')),
+      status TEXT NOT NULL DEFAULT 'pending' CHECK (status IN ('pending', 'refunded', 'failed')),
+      refund_amount INTEGER NOT NULL CHECK (refund_amount > 0),
+      provider_refund_id TEXT,
+      idempotency_key TEXT UNIQUE,
+      refunded_at TEXT,
+      failure_reason TEXT,
+      created_at TEXT NOT NULL,
+      updated_at TEXT NOT NULL
+    );
+
+    CREATE INDEX IF NOT EXISTS idx_payment_refunds_capture ON payment_refunds(payment_capture_id);
+    CREATE INDEX IF NOT EXISTS idx_payment_refunds_order ON payment_refunds(order_id);
   `);
 }
 
@@ -1017,7 +1041,7 @@ function updatePendingOrder(input) {
       SELECT id, status, provider_authorization_id
       FROM payment_authorizations
       WHERE order_id = ?
-        AND provider = 'line_pay'
+        AND provider IN ('line_pay', 'mock_line_pay')
         AND status = 'pending'
     `).all(input.orderId);
 
@@ -1521,7 +1545,7 @@ function getLatestLinePayAuthorizationForOrder(orderId) {
       SELECT *
       FROM payment_authorizations
       WHERE order_id = ?
-        AND provider = 'line_pay'
+        AND provider IN ('line_pay', 'mock_line_pay')
       ORDER BY created_at DESC
       LIMIT 1
     `).get(orderId);
@@ -1626,6 +1650,114 @@ function getLinePayCaptureRetryState(input = {}) {
   }
 }
 
+function getManualLinePayRepaymentContext(orderId, input = {}) {
+  const database = openDatabase();
+  const now = input.now || new Date().toISOString();
+  const cutoffMinutes = normalizePositiveInteger(input.cutoffMinutes, 15);
+
+  try {
+    const row = database.prepare(`
+      SELECT
+        orders.id,
+        orders.customer_user_id,
+        orders.status,
+        orders.payment_status,
+        orders.original_amount,
+        orders.final_amount,
+        activity.id AS activity_id,
+        activity.status AS activity_status,
+        activity.pickup_start_at,
+        capture.id AS failed_capture_id,
+        capture.final_amount AS failed_capture_final_amount,
+        capture.attempt_number AS failed_capture_attempt_number,
+        capture.retryable AS failed_capture_retryable,
+        authorization.id AS original_authorization_id,
+        authorization.provider AS original_provider,
+        authorization.status AS original_authorization_status,
+        authorization.provider_authorization_id AS original_provider_transaction_id
+      FROM orders
+      JOIN group_buy_activities activity ON activity.id = orders.activity_id
+      LEFT JOIN payment_captures capture
+        ON capture.id = (
+          SELECT id
+          FROM payment_captures
+          WHERE order_id = orders.id
+            AND status = 'failed'
+          ORDER BY created_at DESC, id DESC
+          LIMIT 1
+        )
+      LEFT JOIN payment_authorizations authorization
+        ON authorization.id = capture.payment_authorization_id
+      WHERE orders.id = ?
+    `).get(orderId);
+
+    if (!row) return null;
+
+    const latestRepayment = database.prepare(`
+      SELECT *
+      FROM payment_authorizations
+      WHERE order_id = ?
+        AND payment_flow = 'direct_repayment'
+      ORDER BY created_at DESC, id DESC
+      LIMIT 1
+    `).get(orderId);
+    const pickupStartTime = Date.parse(row.pickup_start_at);
+    const nowTime = Date.parse(now);
+    const cutoffAt = Number.isNaN(pickupStartTime)
+      ? null
+      : new Date(pickupStartTime - cutoffMinutes * 60 * 1000).toISOString();
+    const cutoffTime = cutoffAt ? Date.parse(cutoffAt) : Number.NaN;
+    const finalAmount = Number(row.failed_capture_final_amount ?? row.final_amount ?? 0);
+    const terminalCaptureFailure = Boolean(row.failed_capture_id)
+      && !Boolean(row.failed_capture_retryable);
+
+    let reason = null;
+    if (row.payment_status === "captured" || latestRepayment?.status === "captured") {
+      reason = "already_paid";
+    } else if (latestRepayment?.status === "pending") {
+      reason = "repayment_already_pending";
+    } else if (row.payment_status !== "failed") {
+      reason = "payment_not_failed";
+    } else if (!terminalCaptureFailure) {
+      reason = "automatic_capture_not_finished";
+    } else if (!Number.isInteger(finalAmount) || finalAmount <= 0) {
+      reason = "final_amount_missing";
+    } else if (Number.isNaN(nowTime) || Number.isNaN(cutoffTime) || nowTime >= cutoffTime) {
+      reason = "manual_repayment_expired";
+    }
+
+    return {
+      orderId: row.id,
+      customerUserId: row.customer_user_id,
+      orderStatus: row.status,
+      paymentStatus: row.payment_status,
+      activityId: row.activity_id,
+      activityStatus: row.activity_status,
+      originalAmount: row.original_amount,
+      finalAmount,
+      pickupStartAt: row.pickup_start_at,
+      cutoffAt,
+      cutoffMinutes,
+      eligible: reason == null,
+      reason,
+      failedCapture: row.failed_capture_id ? {
+        id: row.failed_capture_id,
+        attemptNumber: row.failed_capture_attempt_number,
+        retryable: Boolean(row.failed_capture_retryable)
+      } : null,
+      originalAuthorization: row.original_authorization_id ? {
+        id: row.original_authorization_id,
+        provider: row.original_provider,
+        status: row.original_authorization_status,
+        providerAuthorizationId: row.original_provider_transaction_id
+      } : null,
+      latestRepayment: latestRepayment ? mapPaymentAuthorization(latestRepayment) : null
+    };
+  } finally {
+    database.close();
+  }
+}
+
 function getOrderRevisionById(orderRevisionId) {
   const database = openDatabase();
   try {
@@ -1661,10 +1793,20 @@ function getOrderRevisionById(orderRevisionId) {
 function getOrderDetail(orderId) {
   const order = getOrderById(orderId);
   if (!order) return null;
+  const latestLinePayAuthorization = getLatestLinePayAuthorizationForOrder(orderId);
+  const paymentRefunds = getPaymentRefundsByOrderId(orderId);
   return {
     ...order,
-    latestLinePayAuthorization: getLatestLinePayAuthorizationForOrder(orderId),
-    pendingRevision: getPendingOrderRevisionByOrderId(orderId)
+    latestLinePayAuthorization,
+    latestPaymentCapture: latestLinePayAuthorization
+      ? getLatestPaymentCaptureByAuthorizationId(latestLinePayAuthorization.id)
+      : null,
+    paymentRefunds,
+    refundedAmount: paymentRefunds
+      .filter((refund) => refund.status === "refunded")
+      .reduce((sum, refund) => sum + refund.refundAmount, 0),
+    pendingRevision: getPendingOrderRevisionByOrderId(orderId),
+    manualRepayment: getManualLinePayRepaymentContext(orderId)
   };
 }
 
@@ -1690,6 +1832,8 @@ function createPendingLinePayAuthorization(input) {
   const database = openDatabase();
   const now = new Date().toISOString();
   const authorizationId = `payment-authorization-${randomUUID()}`;
+  const provider = input.provider || "line_pay";
+  const paymentFlow = input.paymentFlow || "authorization";
   let transactionStarted = false;
 
   try {
@@ -1724,10 +1868,10 @@ function createPendingLinePayAuthorization(input) {
       ? database.prepare(`
           SELECT *
           FROM payment_authorizations
-          WHERE provider = 'line_pay'
+          WHERE provider = ?
             AND provider_authorization_id = ?
           LIMIT 1
-        `).get(input.providerTransactionId)
+        `).get(provider, input.providerTransactionId)
       : null;
 
     if (existingAuthorization) {
@@ -1742,17 +1886,20 @@ function createPendingLinePayAuthorization(input) {
         order_id,
         order_revision_id,
         provider,
+        payment_flow,
         status,
         original_amount,
         authorized_amount,
         provider_authorization_id,
         created_at,
         updated_at
-      ) VALUES (?, ?, ?, 'line_pay', 'pending', ?, 0, ?, ?, ?)
+      ) VALUES (?, ?, ?, ?, ?, 'pending', ?, 0, ?, ?, ?)
     `).run(
       authorizationId,
       revision?.order_id || input.orderId,
       revision?.id || null,
+      provider,
+      paymentFlow,
       revision?.original_amount ?? input.amount,
       input.providerTransactionId,
       now,
@@ -1773,7 +1920,9 @@ function createPendingLinePayAuthorization(input) {
     `).run(
       `status-history-${randomUUID()}`,
       authorizationId,
-      "line_pay_request_created",
+      paymentFlow === "direct_repayment"
+        ? "line_pay_direct_repayment_request_created"
+        : "line_pay_request_created",
       now
     );
 
@@ -1786,13 +1935,17 @@ function createPendingLinePayAuthorization(input) {
         resource_id,
         metadata_json,
         created_at
-      ) VALUES (?, NULL, 'line_pay_request_authorization', 'payment_authorization', ?, ?, ?)
+      ) VALUES (?, NULL, ?, 'payment_authorization', ?, ?, ?)
     `).run(
       `audit-log-${randomUUID()}`,
+      paymentFlow === "direct_repayment"
+        ? "line_pay_request_direct_repayment"
+        : "line_pay_request_authorization",
       authorizationId,
       JSON.stringify({
         orderId: revision?.order_id || input.orderId,
         orderRevisionId: revision?.id || null,
+        paymentFlow,
         providerTransactionId: input.providerTransactionId
       }),
       now
@@ -1806,6 +1959,625 @@ function createPendingLinePayAuthorization(input) {
     if (transactionStarted) {
       database.exec("ROLLBACK;");
     }
+    throw error;
+  } finally {
+    database.close();
+  }
+}
+
+function completeManualLinePayRepaymentInDatabase(input) {
+  const database = openDatabase();
+  const now = input.now || new Date().toISOString();
+  const captureId = `payment-capture-${randomUUID()}`;
+  let transactionStarted = false;
+
+  try {
+    const authorization = findLinePayAuthorization(database, input);
+    if (!authorization) return null;
+    if (authorization.payment_flow !== "direct_repayment") {
+      return {
+        error: "payment_flow_mismatch",
+        authorization: mapPaymentAuthorization(authorization)
+      };
+    }
+    if (authorization.status === "captured") {
+      const existingCapture = database.prepare(`
+        SELECT * FROM payment_captures
+        WHERE payment_authorization_id = ? AND status = 'captured'
+        ORDER BY created_at DESC, id DESC
+        LIMIT 1
+      `).get(authorization.id);
+      return {
+        authorization: mapPaymentAuthorization(authorization),
+        capture: existingCapture ? mapPaymentCapture(existingCapture) : null,
+        status: "captured"
+      };
+    }
+    if (authorization.status !== "pending") {
+      return {
+        error: "repayment_not_pending",
+        authorization: mapPaymentAuthorization(authorization)
+      };
+    }
+
+    const order = database.prepare(`
+      SELECT orders.*, activity.status AS activity_status
+      FROM orders
+      JOIN group_buy_activities activity ON activity.id = orders.activity_id
+      WHERE orders.id = ?
+    `).get(authorization.order_id);
+    if (!order) return null;
+
+    const amount = Number(input.amount ?? authorization.original_amount);
+    if (!Number.isInteger(amount) || amount <= 0 || amount !== authorization.original_amount) {
+      return {
+        error: "repayment_amount_mismatch",
+        expectedAmount: authorization.original_amount,
+        requestedAmount: amount,
+        authorization: mapPaymentAuthorization(authorization)
+      };
+    }
+    if (order.payment_status === "captured") {
+      return {
+        error: "already_paid",
+        authorization: mapPaymentAuthorization(authorization)
+      };
+    }
+
+    database.exec("BEGIN IMMEDIATE;");
+    transactionStarted = true;
+
+    const updateAuthorization = database.prepare(`
+      UPDATE payment_authorizations
+      SET status = 'captured',
+          authorized_amount = ?,
+          authorized_at = ?,
+          failure_reason = NULL,
+          updated_at = ?
+      WHERE id = ?
+        AND status = 'pending'
+    `).run(amount, now, now, authorization.id);
+    if (updateAuthorization.changes !== 1) {
+      database.exec("ROLLBACK;");
+      transactionStarted = false;
+      return {
+        error: "repayment_state_changed",
+        authorization: getPaymentAuthorizationById(authorization.id)
+      };
+    }
+
+    database.prepare(`
+      INSERT INTO payment_captures (
+        id,
+        payment_authorization_id,
+        order_id,
+        status,
+        final_amount,
+        capture_amount,
+        released_amount,
+        provider_capture_id,
+        captured_at,
+        attempt_number,
+        retryable,
+        next_retry_at,
+        created_at,
+        updated_at
+      ) VALUES (?, ?, ?, 'captured', ?, ?, 0, ?, ?, 1, 0, NULL, ?, ?)
+    `).run(
+      captureId,
+      authorization.id,
+      authorization.order_id,
+      amount,
+      amount,
+      input.providerCaptureId || input.providerTransactionId || authorization.provider_authorization_id,
+      now,
+      now,
+      now
+    );
+
+    database.prepare(`
+      UPDATE orders
+      SET payment_status = 'captured',
+          authorization_status = 'captured',
+          final_amount = ?,
+          merchant_acceptance_status = 'accepted',
+          pickup_status = CASE WHEN pickup_status = 'cancelled' THEN pickup_status ELSE 'not_ready' END,
+          updated_at = ?
+      WHERE id = ?
+        AND payment_status != 'captured'
+    `).run(amount, now, authorization.order_id);
+
+    const activityUpdate = database.prepare(`
+      UPDATE group_buy_activities
+      SET status = 'ordering',
+          updated_at = ?
+      WHERE id = ?
+        AND status = 'failed'
+    `).run(now, order.activity_id);
+
+    database.prepare(`
+      INSERT OR IGNORE INTO payment_provider_events (
+        id,
+        provider,
+        resource_type,
+        resource_id,
+        event_type,
+        idempotency_key,
+        payload_json,
+        received_at,
+        processed_at
+      ) VALUES (?, ?, 'capture', ?, 'manual_repayment_confirmed', ?, ?, ?, ?)
+    `).run(
+      `provider-event-${randomUUID()}`,
+      authorization.provider,
+      captureId,
+      authorization.provider_authorization_id
+        ? `${authorization.provider}_manual_repayment_confirmed:${authorization.provider_authorization_id}`
+        : null,
+      JSON.stringify({
+        orderId: authorization.order_id,
+        amount,
+        providerPayload: input.providerPayload || {}
+      }),
+      now,
+      now
+    );
+
+    database.prepare(`
+      INSERT INTO status_history (
+        id, resource_type, resource_id, from_status, to_status, reason, actor_user_id, created_at
+      ) VALUES (?, 'payment_authorization', ?, 'pending', 'captured', 'manual_repayment_confirmed', NULL, ?)
+    `).run(`status-history-${randomUUID()}`, authorization.id, now);
+
+    if (activityUpdate.changes === 1) {
+      database.prepare(`
+        INSERT INTO status_history (
+          id, resource_type, resource_id, from_status, to_status, reason, actor_user_id, created_at
+        ) VALUES (?, 'activity', ?, 'failed', 'ordering', 'manual_repayment_received', NULL, ?)
+      `).run(`status-history-${randomUUID()}`, order.activity_id, now);
+    }
+
+    database.prepare(`
+      INSERT INTO audit_logs (
+        id, actor_user_id, action_type, resource_type, resource_id, metadata_json, created_at
+      ) VALUES (?, NULL, 'line_pay_manual_repayment_captured', 'order', ?, ?, ?)
+    `).run(
+      `audit-log-${randomUUID()}`,
+      authorization.order_id,
+      JSON.stringify({
+        paymentAuthorizationId: authorization.id,
+        captureId,
+        amount,
+        providerTransactionId: authorization.provider_authorization_id
+      }),
+      now
+    );
+
+    database.exec("COMMIT;");
+    transactionStarted = false;
+
+    return {
+      authorization: getPaymentAuthorizationById(authorization.id),
+      capture: getPaymentCaptureById(captureId),
+      order: getOrderDetail(authorization.order_id),
+      status: "captured"
+    };
+  } catch (error) {
+    if (transactionStarted) database.exec("ROLLBACK;");
+    throw error;
+  } finally {
+    database.close();
+  }
+}
+
+function createPendingLinePayRefundInDatabase(input) {
+  const database = openDatabase();
+  const now = input.now || new Date().toISOString();
+  const provider = input.provider || "line_pay";
+  const refundId = `payment-refund-${randomUUID()}`;
+  const reason = input.reason || "line_pay_refund_requested";
+  const requestedRefundAmount = input.refundAmount ?? input.amount;
+  let transactionStarted = false;
+
+  try {
+    database.exec("BEGIN IMMEDIATE;");
+    transactionStarted = true;
+    const rollback = (payload) => {
+      database.exec("ROLLBACK;");
+      transactionStarted = false;
+      return payload;
+    };
+
+    const capturedPayment = findRefundablePaymentCapture(database, input, provider);
+    if (!capturedPayment) {
+      return rollback({ error: "captured_payment_not_found" });
+    }
+
+    const refundedAmount = getRefundedAmountForCapture(database, capturedPayment.capture_id);
+    const remainingRefundableAmount = Math.max(capturedPayment.capture_amount - refundedAmount, 0);
+    const refundAmount = requestedRefundAmount == null
+      ? remainingRefundableAmount
+      : Number(requestedRefundAmount);
+    const idempotencyKey = normalizeRefundIdempotencyKey(input.idempotencyKey)
+      || buildDefaultRefundIdempotencyKey({
+        provider,
+        providerTransactionId: capturedPayment.provider_authorization_id,
+        captureId: capturedPayment.capture_id,
+        refundAmount,
+        fullRefund: requestedRefundAmount == null
+      });
+
+    const existingRefund = database.prepare(`
+      SELECT *
+      FROM payment_refunds
+      WHERE idempotency_key = ?
+    `).get(idempotencyKey);
+    if (existingRefund) {
+      return rollback({
+        refund: mapPaymentRefund(existingRefund),
+        alreadyExists: true,
+        capture: mapRefundableCaptureRow(capturedPayment),
+        authorization: mapRefundableAuthorizationRow(capturedPayment),
+        order: mapRefundableOrderRow(capturedPayment),
+        remainingRefundableAmount,
+        totalRefundedAmount: refundedAmount
+      });
+    }
+
+    if (remainingRefundableAmount <= 0) {
+      const latestRefund = database.prepare(`
+        SELECT *
+        FROM payment_refunds
+        WHERE payment_capture_id = ?
+          AND status = 'refunded'
+        ORDER BY refunded_at DESC, created_at DESC, id DESC
+        LIMIT 1
+      `).get(capturedPayment.capture_id);
+      return rollback({
+        error: "already_fully_refunded",
+        refund: latestRefund ? mapPaymentRefund(latestRefund) : null,
+        capture: mapRefundableCaptureRow(capturedPayment),
+        authorization: mapRefundableAuthorizationRow(capturedPayment),
+        order: mapRefundableOrderRow(capturedPayment),
+        remainingRefundableAmount: 0,
+        totalRefundedAmount: refundedAmount
+      });
+    }
+
+    if (!Number.isInteger(refundAmount) || refundAmount <= 0) {
+      return rollback({
+        error: "invalid_refund_amount",
+        remainingRefundableAmount,
+        requestedRefundAmount
+      });
+    }
+
+    if (refundAmount > remainingRefundableAmount) {
+      return rollback({
+        error: "refund_amount_exceeds_remaining_amount",
+        remainingRefundableAmount,
+        requestedRefundAmount: refundAmount
+      });
+    }
+
+    database.prepare(`
+      INSERT INTO payment_refunds (
+        id,
+        payment_capture_id,
+        payment_authorization_id,
+        order_id,
+        provider,
+        status,
+        refund_amount,
+        idempotency_key,
+        failure_reason,
+        created_at,
+        updated_at
+      ) VALUES (?, ?, ?, ?, ?, 'pending', ?, ?, ?, ?, ?)
+    `).run(
+      refundId,
+      capturedPayment.capture_id,
+      capturedPayment.authorization_id,
+      capturedPayment.order_id,
+      provider,
+      refundAmount,
+      idempotencyKey,
+      reason,
+      now,
+      now
+    );
+
+    database.prepare(`
+      INSERT INTO audit_logs (
+        id, actor_user_id, action_type, resource_type, resource_id, metadata_json, created_at
+      ) VALUES (?, ?, 'line_pay_refund_requested', 'payment_refund', ?, ?, ?)
+    `).run(
+      `audit-log-${randomUUID()}`,
+      input.actorUserId || null,
+      refundId,
+      JSON.stringify({
+        orderId: capturedPayment.order_id,
+        paymentCaptureId: capturedPayment.capture_id,
+        paymentAuthorizationId: capturedPayment.authorization_id,
+        providerTransactionId: capturedPayment.provider_authorization_id,
+        refundAmount,
+        remainingRefundableAmount,
+        reason,
+        idempotencyKey
+      }),
+      now
+    );
+
+    database.exec("COMMIT;");
+    transactionStarted = false;
+
+    return {
+      refund: getPaymentRefundById(refundId),
+      alreadyExists: false,
+      capture: mapRefundableCaptureRow(capturedPayment),
+      authorization: mapRefundableAuthorizationRow(capturedPayment),
+      order: mapRefundableOrderRow(capturedPayment),
+      remainingRefundableAmount,
+      totalRefundedAmount: refundedAmount
+    };
+  } catch (error) {
+    if (transactionStarted) database.exec("ROLLBACK;");
+    throw error;
+  } finally {
+    database.close();
+  }
+}
+
+function completeLinePayRefundInDatabase(input) {
+  const database = openDatabase();
+  const now = input.now || new Date().toISOString();
+  let transactionStarted = false;
+
+  try {
+    const refund = database.prepare(`
+      SELECT *
+      FROM payment_refunds
+      WHERE id = ?
+    `).get(input.refundId);
+    if (!refund) return null;
+    if (refund.status === "refunded") {
+      return buildRefundResult(database, refund);
+    }
+    if (refund.status !== "pending") {
+      return {
+        error: "refund_not_pending",
+        refund: mapPaymentRefund(refund)
+      };
+    }
+
+    const capture = database.prepare(`
+      SELECT *
+      FROM payment_captures
+      WHERE id = ?
+    `).get(refund.payment_capture_id);
+    if (!capture || capture.status !== "captured") {
+      return {
+        error: "capture_not_refundable",
+        refund: mapPaymentRefund(refund)
+      };
+    }
+
+    const order = database.prepare(`
+      SELECT *
+      FROM orders
+      WHERE id = ?
+    `).get(refund.order_id);
+    if (!order) return null;
+
+    database.exec("BEGIN IMMEDIATE;");
+    transactionStarted = true;
+
+    const updateRefund = database.prepare(`
+      UPDATE payment_refunds
+      SET status = 'refunded',
+          provider_refund_id = ?,
+          refunded_at = ?,
+          failure_reason = NULL,
+          updated_at = ?
+      WHERE id = ?
+        AND status = 'pending'
+    `).run(
+      input.providerRefundId || null,
+      now,
+      now,
+      refund.id
+    );
+    if (updateRefund.changes !== 1) {
+      database.exec("ROLLBACK;");
+      transactionStarted = false;
+      return buildRefundResult(database, database.prepare(`
+        SELECT *
+        FROM payment_refunds
+        WHERE id = ?
+      `).get(refund.id));
+    }
+
+    const totalRefundedAmount = getRefundedAmountForCapture(database, capture.id);
+    const remainingRefundableAmount = Math.max(capture.capture_amount - totalRefundedAmount, 0);
+    const fullyRefunded = remainingRefundableAmount === 0;
+
+    if (fullyRefunded) {
+      const updateOrder = database.prepare(`
+        UPDATE orders
+        SET payment_status = 'refunded',
+            updated_at = ?
+        WHERE id = ?
+          AND payment_status != 'refunded'
+      `).run(now, refund.order_id);
+
+      if (updateOrder.changes === 1) {
+        database.prepare(`
+          INSERT INTO status_history (
+            id, resource_type, resource_id, from_status, to_status, reason, actor_user_id, created_at
+          ) VALUES (?, 'order', ?, ?, 'refunded', 'line_pay_refund_completed', ?, ?)
+        `).run(
+          `status-history-${randomUUID()}`,
+          refund.order_id,
+          order.payment_status,
+          input.actorUserId || null,
+          now
+        );
+      }
+    }
+
+    database.prepare(`
+      INSERT OR IGNORE INTO payment_provider_events (
+        id,
+        provider,
+        resource_type,
+        resource_id,
+        event_type,
+        idempotency_key,
+        payload_json,
+        received_at,
+        processed_at
+      ) VALUES (?, ?, 'refund', ?, 'refund_success', ?, ?, ?, ?)
+    `).run(
+      `provider-event-${randomUUID()}`,
+      refund.provider,
+      refund.id,
+      refund.idempotency_key ? `${refund.provider}_refund_success:${refund.idempotency_key}` : null,
+      JSON.stringify({
+        orderId: refund.order_id,
+        paymentCaptureId: refund.payment_capture_id,
+        paymentAuthorizationId: refund.payment_authorization_id,
+        refundAmount: refund.refund_amount,
+        providerRefundId: input.providerRefundId || null,
+        providerPayload: input.providerPayload || {}
+      }),
+      now,
+      now
+    );
+
+    database.prepare(`
+      INSERT INTO audit_logs (
+        id, actor_user_id, action_type, resource_type, resource_id, metadata_json, created_at
+      ) VALUES (?, ?, 'line_pay_refund_completed', 'payment_refund', ?, ?, ?)
+    `).run(
+      `audit-log-${randomUUID()}`,
+      input.actorUserId || null,
+      refund.id,
+      JSON.stringify({
+        orderId: refund.order_id,
+        paymentCaptureId: refund.payment_capture_id,
+        paymentAuthorizationId: refund.payment_authorization_id,
+        refundAmount: refund.refund_amount,
+        totalRefundedAmount,
+        remainingRefundableAmount,
+        fullyRefunded,
+        providerRefundId: input.providerRefundId || null
+      }),
+      now
+    );
+
+    database.exec("COMMIT;");
+    transactionStarted = false;
+
+    return buildRefundResult(database, database.prepare(`
+      SELECT *
+      FROM payment_refunds
+      WHERE id = ?
+    `).get(refund.id));
+  } catch (error) {
+    if (transactionStarted) database.exec("ROLLBACK;");
+    throw error;
+  } finally {
+    database.close();
+  }
+}
+
+function failLinePayRefundInDatabase(input) {
+  const database = openDatabase();
+  const now = input.now || new Date().toISOString();
+  const reason = input.reason || "line_pay_refund_failed";
+  let transactionStarted = false;
+
+  try {
+    const refund = database.prepare(`
+      SELECT *
+      FROM payment_refunds
+      WHERE id = ?
+    `).get(input.refundId);
+    if (!refund) return null;
+    if (refund.status !== "pending") {
+      return buildRefundResult(database, refund);
+    }
+
+    database.exec("BEGIN IMMEDIATE;");
+    transactionStarted = true;
+
+    database.prepare(`
+      UPDATE payment_refunds
+      SET status = 'failed',
+          failure_reason = ?,
+          updated_at = ?
+      WHERE id = ?
+        AND status = 'pending'
+    `).run(reason, now, refund.id);
+
+    database.prepare(`
+      INSERT OR IGNORE INTO payment_provider_events (
+        id,
+        provider,
+        resource_type,
+        resource_id,
+        event_type,
+        idempotency_key,
+        payload_json,
+        received_at,
+        processed_at
+      ) VALUES (?, ?, 'refund', ?, 'refund_failed', ?, ?, ?, ?)
+    `).run(
+      `provider-event-${randomUUID()}`,
+      refund.provider,
+      refund.id,
+      refund.idempotency_key ? `${refund.provider}_refund_failed:${refund.idempotency_key}` : null,
+      JSON.stringify({
+        orderId: refund.order_id,
+        paymentCaptureId: refund.payment_capture_id,
+        paymentAuthorizationId: refund.payment_authorization_id,
+        refundAmount: refund.refund_amount,
+        reason,
+        providerPayload: input.providerPayload || {}
+      }),
+      now,
+      now
+    );
+
+    database.prepare(`
+      INSERT INTO audit_logs (
+        id, actor_user_id, action_type, resource_type, resource_id, metadata_json, created_at
+      ) VALUES (?, ?, 'line_pay_refund_failed', 'payment_refund', ?, ?, ?)
+    `).run(
+      `audit-log-${randomUUID()}`,
+      input.actorUserId || null,
+      refund.id,
+      JSON.stringify({
+        orderId: refund.order_id,
+        paymentCaptureId: refund.payment_capture_id,
+        paymentAuthorizationId: refund.payment_authorization_id,
+        refundAmount: refund.refund_amount,
+        reason,
+        providerPayload: input.providerPayload || {}
+      }),
+      now
+    );
+
+    database.exec("COMMIT;");
+    transactionStarted = false;
+
+    return buildRefundResult(database, database.prepare(`
+      SELECT *
+      FROM payment_refunds
+      WHERE id = ?
+    `).get(refund.id));
+  } catch (error) {
+    if (transactionStarted) database.exec("ROLLBACK;");
     throw error;
   } finally {
     database.close();
@@ -3250,6 +4022,34 @@ function getLatestPaymentCaptureByAuthorizationId(authorizationId) {
   }
 }
 
+function getPaymentRefundById(refundId) {
+  const database = openDatabase();
+  try {
+    const row = database.prepare(`
+      SELECT *
+      FROM payment_refunds
+      WHERE id = ?
+    `).get(refundId);
+    return row ? mapPaymentRefund(row) : null;
+  } finally {
+    database.close();
+  }
+}
+
+function getPaymentRefundsByOrderId(orderId) {
+  const database = openDatabase();
+  try {
+    return database.prepare(`
+      SELECT *
+      FROM payment_refunds
+      WHERE order_id = ?
+      ORDER BY created_at DESC, id DESC
+    `).all(orderId).map(mapPaymentRefund);
+  } finally {
+    database.close();
+  }
+}
+
 function getActivitySettlementByActivityId(activityId) {
   const database = openDatabase();
   try {
@@ -3307,6 +4107,153 @@ function findLinePayAuthorization(database, input) {
   return null;
 }
 
+function findRefundablePaymentCapture(database, input, provider) {
+  const baseQuery = `
+    SELECT
+      capture.id AS capture_id,
+      capture.payment_authorization_id AS capture_payment_authorization_id,
+      capture.order_id AS capture_order_id,
+      capture.status AS capture_status,
+      capture.final_amount AS capture_final_amount,
+      capture.capture_amount AS capture_amount,
+      capture.released_amount AS capture_released_amount,
+      capture.provider_capture_id,
+      capture.captured_at,
+      authorization.id AS authorization_id,
+      authorization.order_id AS authorization_order_id,
+      authorization.provider,
+      authorization.payment_flow,
+      authorization.status AS authorization_status,
+      authorization.original_amount,
+      authorization.authorized_amount,
+      authorization.provider_authorization_id,
+      orders.id AS order_id,
+      orders.customer_user_id,
+      orders.payment_status AS order_payment_status,
+      orders.authorization_status AS order_authorization_status,
+      orders.final_amount AS order_final_amount
+    FROM payment_captures capture
+    JOIN payment_authorizations authorization
+      ON authorization.id = capture.payment_authorization_id
+    JOIN orders
+      ON orders.id = capture.order_id
+    WHERE capture.status = 'captured'
+      AND authorization.provider = ?
+  `;
+
+  if (input.captureId) {
+    return database.prepare(`${baseQuery} AND capture.id = ? LIMIT 1`).get(provider, input.captureId);
+  }
+
+  if (input.providerTransactionId) {
+    return database.prepare(`
+      ${baseQuery}
+        AND authorization.provider_authorization_id = ?
+      ORDER BY capture.captured_at DESC, capture.created_at DESC, capture.id DESC
+      LIMIT 1
+    `).get(provider, input.providerTransactionId);
+  }
+
+  if (input.orderId) {
+    return database.prepare(`
+      ${baseQuery}
+        AND capture.order_id = ?
+      ORDER BY capture.captured_at DESC, capture.created_at DESC, capture.id DESC
+      LIMIT 1
+    `).get(provider, input.orderId);
+  }
+
+  return null;
+}
+
+function getRefundedAmountForCapture(database, captureId) {
+  const row = database.prepare(`
+    SELECT COALESCE(SUM(refund_amount), 0) AS refunded_amount
+    FROM payment_refunds
+    WHERE payment_capture_id = ?
+      AND status = 'refunded'
+  `).get(captureId);
+  return Number(row?.refunded_amount || 0);
+}
+
+function buildRefundResult(database, refund) {
+  if (!refund) return null;
+  const capture = database.prepare(`
+    SELECT *
+    FROM payment_captures
+    WHERE id = ?
+  `).get(refund.payment_capture_id);
+  const totalRefundedAmount = getRefundedAmountForCapture(database, refund.payment_capture_id);
+  const remainingRefundableAmount = capture
+    ? Math.max(capture.capture_amount - totalRefundedAmount, 0)
+    : 0;
+
+  return {
+    refund: mapPaymentRefund(refund),
+    capture: capture ? mapPaymentCapture(capture) : null,
+    order: getOrderDetail(refund.order_id),
+    status: refund.status,
+    fullyRefunded: capture ? remainingRefundableAmount === 0 : false,
+    totalRefundedAmount,
+    remainingRefundableAmount
+  };
+}
+
+function normalizeRefundIdempotencyKey(value) {
+  if (typeof value !== "string") return null;
+  const trimmed = value.trim();
+  return trimmed || null;
+}
+
+function buildDefaultRefundIdempotencyKey({
+  provider,
+  providerTransactionId,
+  captureId,
+  refundAmount,
+  fullRefund
+}) {
+  const transactionPart = providerTransactionId || captureId;
+  const amountPart = fullRefund ? "full" : `amount:${refundAmount}`;
+  return `${provider}_refund:${transactionPart}:${amountPart}`;
+}
+
+function mapRefundableCaptureRow(row) {
+  return {
+    id: row.capture_id,
+    paymentAuthorizationId: row.capture_payment_authorization_id,
+    orderId: row.capture_order_id,
+    status: row.capture_status,
+    finalAmount: row.capture_final_amount,
+    captureAmount: row.capture_amount,
+    releasedAmount: row.capture_released_amount,
+    providerCaptureId: row.provider_capture_id,
+    capturedAt: row.captured_at
+  };
+}
+
+function mapRefundableAuthorizationRow(row) {
+  return {
+    id: row.authorization_id,
+    orderId: row.authorization_order_id,
+    provider: row.provider,
+    paymentFlow: row.payment_flow || "authorization",
+    status: row.authorization_status,
+    originalAmount: row.original_amount,
+    authorizedAmount: row.authorized_amount,
+    providerAuthorizationId: row.provider_authorization_id
+  };
+}
+
+function mapRefundableOrderRow(row) {
+  return {
+    id: row.order_id,
+    customerUserId: row.customer_user_id,
+    paymentStatus: row.order_payment_status,
+    authorizationStatus: row.order_authorization_status,
+    finalAmount: row.order_final_amount
+  };
+}
+
 function mapOrderPaymentContext(row) {
   return {
     id: row.id,
@@ -3325,6 +4272,7 @@ function mapPaymentAuthorization(row) {
     orderId: row.order_id,
     orderRevisionId: row.order_revision_id,
     provider: row.provider,
+    paymentFlow: row.payment_flow || "authorization",
     status: row.status,
     originalAmount: row.original_amount,
     authorizedAmount: row.authorized_amount,
@@ -3353,6 +4301,24 @@ function mapPaymentCapture(row) {
     attemptNumber: row.attempt_number,
     retryable: Boolean(row.retryable),
     nextRetryAt: row.next_retry_at,
+    createdAt: row.created_at,
+    updatedAt: row.updated_at
+  };
+}
+
+function mapPaymentRefund(row) {
+  return {
+    id: row.id,
+    paymentCaptureId: row.payment_capture_id,
+    paymentAuthorizationId: row.payment_authorization_id,
+    orderId: row.order_id,
+    provider: row.provider,
+    status: row.status,
+    refundAmount: row.refund_amount,
+    providerRefundId: row.provider_refund_id,
+    idempotencyKey: row.idempotency_key,
+    refundedAt: row.refunded_at,
+    failureReason: row.failure_reason,
     createdAt: row.created_at,
     updatedAt: row.updated_at
   };
@@ -3641,17 +4607,22 @@ module.exports = {
   cancelPendingLinePayAuthorizationInDatabase,
   cancelGroupBuyActivity,
   captureLinePayAuthorizationInDatabase,
+  completeManualLinePayRepaymentInDatabase,
+  completeLinePayRefundInDatabase,
   completeGroupBuySettlement,
   createGroupBuyActivity,
   createOrder,
   createGroupBuySettlementPlan,
   createOrderRevision,
+  createPendingLinePayRefundInDatabase,
   createPendingLinePayAuthorization,
+  failLinePayRefundInDatabase,
   getLinePayAuthorizationContext,
   getOrderDetail,
   getLatestLinePayAuthorizationForOrder,
   getLatestLinePayAuthorizationForOrderRevision,
   getLinePayCaptureRetryState,
+  getManualLinePayRepaymentContext,
   getOrderPaymentContext,
   getOrderRevisionById,
   getOrderRevisionPaymentContext,

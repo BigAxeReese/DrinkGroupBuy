@@ -152,6 +152,28 @@ API JSON 使用 `camelCase`。已實作 routes 只對目前開發 prototype 具�
 | 已實作規則    | Owner/admin access check、Channel ID/Secret 只在 backend、LINE Pay request signature、預設 sandbox base URL、確認 SQLite 有對應訂單或 pending revision、確認 request amount 等於訂單或 revision 原價金額、未設定 `LINE_PAY_CAPTURE_SEPARATED=true` 時阻擋真 LINE Pay request、latest LINE Pay authorization 為 `pending` 或 `authorized` 時阻擋重複 request、建立 `payment_authorizations.status = pending`、redirect 以 DB 查找為主且 memory cache 只作輔助 |
 | 尚缺規則      | Idempotency table、mobile callback sync、provider 狀態查詢、自動重試 queue                                                                                                                                                                                                                     |
 
+### LINE Pay 手動重新付款
+
+| 項目          | 內容 |
+| ------------- | ---- |
+| Method / path | `POST /api/payments/line-pay/repay` |
+| 相關畫面      | `CustomerOrdersScreen`、`PaymentAuthorizationScreen` |
+| Request       | `{ orderId, productName?, packageName? }`；金額由後端結算結果決定，不接受前端指定 |
+| Response      | LINE Pay 直接付款網址、交易編號、最終付款金額與付款截止時間 |
+| 已實作規則    | 僅限訂單本人；自動請款已終止且付款狀態為 failed；只允許取餐開始前 15 分鐘以前建立；先查原交易避免重複扣款；仍為 authorized 時先 void；以 `direct_repayment` 建立直接付款；confirm 時再次檢查期限；成功後更新訂單為 captured 並加入製作流程；pending 與 captured 狀態防止重複付款 |
+| 尚缺實作      | 跨多個 backend process 的分散式鎖、正式 sandbox 人工端對端測試、付款異常告警 |
+
+### LINE Pay 退款
+
+| 項目          | 內容 |
+| ------------- | ---- |
+| Method / path | `POST /api/payments/line-pay/refund` |
+| 相關畫面      | 目前無正式畫面；admin / dev 後端測試用 |
+| Request       | 需要 admin bearer token。Body: `{ orderId?, captureId?, providerTransactionId?, refundAmount?, reason?, idempotencyKey?, provider? }`；正式使用預設 `provider = line_pay`，`mock_line_pay` 只供非 production smoke test |
+| Response      | `{ refund, capture, order, status, fullyRefunded, totalRefundedAmount, remainingRefundableAmount, providerTransactionId }` |
+| 已實作規則    | 只允許已 capture 的付款退款；未指定 `refundAmount` 時退剩餘全額；退款金額不可超過剩餘可退金額；用 `payment_refunds.idempotency_key` 防止重複退款；同一 key 已退款時回傳 idempotent 結果；成功寫入 `payment_refunds`、provider event 與 audit log；全額退款後 `orders.payment_status = refunded` |
+| 尚缺實作      | 正式退款操作 UI、退款失敗重試 queue、provider 狀態 reconciliation、正式 sandbox 人工端對端測試 |
+
 ### LINE Pay Confirm Redirect
 
 | 項目          | 內容                                                                                                                                                                                                                                                         |
@@ -199,6 +221,7 @@ API JSON 使用 `camelCase`。已實作 routes 只對目前開發 prototype 具�
 | `POST /api/orders/:orderId/payment-authorizations`          | 開始 provider authorization  | LINE Pay capability 與 redirect/deep-link flow |
 | `POST /api/payment-authorizations/:authorizationId/void`    | 取消未使用授權               | Provider expiry 與 idempotency                 |
 | `POST /api/payment-authorizations/:authorizationId/capture` | Partial capture final amount | Backend payment module 已有內部 capture service 與單一 process 重試控制；尚未開公開 API |
+| `POST /api/payment-captures/:captureId/refunds`             | Provider-neutral refund      | 目前已先實作 LINE Pay 專用 admin/dev route；正式 API shape 尚未決定 |
 | `GET /api/payments/line-pay/status/:transactionId`          | 查詢 provider 狀態並對帳     | 正式上線前用於重試、redirect 遺失與付款狀態 reconciliation |
 
 ### 商家履約

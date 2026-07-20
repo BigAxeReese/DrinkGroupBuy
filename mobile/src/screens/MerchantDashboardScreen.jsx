@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { Pressable, StyleSheet, Text, View } from "react-native";
 import { MobileScreen, Section } from "../components/MobileScreen";
 import { PrimaryButton } from "../components/PrimaryButton";
@@ -14,6 +14,11 @@ export function MerchantDashboardScreen({ navigation, appState, actions, memberA
   const activeGroupBuyActivities = merchantGroupBuyActivities.filter((groupBuyActivity) => ["recruiting", "confirmed", "ordering"].includes(groupBuyActivity.status));
   const activeGroupBuyActivityIds = new Set(activeGroupBuyActivities.map((groupBuyActivity) => groupBuyActivity.id));
   const merchantGroupBuyActivityIds = new Set(merchantGroupBuyActivities.map((groupBuyActivity) => groupBuyActivity.id));
+  const merchantOrderIds = appState.orders
+    .filter((order) => merchantGroupBuyActivityIds.has(order.groupBuyActivityId))
+    .map((order) => order.id)
+    .sort()
+    .join("|");
   const activeOrders = appState.orders.filter((order) => (
     activeGroupBuyActivityIds.has(order.groupBuyActivityId)
     && order.status !== "cancelled"
@@ -29,6 +34,14 @@ export function MerchantDashboardScreen({ navigation, appState, actions, memberA
   });
   const pendingAcceptanceCount = activeOrders.filter((order) => order.merchantAcceptanceStatus === "pending").length;
   const authorizedOrderCount = activeOrders.filter((order) => ["authorized", "captured"].includes(order.paymentStatus)).length;
+
+  useEffect(() => {
+    if (!merchantOrderIds) return;
+
+    Promise.allSettled(
+      merchantOrderIds.split("|").map((orderId) => actions.syncOrderFromBackend(orderId))
+    );
+  }, [merchantOrderIds]);
 
   return (
     <MobileScreen title="" compactHeader>

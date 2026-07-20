@@ -1,4 +1,4 @@
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { Pressable, ScrollView, StyleSheet, Text, View } from "react-native";
 import { MobileScreen, Section } from "../components/MobileScreen";
 import { PrimaryButton } from "../components/PrimaryButton";
@@ -12,6 +12,7 @@ export function CustomerOrdersScreen({ navigation, appState, actions, memberActi
   const [tab, setTab] = useState("active");
   const [selectedOrderId, setSelectedOrderId] = useState(null);
   const customerOrders = appState.orders.filter((order) => order.customerId === selectedCustomerId);
+  const customerOrderIds = customerOrders.map((order) => order.id).sort().join("|");
   const cartItems = appState.cartItems.filter((item) => item.customerId === selectedCustomerId);
   const activeOrders = customerOrders.filter((order) => !isHistoryOrder(order, appState.groupBuyActivities));
   const historyOrders = customerOrders.filter((order) => isHistoryOrder(order, appState.groupBuyActivities));
@@ -26,6 +27,14 @@ export function CustomerOrdersScreen({ navigation, appState, actions, memberActi
     : null;
   const cartTotalQuantity = cartItems.reduce((sum, item) => sum + item.quantity, 0);
   const cartTotalAmount = cartItems.reduce((sum, item) => sum + item.subtotal, 0);
+
+  useEffect(() => {
+    if (!customerOrderIds) return;
+
+    Promise.allSettled(
+      customerOrderIds.split("|").map((orderId) => actions.syncOrderFromBackend(orderId))
+    );
+  }, [customerOrderIds]);
 
   function handleTabChange(nextTab) {
     setSelectedOrderId(null);
@@ -175,6 +184,9 @@ function OrderDetailCard({ order, groupBuyActivities, payments, actions, navigat
   const withdrawalLocked = !historical && (orderLocked || isWithdrawalLocked(groupBuyActivity));
   const progress = groupBuyActivity ? getGroupBuyActivityProgress(groupBuyActivity) : null;
   const progressText = progress ? `${progress.currentCups} / ${progress.nextTarget} 杯` : "團購資料已不存在";
+  const manualRepayment = order.manualRepayment ?? null;
+  const repaymentExpired = manualRepayment?.reason === "manual_repayment_expired";
+  const showManualRepayment = order.paymentStatus === "failed" && !historical;
 
   return (
     <View style={styles.orderCard}>
@@ -200,6 +212,25 @@ function OrderDetailCard({ order, groupBuyActivities, payments, actions, navigat
       </View>
 
       <Section title="訂單明細">
+        {showManualRepayment ? (
+          <View style={styles.repaymentNotice}>
+            <Text style={styles.repaymentTitle}>扣款失敗</Text>
+            <Text style={styles.repaymentText}>
+              {repaymentExpired
+                ? "已超過取餐前 15 分鐘，不能再重新付款。"
+                : "自動請款已停止，可在取餐開始前 15 分鐘以前重新付款。"}
+            </Text>
+            <PrimaryButton
+              label={repaymentExpired ? "已超過重新付款期限" : "重新付款"}
+              disabled={repaymentExpired}
+              onPress={() => navigation.go("paymentAuthorization", {
+                groupBuyActivityId: order.groupBuyActivityId,
+                orderId: order.id,
+                mode: "manualRepayment"
+              })}
+            />
+          </View>
+        ) : null}
         <ScrollView
           nestedScrollEnabled
           showsVerticalScrollIndicator
@@ -383,6 +414,10 @@ function getOrderSubtotal(order) {
 
 function isHistoryOrder(order, groupBuyActivities) {
   const groupBuyActivity = groupBuyActivities.find((item) => item.id === order.groupBuyActivityId);
+  if (order.paymentStatus === "failed") {
+    const pickupEndTime = Date.parse(groupBuyActivity?.pickupEndAt);
+    if (Number.isNaN(pickupEndTime) || Date.now() < pickupEndTime) return false;
+  }
   const historyGroupBuyActivityStatuses = ["cancelled", "failed", "completed"];
   const historyOrderStatuses = ["cancelled", "completed"];
   return historyGroupBuyActivityStatuses.includes(groupBuyActivity?.status) || historyOrderStatuses.includes(order.status);
@@ -397,6 +432,24 @@ function getHistoryReason(order, groupBuyActivity) {
 }
 
 const styles = StyleSheet.create({
+  repaymentNotice: {
+    gap: 9,
+    borderRadius: 12,
+    borderWidth: 1,
+    borderColor: "#fecaca",
+    backgroundColor: "#fef2f2",
+    padding: 12
+  },
+  repaymentTitle: {
+    color: "#b91c1c",
+    fontSize: 16,
+    fontWeight: "900"
+  },
+  repaymentText: {
+    color: "#7f1d1d",
+    fontSize: 13,
+    lineHeight: 20
+  },
   orderCard: {
     overflow: "hidden",
     borderRadius: 17,

@@ -43,7 +43,8 @@ async function requestLinePayPayment(input) {
 
   const amount = toPositiveInteger(input.amount, "amount");
   const currency = input.currency || config.currency;
-  const orderId = requiredString(input.orderId, "orderId");
+  const backendOrderId = requiredString(input.orderId, "orderId");
+  const orderId = requiredString(input.providerOrderId || backendOrderId, "providerOrderId");
   const productName = input.productName || "DrinkGroupBuy preorder";
   const packageName = input.packageName || "DrinkGroupBuy";
   const packageId = input.packageId || orderId;
@@ -69,11 +70,14 @@ async function requestLinePayPayment(input) {
       }
     ],
     redirectUrls: {
-      confirmUrl: appendQuery(config.confirmUrl, { orderId }),
-      cancelUrl: appendQuery(config.cancelUrl, { orderId })
+      confirmUrl: appendQuery(config.confirmUrl, { orderId: backendOrderId }),
+      cancelUrl: appendQuery(config.cancelUrl, { orderId: backendOrderId })
     }
   };
-  if (config.captureSeparated) {
+  const captureSeparated = input.captureSeparated == null
+    ? config.captureSeparated
+    : Boolean(input.captureSeparated);
+  if (captureSeparated) {
     body.options = {
       payment: {
         capture: false
@@ -119,12 +123,25 @@ async function voidLinePayPaymentAuthorization(transactionId) {
   return linePayPost(`/v3/payments/authorizations/${encodedTransactionId}/void`, null, config);
 }
 
+async function refundLinePayPayment(transactionId, input = {}) {
+  const config = getLinePayConfig();
+  assertLinePayConfig(config);
+
+  const encodedTransactionId = encodeURIComponent(requiredString(transactionId, "transactionId"));
+  const amount = input.refundAmount ?? input.amount;
+  const body = amount == null
+    ? null
+    : { refundAmount: toPositiveInteger(amount, "refundAmount") };
+
+  return linePayPost(`/v3/payments/${encodedTransactionId}/refund`, body, config);
+}
+
 async function retrieveLinePayPaymentDetails(transactionId) {
   const config = getLinePayConfig();
   assertLinePayConfig(config);
 
   const encodedTransactionId = encodeURIComponent(requiredString(transactionId, "transactionId"));
-  return linePayGet(`/v3/payments?transactionId=${encodedTransactionId}`, config);
+  return linePayGet("/v3/payments", `transactionId=${encodedTransactionId}`, config);
 }
 
 async function linePayPost(uri, body, config = getLinePayConfig()) {
@@ -164,15 +181,16 @@ async function linePayPost(uri, body, config = getLinePayConfig()) {
   return payload;
 }
 
-async function linePayGet(uri, config = getLinePayConfig()) {
+async function linePayGet(uri, queryString = "", config = getLinePayConfig()) {
   const nonce = crypto.randomUUID();
   const signature = signLinePayRequest({
     channelSecret: config.channelSecret,
     uri,
-    bodyText: "",
+    bodyText: queryString,
     nonce
   });
-  const response = await fetch(`${config.baseUrl}${uri}`, {
+  const requestUrl = `${config.baseUrl}${uri}${queryString ? `?${queryString}` : ""}`;
+  const response = await fetch(requestUrl, {
     method: "GET",
     headers: {
       "Content-Type": "application/json",
@@ -274,6 +292,7 @@ module.exports = {
   getLinePayConfig,
   isLinePayCaptureSeparatedEnabled,
   requestLinePayPayment,
+  refundLinePayPayment,
   retrieveLinePayPaymentDetails,
   voidLinePayPaymentAuthorization
 };

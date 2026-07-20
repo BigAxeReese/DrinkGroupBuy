@@ -18,7 +18,9 @@ const {
   cancelLinePayAuthorization,
   clearPendingLinePayAuthorizationsForOrderUpdate,
   confirmLinePayAuthorization,
-  requestLinePayAuthorization
+  requestManualLinePayRepayment,
+  requestLinePayAuthorization,
+  refundLinePayPayment
 } = require("./payments/linePayService");
 const {
   settleGroupBuyActivity,
@@ -369,6 +371,48 @@ const server = http.createServer(async (request, response) => {
       return;
     }
 
+    if (request.method === "POST" && url.pathname === "/api/payments/line-pay/repay") {
+      const authUser = getAuthenticatedUser(request);
+      if (!authUser) {
+        sendJson(response, 401, { error: "Authentication required" });
+        return;
+      }
+
+      const body = await readJsonBody(request);
+      try {
+        const result = await requestManualLinePayRepayment({ authUser, body });
+        sendJson(response, 201, result);
+      } catch (error) {
+        if (error instanceof PaymentServiceError) {
+          sendJson(response, error.statusCode, error.payload);
+          return;
+        }
+        throw error;
+      }
+      return;
+    }
+
+    if (request.method === "POST" && url.pathname === "/api/payments/line-pay/refund") {
+      const authUser = getAuthenticatedUser(request);
+      if (!authUser) {
+        sendJson(response, 401, { error: "Authentication required" });
+        return;
+      }
+
+      const body = await readJsonBody(request);
+      try {
+        const result = await refundLinePayPayment({ authUser, body });
+        sendJson(response, 200, result);
+      } catch (error) {
+        if (error instanceof PaymentServiceError) {
+          sendJson(response, error.statusCode, error.payload);
+          return;
+        }
+        throw error;
+      }
+      return;
+    }
+
     if (request.method === "GET" && url.pathname === "/api/payments/line-pay/confirm") {
       const transactionId = url.searchParams.get("transactionId");
       const orderId = url.searchParams.get("orderId");
@@ -387,7 +431,9 @@ const server = http.createServer(async (request, response) => {
 
       if (result?.error) {
         sendHtml(response, 409, buildLinePayResultPage({
-          title: "LINE Pay 預授權無法完成",
+          title: result.paymentFlow === "direct_repayment"
+            ? "LINE Pay 重新付款無法完成"
+            : "LINE Pay 預授權無法完成",
           message: result.error,
           detail: result.authorization ? `Authorization status: ${result.authorization.status}` : undefined
         }));
@@ -403,8 +449,12 @@ const server = http.createServer(async (request, response) => {
       }
 
       sendHtml(response, 200, buildLinePayResultPage({
-        title: "LINE Pay 預授權完成",
-        message: "目前僅完成授權，尚未正式請款。請回到 App 查看團購進度。",
+        title: result.paymentFlow === "direct_repayment"
+          ? "LINE Pay 重新付款完成"
+          : "LINE Pay 預授權完成",
+        message: result.paymentFlow === "direct_repayment"
+          ? "付款已完成，訂單已進入製作流程。請回到 App 查看訂單。"
+          : "目前僅完成授權，尚未正式請款。請回到 App 查看團購進度。",
         detail: `Order ID: ${result.pendingPayment.orderId}${result.authorization ? ` / Authorization: ${result.authorization.status}` : ""}`,
         rawCode: result.payload.returnCode
       }));
@@ -414,11 +464,15 @@ const server = http.createServer(async (request, response) => {
     if (request.method === "GET" && url.pathname === "/api/payments/line-pay/cancel") {
       const transactionId = url.searchParams.get("transactionId");
       const orderId = url.searchParams.get("orderId");
-      cancelLinePayAuthorization({ transactionId, orderId });
+      const cancelled = cancelLinePayAuthorization({ transactionId, orderId });
+      const directRepayment = cancelled.authorization?.paymentFlow === "direct_repayment"
+        || cancelled.pendingPayment?.paymentFlow === "direct_repayment";
 
       sendHtml(response, 200, buildLinePayResultPage({
-        title: "LINE Pay 預授權已取消",
-        message: "你可以回到 App 重新發起預授權。"
+        title: directRepayment ? "LINE Pay 重新付款已取消" : "LINE Pay 預授權已取消",
+        message: directRepayment
+          ? "你可以在付款期限前回到 App 再次付款。"
+          : "你可以回到 App 重新發起預授權。"
       }));
       return;
     }

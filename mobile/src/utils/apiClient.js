@@ -215,6 +215,28 @@ export async function requestLinePayAuthorization(input) {
   });
 }
 
+export async function requestLinePayRepayment(input) {
+  const requestKey = `requestLinePayRepayment:${stableStringify(input)}`;
+  return dedupeRequest(requestKey, async () => {
+    const response = await fetch(`${backendBaseUrl}/api/payments/line-pay/repay`, {
+      method: "POST",
+      headers: withAuthHeaders({
+        "Content-Type": "application/json"
+      }),
+      body: JSON.stringify(input)
+    });
+
+    const payload = await response.json();
+    if (!response.ok) {
+      const error = new Error(payload.error ?? "LINE Pay repayment request failed");
+      error.payload = payload;
+      throw error;
+    }
+
+    return payload;
+  });
+}
+
 async function dedupeRequest(key, requestFn) {
   if (inflightRequests.has(key)) {
     return inflightRequests.get(key);

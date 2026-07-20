@@ -28,7 +28,7 @@
 | 團購活動   | `group_buy_activities`, `promotion_tiers`, `activity_notices`           |
 | 購物車     | `cart_drafts`, `cart_draft_items`, `cart_draft_item_customizations`     |
 | 訂單       | `orders`, `order_items`, `order_item_customizations`                    |
-| 付款       | `payment_authorizations`, `payment_captures`, `payment_provider_events` |
+| 付款       | `payment_authorizations`, `payment_captures`, `payment_refunds`, `payment_provider_events` |
 | 結算取貨   | `activity_settlements`, `pickup_credentials`                            |
 | 歷程稽核   | `status_history`, `audit_logs`                                          |
 
@@ -308,7 +308,9 @@
 | --------------------------- | ------------------- | ------- | ---- | ----- |
 | `id`                        | 預授權編號          | TEXT    | N    | PK    |
 | `order_id`                  | 訂單編號            | TEXT    | N    | FK    |
+| `order_revision_id`         | 訂單修改版本編號    | TEXT    | Y    | FK    |
 | `provider`                  | 金流服務商          | TEXT    | N    |       |
+| `payment_flow`              | 付款流程            | TEXT    | N    |       |
 | `status`                    | 預授權狀態          | TEXT    | N    |       |
 | `original_amount`           | 原始金額            | INTEGER | N    |       |
 | `authorized_amount`         | 預授權金額          | INTEGER | N    |       |
@@ -341,6 +343,26 @@
 | `next_retry_at`            | 下次允許重試時間    | TEXT    | Y    |       |
 | `created_at`               | 建立時間            | TEXT    | N    |       |
 | `updated_at`               | 更新時間            | TEXT    | N    |       |
+
+## `payment_refunds` 付款退款資料表
+
+用途：保存已請款成功後的退款紀錄。未請款的預授權取消不寫入此表，應使用 `void`。
+
+| 欄位名稱                   | 中文名稱          | 型別    | NULL | PK/FK  |
+| -------------------------- | ----------------- | ------- | ---- | ------ |
+| `id`                       | 退款編號          | TEXT    | N    | PK     |
+| `payment_capture_id`       | 請款編號          | TEXT    | N    | FK     |
+| `payment_authorization_id` | 預授權編號        | TEXT    | N    | FK     |
+| `order_id`                 | 訂單編號          | TEXT    | N    | FK     |
+| `provider`                 | 金流服務商        | TEXT    | N    |        |
+| `status`                   | 退款狀態          | TEXT    | N    |        |
+| `refund_amount`            | 退款金額          | INTEGER | N    |        |
+| `provider_refund_id`       | Provider 退款編號 | TEXT    | Y    |        |
+| `idempotency_key`          | 冪等鍵            | TEXT    | Y    | UNIQUE |
+| `refunded_at`              | 退款完成時間      | TEXT    | Y    |        |
+| `failure_reason`           | 失敗原因          | TEXT    | Y    |        |
+| `created_at`               | 建立時間          | TEXT    | N    |        |
+| `updated_at`               | 更新時間          | TEXT    | N    |        |
 
 ## `payment_provider_events` 金流事件資料表
 

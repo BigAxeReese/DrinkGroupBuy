@@ -645,6 +645,7 @@ export function AppNavigator() {
     async syncOrderFromBackend(orderId) {
       const backendOrder = await getOrder(orderId);
       const authorization = backendOrder.latestLinePayAuthorization;
+      const capture = backendOrder.latestPaymentCapture;
       const authorizedAmount = authorization?.authorizedAmount ?? backendOrder.originalAmount;
       const backendActivities = await listGroupBuyActivities();
       const backendActivity = backendActivities.find((activity) => activity.id === backendOrder.activityId);
@@ -661,6 +662,7 @@ export function AppNavigator() {
               originalAmount: backendOrder.originalAmount,
               authorizedAmount,
               finalAmount: backendOrder.finalAmount,
+              manualRepayment: backendOrder.manualRepayment,
               quantity: backendOrder.totalCups,
               subtotal: backendOrder.originalAmount,
               items: backendOrder.items?.map(toLocalOrderItem) ?? order.items,
@@ -681,6 +683,9 @@ export function AppNavigator() {
               authorizationStatus: pendingRevision ? "pending" : backendOrder.authorizationStatus,
               originalAmount: pendingRevision?.originalAmount ?? backendOrder.originalAmount,
               authorizedAmount: pendingRevision ? 0 : authorizedAmount,
+              finalAmount: backendOrder.finalAmount,
+              captureAmount: capture?.captureAmount ?? report.captureAmount,
+              releasedAmount: capture?.releasedAmount ?? report.releasedAmount,
               provider: authorization?.provider ?? report.provider,
               providerReference: authorization?.providerAuthorizationId ?? report.providerReference,
               pendingRevisionId: pendingRevision?.id ?? null,

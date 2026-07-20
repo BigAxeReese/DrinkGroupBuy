@@ -30,6 +30,7 @@
 | `order_revisions`, `order_revision_items`, `order_revision_item_customizations` | 已授權訂單修改版本             | Order 1:N revisions；revision 1:N items                    |
 | `payment_authorizations`                                            | 付款預授權紀錄                 | Order 1:N authorizations                                   |
 | `payment_captures`                                                  | 請款結果                       | Authorization/order 1:N captures                           |
+| `payment_refunds`                                                   | 退款結果                       | Capture/order 1:N refunds                                  |
 | `payment_provider_events`                                           | 金流 provider event 原始紀錄   | 以邏輯方式關聯付款資源，保留未來 webhook 擴充空間           |
 | `activity_settlements`                                              | 截止後結算結果與適用門檻       | Activity 1:1 settlement                                    |
 | `pickup_credentials`                                                | 訂單取貨憑證                   | Order 1:1 credential                                       |
@@ -42,6 +43,8 @@
 - Seed data 會建立 users、roles、一組或多組 merchant/store、menu items、activities 與 tiers。
 - `orders`、`order_revisions`、payment、settlement、pickup 相關資料表目前仍偏向候選設計與付款模組串接準備，尚未完整連到所有 mobile 流程。
 - `payment_authorizations.provider` 目前支援 `line_pay` 與本機測試用 `mock_line_pay`；`mock_line_pay` 只用於開發 smoke 測試，不代表正式金流。
+- `payment_authorizations.payment_flow` 用來區分一般 `authorization` 與請款失敗後的 `direct_repayment`，避免重新付款被誤當成新的預授權。
+- `payment_refunds` 用來保存已請款成功後的退款紀錄；尚未請款的預授權取消仍使用 `void`，不寫入退款表。
 - `database/test/` 是舊 prototype fixture database，不應視為正式 schema 或目前 mobile 的權威資料來源。
 - 購物車與訂單客製化資料已朝 first normal form 調整：甜度、冰塊、加料與尺寸以 child rows 表示，不以 JSON array 當主要資料結構。
 - 活動容量目前由最高 `promotion_tiers.target_cups` 推導；除非未來明確新增獨立容量規則，`group_buy_activities.maximum_cups` 應與最高門檻一致。
@@ -60,6 +63,7 @@
 - 取貨憑證自取餐開始時間起保留 3 小時；若店家當日營業結束早於 3 小時，則保留至當日營業結束；24 小時營業店家保留 3 小時。
 - 取貨憑證到期後，訂單移至歷史訂單；逾期未取不自動退款，店家不再負原飲品保管責任。
 - 若顧客修改已預授權訂單，採 replacement flow：舊預授權先保留，新預授權成功後才替換；新預授權失敗時，原訂單與原預授權維持有效。
+- 已扣款成功後若需要退費，需建立 `payment_refunds` 並保留 provider event 與 audit log；全額退款完成後，訂單付款狀態可更新為 `refunded`。
 
 ## 已知 schema 缺口
 
@@ -95,3 +99,4 @@
 4. 取消活動：只允許截止前 30 分鐘以前取消，取消 eligible orders，處理 authorizations，寫入 history 與 audit log。
 5. 取貨：驗證 pickup credential，確認尚未過期，更新 pickup/order completion，並寫入 status history。
 6. 取貨逾期：依 `expires_at` 或等效規則將未取貨訂單更新為 `pickup_status = expired`，移至歷史訂單並寫入 status history。
+7. 退款：只允許已 capture 的付款進入 refund flow，以 idempotency key 避免重複退款，成功或失敗都寫入 provider event 與 audit log。

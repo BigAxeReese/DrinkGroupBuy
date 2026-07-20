@@ -297,8 +297,8 @@ PostgreSQL v1 決策：
 4. 已授權訂單修改 API 與 mobile revision + LINE Pay request 第一版已完成；仍需補失敗提示與重試入口。
 5. 仍需要完整 order revision 歷史查詢與 UI 呈現。
 6. 需要跨執行個體 settlement locking、重試佇列與失敗告警。
-7. 需要 LINE Pay refund。
-8. 需要 provider 狀態查詢、重試佇列與 idempotency 處理。
+7. LINE Pay refund 已有後端 admin/dev 切片；仍需要正式退款 UI、退款失敗重試與正式 sandbox 人工端對端測試。
+8. 需要 provider 狀態查詢、重試佇列與跨執行個體 idempotency 處理。
 9. 需要 pickup credential API。
 10. 尚未建立 PostgreSQL backend runtime adapter。
 

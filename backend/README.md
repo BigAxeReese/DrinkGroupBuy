@@ -39,6 +39,8 @@ Invoke-RestMethod http://localhost:3000/health
 | `DELETE` | `/api/admin/group-buy-activities/:activityId` | 管理員取消團購 |
 | `POST` | `/api/admin/group-buy-activities/:activityId/settle` | 管理員手動觸發單一團購結算 |
 | `POST` | `/api/payments/line-pay/request` | 建立 LINE Pay sandbox 授權請求 |
+| `POST` | `/api/payments/line-pay/repay` | 請款失敗後，以結算金額建立 LINE Pay 直接付款 |
+| `POST` | `/api/payments/line-pay/refund` | 管理員針對已請款交易建立 LINE Pay 退款 |
 | `GET` | `/api/payments/line-pay/confirm` | LINE Pay redirect confirm |
 | `GET` | `/api/payments/line-pay/cancel` | LINE Pay redirect cancel |
 
@@ -130,7 +132,7 @@ LINE Pay 相關程式目前集中在：
 | 檔案 | 用途 |
 | --- | --- |
 | `backend/payments/linePayClient.js` | 簽章並呼叫 LINE Pay API |
-| `backend/payments/linePayService.js` | 串接訂單檢查、授權建立、confirm、cancel、void 與 capture |
+| `backend/payments/linePayService.js` | 串接訂單檢查、授權建立、confirm、cancel、void、capture 與 refund |
 | `backend/payments/linePayPendingStore.js` | LINE Pay redirect 前後的記憶體快取；實際 confirm/cancel 以 DB 查找為主 |
 | `backend/payments/settlementService.js` | 單一團購結算流程，依結果批次 capture / void |
 | `backend/linePayClient.js` | 舊路徑相容匯出 |
@@ -143,7 +145,7 @@ LINE Pay 相關程式目前集中在：
 npm run settlement:smoke
 ```
 
-這個指令會備份並還原 `database/drink-group-buy-dev.sqlite`，中途使用乾淨 schema 建立 `mock_line_pay` 預授權資料，確認達標時 capture、未達標時依顧客選項 capture 或 void，驗證 scheduler 會抓到已截止團購、已授權訂單 revision 會在新授權成功後才套用並 void 舊授權，也會驗證失敗請款每 30 秒重試且最多建立三筆嘗試。它不會呼叫外部 LINE Pay API，也不是正式付款流程。
+這個指令會備份並還原 `database/drink-group-buy-dev.sqlite`，中途使用乾淨 schema 建立 `mock_line_pay` 預授權資料，確認達標時 capture、未達標時依顧客選項 capture 或 void，驗證 scheduler 會抓到已截止團購、已授權訂單 revision 會在新授權成功後才套用並 void 舊授權，也會驗證失敗請款每 30 秒重試且最多建立三筆嘗試、取餐前 15 分鐘以前的手動重新付款與防重複入帳，以及全額退款與防重複退款。它不會呼叫外部 LINE Pay API，也不是正式付款流程。
 
 後端啟動時會啟動 deadline settlement scheduler。預設每 30 秒掃描已截止、尚未結算的團購，並呼叫同一套 settlement service。相關設定：
 
@@ -160,7 +162,7 @@ SETTLEMENT_SCHEDULER_ALLOW_PRODUCTION=false
 
 - 管理員登入尚未設定。
 - 已授權訂單修改 API 與 mobile 重新預授權第一版已完成；仍需補 provider 狀態查詢、自動重試 queue 與更完整的錯誤提示。
-- LINE Pay refund 尚未完成。
+- LINE Pay refund 目前只有管理員後端 API 與 smoke test，尚未做正式操作 UI、退款失敗重試 queue 與正式 sandbox 人工端對端測試。
 - LINE Pay webhook 第一版不列為必要入口；付款同步先以 confirm/cancel redirect、資料庫狀態與後續 provider 狀態查詢為主。
 - deadline 自動結算已先以單一 backend process interval 實作；失敗處理規則已決定以自動重試為主，不做人工處理介面；跨執行個體 locking、重試佇列與告警尚未完成。
 - 目前仍是開發資料庫，不是 production migration。

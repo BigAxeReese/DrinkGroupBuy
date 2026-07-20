@@ -10,9 +10,11 @@
 
 - Firebase Auth + Google Login 已實作，backend 會驗證 Firebase ID token，再依開發資料庫的 `users.firebase_uid`、`user_roles` 與 `merchant_users` 判斷身份。
 - 開發資料庫仍使用 SQLite，主要 schema、seed 與付款相關資料表已建立；PostgreSQL schema / seed 草稿已在本機容器驗證，但尚未接入 backend runtime，目前還不是正式資料庫。
-- LINE Pay 付款主幹已拆成獨立模組，已有 request、confirm、cancel、capture、void、訂單修改後重新預授權與截止結算排程。
-- 付款結算 smoke test 已於 2026-07-18 通過，包含達標請款、未達標原價請款／取消授權、排程結算、修改訂單替換授權與截止後拒絕預授權。
+- LINE Pay 付款主幹已拆成獨立模組，已有 request、confirm、cancel、capture、void、refund、訂單修改後重新預授權與截止結算排程。
+- 付款結算 smoke test 已於 2026-07-19 通過，包含達標請款、未達標原價請款／取消授權、排程結算、修改訂單替換授權、截止後拒絕預授權、三次自動請款上限、取餐前 15 分鐘以前的手動重新付款，以及退款 idempotency。
 - 開發資料庫曾暴露同一筆 LINE Pay 失敗請款被無限重試的問題；目前已改為截止時第一次請款，暫時性失敗後每 30 秒重試，總計最多三次，並在重試前查詢 provider 狀態。
+- 2026-07-19 已將該問題產生的 6,496 筆重複失敗紀錄壓縮為 1 筆原始失敗紀錄與 1 筆稽核摘要，共移除 6,495 筆；清理前 SQLite 備份保留於本機 `database/backups/`，後續可用 `npm run payments:cleanup:preview` 預覽及 `npm run payments:cleanup` 安全清理同類資料。
+- 三次自動請款失敗或遇到不可重試錯誤後，顧客可在取餐開始前 15 分鐘以前使用結算後金額直接重新付款；後端會先查原交易狀態並解除仍有效的原授權，付款成功後訂單改為已扣款並加入製作流程。
 - 系統分析書已整理為五大功能，五組描述性綱目已更新，並已抽出 `docs/system-analysis-extracted.md`；各小節使用個案描述與活動圖仍待更新。
 
 ## 2026-07-05 登入方向更新
@@ -131,6 +133,7 @@
 - LINE Pay confirm 在寫入 `authorized` 前會用資料庫交易重新檢查團購容量；容量不足時會把 authorization 標記為 `failed`，訂單不會計入團購。
 - LINE Pay void 已加入付款模組；容量不足但 provider confirm 已成功時，系統會自動嘗試 void，成功後寫入 `authorization_voided`、provider event、status history 與 audit log；void 失敗時會留下 provider event 與 audit log。
 - LINE Pay capture 已加入付款模組；成功後會寫入 `payment_captures`、更新 authorization/order 狀態與 `orders.final_amount`，失敗時會留下 failed capture、provider event 與 audit log。
+- LINE Pay refund 已加入付款模組；admin/dev 後端 API 可針對已 capture 交易建立全額或部分退款，寫入 `payment_refunds`、provider event 與 audit log，並用 idempotency key 防止重複退款；全額退款後訂單付款狀態會更新為 `refunded`。
 - 單一團購手動結算 API 已加入；admin 可觸發已截止活動結算，系統會計算最終級距，對有效授權訂單執行 capture 或 void，並寫入 `activity_settlements`。
 - deadline settlement scheduler 已加入後端啟動流程；預設每 30 秒掃描已截止、尚未結算的團購並呼叫同一套 settlement service。`LINE_PAY_ENV=production` 時需要明確允許才會啟動。
 - 本機付款結算 smoke script 已加入：`npm run settlement:smoke` 會用乾淨 schema 與 `mock_line_pay` 驗證達標 capture、未達標 fallback capture / void，以及 scheduler due activity 結算，並在測試後還原開發 SQLite。
@@ -144,7 +147,7 @@
 尚未完成：
 
 - 已授權後的訂單修改 / 重新授權 mobile 第一版已串接；仍需把訂單列表完全改為後端權威資料。
-- LINE Pay refund。
+- LINE Pay refund 目前只有 admin/dev 後端 API 與 smoke test；尚未做正式操作 UI、退款失敗重試 queue 與正式 sandbox 人工端對端測試。
 - LINE Pay webhook 第一版不列為必要入口；目前付款同步以 confirm/cancel redirect、polling 與後續 provider 狀態查詢為主。
 - 取貨 API。
 - 付款結算失敗規則已決定：第一版以自動重試為主，不做人工處理介面；失敗中的訂單不進入製作或取貨。
@@ -156,7 +159,6 @@
 
 - `POST /api/orders` 只適用於已存在於後端 SQLite 的活動。
 - 如果 mobile local activity 已過期或不存在於後端，送單會失敗。
-- 開發 SQLite 仍保留過去無限重試所產生的 6,496 筆 `failed` payment capture 紀錄；新邏輯會將這筆授權視為已超過三次上限，不再呼叫 LINE Pay 或新增失敗紀錄，但舊紀錄尚未清理。
 
 ## Database / 資料庫
 
@@ -188,7 +190,7 @@ database/seed-dev.sql
 - `cart_drafts` / `cart_draft_items` / `cart_draft_item_customizations`
 - `orders` / `order_items` / `order_item_customizations`
 - `order_revisions` / `order_revision_items` / `order_revision_item_customizations`
-- `payment_authorizations` / `payment_captures` / `payment_provider_events`
+- `payment_authorizations` / `payment_captures` / `payment_refunds` / `payment_provider_events`
 - `activity_settlements`
 - `pickup_credentials`
 - `status_history`

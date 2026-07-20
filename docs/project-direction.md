@@ -65,7 +65,7 @@ API：groupBuyActivity
 
 - 購物車完整後端同步。
 - 顧客訂單列表與訂單修改完整後端同步。
-- LINE Pay refund、provider 狀態查詢與付款重試佇列。
+- LINE Pay refund 已有後端 admin/dev 切片；正式 UI、退款失敗重試、provider 狀態查詢與付款重試佇列仍待補。
 - 商家接單、完成訂單、取貨憑證 API。
 - App 啟動時完整載入後端活動、菜單與訂單。
 

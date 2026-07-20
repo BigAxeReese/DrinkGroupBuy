@@ -100,6 +100,17 @@
 6. webhook 或 redirect 重複送達時，系統必須用 provider transaction id、event type、idempotency key 與資料庫狀態轉換規則去重。
 7. 若較舊事件晚到，例如已 `captured` 後又收到 `authorized` 類事件，系統不得倒退狀態，只保存事件並略過狀態更新。
 
+### 退款
+
+1. 尚未請款成功的預授權不可退款，應使用 `void` 取消授權。
+2. 已請款成功的交易若需要退費，應使用 LINE Pay refund。
+3. 退款可以是全額退款，也可以是部分退款。
+4. 全額退款完成後，訂單付款狀態更新為 `refunded`，顧客端與店家端顯示「已退款」。
+5. 部分退款完成後，系統保留 `payment_refunds` 紀錄；訂單是否另顯示部分退款，待後續 UI 規則決定。
+6. 每次退款必須有 idempotency key；同一 key 重複送出時不得重複呼叫 provider 造成重複退款。
+7. 退款成功與失敗都必須寫入 `payment_refunds`、`payment_provider_events` 與 `audit_logs`。
+8. 第一版退款 API 先作為 admin / dev 後端操作，不先提供顧客或店家 App 操作入口。
+
 ### 結算失敗與自動重試
 
 1. 第一版以系統自動重試為主，不做人工處理介面。
@@ -158,17 +169,18 @@
 1. 付款邏輯維持集中在 `backend/payments/`。
 2. LINE Pay secret 只放在後端本機環境檔。
 3. 付款狀態必須保存於後端資料庫，不以 mobile local state 作為主資料。
-4. 需要保存預授權、請款、取消授權、provider event 與訂單替換紀錄。
-5. 預授權、請款、取消授權與結算 job 需要 idempotency，避免重複執行造成金額錯誤。
+4. 需要保存預授權、請款、取消授權、退款、provider event 與訂單替換紀錄。
+5. 預授權、請款、取消授權、退款與結算 job 需要 idempotency，避免重複執行造成金額錯誤。
 6. 預授權前與訂單替換正式生效前，都需要交易安全的容量檢查。
-7. 上正式金流請款前，需要補齊結算重試 queue、provider 狀態查詢與 audit log。
+7. 上正式金流請款前，需要補齊結算重試 queue、provider 狀態查詢與告警。
 8. LINE Pay cancel redirect 不可只清除記憶體暫存，也必須更新 `payment_authorizations`、`payment_provider_events` 與 `status_history`。
 9. LINE Pay confirm/cancel redirect 應以後端資料庫查找 pending authorization；記憶體快取只能當加速輔助，不能是唯一依據。
 10. LINE Pay confirm 寫入成功前需使用交易鎖定容量檢查；容量不足時需留下 provider event、status history 與 audit log。
 11. LINE Pay void 使用官方 `POST /v3/payments/authorizations/{transactionId}/void`；成功後更新 `payment_authorizations.status = authorization_voided`，並同步更新訂單付款狀態與稽核紀錄；失敗時至少記錄 provider event 與 audit log。
 12. LINE Pay capture 使用官方 `POST /v3/payments/authorizations/{transactionId}/capture`；成功後新增 `payment_captures`，更新 `payment_authorizations.status = captured`、`orders.payment_status = captured` 與 `orders.final_amount`，並記錄 provider event、status history 與 audit log。
-13. 結算的折扣分攤規則：將適用級距的 `promotion_tiers.discount_amount` 平均到截止時有效授權總杯數，再依各訂單杯數計算折扣；若無法整除，未分配餘額作為系統維運補貼。
-14. 本機開發可使用 `mock_line_pay` 測試截止結算，不呼叫外部 LINE Pay API；`npm run settlement:smoke` 會使用乾淨 schema 暫時建立 mock 預授權訂單，驗證達標 capture、未達標 fallback capture、void、scheduler due activity 結算與 order revision 套用，並在測試後還原開發資料庫。
+13. LINE Pay refund 使用官方 `POST /v3/payments/{transactionId}/refund`；成功後新增 `payment_refunds`，全額退款時更新 `orders.payment_status = refunded`，並記錄 provider event 與 audit log。
+14. 結算的折扣分攤規則：將適用級距的 `promotion_tiers.discount_amount` 平均到截止時有效授權總杯數，再依各訂單杯數計算折扣；若無法整除，未分配餘額作為系統維運補貼。
+15. 本機開發可使用 `mock_line_pay` 測試截止結算與退款，不呼叫外部 LINE Pay API；`npm run settlement:smoke` 會使用乾淨 schema 暫時建立 mock 預授權訂單，驗證達標 capture、未達標 fallback capture、void、scheduler due activity 結算、order revision 套用與 refund idempotency，並在測試後還原開發資料庫。
 
 ## 尚未決定
 

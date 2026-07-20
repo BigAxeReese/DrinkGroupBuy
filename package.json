@@ -9,6 +9,8 @@
     "mobile:android": "npm --prefix mobile run android",
     "db:init": "node database/init-dev-db.js",
     "db:seed": "node database/seed-dev-db.js",
+    "payments:cleanup:preview": "node scripts/compact-duplicate-payment-failures.js",
+    "payments:cleanup": "node scripts/compact-duplicate-payment-failures.js --apply --vacuum",
     "settlement:smoke": "node scripts/settlement-smoke.js",
     "auth:map:customer": "node scripts/map-firebase-user.js customer",
     "auth:map:customer-b": "node scripts/map-firebase-user.js customer-b",

@@ -19,7 +19,8 @@ export const paymentStatusLabels = {
   captured: "已付款",
   authorization_voided: "授權已取消",
   released: "已釋放授權",
-  failed: "扣款失敗"
+  failed: "扣款失敗",
+  refunded: "已退款"
 };
 
 export const discountStatusLabels = {

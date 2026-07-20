@@ -5,7 +5,7 @@ import { PlaceholderBox } from "../components/PlaceholderBox";
 import { PrimaryButton } from "../components/PrimaryButton";
 import { StatusBadge } from "../components/StatusBadge";
 import { formatCurrency } from "../utils/calculations";
-import { requestLinePayAuthorization } from "../utils/apiClient";
+import { requestLinePayAuthorization, requestLinePayRepayment } from "../utils/apiClient";
 
 const LINE_PAY_SYNC_POLL_INTERVAL_MS = 3000;
 const LINE_PAY_SYNC_POLL_TIMEOUT_MS = 90000;
@@ -84,19 +84,37 @@ export function PaymentAuthorizationScreen({ navigation, route, appState, action
 
   const isAuthorized = payment.paymentStatus === "authorized" || payment.status === "authorized";
   const isCaptured = payment.paymentStatus === "captured" || payment.status === "captured";
+  const isManualRepayment = route.params?.mode === "manualRepayment"
+    || payment.paymentStatus === "failed"
+    || order?.paymentStatus === "failed";
+  const manualRepayment = order?.manualRepayment ?? null;
+  const repaymentExpired = manualRepayment?.reason === "manual_repayment_expired";
   const canCapture = payment.discountStatus === "qualified";
 
   return (
     <MobileScreen
-      title="付款預授權"
+      title={isManualRepayment ? "重新付款" : "付款預授權"}
       onBack={() => navigation.back()}
       onMemberPress={memberAction}
     >
-      <Section title="預授權狀態">
+      <Section title={isManualRepayment ? "付款狀態" : "預授權狀態"}>
         <StatusBadge owner="payment" value={payment.status} />
-        <Text style={styles.amount}>{formatCurrency(payment.originalAmount)}</Text>
-        <Text style={styles.meta}>目前僅預授權，尚未正式扣款。</Text>
-        <Text style={styles.meta}>達標後將依優惠價請款。</Text>
+        <Text style={styles.amount}>{formatCurrency(isManualRepayment ? (manualRepayment?.finalAmount ?? payment.finalAmount ?? payment.originalAmount) : payment.originalAmount)}</Text>
+        {isManualRepayment ? (
+          <>
+            <Text style={styles.meta}>自動扣款已停止，這次將依結算後金額直接付款。</Text>
+            <Text style={styles.meta}>
+              {repaymentExpired
+                ? "已超過重新付款期限。"
+                : `可付款至 ${formatRepaymentCutoff(manualRepayment?.cutoffAt)}。`}
+            </Text>
+          </>
+        ) : (
+          <>
+            <Text style={styles.meta}>目前僅預授權，尚未正式扣款。</Text>
+            <Text style={styles.meta}>達標後將依優惠價請款。</Text>
+          </>
+        )}
       </Section>
 
       <Section title="授權金額">
@@ -113,16 +131,32 @@ export function PaymentAuthorizationScreen({ navigation, route, appState, action
       </Section>
 
       <Section title="LINE Pay sandbox">
-        <Text style={styles.meta}>此按鈕會向 backend 建立 LINE Pay 預授權請求，並開啟 LINE Pay 付款頁。</Text>
-        <Text style={styles.meta}>完成授權後會自動刷新 backend 訂單狀態；目前只做授權 confirm，不會正式請款。</Text>
+        <Text style={styles.meta}>
+          {isManualRepayment
+            ? "此按鈕會開啟 LINE Pay，並以結算後金額直接付款。"
+            : "此按鈕會向 backend 建立 LINE Pay 預授權請求，並開啟 LINE Pay 付款頁。"}
+        </Text>
+        <Text style={styles.meta}>
+          {isManualRepayment
+            ? "付款成功後會自動更新訂單並加入店家製作清單。"
+            : "完成授權後會自動刷新 backend 訂單狀態；目前只做授權 confirm，不會正式請款。"}
+        </Text>
         {linePayMessage ? (
           <Text style={linePayStatus === "error" ? styles.errorText : styles.successText}>{linePayMessage}</Text>
         ) : null}
         <PrimaryButton
-          label={linePayStatus === "loading" ? "正在建立 LINE Pay 請求..." : "前往 LINE Pay 預授權"}
+          label={repaymentExpired
+            ? "已超過重新付款期限"
+            : linePayStatus === "loading"
+              ? "正在建立 LINE Pay 請求..."
+              : isManualRepayment
+                ? "前往 LINE Pay 重新付款"
+                : "前往 LINE Pay 預授權"}
+          disabled={repaymentExpired}
           onPress={() => {
             if (linePayStatus !== "loading") {
-              startLinePayAuthorization({
+              const startPayment = isManualRepayment ? startLinePayRepayment : startLinePayAuthorization;
+              startPayment({
                 payment,
                 order,
                 routeRevision: {
@@ -164,14 +198,14 @@ export function PaymentAuthorizationScreen({ navigation, route, appState, action
         </Section>
       ) : null}
 
-      {!isAuthorized && !isCaptured ? (
+      {!isManualRepayment && !isAuthorized && !isCaptured ? (
         <PrimaryButton label="模擬預授權成功" onPress={() => actions.authorizeLinePayPayment(payment.orderId)} />
-      ) : (
+      ) : !isManualRepayment ? (
         <PrimaryButton
           label={isCaptured ? "已完成優惠價請款" : canCapture ? "模擬達標後部分請款" : "等待達標後請款"}
           onPress={() => !isCaptured && canCapture && actions.captureQualifiedPayment(payment.orderId, payment.finalAmount ?? Math.round(payment.originalAmount * 0.83))}
         />
-      )}
+      ) : null}
       <PrimaryButton label="前往取貨資訊" variant="secondary" onPress={() => navigation.go("pickupInfo", { orderId: payment.orderId })} />
     </MobileScreen>
   );
@@ -203,6 +237,61 @@ async function syncBackendOrder({
       setSyncMessage(error.message);
     }
     throw error;
+  }
+}
+
+async function startLinePayRepayment({
+  payment,
+  order,
+  actions,
+  pollIntervalRef,
+  pollTimeoutRef,
+  pollInFlightRef,
+  setLinePayStatus,
+  setLinePayMessage,
+  setSyncStatus,
+  setSyncMessage
+}) {
+  try {
+    if (!payment || !order) {
+      throw new Error("找不到可重新付款的訂單資料");
+    }
+
+    setLinePayStatus("loading");
+    setLinePayMessage("");
+    const payload = await requestLinePayRepayment({
+      orderId: order.id,
+      productName: order.itemName || "DrinkGroupBuy 飲料訂單",
+      packageName: payment.recipientName || "DrinkGroupBuy"
+    });
+    const paymentUrl = payload.paymentUrl?.web || payload.paymentUrl?.app;
+    if (!paymentUrl) throw new Error("LINE Pay 沒有回傳付款網址");
+
+    await Linking.openURL(paymentUrl);
+    setLinePayStatus("ready");
+    setLinePayMessage("已開啟 LINE Pay。付款完成後回到 App，訂單狀態會自動刷新。");
+    startLinePaySyncPolling({
+      orderId: payment.orderId,
+      actions,
+      pollIntervalRef,
+      pollTimeoutRef,
+      pollInFlightRef,
+      setSyncStatus,
+      setSyncMessage,
+      finishedStatuses: new Set(["captured"]),
+      waitingMessage: "等待 LINE Pay 重新付款結果。"
+    });
+  } catch (error) {
+    setLinePayStatus("error");
+    setLinePayMessage(getManualRepaymentErrorMessage(error));
+    if (error.payload?.status === "already_paid") {
+      syncBackendOrder({
+        orderId: payment.orderId,
+        actions,
+        setSyncStatus,
+        setSyncMessage
+      }).catch(() => {});
+    }
   }
 }
 
@@ -300,13 +389,15 @@ function startLinePaySyncPolling({
   pollTimeoutRef,
   pollInFlightRef,
   setSyncStatus,
-  setSyncMessage
+  setSyncMessage,
+  finishedStatuses = PAYMENT_SYNC_FINISHED_STATUSES,
+  waitingMessage = "等待 LINE Pay 授權結果，完成後會自動更新訂單狀態。"
 }) {
   stopLinePaySyncPolling({ pollIntervalRef, pollTimeoutRef });
   const deadline = Date.now() + LINE_PAY_SYNC_POLL_TIMEOUT_MS;
 
   setSyncStatus("loading");
-  setSyncMessage("等待 LINE Pay 授權結果，完成後會自動更新訂單狀態。");
+  setSyncMessage(waitingMessage);
 
   const poll = async () => {
     if (pollInFlightRef.current) return;
@@ -317,7 +408,7 @@ function startLinePaySyncPolling({
       const paymentStatus = result.order.paymentStatus;
       const revisionStillPending = orderRevisionId && result.order.pendingRevision?.id === orderRevisionId;
 
-      if (PAYMENT_SYNC_FINISHED_STATUSES.has(paymentStatus) && !revisionStillPending) {
+      if (finishedStatuses.has(paymentStatus) && !revisionStillPending) {
         stopLinePaySyncPolling({ pollIntervalRef, pollTimeoutRef });
         setSyncStatus("ready");
         setSyncMessage(`已同步後端狀態：${paymentStatus}`);
@@ -361,6 +452,32 @@ function getLinePayErrorMessage(error) {
     return "此訂單已有一筆進行中的 LINE Pay 授權，請先完成該付款流程或稍後再試。";
   }
   return error.message;
+}
+
+function getManualRepaymentErrorMessage(error) {
+  const messages = {
+    already_paid: "這筆訂單已完成付款，正在更新訂單狀態。",
+    repayment_already_pending: "已有一筆重新付款流程進行中，請完成該流程或稍後再試。",
+    repayment_request_in_progress: "正在建立重新付款，請勿重複操作。",
+    automatic_capture_not_finished: "系統仍在自動請款，暫時不能手動重新付款。",
+    manual_repayment_expired: "已超過取餐前 15 分鐘，不能再重新付款。",
+    original_payment_state_unknown: "暫時無法確認原付款狀態，請稍後再試。",
+    original_authorization_void_failed: "原付款授權尚未解除，請稍後再試。"
+  };
+  return messages[error.payload?.status] || error.message;
+}
+
+function formatRepaymentCutoff(value) {
+  if (!value) return "取餐開始前 15 分鐘";
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return "取餐開始前 15 分鐘";
+  return date.toLocaleString("zh-TW", {
+    month: "2-digit",
+    day: "2-digit",
+    hour: "2-digit",
+    minute: "2-digit",
+    hour12: false
+  });
 }
 
 function getRevisionPaymentContext(order, payment, routeRevision = null) {

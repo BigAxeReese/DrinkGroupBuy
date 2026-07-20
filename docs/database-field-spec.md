@@ -266,17 +266,19 @@ PostgreSQL draft 另有 `phone_verified_at`、`email_verified_at`、`last_login_
 | --- | --------------------------- | ------------------- | ------- | --------- | --------------------------------------------------------------------- | --------------------------- |
 | 1   | `id`                        | 預授權編號          | TEXT    | PK        | 建議使用 `pay_auth_` 加唯一後綴                                       | `pay_auth_001`              |
 | 2   | `order_id`                  | 訂單編號            | TEXT    | FK, INDEX | References `orders(id)`                                               | `order_001`                 |
-| 3   | `provider`                  | 金流服務商          | TEXT    |           | `line_pay`, `mock_line_pay`                                           | `line_pay`                  |
-| 4   | `status`                    | 預授權狀態          | TEXT    |           | `pending`, `authorized`, `captured`, `authorization_voided`, `failed` | `authorized`                |
-| 5   | `original_amount`           | 原始金額            | INTEGER |           | `>= 0`                                                                | `280`                       |
-| 6   | `authorized_amount`         | 預授權金額          | INTEGER |           | `>= 0`；通常等於 original amount                                      | `280`                       |
-| 7   | `provider_authorization_id` | Provider 預授權編號 | TEXT    |           | Mock flow 可為 NULL                                                   | `linepay-auth-123`          |
-| 8   | `expires_at`                | 預授權到期時間      | TEXT    |           | 可為 NULL；LINE Pay 分離式請款時取自 `authorizationExpireDate`          | `2026-06-26T10:00:00+08:00` |
-| 9   | `authorized_at`             | 預授權成功時間      | TEXT    |           | 預授權成功前可為 NULL                                                 | `2026-06-25T10:16:00+08:00` |
-| 10  | `voided_at`                 | 取消預授權時間      | TEXT    |           | void 前可為 NULL                                                      | `2026-06-25T15:30:00+08:00` |
-| 11  | `failure_reason`            | 失敗原因            | TEXT    |           | 可為 NULL                                                             | `provider_timeout`          |
-| 12  | `created_at`                | 建立時間            | TEXT    |           | ISO datetime string                                                   | `2026-06-25T10:15:00+08:00` |
-| 13  | `updated_at`                | 更新時間            | TEXT    |           | ISO datetime string                                                   | `2026-06-25T10:16:00+08:00` |
+| 3   | `order_revision_id`         | 訂單修改版本編號    | TEXT    | FK        | 可為 NULL；修改訂單重新預授權時使用                                   | `order_revision_001`        |
+| 4   | `provider`                  | 金流服務商          | TEXT    |           | `line_pay`, `mock_line_pay`                                           | `line_pay`                  |
+| 5   | `payment_flow`              | 付款流程            | TEXT    |           | `authorization`, `direct_repayment`                                   | `direct_repayment`          |
+| 6   | `status`                    | 付款處理狀態        | TEXT    |           | `pending`, `authorized`, `captured`, `authorization_voided`, `failed` | `authorized`                |
+| 7   | `original_amount`           | 原始金額            | INTEGER |           | `>= 0`                                                                | `280`                       |
+| 8   | `authorized_amount`         | 預授權或付款金額    | INTEGER |           | `>= 0`                                                                | `280`                       |
+| 9   | `provider_authorization_id` | Provider 交易編號   | TEXT    |           | Mock flow 可為 NULL                                                   | `linepay-auth-123`          |
+| 10  | `expires_at`                | 預授權到期時間      | TEXT    |           | 可為 NULL；LINE Pay 分離式請款時取自 `authorizationExpireDate`          | `2026-06-26T10:00:00+08:00` |
+| 11  | `authorized_at`             | 授權或付款成功時間  | TEXT    |           | 成功前可為 NULL                                                       | `2026-06-25T10:16:00+08:00` |
+| 12  | `voided_at`                 | 取消預授權時間      | TEXT    |           | void 前可為 NULL                                                      | `2026-06-25T15:30:00+08:00` |
+| 13  | `failure_reason`            | 失敗原因            | TEXT    |           | 可為 NULL                                                             | `provider_timeout`          |
+| 14  | `created_at`                | 建立時間            | TEXT    |           | ISO datetime string                                                   | `2026-06-25T10:15:00+08:00` |
+| 15  | `updated_at`                | 更新時間            | TEXT    |           | ISO datetime string                                                   | `2026-06-25T10:16:00+08:00` |
 
 ## `payment_captures`
 
@@ -297,6 +299,24 @@ PostgreSQL draft 另有 `phone_verified_at`、`email_verified_at`、`last_login_
 | 13  | `next_retry_at`            | 下次重試時間      | TEXT    |     | 可重試失敗後 30 秒；否則為 NULL           | `2026-06-25T15:30:30+08:00`  |
 | 14  | `created_at`               | 建立時間          | TEXT    |     | ISO datetime string                      | `2026-06-25T15:30:00+08:00`  |
 | 15  | `updated_at`               | 更新時間          | TEXT    |     | ISO datetime string                      | `2026-06-25T15:31:00+08:00`  |
+
+## `payment_refunds`
+
+| No. | Field name                 | 中文名稱          | Type    | Key    | 規則 / 格式 / 範圍                       | Example                     |
+| --- | -------------------------- | ----------------- | ------- | ------ | ---------------------------------------- | --------------------------- |
+| 1   | `id`                       | 退款編號          | TEXT    | PK     | 建議使用 `pay_refund_` 加唯一後綴        | `pay_refund_001`            |
+| 2   | `payment_capture_id`       | 請款編號          | TEXT    | FK     | References `payment_captures(id)`        | `pay_capture_001`           |
+| 3   | `payment_authorization_id` | 預授權編號        | TEXT    | FK     | References `payment_authorizations(id)`  | `pay_auth_001`              |
+| 4   | `order_id`                 | 訂單編號          | TEXT    | FK     | References `orders(id)`                  | `order_001`                 |
+| 5   | `provider`                 | 金流服務商        | TEXT    |        | `line_pay`, `mock_line_pay`              | `line_pay`                  |
+| 6   | `status`                   | 退款狀態          | TEXT    |        | `pending`, `refunded`, `failed`          | `refunded`                  |
+| 7   | `refund_amount`            | 退款金額          | INTEGER |        | `> 0`，不得超過該請款剩餘可退款金額       | `248`                       |
+| 8   | `provider_refund_id`       | Provider 退款編號 | TEXT    |        | 成功前可為 NULL                          | `linepay-refund-123`        |
+| 9   | `idempotency_key`          | 冪等鍵            | TEXT    | UNIQUE | 防止同一退款要求被重複執行               | `refund-order-001-full`     |
+| 10  | `refunded_at`              | 退款完成時間      | TEXT    |        | 成功前可為 NULL                          | `2026-06-25T16:00:00+08:00` |
+| 11  | `failure_reason`           | 失敗原因          | TEXT    |        | 可為 NULL                                | `provider_timeout`          |
+| 12  | `created_at`               | 建立時間          | TEXT    |        | ISO datetime string                      | `2026-06-25T15:59:00+08:00` |
+| 13  | `updated_at`               | 更新時間          | TEXT    |        | ISO datetime string                      | `2026-06-25T16:00:00+08:00` |
 
 ## `payment_provider_events`
 

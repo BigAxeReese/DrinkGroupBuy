@@ -247,6 +247,8 @@ CREATE TABLE payment_authorizations (
   order_id TEXT NOT NULL REFERENCES orders(id),
   order_revision_id TEXT REFERENCES order_revisions(id),
   provider TEXT NOT NULL CHECK (provider IN ('line_pay', 'mock_line_pay')),
+  payment_flow TEXT NOT NULL DEFAULT 'authorization'
+    CHECK (payment_flow IN ('authorization', 'direct_repayment')),
   status TEXT NOT NULL DEFAULT 'pending'
     CHECK (status IN ('pending', 'authorized', 'captured', 'authorization_voided', 'failed')),
   original_amount INTEGER NOT NULL CHECK (original_amount >= 0),
@@ -283,6 +285,25 @@ CREATE TABLE payment_captures (
 
 CREATE INDEX idx_payment_captures_authorization_attempt
 ON payment_captures(payment_authorization_id, attempt_number);
+
+CREATE TABLE payment_refunds (
+  id TEXT PRIMARY KEY,
+  payment_capture_id TEXT NOT NULL REFERENCES payment_captures(id),
+  payment_authorization_id TEXT NOT NULL REFERENCES payment_authorizations(id),
+  order_id TEXT NOT NULL REFERENCES orders(id),
+  provider TEXT NOT NULL CHECK (provider IN ('line_pay', 'mock_line_pay')),
+  status TEXT NOT NULL DEFAULT 'pending' CHECK (status IN ('pending', 'refunded', 'failed')),
+  refund_amount INTEGER NOT NULL CHECK (refund_amount > 0),
+  provider_refund_id TEXT,
+  idempotency_key TEXT UNIQUE,
+  refunded_at TEXT,
+  failure_reason TEXT,
+  created_at TEXT NOT NULL,
+  updated_at TEXT NOT NULL
+);
+
+CREATE INDEX idx_payment_refunds_capture ON payment_refunds(payment_capture_id);
+CREATE INDEX idx_payment_refunds_order ON payment_refunds(order_id);
 
 CREATE TABLE payment_provider_events (
   id TEXT PRIMARY KEY,

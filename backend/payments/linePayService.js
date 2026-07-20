@@ -1,11 +1,17 @@
+const { randomUUID } = require("node:crypto");
 const {
   authorizeLinePayPaymentInDatabase,
   cancelPendingLinePayAuthorizationInDatabase,
   captureLinePayAuthorizationInDatabase,
+  completeManualLinePayRepaymentInDatabase,
+  completeLinePayRefundInDatabase,
   createPendingLinePayAuthorization,
+  createPendingLinePayRefundInDatabase,
+  failLinePayRefundInDatabase,
   getLinePayAuthorizationContext,
   getLatestLinePayAuthorizationForOrder,
   getLatestLinePayAuthorizationForOrderRevision,
+  getManualLinePayRepaymentContext,
   getOrderPaymentContext,
   getOrderRevisionPaymentContext,
   recordLinePayCaptureFailureInDatabase,
@@ -17,6 +23,7 @@ const {
   confirmLinePayPayment,
   getLinePayConfig,
   requestLinePayPayment,
+  refundLinePayPayment: refundLinePayPaymentTransaction,
   retrieveLinePayPaymentDetails,
   voidLinePayPaymentAuthorization
 } = require("./linePayClient");
@@ -26,6 +33,8 @@ const {
   findPendingLinePayPayment,
   savePendingLinePayPayment
 } = require("./linePayPendingStore");
+
+const manualRepaymentRequestsInFlight = new Set();
 
 class PaymentServiceError extends Error {
   constructor(statusCode, payload) {
@@ -42,6 +51,18 @@ function createMockLinePayPayload(returnMessage, transactionId, orderId) {
     info: {
       transactionId,
       orderId
+    }
+  };
+}
+
+function createMockLinePayRefundPayload(transactionId, refundAmount) {
+  return {
+    returnCode: "0000",
+    returnMessage: "mock_refund",
+    info: {
+      refundTransactionId: `mock-refund-${transactionId}`,
+      refundTransactionDate: new Date().toISOString(),
+      refundAmount
     }
   };
 }
@@ -276,23 +297,188 @@ async function requestLinePayAuthorization({ authUser, body }) {
   };
 }
 
+async function requestManualLinePayRepayment({ authUser, body, now } = {}) {
+  if (!body?.orderId) {
+    throw new PaymentServiceError(400, { error: "Missing required field: orderId" });
+  }
+  if (!authUser?.roles?.includes("customer")) {
+    throw new PaymentServiceError(403, { error: "Customer role required" });
+  }
+  if (manualRepaymentRequestsInFlight.has(body.orderId)) {
+    throw new PaymentServiceError(409, {
+      error: "Manual repayment request is already being created",
+      status: "repayment_request_in_progress"
+    });
+  }
+
+  manualRepaymentRequestsInFlight.add(body.orderId);
+  try {
+    const repayment = getManualLinePayRepaymentContext(body.orderId, { now });
+    if (!repayment) {
+      throw new PaymentServiceError(404, { error: "Order not found" });
+    }
+    if (repayment.customerUserId !== authUser.id && !authUser.roles.includes("admin")) {
+      throw new PaymentServiceError(403, { error: "Order access denied" });
+    }
+    if (!repayment.eligible) {
+      throw new PaymentServiceError(409, {
+        error: manualRepaymentErrorMessage(repayment.reason),
+        status: repayment.reason,
+        manualRepayment: repayment
+      });
+    }
+
+    const originalAuthorization = repayment.originalAuthorization;
+    if (!originalAuthorization?.providerAuthorizationId) {
+      throw new PaymentServiceError(409, {
+        error: "Original LINE Pay transaction is missing",
+        status: "original_transaction_missing"
+      });
+    }
+
+    const providerState = await getLinePayCaptureProviderState({
+      orderId: repayment.orderId,
+      transactionId: originalAuthorization.providerAuthorizationId,
+      provider: originalAuthorization.provider
+    });
+    if (providerState.state === "captured") {
+      const reconciled = captureLinePayAuthorizationInDatabase({
+        orderId: repayment.orderId,
+        providerTransactionId: originalAuthorization.providerAuthorizationId,
+        provider: originalAuthorization.provider,
+        providerCaptureId: originalAuthorization.providerAuthorizationId,
+        amount: repayment.finalAmount,
+        finalAmount: repayment.finalAmount,
+        reason: "manual_repayment_original_capture_reconciled",
+        providerPayload: providerState.payload
+      });
+      throw new PaymentServiceError(409, {
+        error: "Original LINE Pay payment was already captured",
+        status: "already_paid",
+        order: reconciled?.order || null
+      });
+    }
+    if (providerState.state === "unknown") {
+      throw new PaymentServiceError(503, {
+        error: "Unable to verify the original LINE Pay transaction",
+        status: "original_payment_state_unknown"
+      });
+    }
+
+    let originalVoidResult = null;
+    if (providerState.state === "authorized") {
+      try {
+        originalVoidResult = await voidLinePayAuthorization({
+          orderId: repayment.orderId,
+          transactionId: originalAuthorization.providerAuthorizationId,
+          provider: originalAuthorization.provider,
+          reason: "manual_repayment_release_original_authorization"
+        });
+      } catch (error) {
+        throw new PaymentServiceError(502, {
+          error: "Unable to release the original LINE Pay authorization",
+          status: "original_authorization_void_failed",
+          providerError: error.linePayPayload || { message: error.message }
+        });
+      }
+    }
+
+    const providerOrderId = `repay-${repayment.orderId}-${randomUUID()}`.slice(0, 100);
+    const payload = await requestLinePayPayment({
+      orderId: repayment.orderId,
+      providerOrderId,
+      amount: repayment.finalAmount,
+      currency: body.currency,
+      productName: body.productName || "DrinkGroupBuy 訂單重新付款",
+      packageName: body.packageName || "DrinkGroupBuy",
+      products: [{
+        name: body.productName || "DrinkGroupBuy 訂單重新付款",
+        quantity: 1,
+        price: repayment.finalAmount
+      }],
+      captureSeparated: false
+    });
+    const info = payload.info || {};
+    const transactionId = info.transactionId ? String(info.transactionId) : null;
+    if (!transactionId) {
+      throw new PaymentServiceError(502, {
+        error: "LINE Pay did not return a transaction ID",
+        status: "provider_transaction_missing"
+      });
+    }
+    const authorization = createPendingLinePayAuthorization({
+      orderId: repayment.orderId,
+      amount: repayment.finalAmount,
+      providerTransactionId: transactionId,
+      paymentFlow: "direct_repayment"
+    });
+    if (!authorization) {
+      throw new PaymentServiceError(500, {
+        error: "Unable to persist the LINE Pay repayment",
+        status: "repayment_persistence_failed"
+      });
+    }
+    const pendingPayment = {
+      orderId: repayment.orderId,
+      amount: repayment.finalAmount,
+      currency: body.currency || process.env.LINE_PAY_CURRENCY || "TWD",
+      transactionId,
+      authorizationId: authorization?.id,
+      paymentFlow: "direct_repayment",
+      createdAt: new Date().toISOString()
+    };
+    savePendingLinePayPayment(pendingPayment);
+
+    return {
+      provider: "line_pay",
+      paymentFlow: "direct_repayment",
+      orderId: repayment.orderId,
+      transactionId,
+      authorization,
+      originalVoidResult,
+      amount: repayment.finalAmount,
+      cutoffAt: repayment.cutoffAt,
+      paymentUrl: info.paymentUrl,
+      paymentAccessToken: info.paymentAccessToken,
+      status: "payment_url_created"
+    };
+  } finally {
+    manualRepaymentRequestsInFlight.delete(body.orderId);
+  }
+}
+
+function manualRepaymentErrorMessage(reason) {
+  const messages = {
+    already_paid: "Order is already paid",
+    repayment_already_pending: "Order already has a pending repayment",
+    payment_not_failed: "Order payment has not failed",
+    automatic_capture_not_finished: "Automatic capture attempts are not finished",
+    final_amount_missing: "Final payment amount is missing",
+    manual_repayment_expired: "Manual repayment period has ended"
+  };
+  return messages[reason] || "Order is not eligible for manual repayment";
+}
+
 async function confirmLinePayAuthorization({ transactionId, orderId }) {
   const pendingPayment = findPendingLinePayPayment({ orderId, transactionId });
-  const context = pendingPayment
-    ? null
-    : getLinePayAuthorizationContext({
-        orderId,
-        providerTransactionId: transactionId
-      });
+  const context = getLinePayAuthorizationContext({
+    orderId,
+    providerTransactionId: transactionId
+  });
 
   if (!transactionId || (!pendingPayment && !context)) {
     return null;
   }
 
-  const resolvedOrderId = pendingPayment?.orderId || context.authorization.orderId;
-  const resolvedOrderRevisionId = pendingPayment?.orderRevisionId || context.authorization.orderRevisionId || null;
-  const amount = pendingPayment?.amount || context.amount;
-  const currency = pendingPayment?.currency || context.currency;
+  const resolvedOrderId = pendingPayment?.orderId || context?.authorization?.orderId;
+  const resolvedOrderRevisionId = pendingPayment?.orderRevisionId
+    || context?.authorization?.orderRevisionId
+    || null;
+  const amount = pendingPayment?.amount ?? context?.amount;
+  const currency = pendingPayment?.currency || context?.currency;
+  if (!resolvedOrderId || !Number.isInteger(amount) || !currency) {
+    return null;
+  }
   const resolvedPendingPayment = pendingPayment || {
     orderId: resolvedOrderId,
     amount,
@@ -300,8 +486,65 @@ async function confirmLinePayAuthorization({ transactionId, orderId }) {
     transactionId,
     authorizationId: context.authorization.id,
     orderRevisionId: context.authorization.orderRevisionId || null,
+    paymentFlow: context.authorization.paymentFlow || "authorization",
     source: "database"
   };
+  const paymentFlow = pendingPayment?.paymentFlow
+    || context?.authorization?.paymentFlow
+    || "authorization";
+
+  if (paymentFlow === "direct_repayment") {
+    if (context?.authorization?.status === "captured") {
+      return {
+        authorization: context.authorization,
+        payload: { returnCode: "already_captured" },
+        paymentFlow,
+        pendingPayment: resolvedPendingPayment
+      };
+    }
+    if (context?.authorization?.status && context.authorization.status !== "pending") {
+      return {
+        error: "repayment_not_pending",
+        authorization: context.authorization,
+        paymentFlow,
+        pendingPayment: resolvedPendingPayment
+      };
+    }
+
+    const repayment = getManualLinePayRepaymentContext(resolvedOrderId);
+    const currentRepaymentIsPending = repayment?.reason === "repayment_already_pending"
+      && repayment.latestRepayment?.id === resolvedPendingPayment.authorizationId;
+    if (!repayment || (!repayment.eligible && !currentRepaymentIsPending)) {
+      cancelPendingLinePayAuthorizationInDatabase({
+        orderId: resolvedOrderId,
+        providerTransactionId: transactionId,
+        reason: repayment?.reason || "manual_repayment_not_available"
+      });
+      deletePendingLinePayPayment({ orderId: resolvedOrderId, transactionId });
+      return {
+        error: repayment?.reason || "manual_repayment_not_available",
+        paymentFlow,
+        manualRepayment: repayment,
+        pendingPayment: resolvedPendingPayment
+      };
+    }
+
+    const payload = await confirmLinePayPayment(transactionId, { amount, currency });
+    const repaymentResult = completeManualLinePayRepaymentInDatabase({
+      orderId: resolvedOrderId,
+      providerTransactionId: transactionId,
+      amount,
+      providerCaptureId: transactionId,
+      providerPayload: payload
+    });
+    deletePendingLinePayPayment({ orderId: resolvedOrderId, transactionId });
+    return {
+      ...repaymentResult,
+      paymentFlow,
+      payload,
+      pendingPayment: resolvedPendingPayment
+    };
+  }
 
   if (context?.authorization?.status === "authorized") {
     return {
@@ -561,6 +804,140 @@ async function captureLinePayAuthorization({
   };
 }
 
+async function refundLinePayPayment({ authUser, body } = {}) {
+  if (!authUser?.roles?.includes("admin")) {
+    throw new PaymentServiceError(403, { error: "Admin role required" });
+  }
+  if (!body?.orderId && !body?.captureId && !body?.providerTransactionId) {
+    throw new PaymentServiceError(400, {
+      error: "Missing required field: orderId, captureId, or providerTransactionId"
+    });
+  }
+
+  const provider = resolveRefundProvider(body.provider);
+  const pendingRefund = createPendingLinePayRefundInDatabase({
+    orderId: body.orderId,
+    captureId: body.captureId,
+    providerTransactionId: body.providerTransactionId,
+    provider,
+    refundAmount: body.refundAmount ?? body.amount,
+    idempotencyKey: body.idempotencyKey,
+    reason: body.reason || "line_pay_refund_requested",
+    actorUserId: authUser.id
+  });
+
+  if (!pendingRefund) {
+    throw new PaymentServiceError(404, { error: "Captured payment not found" });
+  }
+  if (pendingRefund.error) {
+    throw new PaymentServiceError(refundErrorStatusCode(pendingRefund.error), {
+      error: refundErrorMessage(pendingRefund.error),
+      status: pendingRefund.error,
+      ...pendingRefund
+    });
+  }
+  if (pendingRefund.alreadyExists) {
+    const existingStatus = pendingRefund.refund?.status;
+    if (existingStatus === "refunded") {
+      return {
+        ...pendingRefund,
+        status: "refunded",
+        idempotent: true
+      };
+    }
+    throw new PaymentServiceError(409, {
+      error: existingStatus === "pending"
+        ? "Refund is already pending"
+        : "Refund request already failed; use a new idempotency key to retry",
+      status: existingStatus === "pending" ? "refund_already_pending" : "refund_already_failed",
+      refund: pendingRefund.refund
+    });
+  }
+
+  const transactionId = pendingRefund.authorization?.providerAuthorizationId;
+  if (!transactionId) {
+    const failed = failLinePayRefundInDatabase({
+      refundId: pendingRefund.refund.id,
+      reason: "provider_transaction_missing",
+      actorUserId: authUser.id
+    });
+    throw new PaymentServiceError(409, {
+      error: "LINE Pay transaction ID is missing",
+      status: "provider_transaction_missing",
+      refund: failed?.refund || pendingRefund.refund
+    });
+  }
+
+  let payload;
+  try {
+    payload = provider === "mock_line_pay"
+      ? createMockLinePayRefundPayload(transactionId, pendingRefund.refund.refundAmount)
+      : await refundLinePayPaymentTransaction(transactionId, {
+          refundAmount: pendingRefund.refund.refundAmount
+        });
+  } catch (error) {
+    const failed = failLinePayRefundInDatabase({
+      refundId: pendingRefund.refund.id,
+      reason: "line_pay_refund_failed",
+      actorUserId: authUser.id,
+      providerPayload: error.linePayPayload || { message: error.message }
+    });
+    throw new PaymentServiceError(error.statusCode || 502, {
+      error: "LINE Pay refund failed",
+      status: "refund_failed",
+      refund: failed?.refund || pendingRefund.refund,
+      providerError: error.linePayPayload || { message: error.message }
+    });
+  }
+
+  const completedRefund = completeLinePayRefundInDatabase({
+    refundId: pendingRefund.refund.id,
+    providerRefundId: payload.info?.refundTransactionId ? String(payload.info.refundTransactionId) : null,
+    providerPayload: payload,
+    actorUserId: authUser.id
+  });
+
+  if (completedRefund?.error) {
+    throw new PaymentServiceError(409, completedRefund);
+  }
+
+  return {
+    ...completedRefund,
+    provider,
+    providerTransactionId: transactionId,
+    payload
+  };
+}
+
+function resolveRefundProvider(provider) {
+  if (provider == null || provider === "") return "line_pay";
+  if (provider === "mock_line_pay" && process.env.NODE_ENV !== "production") {
+    return "mock_line_pay";
+  }
+  if (provider === "line_pay") return "line_pay";
+  throw new PaymentServiceError(400, { error: "Invalid refund provider" });
+}
+
+function refundErrorStatusCode(error) {
+  const statusCodes = {
+    captured_payment_not_found: 404,
+    invalid_refund_amount: 400,
+    refund_amount_exceeds_remaining_amount: 409,
+    already_fully_refunded: 409
+  };
+  return statusCodes[error] || 409;
+}
+
+function refundErrorMessage(error) {
+  const messages = {
+    captured_payment_not_found: "Captured payment not found",
+    invalid_refund_amount: "Refund amount must be a positive integer",
+    refund_amount_exceeds_remaining_amount: "Refund amount exceeds the remaining refundable amount",
+    already_fully_refunded: "Payment is already fully refunded"
+  };
+  return messages[error] || "Refund cannot be created";
+}
+
 async function voidLinePayAuthorization({
   transactionId,
   orderId,
@@ -682,6 +1059,8 @@ module.exports = {
   confirmLinePayAuthorization,
   getLinePayCaptureProviderState,
   inferLinePayPaymentState,
+  requestManualLinePayRepayment,
   requestLinePayAuthorization,
+  refundLinePayPayment,
   voidLinePayAuthorization
 };
