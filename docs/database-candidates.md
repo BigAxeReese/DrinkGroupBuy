@@ -1,6 +1,6 @@
 # 資料庫盤點與候選設計
 
-最後更新：2026-07-11
+最後更新：2026-07-20
 
 ## 語言與命名規則
 
@@ -40,7 +40,7 @@
 ## 目前資料保存狀態
 
 - Backend 已經會讀寫 `group_buy_activities`、`promotion_tiers`、`activity_notices`、`status_history` 與 `audit_logs`，用於目前已實作的活動 API。
-- Seed data 會建立 users、roles、一組或多組 merchant/store、menu items、activities 與 tiers。
+- 開發 SQLite seed 會建立 users、roles、merchant/store 與 menu items；`customization_options` 目前在 SQLite runtime 為 0 筆。runtime activities、tiers、orders、payments、settlements 與 pickup credentials 由 API 或 smoke test 產生，不預先 seed 成固定資料。PostgreSQL seed draft 另有較完整的 customization options。
 - `orders`、`order_revisions`、payment、settlement、pickup 相關資料表目前仍偏向候選設計與付款模組串接準備，尚未完整連到所有 mobile 流程。
 - `payment_authorizations.provider` 目前支援 `line_pay` 與本機測試用 `mock_line_pay`；`mock_line_pay` 只用於開發 smoke 測試，不代表正式金流。
 - `payment_authorizations.payment_flow` 用來區分一般 `authorization` 與請款失敗後的 `direct_repayment`，避免重新付款被誤當成新的預授權。
@@ -69,12 +69,12 @@
 
 | 範圍                    | 缺口或待決策項目                                                                                                      |
 | ----------------------- | --------------------------------------------------------------------------------------------------------------------- |
-| Order revision          | `order_revisions` 第一版已建立並支援 replacement authorization；仍缺完整歷史查詢 API 與 mobile UI 串接。              |
+| Order revision          | `order_revisions` 第一版已建立並支援 replacement authorization；欄位字典已補，仍缺完整歷史查詢 API 與 mobile UI 串接。 |
 | Pricing snapshot        | 實際適用門檻、折扣分配與請款金額需要可重現，目前仍需補強欄位或 settlement 設計。                                      |
 | Activity deadline       | 24 小時截止限制已先落到商家建立團購 API；截止前 30 分鐘鎖定規則仍需落到訂單修改 / 退出與取消 API。                   |
 | Merchant acceptance     | `orders.merchant_acceptance_status` 是早期候選欄位；最新規則不需要店家逐筆確認接單，未來可考慮移除或固定為 accepted。 |
 | Pickup status           | Mobile 曾使用 `preparing`，目前 schema 沒有該值；應優先用 activity/order 狀態與 `pickup_status = ready` 表示。        |
-| Pickup credential expiry | `pickup_credentials` 目前缺 `expires_at` / `expired_at`；取貨 API 實作時需補憑證到期時間與逾期處理紀錄。              |
+| Pickup credential expiry | `pickup_credentials` 目前仍缺 `expires_at` / `expired_at`；取貨 API 實作時需補憑證到期時間與逾期處理紀錄。            |
 | Store/menu source       | 七間店家的測試資料與正式開發資料需統一來源。                                                                          |
 | Authentication          | Password 欄位屬於開發相容；正式方向以 Firebase UID 對應 backend user 與角色權限。                                     |
 | Notification            | 尚未有通知 delivery 或 notification event 資料表。                                                                    |

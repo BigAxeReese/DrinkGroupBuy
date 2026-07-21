@@ -1,6 +1,6 @@
 # 資料庫欄位規格
 
-最後更新：2026-07-11
+最後更新：2026-07-20
 
 ## 語言與範圍
 
@@ -260,6 +260,52 @@ PostgreSQL draft 另有 `phone_verified_at`、`email_verified_at`、`last_login_
 | 6   | `price_delta_snapshot`    | 加價金額快照     | INTEGER |     | 預設 `0`，可為正數                              | `0`                            |
 | 7   | `sort_order`              | 排序             | INTEGER |     | 數字越小越前面                                  | `1`                            |
 
+## `order_revisions`
+
+用途：保存已完成預授權訂單的待確認修改版本。新 revision 需重新預授權；成功後才套用到原訂單，失敗或取消時原訂單維持有效。
+
+| No. | Field name                              | 中文名稱           | Type    | Key       | 規則 / 格式 / 範圍                                                              | Example                     |
+| --- | --------------------------------------- | ------------------ | ------- | --------- | -------------------------------------------------------------------------------- | --------------------------- |
+| 1   | `id`                                    | 訂單修改版本編號   | TEXT    | PK        | 建議使用 `order_revision_` 加唯一後綴                                            | `order_revision_001`        |
+| 2   | `order_id`                              | 原訂單編號         | TEXT    | FK, INDEX | References `orders(id)`                                                          | `order_001`                 |
+| 3   | `status`                                | 修改版本狀態       | TEXT    | INDEX     | `pending_authorization`, `applied`, `failed`, `cancelled`                        | `pending_authorization`     |
+| 4   | `original_payment_authorization_id`     | 原預授權編號       | TEXT    | FK        | 可為 NULL；指向被替換前的有效 authorization                                      | `pay_auth_old_001`          |
+| 5   | `replacement_payment_authorization_id`  | 替換預授權編號     | TEXT    | FK        | 可為 NULL；新 authorization 成功後填入                                           | `pay_auth_new_001`          |
+| 6   | `fallback_purchase_preference`          | 未達標購買偏好     | TEXT    |           | `decline_original_price`, `accept_original_price`                                 | `accept_original_price`     |
+| 7   | `previous_total_cups`                   | 原總杯數           | INTEGER |           | `> 0`；建立 revision 時的原訂單杯數                                              | `2`                         |
+| 8   | `previous_original_amount`              | 原訂單原始金額     | INTEGER |           | `>= 0`；建立 revision 時的原訂單原始金額                                         | `140`                       |
+| 9   | `total_cups`                            | 修改後總杯數       | INTEGER |           | `> 0`；revision item quantity 加總                                                | `3`                         |
+| 10  | `original_amount`                       | 修改後原始金額     | INTEGER |           | `>= 0`；重新預授權基準金額                                                       | `210`                       |
+| 11  | `failure_reason`                        | 失敗原因           | TEXT    |           | 可為 NULL；新預授權、容量檢查或 provider 流程失敗時保存                           | `authorization_cancelled`   |
+| 12  | `created_at`                            | 建立時間           | TEXT    |           | ISO datetime string                                                              | `2026-06-25T10:20:00+08:00` |
+| 13  | `updated_at`                            | 更新時間           | TEXT    |           | ISO datetime string                                                              | `2026-06-25T10:25:00+08:00` |
+| 14  | `applied_at`                            | 套用時間           | TEXT    |           | 可為 NULL；新預授權成功並套用到原訂單時填入                                      | `2026-06-25T10:26:00+08:00` |
+| 15  | `cancelled_at`                          | 取消時間           | TEXT    |           | 可為 NULL；顧客取消 revision 或流程取消時填入                                     | `2026-06-25T10:24:00+08:00` |
+
+## `order_revision_items`
+
+| No. | Field name            | 中文名稱             | Type    | Key | 規則 / 格式 / 範圍                                | Example                    |
+| --- | --------------------- | -------------------- | ------- | --- | ------------------------------------------------- | -------------------------- |
+| 1   | `id`                  | 修改版本品項編號     | TEXT    | PK  | 建議使用 `order_revision_item_` 加唯一後綴         | `order_revision_item_001`  |
+| 2   | `order_revision_id`   | 訂單修改版本編號     | TEXT    | FK  | References `order_revisions(id)`                  | `order_revision_001`       |
+| 3   | `menu_item_id`        | 菜單品項編號         | TEXT    | FK  | 原 menu item 被刪除時可為 NULL                    | `menu_item_001`            |
+| 4   | `item_name_snapshot`  | 品項名稱快照         | TEXT    |     | 必填                                              | `白玉歐蕾`                 |
+| 5   | `quantity`            | 數量                 | INTEGER |     | `> 0`                                             | `3`                        |
+| 6   | `unit_price_snapshot` | 單價快照             | INTEGER |     | `>= 0`                                            | `70`                       |
+| 7   | `subtotal`            | 品項小計             | INTEGER |     | `>= 0`；單價加選項價差後乘以數量                  | `210`                      |
+
+## `order_revision_item_customizations`
+
+| No. | Field name                | 中文名稱                 | Type    | Key | 規則 / 格式 / 範圍                              | Example                                  |
+| --- | ------------------------- | ------------------------ | ------- | --- | ----------------------------------------------- | ---------------------------------------- |
+| 1   | `id`                      | 修改版本客製化編號       | TEXT    | PK  | 建議使用 `order_revision_item_customization_` 加唯一後綴 | `order_revision_item_customization_001` |
+| 2   | `order_revision_item_id`  | 修改版本品項編號         | TEXT    | FK  | References `order_revision_items(id)`           | `order_revision_item_001`                |
+| 3   | `customization_option_id` | 客製選項編號             | TEXT    | FK  | 原選項若被刪除可為 NULL                         | `option_001`                             |
+| 4   | `option_type`             | 選項類型                 | TEXT    |     | `sweetness`, `ice`, `topping`, `size`           | `ice`                                    |
+| 5   | `label_snapshot`          | 選項名稱快照             | TEXT    |     | 必填                                            | `少冰`                                   |
+| 6   | `price_delta_snapshot`    | 加價金額快照             | INTEGER |     | 預設 `0`，可為正數                              | `0`                                      |
+| 7   | `sort_order`              | 排序                     | INTEGER |     | 數字越小越前面                                  | `2`                                      |
+
 ## `payment_authorizations`
 
 | No. | Field name                  | 中文名稱            | Type    | Key       | 規則 / 格式 / 範圍                                                    | Example                     |
@@ -355,7 +401,7 @@ PostgreSQL draft 另有 `phone_verified_at`、`email_verified_at`、`last_login_
 | 4   | `visible_after_merchant_acceptance` | 接單後才顯示   | INTEGER |            | 舊欄位；最新規則不需逐筆接單，需後續 review | `1`                         |
 | 5   | `created_at`                        | 建立時間       | TEXT    |            | ISO datetime string                         | `2026-06-25T15:40:00+08:00` |
 
-候選補充欄位：
+候選補充欄位（目前尚未存在於 `database/schema.sql`）：
 
 | Field name   | 中文名稱       | Type | 規則 / 格式 / 範圍 |
 | ------------ | -------------- | ---- | ------------------ |
@@ -391,9 +437,10 @@ PostgreSQL draft 另有 `phone_verified_at`、`email_verified_at`、`last_login_
 
 | 範圍                    | 目前問題                                                                                          |
 | ----------------------- | ------------------------------------------------------------------------------------------------- |
-| Order revisions         | SQLite 第一版已建立 `order_revisions` 與 revision item tables；仍缺完整欄位字典與歷史查詢 API。    |
+| Order revisions         | SQLite 第一版已建立 `order_revisions` 與 revision item tables，欄位字典已補；仍缺完整歷史查詢 API 與 UI 呈現。 |
 | Merchant acceptance     | 最新規則不需要店家逐筆確認接單，`merchant_acceptance_status` 與相關欄位需後續 review。            |
 | Pickup visibility       | `visible_after_merchant_acceptance` 可能需要改名或改為與付款/可取餐狀態連動。                     |
+| Pickup expiry schema    | `pickup_credentials.expires_at` / `expired_at` 仍是候選欄位，尚未進入目前 SQLite schema。         |
 | Activity deadline       | 24 小時截止限制與截止前 30 分鐘鎖定規則需落實到 API validation 與可能的 DB constraint。           |
 | Pricing snapshots       | 最終折扣、適用 tier 與 per-order 分攤方式仍需更完整保存。                                         |
 | Authentication          | `users` 保留 legacy password 欄位，但正式方向是 Firebase Auth + Google Login。                    |

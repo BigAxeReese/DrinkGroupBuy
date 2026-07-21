@@ -45,7 +45,7 @@ API：groupBuyActivity
 ## 登入方向
 
 - 正式登入方向：Firebase Auth + Google Login。
-- 開發測試方向：保留 dev mock login，方便切換顧客、商家與管理員身份。
+- 開發測試方向：保留 dev mock login，方便切換顧客、商家，以及必要的後端補救權限。
 - 正式角色與權限由 backend database 判斷，不由前端自行決定。
 - Mobile 取得 Firebase ID token 後，應交給 backend 驗證。
 - Backend 驗證 Firebase ID token 後，再查 `users`、`user_roles`、`merchant_users` 決定使用者身份。
@@ -57,7 +57,7 @@ API：groupBuyActivity
 已經有部分端到端流程：
 
 - 商家建立團購活動：Mobile -> API -> SQLite。
-- 管理員取消團購活動：Mobile -> API -> SQLite soft cancellation。
+- 開發 / 補救用取消團購活動：API -> SQLite soft cancellation；不列入第一階段正式 App 使用者流程。
 - 後端可從 SQLite 讀取團購活動列表。
 - LINE Pay sandbox 預授權流程已開始串接。
 
@@ -65,8 +65,8 @@ API：groupBuyActivity
 
 - 購物車完整後端同步。
 - 顧客訂單列表與訂單修改完整後端同步。
-- LINE Pay refund 已有後端 admin/dev 切片；正式 UI、退款失敗重試、provider 狀態查詢與付款重試佇列仍待補。
-- 商家接單、完成訂單、取貨憑證 API。
+- LINE Pay refund 已有後端 dev/backend 切片；正式 UI、退款失敗重試、provider 狀態查詢與付款重試佇列仍待補。
+- 商家查看有效訂單、標記可取餐、核銷取貨與取貨憑證 API。
 - App 啟動時完整載入後端活動、菜單與訂單。
 
 ## 架構原則
@@ -97,7 +97,7 @@ API：groupBuyActivity
 - 目前的密碼登入與角色選擇 UI 只屬於開發相容功能；Firebase 登入可用後，應移除或隱藏。
 - Mobile app 流程：使用者點選 Google Login -> Firebase 回傳 ID token -> mobile 將 ID token 送到 backend -> backend 驗證 Firebase token -> backend 依 `users`、`user_roles`、`merchant_users` 對應使用者身份。
 - Firebase 只用於身份驗證。Firestore 不是本專案主要業務資料庫。
-- 顧客、商家、管理員角色、店家權限、團購活動、訂單、付款、取貨憑證、狀態歷史與 audit logs 都以 backend database 為準。
+- 顧客、商家角色、店家權限、團購活動、訂單、付款、取貨憑證、狀態歷史與 audit logs 都以 backend database 為準；admin 相關能力僅作開發或後端補救工具，第一階段正式 App 不提供管理員流程。
 - 資料庫方向：使用 `users.firebase_uid` 作為穩定對應 Firebase identity 的正式欄位。
 
 ## 開發期角色測試策略
@@ -109,6 +109,6 @@ API：groupBuyActivity
   - customer A Google 測試帳號 -> customer A 的 `users.firebase_uid` -> `user_roles.role = customer`
   - customer B Google 測試帳號 -> customer B 的 `users.firebase_uid` -> `user_roles.role = customer`
   - merchant store 001 Google 測試帳號 -> merchant 001 的 `users.firebase_uid` -> `user_roles.role = merchant` 與 `merchant_users.store_id = store-001`
-  - admin Google 測試帳號 -> admin 的 `users.firebase_uid` -> `user_roles.role = admin`
+- 若需要測後端補救工具，可另行對應 dev/admin 測試帳號；不列入第一階段正式 App 流程。
 - 只在本機開發時，可以使用 Firebase Auth emulator 或明確由環境變數開啟的 dev-auth bypass；除非本機 `.env` 設定 `AUTH_DEV_MODE=true` 或等效設定，否則必須關閉。
 - dev-auth bypass 不得預設啟用，也不得用於 production build。

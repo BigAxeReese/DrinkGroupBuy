@@ -1,6 +1,6 @@
 # 資料庫設計 v1
 
-最後更新：2026-07-11
+最後更新：2026-07-20
 
 ## 語言與註解規則
 
@@ -26,11 +26,11 @@
 
 ## 目前開發資料
 
-截至 2026-07-02，本機開發資料庫內容如下：
+截至 2026-07-20，本機開發資料庫內容如下：
 
 | 資料範圍               | 目前數量 | 說明                                 |
 | ---------------------- | -------: | ------------------------------------ |
-| Users                  | 12       | 4 customers、7 merchants、1 admin    |
+| Users                  | 12       | 4 customers、7 merchants、1 dev/admin |
 | User roles             | 12       | 每個 seed user 一個 active role      |
 | Merchants              | 7        | 每間測試店一個 merchant organization |
 | Merchant users         | 7        | 每個店家帳號管理一間門市             |
@@ -49,7 +49,7 @@
 
 | 資料表                  | 用途                                    | Primary key | 重要關係                         |
 | ----------------------- | --------------------------------------- | ----------- | -------------------------------- |
-| `users`                 | 顧客、店家與管理員共用的帳號身份        | `id`        | 1 user 可有多個 role             |
+| `users`                 | 顧客、店家與開發補救帳號共用的帳號身份  | `id`        | 1 user 可有多個 role             |
 | `user_private_profiles` | PostgreSQL draft 中的內部私人身份資料   | `user_id`   | 1 private profile 屬於 1 user    |
 | `user_public_profiles`  | PostgreSQL draft 中可對外顯示的別名資料 | `user_id`   | 1 public profile 屬於 1 user     |
 | `user_roles`            | 使用者被授予的角色                      | `id`        | 多個 role 屬於 1 user            |
@@ -202,6 +202,7 @@ PostgreSQL 方向：
 | ------------------------- | -------------------------------- | ----------- | --------------------------------------- |
 | `payment_authorizations`  | LINE Pay 預授權嘗試              | `id`        | 多筆 authorization 可屬於 1 order       |
 | `payment_captures`        | 截止後確認折扣後的請款結果       | `id`        | Capture 屬於 1 authorization 與 1 order |
+| `payment_refunds`         | 已請款交易的退款結果             | `id`        | Refund 屬於 1 capture、authorization 與 order |
 | `payment_provider_events` | 金流 provider event 紀錄 | `id`        | 以邏輯方式關聯付款資源，保留未來 webhook 擴充空間 |
 
 目前付款方向：
@@ -222,15 +223,15 @@ PostgreSQL 方向：
 - Deadline settlement scheduler 已先以單一 backend process interval 實作；仍缺跨執行個體 locking、重試佇列與告警。
 - LINE Pay capture 已在付款模組內部實作。
 - LINE Pay void 已在付款模組內部實作。
-- LINE Pay refund 已有後端 admin/dev 切片；仍缺正式退款操作 UI、退款失敗重試與正式 sandbox 人工端對端測試。
+- LINE Pay refund 已有後端開發 / 補救切片；仍缺正式退款操作 UI、退款失敗重試與正式 sandbox 人工端對端測試。
 - Provider 狀態查詢、付款重試與 reconciliation。
-- Order replacement authorization 的完整 DB 歷史紀錄。
+- Order replacement authorization 已有 SQLite revision tables；仍缺對外歷史查詢 API、UI 呈現與 PostgreSQL draft 同步。
 
 PostgreSQL 方向：
 
 - Mobile 不直接呼叫金流 provider。
 - Backend 保存 LINE Pay secrets 並進行 request signing。
-- 付款狀態保存在 `payment_authorizations`、`payment_captures` 與 `payment_provider_events`。
+- 付款狀態保存在 `payment_authorizations`、`payment_captures`、`payment_refunds` 與 `payment_provider_events`。
 - PostgreSQL 是 authorization、capture、void、refund、provider event 與付款 reconciliation 的 source of truth。
 
 ### 結算與取貨
@@ -243,14 +244,14 @@ PostgreSQL 方向：
 重要規則：
 
 - 團購截止後，系統計算 authorized cups 與適用 discount tier。
-- 達標且完成 capture 後，系統可產生取貨憑證或取貨代碼。
-- 店家完成製作後，可標記可取餐。
+- 達標且完成 capture 後，符合條件的訂單進入製作流程。
+- 店家完成製作後，可標記可取餐；系統此時才顯示或產生取貨憑證或取貨代碼。
 - 顧客到店取餐時，店家核對取貨憑證或取貨代碼。
 - 店家可標記訂單已取貨。
 - 取貨憑證自取餐開始時間起保留 3 小時；若店家當日營業結束早於 3 小時，保留至當日營業結束；24 小時營業店家保留 3 小時。
 - 憑證到期後，訂單取貨狀態改為 `expired` 並移至歷史訂單；逾期未取不自動退款，店家不再負原飲品保管責任。
 - 若顧客在有效取餐期間到店但店家無法交付，不得將訂單標記為 `expired`。
-- 顧客歷史訂單應包含 completed、cancelled、failed 或 admin-cancelled 的訂單。
+- 顧客歷史訂單應包含 completed、cancelled、未成團、逾期未取，以及超過重新付款期限仍未付款的 failed 訂單。
 
 PostgreSQL 方向：
 
@@ -269,7 +270,7 @@ PostgreSQL 方向：
 
 - 重要狀態變更必須可追蹤。
 - 活動取消、付款狀態變更、截止結算、取貨完成都應寫入 history。
-- 付款、取消、權限、管理員操作尤其需要 audit log。
+- 付款、取消、權限與後端補救操作尤其需要 audit log。
 
 PostgreSQL 方向：
 
@@ -310,7 +311,10 @@ PostgreSQL v1 決策：時間欄位使用 `timestamptz`。
 - `authorized_at`
 - `voided_at`
 - `captured_at`
+- `refunded_at`
+- `next_retry_at`
 - `settled_at`
+- 候選：`pickup_credentials.expires_at`、`pickup_credentials.expired_at`
 
 原因：
 
@@ -326,8 +330,6 @@ PostgreSQL v1 決策：true/false 欄位使用 `boolean`。
 | `menu_items.is_available`                              | `boolean`       | 飲品是否開放販售     |
 | `customization_options.is_available`                   | `boolean`       | 客製化選項是否可使用 |
 | `pickup_credentials.visible_after_merchant_acceptance` | `boolean`       | 取貨憑證顯示規則     |
-| `pickup_credentials.expires_at`                        | `timestamptz`   | 候選欄位；取貨憑證到期時間 |
-| `pickup_credentials.expired_at`                        | `timestamptz`   | 候選欄位；實際逾期處理時間 |
 
 API JSON 應回傳 `true` / `false`。
 
@@ -418,14 +420,10 @@ PostgreSQL v1 決策：status 欄位使用 `text check (...)`，第一版不使�
 4. 將 24 小時截止限制與截止前 30 分鐘鎖定規則落到 API validation。
 5. 依 `docs/postgresql-migration-plan.md` 規劃 runtime database 切換。
 
-## 開放問題
+## 待收斂事項
 
-1. `group_buy_activities.maximum_cups` 是否永遠等於最高 `promotion_tiers.target_cups`，或未來允許獨立容量？
-2. `order_revisions` 是否需要公開完整歷史查詢 API，以及是否需要保存更完整的 before/after JSON snapshot？
-3. Pickup 狀態是否需要 `preparing`，或以 activity/order status 表示即可？
-4. `orders.merchant_acceptance_status` 是否應移除，或在預授權成功後固定為 `accepted`？
-5. 未達團購門檻但顧客接受原價購買時，是否在 deadline 直接 capture 原價？
-6. 顧客 phone number 是否需要加密，或只需 normalize 並由 access control 保護？
-7. LINE Pay authorization 的有效時間如何與 24 小時團購截止限制對齊？
-8. Deadline settlement 應由 backend cron、Cloud Functions，還是店家操作 fallback 觸發？
-9. 使用者要求刪除帳號後，訂單、付款與 audit data 應保留到什麼程度？
+1. `order_revisions` 需要公開完整歷史查詢 API，並決定是否另存更完整的 before/after snapshot。
+2. `orders.merchant_acceptance_status` 應移除，或在預授權成功後固定為 `accepted`。
+3. `pickup_credentials` 需補 `expires_at` / `expired_at`，並實作逾期處理 job。
+4. 顧客 phone number 是否需要加密，或只需 normalize 並由 access control 保護。
+5. 使用者要求刪除帳號後，訂單、付款與 audit data 應保留到什麼程度。

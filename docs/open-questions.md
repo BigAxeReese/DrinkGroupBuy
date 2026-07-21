@@ -1,16 +1,28 @@
 # 未決問題
 
-最後更新：2026-07-12
+最後更新：2026-07-20
 
 ## 語言規則
 
-本文件整理目前還沒完全決定、但會影響實作的問題。
+本文件整理會影響實作的產品與技術決策。多數早期問題目前已進入 `Resolved`，因此本文件同時作為決策紀錄；仍需開發的項目應視為 backlog，不一定代表產品規則未決。
 
 - `Resolved` 表示目前已有暫定決策。
 - `High` 表示會影響核心流程，例如付款、訂單、團購結算或權限。
 - `Medium` / `Low` 表示可以稍後再定，但仍需要追蹤。
 - 問題可以用中文補充，但涉及欄位、API、status value 時仍保留英文名稱。
 - 技術決策確認後，應同步更新對應的 API、database 或 status 文件。
+
+## 仍需追蹤的 backlog
+
+| 優先級 | 項目 | 目前狀態 |
+| ------ | ---- | -------- |
+| High   | 顧客退出 / 取消訂單 API | 規則已決定；仍需實作 deadline race、authorization void 與 authorized-cup rollback |
+| High   | 商家 pickup API | 規則已決定；仍需實作標記可取餐、核銷取貨、憑證過期與逾期未取 job |
+| High   | Provider status reconciliation | 第一版不做 webhook；仍需 provider 狀態查詢、redirect 遺失恢復、重試佇列與告警 |
+| High   | 跨執行個體 settlement locking | 單一 backend process scheduler 已有；正式多人/多 instance 前仍需 DB lock 或等效機制 |
+| Medium | PostgreSQL runtime adapter | PostgreSQL schema/seed draft 已有；backend runtime 仍是 SQLite |
+| Medium | Notification table / delivery | 尚未設計 notification 或 delivery event schema |
+| Medium | 正式退款 UI 與退款失敗重試 | Admin/dev 後端 refund route 已有；正式操作介面與 retry/reconciliation 尚未完成 |
 
 ## 身份與權限
 
@@ -25,7 +37,7 @@
 | Resolved | dev mock login 如何在 production 停用？                                       | 預設停用；只能透過本機 env 如 `AUTH_DEV_MODE=true` 明確啟用，且 production UI 不得顯示角色選擇。                             |
 | Resolved | 哪些實際 Google 測試帳號要對應 customer A/B/C/D、各 merchant store 與 admin？ | 第一階段不做 admin；測試至少需要一個顧客與一個店家 UID。若 Google 帳號不足，本機可用 dev bypass 或重新映射同一 UID 測試角色。 |
 | Resolved | 商家使用者如何被授權管理一間或多間店？                                        | 目前方向是一個商家帳號只透過 `merchant_users.store_id` 管理一間店；暫不拆 owner/manager/staff。                              |
-| Resolved | 管理員角色如何授權與稽核？                                                    | 分析文件與第一階段產品不納入管理員角色；後台或營運工具若未來需要，另開需求處理。                                             |
+| Resolved | 管理員角色如何授權與稽核？                                                    | 第一階段正式 App 不做管理員入口；目前 backend 僅保留開發 / 後端補救 API 供活動取消、結算與退款測試，敏感操作必須寫入 audit log。 |
 | Resolved | 除了 alias 與取餐/訂單資料外，商家可以看到哪些顧客公開資料？                  | 商家只看得到顧客 alias、訂單品項、客製化內容、金額、付款狀態、取貨狀態與取貨憑證；不顯示 email、Firebase UID 或敏感身份資料。 |
 
 ## 店家與菜單

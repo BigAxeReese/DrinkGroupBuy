@@ -18,8 +18,8 @@
 
 | 中文詞彙         | 意義                            | Mobile / API (`camelCase`)       | Database (`snake_case`)               | 備註                                         |
 | ---------------- | ------------------------------- | -------------------------------- | ------------------------------------- | -------------------------------------------- |
-| 使用者           | 擁有一個或多個角色的人          | `user`, `userId`                 | `users`, `user_id`                    | 角色可以是 `customer`、`merchant` 或 `admin` |
-| 使用者角色       | 掛在使用者身上的權限角色        | `userRole`, `role`               | `user_roles`, `role`                  | 目前角色為 `customer`、`merchant`、`admin`   |
+| 使用者           | 擁有一個或多個角色的人          | `user`, `userId`                 | `users`, `user_id`                    | 第一階段正式 App 使用 `customer`、`merchant`；`admin` 僅作開發或後端補救工具 |
+| 使用者角色       | 掛在使用者身上的權限角色        | `userRole`, `role`               | `user_roles`, `role`                  | 第一階段正式 App 使用顧客與商家角色；管理員僅作開發或後端補救工具 |
 | 商家             | 商業組織                        | `merchant`, `merchantId`         | `merchants`, `merchant_id`            | 不等同實體店家或門市                         |
 | 門市 / 店家      | 實體下單與取貨地點              | `store`, `storeId`               | `stores`, `store_id`                  | 優先使用 `store`，避免再引入 `shop`          |
 | 菜單品項         | 店家販售的飲品或商品            | `menuItem`, `menuItemId`         | `menu_items`, `menu_item_id`          | 基本價格存放於此                             |
@@ -42,11 +42,11 @@
 | 付款請款         | 活動結算後的 capture            | `paymentCapture`                 | `payment_captures`                    | 可能是 partial capture                       |
 | 金流事件         | Provider event payload          | `paymentProviderEvent`           | `payment_provider_events`             | 用於 idempotency 與 reconciliation；未來可包含 webhook |
 | 活動結算         | 截止結果與套用級距              | `activitySettlement`             | `activity_settlements`                | 應只建立一次且可稽核                         |
-| 商家接單狀態     | 商家是否接受製作                | `merchantAcceptanceStatus`       | `merchant_acceptance_status`          | 與訂單狀態、取貨狀態分開                     |
+| 商家接單狀態     | 舊候選：商家是否接受製作        | `merchantAcceptanceStatus`       | `merchant_acceptance_status`          | 最新規則不需逐筆接單；可固定 accepted 或後續移除 |
 | 取貨狀態         | 製作與取貨生命週期              | `pickupStatus`                   | `pickup_status`                       | `ready` 代表可以顯示取貨碼                   |
 | 取貨憑證         | 顧客取貨時使用的 code/QR        | `pickupCredential`, `pickupCode` | `pickup_credentials`, `pickup_code`   | 必須只屬於一筆訂單                           |
 | 狀態歷史         | 不可變更的狀態轉換紀錄          | `statusHistory`                  | `status_history`                      | 包含 actor、reason 與 timestamp              |
-| 稽核紀錄         | 敏感操作者與操作紀錄            | `auditLog`                       | `audit_logs`                          | admin、payment、cancellation 操作都需要      |
+| 稽核紀錄         | 敏感操作者與操作紀錄            | `auditLog`                       | `audit_logs`                          | payment、cancellation、權限與後端補救操作都需要 |
 
 ## 衍生值
 
