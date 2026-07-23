@@ -4,6 +4,10 @@ const backendBaseUrl = process.env.EXPO_PUBLIC_BACKEND_URL
   || Constants.expoConfig?.extra?.backendBaseUrl
   || Constants.manifest2?.extra?.expoClient?.extra?.backendBaseUrl
   || "http://localhost:3000";
+const authMode = process.env.EXPO_PUBLIC_AUTH_MODE
+  || Constants.expoConfig?.extra?.authMode
+  || Constants.manifest2?.extra?.expoClient?.extra?.authMode
+  || "firebase";
 
 const inflightRequests = new Map();
 let authToken = null;
@@ -46,6 +50,38 @@ export async function loginWithFirebaseIdToken(idToken) {
   const payload = await response.json();
   if (!response.ok) {
     const error = new Error(payload.error ?? "Firebase login failed");
+    error.payload = payload;
+    throw error;
+  }
+
+  setAuthToken(payload.token);
+  return payload;
+}
+
+export async function listDevAuthUsers() {
+  const response = await fetch(`${backendBaseUrl}/api/auth/dev-users`);
+  const payload = await response.json();
+  if (!response.ok) {
+    const error = new Error(payload.error ?? "List dev users failed");
+    error.payload = payload;
+    throw error;
+  }
+
+  return payload.users;
+}
+
+export async function loginWithDevUser(userId) {
+  const response = await fetch(`${backendBaseUrl}/api/auth/dev-session`, {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json"
+    },
+    body: JSON.stringify({ userId })
+  });
+
+  const payload = await response.json();
+  if (!response.ok) {
+    const error = new Error(payload.error ?? "Dev login failed");
     error.payload = payload;
     throw error;
   }
@@ -270,4 +306,8 @@ function withAuthHeaders(headers = {}) {
 
 export function getBackendBaseUrl() {
   return backendBaseUrl;
+}
+
+export function getAuthMode() {
+  return authMode;
 }

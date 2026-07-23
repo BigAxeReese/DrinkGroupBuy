@@ -90,6 +90,7 @@ export function PaymentAuthorizationScreen({ navigation, route, appState, action
   const manualRepayment = order?.manualRepayment ?? null;
   const repaymentExpired = manualRepayment?.reason === "manual_repayment_expired";
   const canCapture = payment.discountStatus === "qualified";
+  const deepLinkResultMessage = getDeepLinkResultMessage(route.params);
 
   return (
     <MobileScreen
@@ -143,6 +144,11 @@ export function PaymentAuthorizationScreen({ navigation, route, appState, action
         </Text>
         {linePayMessage ? (
           <Text style={linePayStatus === "error" ? styles.errorText : styles.successText}>{linePayMessage}</Text>
+        ) : null}
+        {deepLinkResultMessage ? (
+          <Text style={deepLinkResultMessage.type === "error" ? styles.errorText : styles.successText}>
+            {deepLinkResultMessage.message}
+          </Text>
         ) : null}
         <PrimaryButton
           label={repaymentExpired
@@ -478,6 +484,20 @@ function formatRepaymentCutoff(value) {
     minute: "2-digit",
     hour12: false
   });
+}
+
+function getDeepLinkResultMessage(params = {}) {
+  if (!params.linePayResultStatus) return null;
+  if (params.linePayResultStatus === "authorized") {
+    return { type: "success", message: "已從 LINE Pay 返回 App，正在同步預授權結果。" };
+  }
+  if (params.linePayResultStatus === "captured") {
+    return { type: "success", message: "已從 LINE Pay 返回 App，正在同步付款結果。" };
+  }
+  if (params.linePayResultStatus === "cancelled") {
+    return { type: "error", message: "LINE Pay 付款已取消，可重新發起付款。" };
+  }
+  return { type: "error", message: "LINE Pay 流程未完成，請查看付款狀態或重新付款。" };
 }
 
 function getRevisionPaymentContext(order, payment, routeRevision = null) {

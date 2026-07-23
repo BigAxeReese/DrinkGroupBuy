@@ -1,5 +1,5 @@
-import { useEffect, useMemo, useState } from "react";
-import { View, StyleSheet } from "react-native";
+import { useEffect, useMemo, useRef, useState } from "react";
+import { Linking, View, StyleSheet } from "react-native";
 import { BottomNav } from "../components/BottomNav";
 import { groupBuyActivities as initialGroupBuyActivities } from "../mock/groupBuyActivities";
 import { orders as initialOrders } from "../mock/orders";
@@ -88,6 +88,111 @@ function normalizeStoredCartItem(item) {
   };
 }
 
+function buildLocalOrderFromBackend({
+  backendOrder,
+  existingOrder,
+  selectedCustomerId,
+  authorizedAmount,
+  pendingRevision,
+  pendingRevisionItems
+}) {
+  const localItems = backendOrder.items?.map(toLocalOrderItem) ?? existingOrder?.items ?? [];
+  const firstItem = localItems[0] ?? {};
+
+  return {
+    ...existingOrder,
+    id: backendOrder.id,
+    customerId: existingOrder?.customerId ?? selectedCustomerId,
+    groupBuyActivityId: backendOrder.activityId,
+    status: backendOrder.status,
+    itemName: localItems.length > 1 ? `${firstItem.itemName || "飲料"} 等 ${localItems.length} 項` : firstItem.itemName || existingOrder?.itemName || "飲料訂單",
+    items: localItems,
+    quantity: backendOrder.totalCups,
+    sweetness: firstItem.sweetness ?? existingOrder?.sweetness ?? "",
+    ice: firstItem.ice ?? existingOrder?.ice ?? "",
+    toppings: firstItem.toppings ?? existingOrder?.toppings ?? [],
+    subtotal: backendOrder.originalAmount,
+    originalAmount: backendOrder.originalAmount,
+    authorizedAmount,
+    finalAmount: backendOrder.finalAmount,
+    manualRepayment: backendOrder.manualRepayment,
+    paymentStatus: backendOrder.paymentStatus,
+    authorizationStatus: backendOrder.authorizationStatus,
+    merchantAcceptanceStatus: backendOrder.merchantAcceptanceStatus,
+    pickupStatus: backendOrder.pickupStatus,
+    fallbackPurchasePreference: backendOrder.fallbackPurchasePreference ?? existingOrder?.fallbackPurchasePreference,
+    pendingRevisionId: pendingRevision?.id ?? null,
+    pendingRevisionAmount: pendingRevision?.originalAmount ?? null,
+    pendingRevisionItems,
+    pendingRevisionTotalCups: pendingRevision?.totalCups ?? null,
+    reauthorizationReason: pendingRevision ? "order_amount_changed" : null
+  };
+}
+
+function buildLocalPaymentFromBackend({
+  backendOrder,
+  existingPayment,
+  backendActivity,
+  authorization,
+  capture,
+  authorizedAmount,
+  pendingRevision,
+  pendingRevisionItems
+}) {
+  return {
+    ...existingPayment,
+    id: existingPayment?.id ?? `payment-${backendOrder.id}`,
+    orderId: backendOrder.id,
+    status: pendingRevision ? "pending" : backendOrder.paymentStatus,
+    paymentStatus: pendingRevision ? "pending" : backendOrder.paymentStatus,
+    authorizationStatus: pendingRevision ? "pending" : backendOrder.authorizationStatus,
+    originalAmount: pendingRevision?.originalAmount ?? backendOrder.originalAmount,
+    authorizedAmount: pendingRevision ? 0 : authorizedAmount,
+    finalAmount: backendOrder.finalAmount,
+    captureAmount: capture?.captureAmount ?? existingPayment?.captureAmount ?? null,
+    releasedAmount: capture?.releasedAmount ?? existingPayment?.releasedAmount ?? null,
+    provider: authorization?.provider ?? existingPayment?.provider ?? "line_pay",
+    providerReference: authorization?.providerAuthorizationId ?? existingPayment?.providerReference ?? null,
+    recipientName: existingPayment?.recipientName ?? backendActivity?.storeName ?? "LINE Pay",
+    pendingRevisionId: pendingRevision?.id ?? null,
+    revisionAmount: pendingRevision?.originalAmount ?? null,
+    revisionItems: pendingRevisionItems,
+    note: "Synced from backend order state."
+  };
+}
+
+function parseLinePayResultDeepLink(rawUrl) {
+  if (!rawUrl || typeof rawUrl !== "string") return null;
+
+  let parsedUrl;
+  try {
+    parsedUrl = new URL(rawUrl);
+  } catch {
+    return null;
+  }
+
+  const scheme = parsedUrl.protocol.replace(":", "");
+  const host = parsedUrl.hostname;
+  const path = parsedUrl.pathname.replace(/^\/+/, "");
+  const isPaymentResult = scheme === "drinkgroupbuy"
+    && (
+      (host === "payment" && path === "result")
+      || path === "payment/result"
+    );
+  if (!isPaymentResult) return null;
+
+  const orderId = parsedUrl.searchParams.get("orderId");
+  if (!orderId) return null;
+
+  return {
+    orderId,
+    status: parsedUrl.searchParams.get("status"),
+    paymentFlow: parsedUrl.searchParams.get("paymentFlow"),
+    transactionId: parsedUrl.searchParams.get("transactionId"),
+    error: parsedUrl.searchParams.get("error")
+  };
+}
+
 export function AppNavigator() {
   const [stack, setStack] = useState([initialRoute]);
   const [currentRole, setCurrentRole] = useState(null);
@@ -99,6 +204,7 @@ export function AppNavigator() {
   // Prototype only, not final API contract. Cart contents are saved locally when available.
   const [cartItems, setCartItems] = useState([]);
   const [storageLoaded, setStorageLoaded] = useState(false);
+  const handledDeepLinkRef = useRef(null);
   const current = stack[stack.length - 1];
 
   useEffect(() => {
@@ -652,49 +758,36 @@ export function AppNavigator() {
       const pendingRevision = backendOrder.pendingRevision ?? null;
       const pendingRevisionItems = pendingRevision?.items?.map(toLocalOrderItem) ?? null;
 
-      setOrders((items) => items.map((order) => (
-        order.id === orderId
-          ? {
-              ...order,
-              status: backendOrder.status,
-              paymentStatus: backendOrder.paymentStatus,
-              authorizationStatus: backendOrder.authorizationStatus,
-              originalAmount: backendOrder.originalAmount,
-              authorizedAmount,
-              finalAmount: backendOrder.finalAmount,
-              manualRepayment: backendOrder.manualRepayment,
-              quantity: backendOrder.totalCups,
-              subtotal: backendOrder.originalAmount,
-              items: backendOrder.items?.map(toLocalOrderItem) ?? order.items,
-              pendingRevisionId: pendingRevision?.id ?? null,
-              pendingRevisionAmount: pendingRevision?.originalAmount ?? null,
-              pendingRevisionItems,
-              pendingRevisionTotalCups: pendingRevision?.totalCups ?? null,
-              reauthorizationReason: pendingRevision ? "order_amount_changed" : null
-            }
-          : order
-      )));
-      setPaymentAuthorizations((items) => items.map((report) => (
-        report.orderId === orderId
-          ? {
-              ...report,
-              status: pendingRevision ? "pending" : backendOrder.paymentStatus,
-              paymentStatus: pendingRevision ? "pending" : backendOrder.paymentStatus,
-              authorizationStatus: pendingRevision ? "pending" : backendOrder.authorizationStatus,
-              originalAmount: pendingRevision?.originalAmount ?? backendOrder.originalAmount,
-              authorizedAmount: pendingRevision ? 0 : authorizedAmount,
-              finalAmount: backendOrder.finalAmount,
-              captureAmount: capture?.captureAmount ?? report.captureAmount,
-              releasedAmount: capture?.releasedAmount ?? report.releasedAmount,
-              provider: authorization?.provider ?? report.provider,
-              providerReference: authorization?.providerAuthorizationId ?? report.providerReference,
-              pendingRevisionId: pendingRevision?.id ?? null,
-              revisionAmount: pendingRevision?.originalAmount ?? null,
-              revisionItems: pendingRevisionItems,
-              note: "Synced from backend order state."
-            }
-          : report
-      )));
+      setOrders((items) => {
+        const existingOrder = items.find((order) => order.id === orderId);
+        const syncedOrder = buildLocalOrderFromBackend({
+          backendOrder,
+          existingOrder,
+          selectedCustomerId,
+          authorizedAmount,
+          pendingRevision,
+          pendingRevisionItems
+        });
+        return existingOrder
+          ? items.map((order) => (order.id === orderId ? syncedOrder : order))
+          : [...items, syncedOrder];
+      });
+      setPaymentAuthorizations((items) => {
+        const existingPayment = items.find((report) => report.orderId === orderId);
+        const syncedPayment = buildLocalPaymentFromBackend({
+          backendOrder,
+          existingPayment,
+          backendActivity,
+          authorization,
+          capture,
+          authorizedAmount,
+          pendingRevision,
+          pendingRevisionItems
+        });
+        return existingPayment
+          ? items.map((report) => (report.orderId === orderId ? syncedPayment : report))
+          : [...items, syncedPayment];
+      });
       if (backendActivity) {
         setGroupBuyActivities((items) => items.map((groupBuyActivity) => (
           groupBuyActivity.id === backendActivity.id
@@ -861,6 +954,38 @@ export function AppNavigator() {
       )));
     }
   }), [cartItems, groupBuyActivities, orders, selectedCustomerId]);
+
+  useEffect(() => {
+    function handleIncomingUrl(rawUrl) {
+      const deepLink = parseLinePayResultDeepLink(rawUrl);
+      if (!deepLink) return;
+      if (handledDeepLinkRef.current === rawUrl) return;
+      handledDeepLinkRef.current = rawUrl;
+
+      const mode = deepLink.paymentFlow === "direct_repayment" ? "manualRepayment" : undefined;
+      navigation.replace("paymentAuthorization", {
+        orderId: deepLink.orderId,
+        mode,
+        linePayResultStatus: deepLink.status,
+        linePayPaymentFlow: deepLink.paymentFlow,
+        linePayTransactionId: deepLink.transactionId,
+        linePayError: deepLink.error
+      });
+      actions.syncOrderFromBackend(deepLink.orderId).catch(() => {
+        // PaymentAuthorizationScreen still allows manual refresh when auth/session state is not ready.
+      });
+    }
+
+    Linking.getInitialURL()
+      .then(handleIncomingUrl)
+      .catch(() => {});
+
+    const subscription = Linking.addEventListener("url", (event) => {
+      handleIncomingUrl(event.url);
+    });
+
+    return () => subscription?.remove?.();
+  }, [actions, navigation]);
 
   const appState = { groupBuyActivities, orders, paymentAuthorizations, cartItems };
   const screenProps = {

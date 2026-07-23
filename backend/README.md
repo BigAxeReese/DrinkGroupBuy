@@ -29,6 +29,8 @@ Invoke-RestMethod http://localhost:3000/health
 | Method | Path | Purpose |
 | --- | --- | --- |
 | `POST` | `/api/auth/firebase-session` | Firebase ID token login and backend role resolution |
+| `GET` | `/api/auth/dev-users` | 本機 dev-only 身份清單，需 `AUTH_DEV_MODE=true` |
+| `POST` | `/api/auth/dev-session` | 本機 dev-only 模擬登入，需 `AUTH_DEV_MODE=true` |
 | `POST` | `/api/auth/login` | 開發版登入 |
 | `GET` | `/health` | 後端健康檢查 |
 | `GET` | `/api/group-buy-activities` | 讀取團購活動 |
@@ -65,6 +67,10 @@ AUTH_SESSION_SECRET=replace_with_backend_session_secret_at_least_16_chars
 Do not commit the Firebase service account JSON. Each Firebase Google test account UID must be stored in `users.firebase_uid`.
 
 ## 開發測試登入
+
+正式登入方向仍是 Firebase Google Login。若本機只有一個 Google 帳號，可把 `backend/.env` 設成 `AUTH_DEV_MODE=true`，並把 `mobile/.env` 設成 `EXPO_PUBLIC_AUTH_MODE=dev`；mobile 登入頁會顯示「本機測試身份」下拉選單，選項來自 SQLite 內的有效顧客、商家與開發補救身份。
+
+舊版帳密登入端點仍暫時保留作開發相容，但不屬於正式產品流程。
 
 顧客使用「手機號碼 / 密碼」登入。
 

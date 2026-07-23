@@ -795,6 +795,39 @@ function getUserAuthProfileById(userId) {
   }
 }
 
+function listDevAuthUsers() {
+  const database = openDatabase();
+  try {
+    const rows = database.prepare(`
+      SELECT DISTINCT
+        u.id,
+        u.login_name,
+        u.phone_number,
+        u.email,
+        u.password_hash,
+        u.display_name,
+        u.surname,
+        u.status
+      FROM users u
+      JOIN user_roles user_role ON user_role.user_id = u.id
+      WHERE u.status = 'active'
+        AND user_role.status = 'active'
+        AND user_role.role IN ('customer', 'merchant', 'admin')
+      ORDER BY
+        CASE
+          WHEN user_role.role = 'customer' THEN 1
+          WHEN user_role.role = 'merchant' THEN 2
+          ELSE 3
+        END,
+        u.id ASC
+    `).all();
+
+    return rows.map((row) => toDevAuthUser(hydrateUserAuthProfile(database, row)));
+  } finally {
+    database.close();
+  }
+}
+
 function createOrder(input) {
   const database = openDatabase();
   const now = new Date().toISOString();
@@ -4537,6 +4570,42 @@ function toPublicUser(user) {
   };
 }
 
+function toDevAuthUser(user) {
+  const primaryRole = user.roles.includes("customer")
+    ? "customer"
+    : user.roles.includes("merchant")
+      ? "merchant"
+      : user.roles[0] || "unknown";
+  const store = user.merchantStores?.[0] || null;
+
+  return {
+    ...toPublicUser(user),
+    primaryRole,
+    label: buildDevAuthUserLabel(user, primaryRole, store)
+  };
+}
+
+function buildDevAuthUserLabel(user, primaryRole, store) {
+  if (primaryRole === "customer") {
+    return `顧客：${getReadableText(user.displayName) || user.loginName || user.id}`;
+  }
+  if (primaryRole === "merchant") {
+    const storeLabel = getReadableText(store?.name) || store?.id;
+    const accountLabel = getReadableText(user.loginName) || user.email || user.id;
+    return `商家：${storeLabel || accountLabel}${storeLabel && accountLabel ? ` / ${accountLabel}` : ""}`;
+  }
+  if (primaryRole === "admin") {
+    return "開發補救：管理員";
+  }
+  return getReadableText(user.displayName) || user.loginName || user.id;
+}
+
+function getReadableText(value) {
+  const text = typeof value === "string" ? value.trim() : "";
+  if (!text || /^[?\s]+$/.test(text)) return null;
+  return text;
+}
+
 function mapOrder(row, items = []) {
   return {
     id: row.id,
@@ -4629,6 +4698,7 @@ module.exports = {
   getUserAuthProfileByFirebaseUid,
   getUserAuthProfileByLoginIdentifier,
   getUserAuthProfileById,
+  listDevAuthUsers,
   listDueGroupBuyActivitiesForSettlement,
   listGroupBuyActivities,
   recordLinePayCaptureFailureInDatabase,

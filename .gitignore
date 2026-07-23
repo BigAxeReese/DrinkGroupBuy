@@ -5,6 +5,9 @@ mobile/node_modules/
 # Local runtime logs
 .logs/
 
+# Codex conversation attachments
+.codex-remote-attachments/
+
 # Local environment files
 .env
 .env.*

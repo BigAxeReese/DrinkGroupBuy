@@ -220,7 +220,16 @@ Android 手機測試時，如果 backend 連不上，通常是因為手機無法
 
 正式方向是 Firebase Auth + Google Login。App 不提供角色選擇，角色由 backend 查本機開發資料庫決定。
 
-開發時可以用同一個 Google 測試帳號，搭配本機 mapping 指令切換角色：
+若只有一個 Google 測試帳號，建議本機改用 dev-only 身份切換器：
+
+```env
+AUTH_DEV_MODE=true
+EXPO_PUBLIC_AUTH_MODE=dev
+```
+
+啟用後，登入頁會顯示「本機測試身份」下拉選單，可切換 SQLite 內的顧客、商家與開發補救身份。這個模式不得用於 production build。
+
+也可以用同一個 Google 測試帳號，搭配本機 mapping 指令切換角色：
 
 ```powershell
 npm run auth:map:customer

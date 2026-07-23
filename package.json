@@ -12,6 +12,7 @@
     "payments:cleanup:preview": "node scripts/compact-duplicate-payment-failures.js",
     "payments:cleanup": "node scripts/compact-duplicate-payment-failures.js --apply --vacuum",
     "settlement:smoke": "node scripts/settlement-smoke.js",
+    "check:sql-safety": "node scripts/check-sql-safety.js",
     "auth:map:customer": "node scripts/map-firebase-user.js customer",
     "auth:map:customer-b": "node scripts/map-firebase-user.js customer-b",
     "auth:map:merchant": "node scripts/map-firebase-user.js merchant",

@@ -45,7 +45,7 @@ API：groupBuyActivity
 ## 登入方向
 
 - 正式登入方向：Firebase Auth + Google Login。
-- 開發測試方向：保留 dev mock login，方便切換顧客、商家，以及必要的後端補救權限。
+- 開發測試方向：優先使用 Firebase Google 測試帳號；若 Google 帳號不足，本機可用 dev-only 身份切換器測顧客、商家，以及必要的後端補救權限。
 - 正式角色與權限由 backend database 判斷，不由前端自行決定。
 - Mobile 取得 Firebase ID token 後，應交給 backend 驗證。
 - Backend 驗證 Firebase ID token 後，再查 `users`、`user_roles`、`merchant_users` 決定使用者身份。
@@ -103,12 +103,12 @@ API：groupBuyActivity
 ## 開發期角色測試策略
 
 - 正式環境規則：使用者永遠不能在 mobile app 手動選擇角色。
-- 開發環境規則：用不同 Firebase Google 測試帳號登入，並透過 `users.firebase_uid` 對應不同測試角色。
+- 開發環境規則：優先用不同 Firebase Google 測試帳號登入，並透過 `users.firebase_uid` 對應不同測試角色。
 - 角色判斷必須在 backend/database 完成，不由 mobile UI 選擇。
 - 建議 seed 對應：
   - customer A Google 測試帳號 -> customer A 的 `users.firebase_uid` -> `user_roles.role = customer`
   - customer B Google 測試帳號 -> customer B 的 `users.firebase_uid` -> `user_roles.role = customer`
   - merchant store 001 Google 測試帳號 -> merchant 001 的 `users.firebase_uid` -> `user_roles.role = merchant` 與 `merchant_users.store_id = store-001`
 - 若需要測後端補救工具，可另行對應 dev/admin 測試帳號；不列入第一階段正式 App 流程。
-- 只在本機開發時，可以使用 Firebase Auth emulator 或明確由環境變數開啟的 dev-auth bypass；除非本機 `.env` 設定 `AUTH_DEV_MODE=true` 或等效設定，否則必須關閉。
-- dev-auth bypass 不得預設啟用，也不得用於 production build。
+- 若測試帳號不足，只在本機開發時可使用明確由環境變數開啟的 dev-only 身份切換器；backend 需設定 `AUTH_DEV_MODE=true`，mobile 需設定 `EXPO_PUBLIC_AUTH_MODE=dev`。
+- dev-only 身份切換器不得預設啟用，也不得用於 production build。

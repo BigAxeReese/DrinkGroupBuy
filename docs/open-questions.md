@@ -1,6 +1,6 @@
 # 未決問題
 
-最後更新：2026-07-20
+最後更新：2026-07-21
 
 ## 語言規則
 
@@ -33,9 +33,9 @@
 | Resolved | 正式產品是否保留密碼登入？                                                    | 不保留。正式方向是只使用 Google Login；目前密碼登入是舊版開發相容功能。                                                      |
 | Resolved | 哪個欄位用來對應 Firebase Auth 使用者與既有 `users` rows？                    | 使用 `users.firebase_uid` 作為正式且唯一的 Firebase identity 欄位。                                                          |
 | Resolved | Google 帳號如何連結到既有 seeded users 與 merchant/store 權限？               | 以 `users.firebase_uid` 手動或 seed/script 對應；不由前端選角色，也不以 email 自動取得商家權限。未對應者暫不允許進入主流程。 |
-| Resolved | 沒有角色選擇密碼帳號後，開發與測試登入如何運作？                              | 使用 Firebase Google 測試帳號，並以 `users.firebase_uid` 對應；可選 local emulator/dev bypass，但必須由 env 明確開啟。       |
-| Resolved | dev mock login 如何在 production 停用？                                       | 預設停用；只能透過本機 env 如 `AUTH_DEV_MODE=true` 明確啟用，且 production UI 不得顯示角色選擇。                             |
-| Resolved | 哪些實際 Google 測試帳號要對應 customer A/B/C/D、各 merchant store 與 admin？ | 第一階段不做 admin；測試至少需要一個顧客與一個店家 UID。若 Google 帳號不足，本機可用 dev bypass 或重新映射同一 UID 測試角色。 |
+| Resolved | 沒有角色選擇密碼帳號後，開發與測試登入如何運作？                              | 優先使用 Firebase Google 測試帳號，並以 `users.firebase_uid` 對應；若帳號不足，本機可用 dev-only 身份切換器，但必須由 env 明確開啟。 |
+| Resolved | dev mock login 如何在 production 停用？                                       | 預設停用；backend 只能透過本機 env `AUTH_DEV_MODE=true` 明確啟用，mobile 也必須設定 `EXPO_PUBLIC_AUTH_MODE=dev` 才顯示身份切換下拉選單；production UI 不得顯示。 |
+| Resolved | 哪些實際 Google 測試帳號要對應 customer A/B/C/D、各 merchant store 與 admin？ | 第一階段不做 admin；測試至少需要一個顧客與一個店家 UID。若 Google 帳號不足，本機可用 dev-only 身份切換器測試 SQLite 內所有有效顧客、商家與開發補救身份。 |
 | Resolved | 商家使用者如何被授權管理一間或多間店？                                        | 目前方向是一個商家帳號只透過 `merchant_users.store_id` 管理一間店；暫不拆 owner/manager/staff。                              |
 | Resolved | 管理員角色如何授權與稽核？                                                    | 第一階段正式 App 不做管理員入口；目前 backend 僅保留開發 / 後端補救 API 供活動取消、結算與退款測試，敏感操作必須寫入 audit log。 |
 | Resolved | 除了 alias 與取餐/訂單資料外，商家可以看到哪些顧客公開資料？                  | 商家只看得到顧客 alias、訂單品項、客製化內容、金額、付款狀態、取貨狀態與取貨憑證；不顯示 email、Firebase UID 或敏感身份資料。 |

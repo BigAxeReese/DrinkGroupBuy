@@ -10,7 +10,7 @@
 
 目前已接上的功能：
 
-- 顧客、商家與管理員 prototype 登入入口。
+- Firebase Google Login 入口；本機 dev mode 可用測試身份下拉選單切換顧客與商家流程。
 - 顧客首頁、即時地圖、菜單、購物車、我的訂單。
 - 商家建立團購活動，會呼叫 backend API。
 - 顧客送出購物車，會呼叫 backend 建立訂單。
@@ -19,7 +19,7 @@
 
 目前仍未完成：
 
-- 正式顧客手機號碼密碼登入，以及商家/管理員 Email 密碼登入。
+- 正式 Firebase / Google 設定與測試帳號 UID 對應仍需依環境完成。
 - App 重新載入後完整從 backend 載入所有訂單。
 - LINE Pay capture / void / refund。
 - LINE Pay webhook。
@@ -84,6 +84,7 @@ GOOGLE_MAPS_API_KEY=your_restricted_android_google_maps_api_key
 EXPO_PUBLIC_GOOGLE_MAPS_API_KEY=your_http_referrer_restricted_web_google_maps_api_key
 EXPO_PUBLIC_BACKEND_URL=http://localhost:3000
 EXPO_PUBLIC_AUTH_MODE=firebase
+# EXPO_PUBLIC_AUTH_MODE=dev
 EXPO_PUBLIC_FIREBASE_API_KEY=your_firebase_web_api_key
 EXPO_PUBLIC_FIREBASE_AUTH_DOMAIN=your_project_id.firebaseapp.com
 EXPO_PUBLIC_FIREBASE_PROJECT_ID=your_firebase_project_id
@@ -123,6 +124,8 @@ Expo Web is fixed to `http://localhost:8083` in local development so Google OAut
 ## Firebase Google Login
 
 Mobile now uses Firebase Auth with Google Login as the primary login path. The app sends the Firebase ID token to `POST /api/auth/firebase-session`, and the backend decides the user role from `users.firebase_uid`, `user_roles`, and `merchant_users`.
+
+For local testing with only one Google account, set backend `AUTH_DEV_MODE=true` and mobile `EXPO_PUBLIC_AUTH_MODE=dev`. The login screen will show a dev-only identity dropdown populated from the local SQLite users and roles. Do not use that mode for production builds.
 
 Required setup:
 

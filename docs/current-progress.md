@@ -1,6 +1,6 @@
 # 目前進度
 
-最後更新：2026-07-20
+最後更新：2026-07-22
 
 換電腦或交接給其他 AI 時，請先閱讀 `docs/handoff-summary.md`。
 
@@ -9,12 +9,14 @@
 ## 進度摘要
 
 - Firebase Auth + Google Login 已實作，backend 會驗證 Firebase ID token，再依開發資料庫的 `users.firebase_uid`、`user_roles` 與 `merchant_users` 判斷身份。
+- 本機開發已新增 dev-only 身份切換器；只有 backend `AUTH_DEV_MODE=true` 且 mobile `EXPO_PUBLIC_AUTH_MODE=dev` 時才會顯示，可用下拉選單切換 SQLite 內所有有效顧客、商家與開發補救身份。
 - 開發資料庫仍使用 SQLite，主要 schema、seed 與付款相關資料表已建立；PostgreSQL schema / seed 草稿已在本機容器驗證，但尚未接入 backend runtime，目前還不是正式資料庫。
 - LINE Pay 付款主幹已拆成獨立模組，已有 request、confirm、cancel、capture、void、refund、訂單修改後重新預授權與截止結算排程。
 - 付款結算 smoke test 已於 2026-07-19 通過，包含達標請款、未達標原價請款／取消授權、排程結算、修改訂單替換授權、截止後拒絕預授權、三次自動請款上限、取餐前 15 分鐘以前的手動重新付款，以及退款 idempotency。
 - 開發資料庫曾暴露同一筆 LINE Pay 失敗請款被無限重試的問題；目前已改為截止時第一次請款，暫時性失敗後每 30 秒重試，總計最多三次，並在重試前查詢 provider 狀態。
 - 2026-07-19 已將該問題產生的 6,496 筆重複失敗紀錄壓縮為 1 筆原始失敗紀錄與 1 筆稽核摘要，共移除 6,495 筆；清理前 SQLite 備份保留於本機 `database/backups/`，後續可用 `npm run payments:cleanup:preview` 預覽及 `npm run payments:cleanup` 安全清理同類資料。
 - 三次自動請款失敗或遇到不可重試錯誤後，顧客可在取餐開始前 15 分鐘以前使用結算後金額直接重新付款；後端會先查原交易狀態並解除仍有效的原授權，付款成功後訂單改為已扣款並加入製作流程。
+- 已新增 `npm run check:sql-safety`，用來檢查 backend、database 與 scripts 內是否出現未審核的動態 SQL、SQL 字串插值或字串相加，降低後續開發時引入 SQL 注入風險。
 - 系統分析書已整理為五大功能，五組描述性綱目已更新，並已抽出 `docs/system-analysis-extracted.md`；各小節使用個案描述與活動圖仍待更新。
 
 ## 2026-07-05 登入方向更新
@@ -44,6 +46,13 @@
 - 這不是正式環境角色切換器。Mobile app 仍不顯示角色選擇，角色解析仍由 backend/database 控制。
 - 重新對應後，需要登出再登入，讓 app 取得新的 backend token。
 
+## 2026-07-21 本機模擬身份切換
+
+- Mobile 登入頁在 `EXPO_PUBLIC_AUTH_MODE=dev` 時會額外顯示「本機測試身份」下拉選單。
+- Backend 只有在 `AUTH_DEV_MODE=true` 且非 `NODE_ENV=production` 時才開放 `GET /api/auth/dev-users` 與 `POST /api/auth/dev-session`。
+- 下拉選單資料來自 SQLite `users`、`user_roles` 與 `merchant_users`，包含所有 active 的 customer、merchant 與開發補救身份。
+- 這不是正式產品角色選擇；正式環境仍只顯示 Google 登入，並由 Firebase UID 對應資料庫身份。
+
 ## Mobile 端
 
 技術方向：React Native + Expo，Android-first，目前使用 Expo Web 預覽。
@@ -53,7 +62,7 @@
 - 登入頁面使用 Firebase Auth + Google Login，並將 Firebase ID token 送到 backend 建立應用程式 session。
 - 顧客與商家使用相同的 Google 登入入口；角色不由 mobile UI 選擇，而是由 backend/database 判斷。
 - 密碼登入只保留為舊版開發相容功能，不屬於最終產品流程。
-- 開發期仍保留 dev mock login / 測試帳號概念，方便切換身份測流程。
+- 開發期仍保留測試帳號與 dev-only 身份切換器，方便在本機切換顧客與商家流程。
 - 顧客首頁、Google Maps 即時地圖、店家菜單、飲料客製化、購物車。
 - 顧客首頁會區分「目前顧客已加入的團購」與「附近招募中的團購推薦」。
 - 顧客可查看進行中訂單、訂單明細、修改訂單、團購進度、取貨碼與歷史訂單。
@@ -61,6 +70,7 @@
 - LINE Pay 預授權與 partial capture 的 mobile UI / 狀態流程已串接第一版。
 - 付款畫面可向後端建立 LINE Pay sandbox 授權網址，並開啟 LINE Pay 付款頁。
 - 付款畫面在開啟 LINE Pay 後會短時間自動輪詢 backend 訂單狀態；App / 瀏覽器回到前景時也會安靜刷新，授權完成後同步顯示 `authorized`。
+- LINE Pay confirm/cancel backend HTML 結果頁已提供 `drinkgroupbuy://payment/result` app deep link，並嘗試自動返回 App；mobile 端會監聽 deep link、導回付款畫面並同步該筆訂單。
 - 顧客送出預授權後，購物車會保留飲品；只有 backend 訂單同步為 `authorized` / `captured` 後，才清除該團購的購物車飲品。
 - Mobile 主要團購命名已從 `deal` 遷移到 `groupBuyActivity`，付款預授權畫面已從 `PaymentReportScreen` 改為 `PaymentAuthorizationScreen`；舊 localStorage key 只保留相容讀取。
 - 付款規則已集中記錄在 `docs/payment-rules-and-flow.md`；目前決議是預授權成功即計入杯數，修改授權訂單採先新授權成功、再取消舊授權的替換流程。
@@ -72,7 +82,7 @@
 
 - App 啟動時尚未完整載入後端權威活動列表。
 - 訂單、付款、取貨與大部分 runtime progress 仍有 mobile-local state。
-- LINE Pay 完成後目前仍回 backend HTML 頁，尚未做正式 app deep link；mobile 端先以 polling / foreground refresh 同步狀態。
+- LINE Pay 完成後仍會先回 backend HTML 頁；HTML 頁會提供返回 App deep link，mobile 端仍保留 polling / foreground refresh 作為備援。
 - 部分流程仍保留 fallback 行為。
 
 ## Backend 端
@@ -99,6 +109,8 @@
 | -------- | --------------------------------------------- | ------------------------------------- |
 | `POST`   | `/api/auth/login`                             | 開發用登入                            |
 | `POST`   | `/api/auth/firebase-session`                  | Firebase Google Login session         |
+| `GET`    | `/api/auth/dev-users`                         | 本機 dev-only 身份清單                |
+| `POST`   | `/api/auth/dev-session`                       | 本機 dev-only 模擬登入                |
 | `GET`    | `/health`                                     | 健康檢查                              |
 | `GET`    | `/api/group-buy-activities`                   | 查詢團購活動與優惠級距                |
 | `POST`   | `/api/merchant/group-buy-activities`          | 商家建立團購活動                      |
@@ -120,7 +132,7 @@
 - 訂單建立會保存品項與客製化快照。
 - 尚未預授權成功的 pending 訂單可以用目前購物車內容更新；更新時會把舊的 pending LINE Pay 授權標成 `failed`，避免下一次預授權被阻擋。
 - 已授權訂單修改第一版已加入：`POST /api/orders/:orderId/revisions` 會建立 pending revision 與 item snapshots，不會立即修改原訂單；mobile 購物車與訂單明細修改會建立 revision，付款頁會帶 `orderRevisionId` 重新發起 LINE Pay 預授權；新預授權 confirm 成功後才套用 revision，並嘗試 void 舊授權。
-- 付款畫面可在 LINE Pay redirect 後透過自動輪詢、回前景刷新或手動刷新同步後端訂單狀態。
+- 付款畫面可在 LINE Pay redirect 後透過 app deep link、自動輪詢、回前景刷新或手動刷新同步後端訂單狀態。
 - 團購列表會回傳 `authorizedCups` 與 `participantCount`。
 - 活動建立有基本 idempotency 處理。
 - 開發 / 補救用取消活動會寫入 `status_history` 與 `audit_logs`。

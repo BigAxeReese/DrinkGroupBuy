@@ -1,6 +1,6 @@
 # 交接總整理
 
-最後更新：2026-07-20
+最後更新：2026-07-21
 
 換電腦、交接給其他人、或開新的 Codex 對話時，請先閱讀本文件。
 
@@ -27,7 +27,7 @@ project-root/
 - 未來正式資料庫目標：PostgreSQL。
 - Firebase 不作為主要資料庫方向。
 - Firebase 目前只規劃用於 Auth / Google Login。
-- 開發期保留 dev mock login，方便測顧客、商家，以及必要的後端補救權限。
+- 開發期優先用 Firebase Google 測試帳號；若帳號不足，本機可用 dev-only 身份切換器測顧客、商家，以及必要的後端補救權限。
 - LINE Pay sandbox 預授權、void、capture、refund、手動重新付款、單一團購手動結算與 deadline settlement scheduler 已有後端切片。
 
 文件語言規則：
@@ -144,7 +144,18 @@ backend/
 
 ## 測試登入帳號
 
-目前正式登入方向是 Firebase Auth + Google Login；角色與權限由 backend database 的 `users.firebase_uid`、`user_roles` 與 `merchant_users` 判斷。開發版仍保留舊帳密登入 / dev mock login 作為本機相容與除錯工具，production UI 不應依賴角色選擇或任意 UID 輸入。
+目前正式登入方向是 Firebase Auth + Google Login；角色與權限由 backend database 的 `users.firebase_uid`、`user_roles` 與 `merchant_users` 判斷。production UI 不顯示角色選擇，也不允許任意 UID 輸入。
+
+本機若只有一個 Google 帳號，可改用 dev-only 身份切換器：
+
+```env
+AUTH_DEV_MODE=true
+EXPO_PUBLIC_AUTH_MODE=dev
+```
+
+啟用後，mobile 登入頁會顯示「本機測試身份」下拉選單，選項來自 SQLite 內所有 active 的 customer、merchant 與開發補救身份。此模式不得用於 production build。
+
+舊帳密登入端點仍暫時保留作開發相容，但不屬於正式產品流程。
 
 Legacy dev mock login 顧客可使用手機號碼 + 密碼登入。
 

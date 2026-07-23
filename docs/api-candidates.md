@@ -1,6 +1,6 @@
 # API 清單與候選項
 
-最後更新：2026-07-20
+最後更新：2026-07-21
 
 ## 語言規則
 
@@ -37,12 +37,13 @@ API JSON 使用 `camelCase`。已實作 routes 只對目前開發 prototype 具�
 | ------------------ | -------------------------------------------------------------------------------------------- |
 | 用途               | 在 production 維持 Google-only 的前提下，讓開發者測試 customer、merchant 流程，以及必要的 dev/admin 後端補救權限 |
 | 建議方法           | 使用真實 Firebase Google 測試帳號，並用 `users.firebase_uid` 對應                            |
-| 本機替代方法       | Firebase Auth emulator 或 dev-only bypass                                                    |
+| 本機替代方法       | 已實作 dev-only 身份切換器；mobile 只在 `EXPO_PUBLIC_AUTH_MODE=dev` 時顯示下拉選單              |
 | 必要防護           | 只能由本機 backend env 如 `AUTH_DEV_MODE=true` 開啟；預設必須停用                            |
-| Candidate request  | 僅 local/dev mode 可使用 `{ devFirebaseUid }`，或使用 Firebase emulator 的正常 `{ idToken }` |
-| Candidate response | 與正式 Google login 相同：`{ token, user }`                                                  |
-| 禁止行為           | Mobile production UI 不得顯示角色選擇，也不得允許任意輸入 Firebase UID                       |
-| Audit 備註         | 若實作 dev bypass，需明確記錄使用情況，且不得進入 production deployment config               |
+| 已實作 route       | `GET /api/auth/dev-users`、`POST /api/auth/dev-session`                                      |
+| Request            | `GET /api/auth/dev-users` 無 body；`POST /api/auth/dev-session` body: `{ userId }`            |
+| Response           | `GET` 回傳 `{ users }`；`POST` 與正式 Google login 相同：`{ token, user }`                    |
+| 禁止行為           | Mobile production UI 不得顯示身份切換下拉選單，也不得允許任意輸入 Firebase UID               |
+| Audit 備註         | dev-only 身份切換不得進入 production deployment config；正式身份仍以 Firebase UID 對應為準    |
 
 ### 健康檢查
 
@@ -181,9 +182,9 @@ API JSON 使用 `camelCase`。已實作 routes 只對目前開發 prototype 具�
 | Method / path | `GET /api/payments/line-pay/confirm?transactionId=&orderId=`                                                                                                                                                                                                 |
 | 相關畫面      | LINE Pay hosted page 會 redirect 到這裡                                                                                                                                                                                                                      |
 | Request       | LINE Pay query parameters，加上 confirm URL 裡自行帶入的 `orderId`                                                                                                                                                                                           |
-| Response      | HTML result page                                                                                                                                                                                                                                             |
-| 已實作規則    | 以 DB 查找 pending authorization，memory cache 只作輔助；用原價金額/currency 呼叫 LINE Pay confirm；寫入 `authorized` 前用交易重新檢查是否已截止、容量與 `authorizationExpireDate`；一般訂單成功時更新 `payment_authorizations` 與 `orders`；revision 授權成功時先套用 `order_revisions` 再嘗試 void 舊授權；截止後 confirm、容量不足或授權期限不足時標記 authorization / revision failed，並自動嘗試 LINE Pay void；記錄 provider event、status history 與 audit log |
-| 尚缺實作      | Mobile callback sync、provider 狀態查詢、自動重試 queue、void 失敗重試與告警、duplicate redirect 更完整的 idempotency table                                                                                                                                     |
+| Response      | HTML result page；包含返回 App 的 deep link，例如 `drinkgroupbuy://payment/result?orderId=...`                                                                                                                                                              |
+| 已實作規則    | 以 DB 查找 pending authorization，memory cache 只作輔助；用原價金額/currency 呼叫 LINE Pay confirm；寫入 `authorized` 前用交易重新檢查是否已截止、容量與 `authorizationExpireDate`；一般訂單成功時更新 `payment_authorizations` 與 `orders`；revision 授權成功時先套用 `order_revisions` 再嘗試 void 舊授權；截止後 confirm、容量不足或授權期限不足時標記 authorization / revision failed，並自動嘗試 LINE Pay void；記錄 provider event、status history 與 audit log；結果頁會提供 app deep link 並嘗試自動返回 App |
+| 尚缺實作      | provider 狀態查詢、自動重試 queue、void 失敗重試與告警、duplicate redirect 更完整的 idempotency table                                                                                                                                                         |
 
 ### LINE Pay Cancel Redirect
 
@@ -191,9 +192,9 @@ API JSON 使用 `camelCase`。已實作 routes 只對目前開發 prototype 具�
 | ------------- | ----------------------------------------------------------- |
 | Method / path | `GET /api/payments/line-pay/cancel?transactionId=&orderId=` |
 | 相關畫面      | LINE Pay hosted page 會 redirect 到這裡                     |
-| Response      | HTML cancellation page                                      |
-| 已實作規則    | 以 DB 查找 pending authorization，將 pending authorization 標記為 `failed`；若屬於 order revision，revision 也會標記為 `failed`；寫入 provider event、status history 與 audit log，並清除 memory cache |
-| 尚缺規則      | 導回 app、duplicate cancel redirect 的完整 idempotency table                                                                 |
+| Response      | HTML cancellation page；包含返回 App 的 deep link             |
+| 已實作規則    | 以 DB 查找 pending authorization，將 pending authorization 標記為 `failed`；若屬於 order revision，revision 也會標記為 `failed`；寫入 provider event、status history 與 audit log，並清除 memory cache；結果頁會提供 app deep link |
+| 尚缺規則      | duplicate cancel redirect 的完整 idempotency table             |
 
 ## 下一步候選 API
 
@@ -256,6 +257,7 @@ API JSON 使用 `camelCase`。已實作 routes 只對目前開發 prototype 具�
 - Authentication 與 role authorization。
 - Local mobile web CORS 必須允許 `Authorization`，讓 bearer-token API calls 可以通過 browser preflight。
 - Input validation 與一致的 error format。
+- 所有 API 在處理查詢、建立、修改、刪除資料時，必須使用參數化查詢；若有動態排序欄位、狀態值、角色或類型，必須使用白名單驗證，避免使用者輸入改變 SQL 結構。
 - create、authorization、capture、cancellation、pickup operations 需要 idempotency。
 - 更新 orders、cup totals、payment state 與 history 的操作需要 transaction。
 - deadline/capacity races 需要 optimistic concurrency 或 locking。

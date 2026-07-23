@@ -1,6 +1,6 @@
 # 付款規則與流程
 
-最後更新：2026-07-13
+最後更新：2026-07-21
 
 本文件紀錄目前已確認的付款商業規則，作為下一階段 LINE Pay 實作依據。
 
@@ -85,10 +85,11 @@
 ### 付款結果同步
 
 1. LINE Pay confirm/cancel redirect 後，以後端資料庫狀態為準。
-2. Mobile 付款結果頁第一階段使用 polling 讀取訂單與付款狀態。
-3. App 從外部付款頁回到前景時，應重新讀取訂單狀態。
-4. 若自動同步失敗，顧客可以手動重新整理付款結果。
-5. Deep link 可留到後續優化，不是第一階段必要條件。
+2. 後端 HTML 結果頁應提供 app deep link，例如 `drinkgroupbuy://payment/result?orderId=...`，讓顧客可回到 App 的付款畫面。
+3. Mobile 收到 deep link 後，應導回付款畫面並重新讀取該筆訂單狀態。
+4. Mobile 付款結果頁仍保留 polling 讀取訂單與付款狀態，作為 deep link 失敗時的備援。
+5. App 從外部付款頁回到前景時，應重新讀取訂單狀態。
+6. 若自動同步失敗，顧客可以手動重新整理付款結果。
 
 ### Provider 事件與 webhook
 

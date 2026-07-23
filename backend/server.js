@@ -8,6 +8,7 @@ const {
   getUserAuthProfileByFirebaseUid,
   getUserAuthProfileByLoginIdentifier,
   getUserAuthProfileById,
+  listDevAuthUsers,
   listGroupBuyActivities,
   updatePendingOrder
 } = require("./db");
@@ -74,6 +75,39 @@ const server = http.createServer(async (request, response) => {
           error: "Firebase user is not mapped to an active backend user",
           nextStep: "Add this Firebase UID to users.firebase_uid in the development database."
         });
+        return;
+      }
+
+      const token = createAuthToken(user);
+      sendJson(response, 200, { token, user: toPublicUserResponse(user) });
+      return;
+    }
+
+    if (request.method === "GET" && url.pathname === "/api/auth/dev-users") {
+      if (!isDevAuthModeEnabled()) {
+        sendJson(response, 404, { error: "Not found" });
+        return;
+      }
+
+      sendJson(response, 200, { users: listDevAuthUsers() });
+      return;
+    }
+
+    if (request.method === "POST" && url.pathname === "/api/auth/dev-session") {
+      if (!isDevAuthModeEnabled()) {
+        sendJson(response, 404, { error: "Not found" });
+        return;
+      }
+
+      const body = await readJsonBody(request);
+      if (!body.userId) {
+        sendJson(response, 400, { error: "userId is required" });
+        return;
+      }
+
+      const user = getUserAuthProfileById(body.userId);
+      if (!user) {
+        sendJson(response, 404, { error: "Dev user not found" });
         return;
       }
 
@@ -424,7 +458,14 @@ const server = http.createServer(async (request, response) => {
         sendHtml(response, 409, buildLinePayResultPage({
           title: "LINE Pay 預授權無法完成",
           message: "團購已達杯數上限，這筆訂單沒有加入團購。",
-          detail: `Maximum cups: ${result.maximumCups} / Authorized cups: ${result.authorizedCups} / Requested cups: ${result.requestedCups} / Void: ${voidStatus}`
+          detail: `Maximum cups: ${result.maximumCups} / Authorized cups: ${result.authorizedCups} / Requested cups: ${result.requestedCups} / Void: ${voidStatus}`,
+          appReturnUrl: buildLinePayAppReturnUrl({
+            orderId: result.pendingPayment?.orderId || orderId,
+            transactionId,
+            status: "failed",
+            paymentFlow: result.paymentFlow,
+            error: result.error
+          })
         }));
         return;
       }
@@ -435,7 +476,14 @@ const server = http.createServer(async (request, response) => {
             ? "LINE Pay 重新付款無法完成"
             : "LINE Pay 預授權無法完成",
           message: result.error,
-          detail: result.authorization ? `Authorization status: ${result.authorization.status}` : undefined
+          detail: result.authorization ? `Authorization status: ${result.authorization.status}` : undefined,
+          appReturnUrl: buildLinePayAppReturnUrl({
+            orderId: result.pendingPayment?.orderId || orderId,
+            transactionId,
+            status: "failed",
+            paymentFlow: result.paymentFlow,
+            error: result.error
+          })
         }));
         return;
       }
@@ -443,7 +491,13 @@ const server = http.createServer(async (request, response) => {
       if (!result) {
         sendHtml(response, 409, buildLinePayResultPage({
           title: "LINE Pay 預授權無法完成",
-          message: "找不到待確認的付款資料。請回到 App 重新發起預授權。"
+          message: "找不到待確認的付款資料。請回到 App 重新發起預授權。",
+          appReturnUrl: buildLinePayAppReturnUrl({
+            orderId,
+            transactionId,
+            status: "failed",
+            error: "pending_payment_not_found"
+          })
         }));
         return;
       }
@@ -456,7 +510,13 @@ const server = http.createServer(async (request, response) => {
           ? "付款已完成，訂單已進入製作流程。請回到 App 查看訂單。"
           : "目前僅完成授權，尚未正式請款。請回到 App 查看團購進度。",
         detail: `Order ID: ${result.pendingPayment.orderId}${result.authorization ? ` / Authorization: ${result.authorization.status}` : ""}`,
-        rawCode: result.payload.returnCode
+        rawCode: result.payload.returnCode,
+        appReturnUrl: buildLinePayAppReturnUrl({
+          orderId: result.pendingPayment.orderId,
+          transactionId,
+          status: result.paymentFlow === "direct_repayment" ? "captured" : "authorized",
+          paymentFlow: result.paymentFlow
+        })
       }));
       return;
     }
@@ -472,7 +532,13 @@ const server = http.createServer(async (request, response) => {
         title: directRepayment ? "LINE Pay 重新付款已取消" : "LINE Pay 預授權已取消",
         message: directRepayment
           ? "你可以在付款期限前回到 App 再次付款。"
-          : "你可以回到 App 重新發起預授權。"
+          : "你可以回到 App 重新發起預授權。",
+        appReturnUrl: buildLinePayAppReturnUrl({
+          orderId: cancelled.orderId || orderId,
+          transactionId: cancelled.transactionId || transactionId,
+          status: "cancelled",
+          paymentFlow: directRepayment ? "direct_repayment" : "authorization"
+        })
       }));
       return;
     }
@@ -696,6 +762,16 @@ function canManageStore(user, storeId) {
   return user.merchantStores.some((store) => store.id === storeId);
 }
 
+function isDevAuthModeEnabled() {
+  if (process.env.NODE_ENV === "production") return false;
+  return readBooleanEnv(process.env.AUTH_DEV_MODE, false);
+}
+
+function readBooleanEnv(value, fallback = false) {
+  if (value == null || value === "") return fallback;
+  return ["1", "true", "yes", "on"].includes(String(value).trim().toLowerCase());
+}
+
 function toPublicUserResponse(user) {
   return {
     id: user.id,
@@ -709,7 +785,15 @@ function toPublicUserResponse(user) {
   };
 }
 
-function buildLinePayResultPage({ title, message, detail, rawCode }) {
+function buildLinePayResultPage({ title, message, detail, rawCode, appReturnUrl }) {
+  const autoReturnScript = appReturnUrl
+    ? `<script>
+  window.setTimeout(function () {
+    window.location.href = ${toSafeScriptString(appReturnUrl)};
+  }, 900);
+</script>`
+    : "";
+
   return `<!doctype html>
 <html lang="zh-Hant">
 <head>
@@ -736,6 +820,18 @@ function buildLinePayResultPage({ title, message, detail, rawCode }) {
     h1 { margin: 0 0 12px; font-size: 24px; }
     p { margin: 8px 0; line-height: 1.6; color: #334155; }
     .code { color: #2563eb; font-weight: 800; }
+    .button {
+      display: block;
+      margin-top: 18px;
+      border-radius: 14px;
+      background: #2563eb;
+      color: white;
+      font-weight: 900;
+      padding: 14px 16px;
+      text-align: center;
+      text-decoration: none;
+    }
+    .hint { font-size: 13px; color: #64748b; }
   </style>
 </head>
 <body>
@@ -744,9 +840,32 @@ function buildLinePayResultPage({ title, message, detail, rawCode }) {
     <p>${escapeHtml(message)}</p>
     ${detail ? `<p class="code">${escapeHtml(detail)}</p>` : ""}
     ${rawCode ? `<p>LINE Pay returnCode: ${escapeHtml(rawCode)}</p>` : ""}
+    ${appReturnUrl ? `<a class="button" href="${escapeHtml(appReturnUrl)}">返回 App 查看訂單</a>` : ""}
+    ${appReturnUrl ? '<p class="hint">若沒有自動返回 App，請點選上方按鈕。</p>' : ""}
   </main>
+  ${autoReturnScript}
 </body>
 </html>`;
+}
+
+function buildLinePayAppReturnUrl({ orderId, transactionId, status, paymentFlow, error }) {
+  const baseUrl = process.env.LINE_PAY_APP_RETURN_URL || "drinkgroupbuy://payment/result";
+  try {
+    const appUrl = new URL(baseUrl);
+    appUrl.searchParams.set("source", "line_pay");
+    if (orderId) appUrl.searchParams.set("orderId", orderId);
+    if (transactionId) appUrl.searchParams.set("transactionId", transactionId);
+    if (status) appUrl.searchParams.set("status", status);
+    if (paymentFlow) appUrl.searchParams.set("paymentFlow", paymentFlow);
+    if (error) appUrl.searchParams.set("error", error);
+    return appUrl.toString();
+  } catch {
+    return null;
+  }
+}
+
+function toSafeScriptString(value) {
+  return JSON.stringify(String(value)).replaceAll("<", "\\u003c");
 }
 
 function escapeHtml(value) {
