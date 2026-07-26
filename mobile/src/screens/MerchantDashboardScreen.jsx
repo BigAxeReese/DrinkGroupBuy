@@ -22,7 +22,6 @@ export function MerchantDashboardScreen({ navigation, appState, actions, memberA
   const activeOrders = appState.orders.filter((order) => (
     activeGroupBuyActivityIds.has(order.groupBuyActivityId)
     && order.status !== "cancelled"
-    && order.merchantAcceptanceStatus !== "cancelled"
   ));
   const historyOrders = appState.orders.filter((order) => {
     const groupBuyActivity = appState.groupBuyActivities.find((item) => item.id === order.groupBuyActivityId);
@@ -32,8 +31,8 @@ export function MerchantDashboardScreen({ navigation, appState, actions, memberA
       || ["cancelled", "failed", "completed"].includes(groupBuyActivity?.status)
     );
   });
-  const pendingAcceptanceCount = activeOrders.filter((order) => order.merchantAcceptanceStatus === "pending").length;
-  const authorizedOrderCount = activeOrders.filter((order) => ["authorized", "captured"].includes(order.paymentStatus)).length;
+  const pendingPaymentCount = activeOrders.filter((order) => ["pending", "failed"].includes(order.paymentStatus)).length;
+  const paidOrderCount = activeOrders.filter((order) => ["authorized", "captured"].includes(order.paymentStatus)).length;
 
   useEffect(() => {
     if (!merchantOrderIds) return;
@@ -60,8 +59,8 @@ export function MerchantDashboardScreen({ navigation, appState, actions, memberA
         </View>
         <View style={styles.metricRow}>
           <MetricCard label="進行中活動" value={activeGroupBuyActivities.length} />
-          <MetricCard label="待確認接單" value={pendingAcceptanceCount} />
-          <MetricCard label="已預授權" value={authorizedOrderCount} />
+          <MetricCard label="待付款" value={pendingPaymentCount} />
+          <MetricCard label="已付款" value={paidOrderCount} />
         </View>
       </View>
 
@@ -102,14 +101,13 @@ export function MerchantDashboardScreen({ navigation, appState, actions, memberA
           const relatedOrders = appState.orders.filter((order) => (
             order.groupBuyActivityId === groupBuyActivity.id
             && order.status !== "cancelled"
-            && order.merchantAcceptanceStatus !== "cancelled"
           ));
-          const authorizedOrders = relatedOrders.filter((order) => ["authorized", "captured"].includes(order.paymentStatus)).length;
+          const pendingPaymentOrders = relatedOrders.filter((order) => ["pending", "failed"].includes(order.paymentStatus)).length;
+          const paidOrders = relatedOrders.filter((order) => ["authorized", "captured"].includes(order.paymentStatus)).length;
           const capturedOrders = relatedOrders.filter((order) => order.paymentStatus === "captured").length;
           const readyPickups = relatedOrders.filter((order) => order.pickupStatus === "ready").length;
-          const pendingAcceptanceOrders = relatedOrders.filter((order) => order.merchantAcceptanceStatus === "pending").length;
-          const preparingOrders = relatedOrders.filter((order) => (
-            order.merchantAcceptanceStatus === "accepted"
+          const manufacturableOrders = relatedOrders.filter((order) => (
+            order.paymentStatus === "captured"
             && !["ready", "picked_up", "cancelled"].includes(order.pickupStatus)
           )).length;
 
@@ -130,32 +128,25 @@ export function MerchantDashboardScreen({ navigation, appState, actions, memberA
               />
               <View style={styles.summaryRow}>
                 <Text style={styles.summary}>訂單 {relatedOrders.length} 筆</Text>
-                <Text style={styles.summary}>預授權 {authorizedOrders} 筆</Text>
+                <Text style={styles.summary}>已付款 {paidOrders} 筆</Text>
               </View>
               <Text style={styles.summary}>已請款 {capturedOrders} 筆 · 可取貨：{readyPickups} 筆</Text>
-              {pendingAcceptanceOrders > 0 ? (
+              {pendingPaymentOrders > 0 ? (
+                <Text style={styles.warningText}>待付款 {pendingPaymentOrders} 筆，不列入製作清單。</Text>
+              ) : null}
+              {manufacturableOrders > 0 ? (
                 <PrimaryButton
-                  label={`確認接單（${pendingAcceptanceOrders} 筆）`}
-                  variant="secondary"
+                  label={`標記可取餐（${manufacturableOrders} 筆）`}
                   onPress={(event) => {
                     event.stopPropagation?.();
-                    actions.acceptMerchantOrdersForGroupBuyActivity(groupBuyActivity.id);
-                  }}
-                />
-              ) : (
-                <Text style={styles.acceptedText}>店家已確認目前訂單</Text>
-              )}
-              {preparingOrders > 0 ? (
-                <PrimaryButton
-                  label={`完成訂單（${preparingOrders} 筆）`}
-                  onPress={(event) => {
-                    event.stopPropagation?.();
-                    actions.completeMerchantOrdersForGroupBuyActivity(groupBuyActivity.id);
+                    actions.markOrdersReadyForPickupForGroupBuyActivity(groupBuyActivity.id);
                   }}
                 />
               ) : readyPickups > 0 ? (
                 <Text style={styles.readyText}>已有 {readyPickups} 筆訂單完成，可顯示取貨碼</Text>
-              ) : null}
+              ) : (
+                <Text style={styles.settledText}>目前沒有待製作訂單</Text>
+              )}
             </View>
           );
         })}
@@ -365,8 +356,13 @@ const styles = StyleSheet.create({
     fontSize: 12,
     fontWeight: "800"
   },
-  acceptedText: {
+  settledText: {
     color: "#047857",
+    fontSize: 12,
+    fontWeight: "900"
+  },
+  warningText: {
+    color: "#92400e",
     fontSize: 12,
     fontWeight: "900"
   },

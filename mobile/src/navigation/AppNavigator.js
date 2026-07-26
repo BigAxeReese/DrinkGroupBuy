@@ -276,13 +276,7 @@ export function AppNavigator() {
           ? {
               ...order,
               status: "locked",
-              lockedReason: "activity_deadline_reached",
-              merchantAcceptanceStatus: order.merchantAcceptanceStatus === "pending"
-                ? "accepted"
-                : order.merchantAcceptanceStatus,
-              pickupStatus: order.pickupStatus === "not_ready"
-                ? "preparing"
-                : order.pickupStatus
+              lockedReason: "activity_deadline_reached"
             }
           : order
       )));
@@ -697,6 +691,7 @@ export function AppNavigator() {
               paymentStatus: "authorized",
               authorizationStatus: "authorized",
               authorizedAmount: order.originalAmount ?? order.subtotal,
+              merchantAcceptanceStatus: "accepted",
               reauthorizationReason: null
             }
           : order
@@ -743,7 +738,9 @@ export function AppNavigator() {
               authorizationStatus: "captured",
               finalAmount: captureAmount,
               captureAmount,
-              releasedAmount: Math.max(0, order.authorizedAmount - captureAmount)
+              releasedAmount: Math.max(0, order.authorizedAmount - captureAmount),
+              merchantAcceptanceStatus: "accepted",
+              pickupStatus: order.pickupStatus === "not_ready" ? "preparing" : order.pickupStatus
             }
           : order
       )));
@@ -817,24 +814,11 @@ export function AppNavigator() {
 
       return { order: backendOrder, activity: backendActivity };
     },
-    acceptMerchantOrdersForGroupBuyActivity(groupBuyActivityId) {
+    markOrdersReadyForPickupForGroupBuyActivity(groupBuyActivityId) {
       setOrders((items) => items.map((order) => (
         order.groupBuyActivityId === groupBuyActivityId
           && order.status !== "cancelled"
-          && order.merchantAcceptanceStatus === "pending"
-          ? {
-              ...order,
-              merchantAcceptanceStatus: "accepted",
-              pickupStatus: order.pickupStatus === "not_ready" ? "preparing" : order.pickupStatus
-            }
-          : order
-      )));
-    },
-    completeMerchantOrdersForGroupBuyActivity(groupBuyActivityId) {
-      setOrders((items) => items.map((order) => (
-        order.groupBuyActivityId === groupBuyActivityId
-          && order.status !== "cancelled"
-          && order.merchantAcceptanceStatus === "accepted"
+          && order.paymentStatus === "captured"
           && !["ready", "picked_up", "cancelled"].includes(order.pickupStatus)
           ? {
               ...order,

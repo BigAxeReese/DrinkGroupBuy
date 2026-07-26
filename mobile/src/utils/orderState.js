@@ -25,7 +25,6 @@ export function buildOrderItemsChange({ order, nextItems }) {
       releasedAmount: null,
       paymentStatus: "pending",
       authorizationStatus: wasCounted ? "authorization_voided" : "pending",
-      merchantAcceptanceStatus: "pending",
       reauthorizationReason: "order_amount_changed"
     },
     paymentPatch: {

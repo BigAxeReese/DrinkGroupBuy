@@ -18,7 +18,7 @@ export function PickupInfoScreen({ navigation, route, appState, memberAction, se
         onMemberPress={memberAction}
       >
         <Section title="目前沒有取貨資料">
-          <Text style={styles.meta}>訂單已清空。送出訂單並由店家確認接單後，才會顯示取貨資訊與取貨憑證。</Text>
+          <Text style={styles.meta}>訂單完成付款並進入取貨流程後，才會顯示取貨資訊與取貨憑證。</Text>
         </Section>
       </MobileScreen>
     );
@@ -43,7 +43,7 @@ export function PickupInfoScreen({ navigation, route, appState, memberAction, se
       </Section>
 
       <Section title="異動提示">
-        <Text style={styles.meta}>取貨憑證會在店家確認接單後顯示。</Text>
+        <Text style={styles.meta}>店家標記可取貨後，取貨憑證才會顯示。</Text>
         <PlaceholderBox title="取貨碼" />
       </Section>
     </MobileScreen>

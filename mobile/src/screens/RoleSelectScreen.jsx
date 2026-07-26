@@ -1,7 +1,5 @@
 import { useEffect, useState } from "react";
-import { Pressable, StyleSheet, Text, View } from "react-native";
-import { MobileScreen, Section } from "../components/MobileScreen";
-import { PrimaryButton } from "../components/PrimaryButton";
+import { Pressable, ScrollView, StyleSheet, Text, View } from "react-native";
 import {
   getAuthMode,
   listDevAuthUsers,
@@ -106,35 +104,38 @@ export function RoleSelectScreen({ navigation }) {
   };
 
   return (
-    <MobileScreen title="登入">
-      <Section title="Google 登入">
-        <Text style={styles.description}>
-          使用 Google 測試帳號登入。後端會依 Firebase UID 對應顧客或商家身份。
-        </Text>
+    <ScrollView style={styles.screen} contentContainerStyle={styles.content}>
+      <View style={styles.hero}>
+        <LoginHeroIllustration />
+      </View>
 
-        {signedInUser ? (
-          <View style={styles.userCard}>
-            <Text style={styles.userLabel}>目前登入</Text>
-            <Text numberOfLines={1} style={styles.userName}>
-              {signedInUser.backendUser?.displayName || signedInUser.displayName || signedInUser.email}
-            </Text>
-            <Text numberOfLines={1} style={styles.userMeta}>
-              {signedInUser.email || signedInUser.uid}
-            </Text>
-          </View>
-        ) : null}
-
+      <View style={styles.actionStack}>
         {loginError ? <Text style={styles.errorText}>{loginError}</Text> : null}
 
-        <PrimaryButton
-          label={isLoggingIn ? "登入中..." : "使用 Google 繼續"}
+        <LoginOptionButton
+          icon="G"
+          iconStyle={styles.googleIcon}
+          label={isLoggingIn ? "登入中..." : "使用Google登入"}
+          disabled={isLoggingIn}
           onPress={() => !isLoggingIn && login()}
         />
 
-        {redirectUri ? (
-          <View style={styles.redirectCard}>
-            <Text style={styles.redirectLabel}>OAuth 回呼網址</Text>
-            <Text selectable style={styles.redirectValue}>{redirectUri}</Text>
+        {signedInUser ? (
+          <View style={styles.userCard}>
+            <View style={styles.userAvatar}>
+              <Text style={styles.userAvatarText}>
+                {(signedInUser.backendUser?.displayName || signedInUser.displayName || signedInUser.email || "會").slice(0, 1)}
+              </Text>
+            </View>
+            <View style={styles.userInfo}>
+              <Text style={styles.userLabel}>目前登入</Text>
+              <Text numberOfLines={1} style={styles.userName}>
+                {signedInUser.backendUser?.displayName || signedInUser.displayName || signedInUser.email}
+              </Text>
+              <Text numberOfLines={1} style={styles.userMeta}>
+                {signedInUser.email || signedInUser.uid}
+              </Text>
+            </View>
           </View>
         ) : null}
 
@@ -142,44 +143,107 @@ export function RoleSelectScreen({ navigation }) {
           <Pressable
             accessibilityRole="button"
             onPress={clearFirebaseSession}
-            style={({ pressed }) => [styles.secondaryButton, pressed && styles.pressed]}
+            style={({ pressed }) => [styles.textButton, pressed && styles.pressed]}
           >
-            <Text style={styles.secondaryButtonText}>登出 Google 登入狀態</Text>
+            <Text style={styles.textButtonLabel}>登出 Google 登入狀態</Text>
           </Pressable>
         ) : null}
-      </Section>
 
-      {isDevAuthMode ? (
-        <Section title="本機測試身份">
-          <Text style={styles.description}>
-            只在開發模式顯示。正式環境仍只使用 Google 登入。
-          </Text>
-          <DevIdentityDropdown
-            users={devUsers}
-            selectedUserId={selectedDevUserId}
-            isOpen={isDevDropdownOpen}
-            onToggle={() => setIsDevDropdownOpen((value) => !value)}
-            onSelect={(userId) => {
-              setSelectedDevUserId(userId);
-              setIsDevDropdownOpen(false);
-            }}
-          />
-          <PrimaryButton
-            label={isLoadingDevUsers
-              ? "讀取測試身份中..."
-              : isLoggingIn
-                ? "切換身份中..."
-                : "使用選取身份進入"}
-            disabled={isLoadingDevUsers || !selectedDevUserId}
-            onPress={() => {
-              if (!isLoggingIn && selectedDevUserId) {
-                devLogin();
-              }
-            }}
-          />
-        </Section>
+        {isDevAuthMode ? (
+          <View style={styles.devPanel}>
+            <View style={styles.devHeader}>
+              <Text style={styles.devTitle}>本機測試身份</Text>
+              <Text style={styles.devBadge}>開發模式</Text>
+            </View>
+            <DevIdentityDropdown
+              users={devUsers}
+              selectedUserId={selectedDevUserId}
+              isOpen={isDevDropdownOpen}
+              onToggle={() => setIsDevDropdownOpen((value) => !value)}
+              onSelect={(userId) => {
+                setSelectedDevUserId(userId);
+                setIsDevDropdownOpen(false);
+              }}
+            />
+            <LoginOptionButton
+              compact
+              label={isLoadingDevUsers
+                ? "讀取測試身份中..."
+                : isLoggingIn
+                  ? "切換身份中..."
+                  : "登入"}
+              disabled={isLoadingDevUsers || !selectedDevUserId || isLoggingIn}
+              onPress={() => {
+                if (!isLoggingIn && selectedDevUserId) {
+                  devLogin();
+                }
+              }}
+            />
+          </View>
+        ) : null}
+      </View>
+
+      <Text style={styles.terms}>
+        登入代表你同意<Text style={styles.termsLink}>服務條款</Text>與<Text style={styles.termsLink}>隱私政策</Text>
+      </Text>
+      <Text style={styles.version}>DrinkGroupBuy Prototype</Text>
+
+      {isDevAuthMode && redirectUri ? (
+        <View style={styles.redirectCard}>
+          <Text style={styles.redirectLabel}>開發回呼網址</Text>
+          <Text selectable style={styles.redirectValue}>{redirectUri}</Text>
+        </View>
       ) : null}
-    </MobileScreen>
+    </ScrollView>
+  );
+}
+
+function LoginHeroIllustration() {
+  return (
+    <View style={styles.illustration} accessibilityLabel="飲料團購插圖">
+      <View style={styles.blob} />
+      <View style={styles.smallBlobTop} />
+      <View style={styles.smallBlobBottom} />
+      <View style={styles.cup}>
+        <View style={[styles.ticket, styles.ticketOne]}>
+          <Text style={styles.ticketText}>折</Text>
+        </View>
+        <View style={[styles.ticket, styles.ticketTwo]}>
+          <Text style={styles.ticketText}>省</Text>
+        </View>
+        <View style={[styles.ticket, styles.ticketThree]}>
+          <Text style={styles.ticketText}>團</Text>
+        </View>
+        <View style={[styles.ticket, styles.ticketFour]}>
+          <Text style={styles.ticketText}>買</Text>
+        </View>
+      </View>
+      <View style={styles.lid} />
+      <View style={styles.straw} />
+      <View style={styles.flower}>
+        <Text style={styles.flowerText}>米</Text>
+      </View>
+    </View>
+  );
+}
+
+function LoginOptionButton({ icon, iconStyle, label, onPress, disabled = false, compact = false }) {
+  return (
+    <Pressable
+      accessibilityRole="button"
+      accessibilityState={{ disabled }}
+      disabled={disabled}
+      onPress={onPress}
+      style={({ pressed }) => [
+        styles.loginButton,
+        compact && styles.compactLoginButton,
+        disabled && styles.loginButtonDisabled,
+        pressed && !disabled && styles.pressed
+      ]}
+    >
+      {icon ? <Text style={[styles.loginIcon, compact && styles.compactLoginIcon, iconStyle]}>{icon}</Text> : null}
+      <Text numberOfLines={1} adjustsFontSizeToFit style={[styles.loginButtonLabel, compact && styles.compactLoginButtonLabel]}>{label}</Text>
+    </Pressable>
   );
 }
 
@@ -279,88 +343,313 @@ function getDevUserMeta(user) {
 }
 
 const styles = StyleSheet.create({
-  description: {
-    color: "#475569",
-    fontSize: 13,
-    lineHeight: 20
+  screen: {
+    flex: 1,
+    backgroundColor: "#ffffff"
   },
-  userCard: {
-    gap: 5,
-    borderRadius: 12,
-    backgroundColor: "#f8fafc",
-    padding: 12
+  content: {
+    flexGrow: 1,
+    paddingHorizontal: 30,
+    paddingTop: 28,
+    paddingBottom: 22
   },
-  userLabel: {
-    color: "#64748b",
-    fontSize: 11,
-    fontWeight: "900"
+  hero: {
+    alignItems: "center",
+    marginTop: 24,
+    marginBottom: 14
   },
-  userName: {
-    color: "#0f172a",
-    fontSize: 15,
-    fontWeight: "900"
+  illustration: {
+    width: 282,
+    height: 246,
+    alignItems: "center",
+    justifyContent: "center"
   },
-  userMeta: {
-    color: "#475569",
-    fontSize: 12,
-    fontWeight: "700"
+  blob: {
+    position: "absolute",
+    width: 226,
+    height: 166,
+    borderRadius: 999,
+    backgroundColor: "#37d39b",
+    transform: [{ rotate: "8deg" }]
   },
-  errorText: {
-    color: "#dc2626",
-    fontSize: 12,
-    fontWeight: "900",
-    lineHeight: 18
+  smallBlobTop: {
+    position: "absolute",
+    right: 34,
+    top: 36,
+    width: 58,
+    height: 40,
+    borderRadius: 999,
+    backgroundColor: "#2ecf93",
+    transform: [{ rotate: "18deg" }]
   },
-  secondaryButton: {
-    minHeight: 42,
+  smallBlobBottom: {
+    position: "absolute",
+    left: 36,
+    bottom: 42,
+    width: 74,
+    height: 52,
+    borderRadius: 999,
+    backgroundColor: "#37d39b",
+    transform: [{ rotate: "28deg" }]
+  },
+  cup: {
+    position: "absolute",
+    bottom: 54,
+    width: 92,
+    height: 116,
+    overflow: "hidden",
+    borderRadius: 22,
+    borderWidth: 7,
+    borderColor: "#27c7da",
+    backgroundColor: "rgba(34, 211, 238, 0.72)"
+  },
+  lid: {
+    position: "absolute",
+    top: 76,
+    width: 106,
+    height: 18,
+    borderRadius: 6,
+    backgroundColor: "#6b7280"
+  },
+  straw: {
+    position: "absolute",
+    top: 42,
+    width: 4,
+    height: 38,
+    borderRadius: 3,
+    backgroundColor: "#087f5b"
+  },
+  flower: {
+    position: "absolute",
+    top: 30,
+    width: 36,
+    height: 36,
+    borderRadius: 18,
     alignItems: "center",
     justifyContent: "center",
-    borderRadius: 12,
-    borderWidth: 1,
-    borderColor: "#cbd5e1",
-    backgroundColor: "#ffffff",
-    paddingHorizontal: 14
+    backgroundColor: "#f43f5e"
   },
-  dropdown: {
-    gap: 8
+  flowerText: {
+    color: "#ffffff",
+    fontSize: 18,
+    fontWeight: "900"
   },
-  dropdownButton: {
+  ticket: {
+    position: "absolute",
+    width: 52,
+    height: 28,
+    alignItems: "center",
+    justifyContent: "center",
+    borderRadius: 4,
+    backgroundColor: "#16a34a",
+    borderWidth: 2,
+    borderColor: "#087f5b"
+  },
+  ticketOne: {
+    left: 8,
+    top: 22,
+    transform: [{ rotate: "-18deg" }]
+  },
+  ticketTwo: {
+    right: 7,
+    top: 34,
+    transform: [{ rotate: "14deg" }]
+  },
+  ticketThree: {
+    left: 18,
+    bottom: 28,
+    transform: [{ rotate: "12deg" }]
+  },
+  ticketFour: {
+    right: 15,
+    bottom: 14,
+    transform: [{ rotate: "-12deg" }]
+  },
+  ticketText: {
+    color: "#bbf7d0",
+    fontSize: 13,
+    fontWeight: "900"
+  },
+  actionStack: {
+    gap: 14
+  },
+  loginButton: {
     minHeight: 58,
+    width: "100%",
     flexDirection: "row",
     alignItems: "center",
-    justifyContent: "space-between",
-    borderRadius: 12,
+    justifyContent: "center",
+    borderRadius: 4,
     borderWidth: 1,
-    borderColor: "#cbd5e1",
+    borderColor: "#c9c9c9",
     backgroundColor: "#ffffff",
+    paddingHorizontal: 18
+  },
+  compactLoginButton: {
+    minHeight: 42,
+    paddingHorizontal: 14
+  },
+  loginButtonDisabled: {
+    opacity: 0.62
+  },
+  loginIcon: {
+    position: "absolute",
+    left: 18,
+    width: 28,
+    textAlign: "center",
+    fontSize: 18,
+    fontWeight: "900"
+  },
+  compactLoginIcon: {
+    left: 14,
+    fontSize: 17
+  },
+  googleIcon: {
+    color: "#4285f4"
+  },
+  loginButtonLabel: {
+    color: "#3a3a3f",
+    fontSize: 18,
+    fontWeight: "900",
+    textAlign: "center"
+  },
+  compactLoginButtonLabel: {
+    fontSize: 15
+  },
+  userCard: {
+    minHeight: 72,
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 12,
+    borderRadius: 8,
+    borderWidth: 1,
+    borderColor: "#d8d8d8",
+    backgroundColor: "#f8fafc",
     paddingHorizontal: 14,
     paddingVertical: 10
   },
+  userAvatar: {
+    width: 42,
+    height: 42,
+    borderRadius: 21,
+    alignItems: "center",
+    justifyContent: "center",
+    backgroundColor: "#14b8a6"
+  },
+  userAvatarText: {
+    color: "#ffffff",
+    fontSize: 18,
+    fontWeight: "900"
+  },
+  userInfo: {
+    flex: 1,
+    gap: 3
+  },
+  userLabel: {
+    color: "#6b7280",
+    fontSize: 12,
+    fontWeight: "900"
+  },
+  userName: {
+    color: "#26262b",
+    fontSize: 16,
+    fontWeight: "900"
+  },
+  userMeta: {
+    color: "#6b7280",
+    fontSize: 12,
+    fontWeight: "700"
+  },
+  textButton: {
+    minHeight: 38,
+    alignItems: "center",
+    justifyContent: "center"
+  },
+  textButtonLabel: {
+    color: "#0f766e",
+    fontSize: 14,
+    fontWeight: "900"
+  },
+  errorText: {
+    color: "#b91c1c",
+    fontSize: 13,
+    fontWeight: "900",
+    lineHeight: 19,
+    borderRadius: 6,
+    backgroundColor: "#fee2e2",
+    paddingHorizontal: 12,
+    paddingVertical: 10
+  },
+  devPanel: {
+    gap: 8,
+    marginTop: 2,
+    borderRadius: 8,
+    borderWidth: 1,
+    borderColor: "#d8d8d8",
+    backgroundColor: "#fbfbfb",
+    padding: 10
+  },
+  devHeader: {
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "space-between",
+    gap: 10
+  },
+  devTitle: {
+    color: "#2f2f33",
+    fontSize: 16,
+    fontWeight: "900"
+  },
+  devBadge: {
+    overflow: "hidden",
+    borderRadius: 999,
+    backgroundColor: "#ccfbf1",
+    color: "#0f766e",
+    fontSize: 11,
+    fontWeight: "900",
+    paddingHorizontal: 8,
+    paddingVertical: 4
+  },
+  dropdown: {
+    gap: 7
+  },
+  dropdownButton: {
+    minHeight: 42,
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "space-between",
+    borderRadius: 5,
+    borderWidth: 1.3,
+    borderColor: "#c7c7c7",
+    backgroundColor: "#ffffff",
+    paddingHorizontal: 12,
+    paddingVertical: 6
+  },
   dropdownTextGroup: {
     flex: 1,
-    gap: 4,
+    gap: 2,
     paddingRight: 10
   },
   dropdownLabel: {
-    color: "#64748b",
+    color: "#6b7280",
     fontSize: 11,
     fontWeight: "900"
   },
   dropdownValue: {
-    color: "#0f172a",
-    fontSize: 15,
+    color: "#2f2f33",
+    fontSize: 14,
     fontWeight: "900"
   },
   dropdownIcon: {
-    color: "#2563eb",
+    color: "#0f766e",
     fontSize: 14,
     fontWeight: "900"
   },
   optionList: {
     overflow: "hidden",
-    borderRadius: 12,
+    borderRadius: 5,
     borderWidth: 1,
-    borderColor: "#dbe3ef",
+    borderColor: "#d8d8d8",
     backgroundColor: "#ffffff"
   },
   option: {
@@ -368,26 +657,46 @@ const styles = StyleSheet.create({
     minHeight: 52,
     justifyContent: "center",
     borderBottomWidth: 1,
-    borderBottomColor: "#e2e8f0",
+    borderBottomColor: "#e5e7eb",
     paddingHorizontal: 12,
     paddingVertical: 9
   },
   selectedOption: {
-    backgroundColor: "#eff6ff"
+    backgroundColor: "#ecfdf5"
   },
   optionText: {
-    color: "#0f172a",
+    color: "#2f2f33",
     fontSize: 14,
     fontWeight: "900"
   },
   optionMeta: {
-    color: "#64748b",
+    color: "#6b7280",
     fontSize: 11,
     fontWeight: "700"
   },
+  terms: {
+    marginTop: 26,
+    color: "#6b7280",
+    fontSize: 15,
+    fontWeight: "700",
+    lineHeight: 22,
+    textAlign: "center"
+  },
+  termsLink: {
+    color: "#0f9f8f",
+    fontWeight: "900"
+  },
+  version: {
+    marginTop: 20,
+    color: "#8a8a8f",
+    fontSize: 15,
+    fontWeight: "700",
+    textAlign: "center"
+  },
   redirectCard: {
     gap: 5,
-    borderRadius: 10,
+    marginTop: 16,
+    borderRadius: 6,
     backgroundColor: "#eef2ff",
     padding: 10
   },
@@ -402,12 +711,7 @@ const styles = StyleSheet.create({
     fontWeight: "800",
     lineHeight: 17
   },
-  secondaryButtonText: {
-    color: "#0f172a",
-    fontSize: 13,
-    fontWeight: "800"
-  },
   pressed: {
-    opacity: 0.75
+    opacity: 0.72
   }
 });

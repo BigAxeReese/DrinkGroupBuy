@@ -178,8 +178,8 @@ function OrderDetailCard({ order, groupBuyActivities, payments, actions, navigat
   const displaySubtotal = getOrderSubtotal(order);
   const displayTotal = payment?.captureAmount ?? displaySubtotal;
   const authorizedTotal = payment?.authorizedAmount ?? displaySubtotal;
-  const merchantAccepted = order.merchantAcceptanceStatus === "accepted";
   const pickupReady = ["ready", "picked_up"].includes(order.pickupStatus);
+  const pickupPendingContent = getPickupPendingContent(order);
   const orderLocked = order.status === "locked";
   const withdrawalLocked = !historical && (orderLocked || isWithdrawalLocked(groupBuyActivity));
   const progress = groupBuyActivity ? getGroupBuyActivityProgress(groupBuyActivity) : null;
@@ -344,18 +344,43 @@ function OrderDetailCard({ order, groupBuyActivities, payments, actions, navigat
         </View>
       ) : !historical ? (
         <View style={styles.pickupPending}>
-          <Text style={styles.pickupPendingTitle}>
-            {merchantAccepted ? "店家製作中" : "等待店家確認接單"}
-          </Text>
-          <Text style={styles.pickupPendingText}>
-            {merchantAccepted
-              ? "店家標記可取貨後，取貨憑證才會顯示。"
-              : "店家確認接單後會進入製作中，完成後才會顯示取貨憑證。"}
-          </Text>
+          <Text style={styles.pickupPendingTitle}>{pickupPendingContent.title}</Text>
+          <Text style={styles.pickupPendingText}>{pickupPendingContent.text}</Text>
         </View>
       ) : null}
     </View>
   );
+}
+
+function getPickupPendingContent(order) {
+  if (order.paymentStatus === "pending") {
+    return {
+      title: "待付款",
+      text: "完成 LINE Pay 預授權後，訂單才會成立並計入團購。"
+    };
+  }
+  if (order.paymentStatus === "failed") {
+    return {
+      title: "扣款失敗",
+      text: "重新付款成功前，訂單不會進入製作中。"
+    };
+  }
+  if (order.paymentStatus === "authorized") {
+    return {
+      title: order.status === "locked" ? "訂單已鎖定" : "訂單已成立",
+      text: "團購截止後系統會依結果扣款，扣款成功後進入製作中。"
+    };
+  }
+  if (order.paymentStatus === "captured" || order.pickupStatus === "preparing") {
+    return {
+      title: "店家製作中",
+      text: "店家標記可取貨後，取貨憑證才會顯示。"
+    };
+  }
+  return {
+    title: "尚未可取貨",
+    text: "系統會依付款與取貨狀態更新取貨資訊。"
+  };
 }
 
 function OrderTabs({ tab, setTab }) {
