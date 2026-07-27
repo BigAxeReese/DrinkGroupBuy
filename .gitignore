@@ -1,4 +1,4 @@
-# Local dependencies
+﻿# Local dependencies
 node_modules/
 mobile/node_modules/
 
@@ -25,3 +25,6 @@ mobile/.env.*
 .expo/
 dist/
 build/
+
+# Local system-analysis documents and blueprint images
+/system-analysis/
