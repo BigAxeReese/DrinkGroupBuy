@@ -1,6 +1,6 @@
 # 未決問題
 
-最後更新：2026-07-21
+最後更新：2026-07-30
 
 ## 語言規則
 
@@ -22,6 +22,8 @@
 | High   | 跨執行個體 settlement locking | 單一 backend process scheduler 已有；正式多人/多 instance 前仍需 DB lock 或等效機制 |
 | Medium | PostgreSQL runtime adapter | PostgreSQL schema/seed draft 已有；backend runtime 仍是 SQLite |
 | Medium | Notification table / delivery | 尚未設計 notification 或 delivery event schema |
+| Medium | 菜單管理與下單 E2E | 權威菜單 API、商家管理畫面、後端驗證與價格重算已完成第一版；仍需完整 Android E2E 與更細的逐項衝突修正 UX |
+| Medium | 每杯折扣顯示與實際結算公式一致性 | 藍圖可顯示「每杯折 10／15 元」，但仍需確認顯示換算與截止時依實際有效杯數分攤總折扣的差異如何向顧客說明 |
 | Medium | 正式退款 UI 與退款失敗重試 | Admin/dev 後端 refund route 已有；正式操作介面與 retry/reconciliation 尚未完成 |
 
 ## 身份與權限
@@ -47,6 +49,9 @@
 | Resolved | `database/schema.sql` 還是七間店測試資料庫才是正式 seed 來源？    | `database/schema.sql` 與正式 dev seed 檔是主來源；`database/test/` 只作測試或匯出輔助，不作權威資料。 |
 | Resolved | 菜單選項是 store-wide 還是 item-specific？                        | 第一階段採 item-specific；甜度、冰塊、加料、尺寸等選項直接隸屬於單一 `menu_items`。                 |
 | Resolved | 商品在購物車內時，如果價格或可販售狀態變更，要如何處理？          | 購物車可保留快照顯示；送出訂單或重新預授權前必須重新驗證目前價格、可販售狀態與選項是否仍有效。       |
+| Resolved | 團購活動是否需要由店家逐一選擇適用飲品？                        | 不需要。每個團購自動開放該活動所屬店家目前 `is_available = 1` 的全部飲品，不建立 activity-menu item 關聯表。 |
+| Resolved | 團購進行中店家修改菜單會如何影響顧客？                          | 新選取與未送出購物車以最新菜單為準；停售品項不得新加入。已送出的訂單使用品名、價格與客製化快照，不追溯改寫。 |
+| Resolved | 一杯飲料是否能同時選多種加料？                                  | 由店家針對每個飲品設定明確的最少／最多選擇數；`maxSelections = 1` 為單選，`2` 以上為限制數量的多選，`0` 為不提供。 |
 | Resolved | 店家座標如何與 Google Maps/Places 驗證？                          | 第一階段由資料庫保存店家座標並用 Google Maps 顯示；不先做 Google Places 店家驗證。                  |
 | Resolved | `database/test/` 是否應正規化，或改由 canonical dev schema 取代？ | 以 canonical dev schema 為準；`database/test/` 可留作 smoke test，但不得成為另一套正式資料模型。     |
 
@@ -58,7 +63,7 @@
 | Resolved | 商家建立的團購活動最長可以開放多久？                     | 截止時間必須在活動發布或開放招募後 24 小時內。                                                                   |
 | Resolved | 達到某個優惠級距後，截止前有人退出是否會讓最終級距下降？ | 會。最終級距以截止結算時仍有效的已預授權訂單為準；但進入截止前 30 分鐘後，顧客不可退出或修改。                   |
 | Resolved | 團購折扣是依杯數、訂單數，還是品項金額分配？             | 折扣是該級距的總折扣金額，截止結算時平均分攤給每一杯有效授權飲品；無法整除的餘額不分配給訂單，作為系統維運補貼。   |
-| Resolved | 團購發布後，商家可以修改哪些 activity fields？           | 第一階段發布後不允許修改截止時間、優惠門檻、折扣規則、適用飲品或取餐時間；只能取消符合條件的團購或查看狀態。       |
+| Resolved | 團購發布後，商家可以修改哪些 activity fields？           | 第一階段發布後不允許修改截止時間、優惠門檻、折扣規則或取餐時間；活動沒有獨立適用飲品欄位。商家仍可管理店家菜單，並依菜單異動規則影響後續新選取。 |
 | Resolved | 誰負責執行 deadline settlement？                         | 系統排程負責自動結算；開發或營運用手動觸發只能作補救工具，不是一般使用者流程。                                   |
 | Resolved | deadline settlement 失敗後，重試、告警與人工補救怎麼做？ | 第一版以自動重試為主，不做人工處理介面；仍無法處理時保留失敗狀態與紀錄，訂單不得進入製作或取貨。                 |
 

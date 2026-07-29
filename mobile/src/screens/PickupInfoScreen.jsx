@@ -1,15 +1,24 @@
-import { StyleSheet, Text } from "react-native";
+import { useEffect } from "react";
+import { StyleSheet, Text, View } from "react-native";
 import { MobileScreen, Section } from "../components/MobileScreen";
 import { PlaceholderBox } from "../components/PlaceholderBox";
 import { StatusBadge } from "../components/StatusBadge";
 import { stores } from "../mock/stores";
 import { formatCurrency, getGroupBuyActivityById } from "../utils/calculations";
 
-export function PickupInfoScreen({ navigation, route, appState, memberAction, selectedCustomerId }) {
+export function PickupInfoScreen({ navigation, route, appState, actions, memberAction, selectedCustomerId }) {
   const order = appState.orders.find((item) => item.id === route.params?.orderId && item.customerId === selectedCustomerId)
     ?? appState.orders.find((item) => item.customerId === selectedCustomerId);
   const groupBuyActivity = order ? getGroupBuyActivityById(appState.groupBuyActivities, route.params?.groupBuyActivityId ?? order.groupBuyActivityId) : null;
   const store = groupBuyActivity ? stores.find((item) => item.id === groupBuyActivity.storeId) : null;
+  const pickupCode = order?.pickupCredential?.status === "active"
+    ? order.pickupCredential.pickupCode
+    : null;
+
+  useEffect(() => {
+    if (!order?.id) return;
+    actions.syncOrderFromBackend(order.id).catch(() => {});
+  }, [order?.id]);
   if (!order || !groupBuyActivity || !store) {
     return (
       <MobileScreen
@@ -42,9 +51,18 @@ export function PickupInfoScreen({ navigation, route, appState, memberAction, se
         <PlaceholderBox title="地圖導航" />
       </Section>
 
-      <Section title="異動提示">
-        <Text style={styles.meta}>店家標記可取貨後，取貨憑證才會顯示。</Text>
-        <PlaceholderBox title="取貨碼" />
+      <Section title="取餐憑證">
+        {pickupCode ? (
+          <View style={styles.pickupPass}>
+            <Text style={styles.passLabel}>六位取餐碼</Text>
+            <Text style={styles.passCode}>{pickupCode}</Text>
+            <Text style={styles.passHint}>到店取餐時，將此代碼提供給店家。</Text>
+          </View>
+        ) : (
+          <Text style={styles.meta}>
+            {order.pickupStatus === "picked_up" ? "此訂單已完成取餐。" : "店家標記可取餐後，六位取餐碼會顯示在這裡。"}
+          </Text>
+        )}
       </Section>
     </MobileScreen>
   );
@@ -60,5 +78,33 @@ const styles = StyleSheet.create({
     color: "#475569",
     fontSize: 14,
     lineHeight: 21
+  },
+  pickupPass: {
+    gap: 7,
+    minHeight: 128,
+    borderRadius: 12,
+    alignItems: "center",
+    justifyContent: "center",
+    backgroundColor: "#111827",
+    padding: 16
+  },
+  passLabel: {
+    color: "#cbd5e1",
+    fontSize: 12,
+    fontWeight: "800",
+    textAlign: "center"
+  },
+  passCode: {
+    color: "#ffffff",
+    fontSize: 32,
+    fontWeight: "900",
+    letterSpacing: 0,
+    textAlign: "center"
+  },
+  passHint: {
+    color: "#cbd5e1",
+    fontSize: 12,
+    lineHeight: 18,
+    textAlign: "center"
   }
 });

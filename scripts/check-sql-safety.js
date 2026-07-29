@@ -24,7 +24,11 @@ const reviewedExecSources = [
   { file: "database/init-dev-db.js", expression: "schema" },
   { file: "database/seed-dev-db.js", expression: "seed" },
   { file: "database/test/init-test-db.js", expressionPrefix: "fs.readFileSync(" },
-  { file: "scripts/settlement-smoke.js", expression: "schema" }
+  { file: "scripts/settlement-smoke.js", expression: "schema" },
+  { file: "scripts/pickup-expiration-smoke.js", expression: "schema" },
+  { file: "scripts/pickup-credential-smoke.js", expression: "schema" },
+  { file: "scripts/menu-order-smoke.js", expression: "schema" },
+  { file: "scripts/menu-order-smoke.js", expression: "seed" }
 ];
 
 const findings = [];

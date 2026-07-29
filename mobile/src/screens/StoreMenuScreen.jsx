@@ -1,8 +1,8 @@
+import { useEffect, useState } from "react";
 import { StyleSheet, Text, View } from "react-native";
 import { MobileScreen, Section } from "../components/MobileScreen";
 import { PrimaryButton } from "../components/PrimaryButton";
-import { drinks } from "../mock/drinks";
-import { stores } from "../mock/stores";
+import { getStoreMenu } from "../utils/apiClient";
 import { formatCurrency } from "../utils/calculations";
 
 const businessStatusLabels = {
@@ -13,8 +13,39 @@ const businessStatusLabels = {
 
 export function StoreMenuScreen({ navigation, route, memberAction }) {
   const storeId = route.params?.storeId;
-  const store = stores.find((item) => item.id === storeId);
-  const storeDrinks = drinks.filter((drink) => drink.storeId === storeId);
+  const [menu, setMenu] = useState(null);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState(null);
+
+  useEffect(() => {
+    let active = true;
+    setLoading(true);
+    setError(null);
+    getStoreMenu(storeId)
+      .then((result) => {
+        if (active) setMenu(result);
+      })
+      .catch((requestError) => {
+        if (active) setError(requestError.message || "菜單載入失敗。");
+      })
+      .finally(() => {
+        if (active) setLoading(false);
+      });
+    return () => {
+      active = false;
+    };
+  }, [storeId]);
+
+  const store = menu?.store;
+  const storeDrinks = menu?.menuItems || [];
+
+  if (loading) {
+    return (
+      <MobileScreen title="店家菜單" onBack={() => navigation.back()} onMemberPress={memberAction}>
+        <Section title="正在載入"><Text style={styles.meta}>正在讀取店家最新菜單…</Text></Section>
+      </MobileScreen>
+    );
+  }
 
   if (!store) {
     return (
@@ -24,7 +55,7 @@ export function StoreMenuScreen({ navigation, route, memberAction }) {
         onMemberPress={memberAction}
       >
         <Section title="找不到店家">
-          <Text style={styles.meta}>此店家可能已從 prototype mock data 移除。</Text>
+          <Text style={styles.meta}>{error || "後端找不到這間店家。"}</Text>
           <PrimaryButton label="返回地圖" variant="secondary" onPress={() => navigation.replace("liveMap")} />
         </Section>
       </MobileScreen>
@@ -42,7 +73,7 @@ export function StoreMenuScreen({ navigation, route, memberAction }) {
         <View style={styles.storeHeader}>
           <View style={styles.flex}>
             <Text style={styles.storeName}>{store.name}</Text>
-            <Text style={styles.meta}>{store.distanceText} · {store.address}</Text>
+            <Text style={styles.meta}>{store.address}</Text>
             <Text style={styles.meta}>{store.phone}</Text>
           </View>
           <View style={[styles.businessBadge, styles[store.businessStatus] || styles.closed]}>
@@ -67,23 +98,30 @@ export function StoreMenuScreen({ navigation, route, memberAction }) {
                   <Text style={styles.drinkName}>{drink.name}</Text>
                   <Text style={styles.description}>{drink.description}</Text>
                 </View>
-                <Text style={styles.price}>{formatCurrency(drink.price)}</Text>
+                <Text style={styles.price}>{formatCurrency(drink.basePrice)}</Text>
               </View>
-              <Text style={styles.optionText}>甜度：{drink.sweetnessOptions.join("、")}</Text>
-              <Text style={styles.optionText}>冰塊：{drink.iceOptions.join("、")}</Text>
-              <Text style={styles.optionText}>
-                加料：{drink.toppings.map((topping) => `${topping.name}${topping.price > 0 ? ` +${formatCurrency(topping.price)}` : ""}`).join("、")}
-              </Text>
+              {drink.customizationGroups.map((group) => (
+                <Text key={group.optionType} style={styles.optionText}>
+                  {getGroupLabel(group.optionType)}：{group.options.length
+                    ? group.options.map((option) => `${option.label}${option.priceDelta > 0 ? ` +${formatCurrency(option.priceDelta)}` : ""}`).join("、")
+                    : "不提供"}
+                  {group.optionType === "topping" ? `（最多 ${group.maxSelections} 種）` : ""}
+                </Text>
+              ))}
             </View>
           ))
         ) : (
           <View style={styles.emptyBox}>
-            <Text style={styles.meta}>此店家目前沒有 mock 菜單資料。</Text>
+            <Text style={styles.meta}>此店家目前沒有上架飲品。</Text>
           </View>
         )}
       </Section>
     </MobileScreen>
   );
+}
+
+function getGroupLabel(optionType) {
+  return { size: "尺寸", sweetness: "甜度", ice: "冰量", topping: "加料" }[optionType] || optionType;
 }
 
 const styles = StyleSheet.create({

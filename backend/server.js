@@ -10,6 +10,8 @@ const {
   getUserAuthProfileById,
   listDevAuthUsers,
   listGroupBuyActivities,
+  listStoreMenu,
+  saveMerchantMenuItem,
   updatePendingOrder
 } = require("./db");
 const { createAuthToken, getBearerToken, verifyAuthToken, verifyPassword } = require("./auth");
@@ -27,6 +29,13 @@ const {
   settleGroupBuyActivity,
   startDeadlineSettlementScheduler
 } = require("./payments/settlementService");
+const {
+  getPickupCredentialForOrder,
+  lookupPickupCode,
+  markGroupBuyActivityReadyForPickup,
+  redeemPickupCode
+} = require("./pickup/credentialService");
+const { startPickupExpirationScheduler } = require("./pickup/expirationService");
 
 const port = Number(process.env.PORT ?? 3000);
 
@@ -140,6 +149,104 @@ const server = http.createServer(async (request, response) => {
       return;
     }
 
+    const publicStoreMenuMatch = url.pathname.match(/^\/api\/stores\/([^/]+)\/menu$/);
+    if (request.method === "GET" && publicStoreMenuMatch) {
+      const menu = listStoreMenu(publicStoreMenuMatch[1]);
+      if (!menu) {
+        sendJson(response, 404, { error: "Store not found" });
+        return;
+      }
+      sendJson(response, 200, menu);
+      return;
+    }
+
+    const merchantStoreMenuMatch = url.pathname.match(/^\/api\/merchant\/stores\/([^/]+)\/menu$/);
+    if (request.method === "GET" && merchantStoreMenuMatch) {
+      const authUser = getAuthenticatedUser(request);
+      if (!authUser) {
+        sendJson(response, 401, { error: "Authentication required" });
+        return;
+      }
+      if (!authUser.roles.includes("merchant") || !canManageStore(authUser, merchantStoreMenuMatch[1])) {
+        sendJson(response, 403, { error: "Store access denied" });
+        return;
+      }
+      const menu = listStoreMenu(merchantStoreMenuMatch[1], { includeUnavailable: true });
+      sendJson(response, 200, menu);
+      return;
+    }
+
+    const merchantMenuItemsMatch = url.pathname.match(/^\/api\/merchant\/stores\/([^/]+)\/menu-items$/);
+    if (request.method === "POST" && merchantMenuItemsMatch) {
+      const authUser = getAuthenticatedUser(request);
+      if (!authUser) {
+        sendJson(response, 401, { error: "Authentication required" });
+        return;
+      }
+      if (!authUser.roles.includes("merchant") || !canManageStore(authUser, merchantMenuItemsMatch[1])) {
+        sendJson(response, 403, { error: "Store access denied" });
+        return;
+      }
+      const body = await readJsonBody(request);
+      const validationError = validateMenuItemInput(body);
+      if (validationError) {
+        sendJson(response, 400, { error: validationError });
+        return;
+      }
+      const result = saveMerchantMenuItem({
+        ...body,
+        storeId: merchantMenuItemsMatch[1],
+        actorUserId: authUser.id
+      });
+      if (result.error === "store_not_found") {
+        sendJson(response, 404, result);
+        return;
+      }
+      if (result.error) {
+        sendJson(response, 409, result);
+        return;
+      }
+      sendJson(response, 201, result);
+      return;
+    }
+
+    const merchantMenuItemMatch = url.pathname.match(
+      /^\/api\/merchant\/stores\/([^/]+)\/menu-items\/([^/]+)$/
+    );
+    if (request.method === "PATCH" && merchantMenuItemMatch) {
+      const authUser = getAuthenticatedUser(request);
+      if (!authUser) {
+        sendJson(response, 401, { error: "Authentication required" });
+        return;
+      }
+      if (!authUser.roles.includes("merchant") || !canManageStore(authUser, merchantMenuItemMatch[1])) {
+        sendJson(response, 403, { error: "Store access denied" });
+        return;
+      }
+      const body = await readJsonBody(request);
+      const validationError = validateMenuItemInput(body);
+      if (validationError) {
+        sendJson(response, 400, { error: validationError });
+        return;
+      }
+      const result = saveMerchantMenuItem({
+        ...body,
+        storeId: merchantMenuItemMatch[1],
+        menuItemId: merchantMenuItemMatch[2],
+        actorUserId: authUser.id
+      });
+      if (result.error === "menu_item_not_found") {
+        sendJson(response, 404, result);
+        return;
+      }
+      if (result.error) {
+        sendJson(response, 409, result);
+        return;
+      }
+      sendJson(response, 200, result);
+      return;
+    }
+
     if (request.method === "POST" && url.pathname === "/api/merchant/group-buy-activities") {
       const authUser = getAuthenticatedUser(request);
       if (!authUser) {
@@ -170,6 +277,95 @@ const server = http.createServer(async (request, response) => {
       return;
     }
 
+    const merchantReadyForPickupMatch = url.pathname.match(
+      /^\/api\/merchant\/group-buy-activities\/([^/]+)\/ready-for-pickup$/
+    );
+    if (request.method === "POST" && merchantReadyForPickupMatch) {
+      const authUser = getAuthenticatedUser(request);
+      if (!authUser) {
+        sendJson(response, 401, { error: "Authentication required" });
+        return;
+      }
+      if (!authUser.roles.includes("merchant")) {
+        sendJson(response, 403, { error: "Merchant role required" });
+        return;
+      }
+
+      const result = markGroupBuyActivityReadyForPickup(
+        merchantReadyForPickupMatch[1],
+        { actorUserId: authUser.id }
+      );
+      sendPickupServiceResult(response, result);
+      return;
+    }
+
+    if (request.method === "POST"
+      && url.pathname === "/api/merchant/pickup-credentials/lookup") {
+      const authUser = getAuthenticatedUser(request);
+      if (!authUser) {
+        sendJson(response, 401, { error: "Authentication required" });
+        return;
+      }
+      if (!authUser.roles.includes("merchant")) {
+        sendJson(response, 403, { error: "Merchant role required" });
+        return;
+      }
+
+      const body = await readJsonBody(request);
+      const result = lookupPickupCode({
+        actorUserId: authUser.id,
+        pickupCode: body.pickupCode
+      });
+      sendPickupServiceResult(response, result);
+      return;
+    }
+
+    if (request.method === "POST"
+      && url.pathname === "/api/merchant/pickup-credentials/redeem") {
+      const authUser = getAuthenticatedUser(request);
+      if (!authUser) {
+        sendJson(response, 401, { error: "Authentication required" });
+        return;
+      }
+      if (!authUser.roles.includes("merchant")) {
+        sendJson(response, 403, { error: "Merchant role required" });
+        return;
+      }
+
+      const body = await readJsonBody(request);
+      const result = redeemPickupCode({
+        actorUserId: authUser.id,
+        pickupCode: body.pickupCode
+      });
+      sendPickupServiceResult(response, result);
+      return;
+    }
+
+    const orderPickupCredentialMatch = url.pathname.match(
+      /^\/api\/orders\/([^/]+)\/pickup-credential$/
+    );
+    if (request.method === "GET" && orderPickupCredentialMatch) {
+      const authUser = getAuthenticatedUser(request);
+      if (!authUser) {
+        sendJson(response, 401, { error: "Authentication required" });
+        return;
+      }
+
+      const order = getOrderDetail(orderPickupCredentialMatch[1]);
+      if (!order) {
+        sendJson(response, 404, { error: "Order not found" });
+        return;
+      }
+      if (!canAccessOrder(authUser, order)) {
+        sendJson(response, 403, { error: "Order access denied" });
+        return;
+      }
+
+      const credential = getPickupCredentialForOrder(order.id);
+      sendJson(response, 200, { credential });
+      return;
+    }
+
     if (request.method === "POST" && url.pathname === "/api/orders") {
       const authUser = getAuthenticatedUser(request);
       if (!authUser) {
@@ -192,6 +388,7 @@ const server = http.createServer(async (request, response) => {
         ...body,
         customerUserId: authUser.id
       });
+      if (sendOrderItemValidationError(response, result)) return;
       if (result?.error === "activity_not_found") {
         sendJson(response, 404, { error: "Group-buy activity not found" });
         return;
@@ -242,6 +439,7 @@ const server = http.createServer(async (request, response) => {
         orderId: orderRevisionMatch[1],
         customerUserId: authUser.id
       });
+      if (sendOrderItemValidationError(response, result)) return;
       if (result?.error === "order_not_found") {
         sendJson(response, 404, { error: "Order not found" });
         return;
@@ -320,6 +518,7 @@ const server = http.createServer(async (request, response) => {
         orderId: orderMatch[1],
         customerUserId: authUser.id
       });
+      if (sendOrderItemValidationError(response, result)) return;
       if (result?.error === "order_not_found") {
         sendJson(response, 404, { error: "Order not found" });
         return;
@@ -628,6 +827,7 @@ const server = http.createServer(async (request, response) => {
 });
 
 let deadlineSettlementScheduler;
+let pickupExpirationScheduler;
 
 server.listen(port, () => {
   console.log(`DrinkGroupBuy backend listening on http://localhost:${port}`);
@@ -637,7 +837,31 @@ server.listen(port, () => {
   } else {
     console.log(`Deadline settlement scheduler disabled: ${deadlineSettlementScheduler.reason}`);
   }
+
+  pickupExpirationScheduler = startPickupExpirationScheduler();
+  if (pickupExpirationScheduler.enabled) {
+    console.log(`Pickup expiration scheduler enabled (${pickupExpirationScheduler.intervalMs}ms interval)`);
+  } else {
+    console.log(`Pickup expiration scheduler disabled: ${pickupExpirationScheduler.reason}`);
+  }
 });
+
+function sendPickupServiceResult(response, result) {
+  if (!result?.error) {
+    sendJson(response, 200, result);
+    return;
+  }
+
+  const statusByError = {
+    activity_not_found: 404,
+    credential_not_found: 404,
+    activity_access_denied: 403,
+    merchant_user_required: 403,
+    pickup_code_invalid: 400,
+    pickup_code_rate_limited: 429
+  };
+  sendJson(response, statusByError[result.error] || 409, result);
+}
 
 function sendJson(response, statusCode, payload) {
   response.writeHead(statusCode, {
@@ -743,6 +967,60 @@ function validateUpdateOrder(body) {
     return "fallbackPurchasePreference is invalid";
   }
   return null;
+}
+
+function validateMenuItemInput(body) {
+  if (!String(body.name || "").trim()) return "name is required";
+  if (!String(body.category || "").trim()) return "category is required";
+  if (!Number.isInteger(Number(body.basePrice)) || Number(body.basePrice) < 0) {
+    return "basePrice must be a non-negative integer";
+  }
+  if (typeof body.isAvailable !== "boolean") return "isAvailable must be a boolean";
+  if (!Array.isArray(body.customizationGroups)) return "customizationGroups must be an array";
+
+  const allowedTypes = new Set(["sweetness", "ice", "topping", "size"]);
+  const seenTypes = new Set();
+  for (const group of body.customizationGroups) {
+    if (!allowedTypes.has(group.optionType)) return "customization group optionType is invalid";
+    if (seenTypes.has(group.optionType)) return "customization group optionType must be unique";
+    seenTypes.add(group.optionType);
+    const minSelections = Number(group.minSelections);
+    const maxSelections = Number(group.maxSelections);
+    if (!Number.isInteger(minSelections) || minSelections < 0) {
+      return "customization group minSelections must be a non-negative integer";
+    }
+    if (!Number.isInteger(maxSelections) || maxSelections < minSelections) {
+      return "customization group maxSelections must be an integer greater than or equal to minSelections";
+    }
+    if (!Array.isArray(group.options)) return "customization group options must be an array";
+    if (maxSelections > group.options.filter((option) => option.isAvailable !== false).length) {
+      return "customization group maxSelections cannot exceed available option count";
+    }
+    const labels = new Set();
+    for (const option of group.options) {
+      const label = String(option.label || "").trim();
+      if (!label) return "customization option label is required";
+      if (labels.has(label)) return "customization option labels must be unique within a group";
+      labels.add(label);
+      if (!Number.isInteger(Number(option.priceDelta)) || Number(option.priceDelta) < 0) {
+        return "customization option priceDelta must be a non-negative integer";
+      }
+      if (typeof option.isAvailable !== "boolean") return "customization option isAvailable must be a boolean";
+    }
+  }
+  return null;
+}
+
+function sendOrderItemValidationError(response, result) {
+  if (result?.error === "order_items_invalid") {
+    sendJson(response, 409, result);
+    return true;
+  }
+  if (result?.error === "order_price_changed") {
+    sendJson(response, 409, result);
+    return true;
+  }
+  return false;
 }
 
 function getAuthenticatedUser(request) {

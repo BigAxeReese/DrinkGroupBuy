@@ -35,6 +35,10 @@ Invoke-RestMethod http://localhost:3000/health
 | `GET` | `/health` | 後端健康檢查 |
 | `GET` | `/api/group-buy-activities` | 讀取團購活動 |
 | `POST` | `/api/merchant/group-buy-activities` | 商家建立團購 |
+| `GET` | `/api/stores/:storeId/menu` | 讀取顧客可購買的上架菜單與客製化選擇限制 |
+| `GET` | `/api/merchant/stores/:storeId/menu` | 商家讀取包含停售品項的完整菜單 |
+| `POST` | `/api/merchant/stores/:storeId/menu-items` | 商家新增菜單品項與客製化規則 |
+| `PATCH` | `/api/merchant/stores/:storeId/menu-items/:menuItemId` | 商家修改菜單品項、選項、明確選擇上限與販售狀態 |
 | `POST` | `/api/orders` | 顧客建立訂單 |
 | `POST` | `/api/orders/:orderId/revisions` | 建立已授權訂單的修改版本 |
 | `GET` | `/api/orders/:orderId` | 讀取訂單明細 |
@@ -141,6 +145,7 @@ LINE Pay 相關程式目前集中在：
 | `backend/payments/linePayService.js` | 串接訂單檢查、授權建立、confirm、cancel、void、capture 與 refund |
 | `backend/payments/linePayPendingStore.js` | LINE Pay redirect 前後的記憶體快取；實際 confirm/cancel 以 DB 查找為主 |
 | `backend/payments/settlementService.js` | 單一團購結算流程，依結果批次 capture / void |
+| `backend/pickup/expirationService.js` | 掃描取餐期限並完成活動、標記逾期未取與寫入歷程 |
 | `backend/linePayClient.js` | 舊路徑相容匯出 |
 
 商家建立團購時，`deadlineAt` 必須晚於 `startAt`，且不得超過 `startAt` 後 24 小時。`pickupStartAt` 至少要晚於 `deadlineAt` 30 分鐘，`pickupEndAt` 必須晚於 `pickupStartAt`。
@@ -164,6 +169,32 @@ SETTLEMENT_SCHEDULER_ALLOW_PRODUCTION=false
 
 若 `LINE_PAY_ENV=production`，scheduler 會被 production guard 擋下；必須明確設定 `SETTLEMENT_SCHEDULER_ALLOW_PRODUCTION=true` 才會啟動，避免意外真實請款。
 
+後端也會啟動 pickup expiration scheduler。有效期限取 `pickupStartAt + 3 小時` 與 `pickupEndAt` 兩者較早者；到期後，已扣款但未取餐的訂單會標記為 `expired`，已取餐維持 `picked_up`，活動則更新為 `completed`。相關設定：
+
+```env
+PICKUP_EXPIRATION_SCHEDULER_ENABLED=true
+PICKUP_EXPIRATION_SCHEDULER_INTERVAL_MS=30000
+PICKUP_EXPIRATION_SCHEDULER_BATCH_SIZE=20
+```
+
+本機可用以下指令驗證取貨逾期與重複執行防護：
+
+```powershell
+npm run pickup-expiration:smoke
+```
+
+菜單客製化規則可用不清除既有資料的 migration 補入；執行前會自動備份 SQLite，完成後驗證完整性與外鍵：
+
+```powershell
+npm run db:migrate:menu-customizations
+```
+
+菜單與訂單權威驗證可使用隔離的暫存資料庫測試，不會改動目前開發資料：
+
+```powershell
+npm run menu-order:smoke
+```
+
 ## 目前限制
 
 - 管理員登入尚未設定。
@@ -172,3 +203,5 @@ SETTLEMENT_SCHEDULER_ALLOW_PRODUCTION=false
 - LINE Pay webhook 第一版不列為必要入口；付款同步先以 confirm/cancel redirect、資料庫狀態與後續 provider 狀態查詢為主。
 - deadline 自動結算已先以單一 backend process interval 實作；失敗處理規則已決定以自動重試為主，不做人工處理介面；跨執行個體 locking、重試佇列與告警尚未完成。
 - 目前仍是開發資料庫，不是 production migration。
+- 顧客與商家菜單 API、商家菜單管理 mobile 第一版、明確客製化選擇上限及訂單後端價格重算已完成；仍需完整 Android 裝置 E2E 與更細的菜單異動衝突修正 UX。
+- 取貨逾期排程與 SQLite 交易已完成；仍缺建立／驗證取貨憑證 API，以及顧客與商家 App 的歷史訂單串接。

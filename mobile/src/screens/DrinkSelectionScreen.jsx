@@ -1,13 +1,36 @@
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { Pressable, StyleSheet, Text, View } from "react-native";
 import { MobileScreen, Section } from "../components/MobileScreen";
 import { PrimaryButton } from "../components/PrimaryButton";
-import { drinks } from "../mock/drinks";
-import { stores } from "../mock/stores";
-import { calculateDrinkSubtotal, formatCurrency, getGroupBuyActivityById, getDrinkById, getStoreById } from "../utils/calculations";
+import { getStoreMenu } from "../utils/apiClient";
+import { formatCurrency, getGroupBuyActivityById } from "../utils/calculations";
 
 export function DrinkSelectionScreen({ navigation, route, appState, actions, memberAction, selectedCustomerId }) {
   const groupBuyActivity = getGroupBuyActivityById(appState.groupBuyActivities, route.params?.groupBuyActivityId);
+  const [menu, setMenu] = useState(null);
+  const [loading, setLoading] = useState(Boolean(groupBuyActivity));
+  const [error, setError] = useState(null);
+
+  useEffect(() => {
+    if (!groupBuyActivity) return undefined;
+    let active = true;
+    setLoading(true);
+    setError(null);
+    getStoreMenu(groupBuyActivity.storeId)
+      .then((result) => {
+        if (active) setMenu(result);
+      })
+      .catch((requestError) => {
+        if (active) setError(requestError.message || "菜單載入失敗。");
+      })
+      .finally(() => {
+        if (active) setLoading(false);
+      });
+    return () => {
+      active = false;
+    };
+  }, [groupBuyActivity?.storeId]);
+
   if (!groupBuyActivity) {
     return (
       <MobileScreen
@@ -22,33 +45,47 @@ export function DrinkSelectionScreen({ navigation, route, appState, actions, mem
       </MobileScreen>
     );
   }
-
-  const store = getStoreById(stores, groupBuyActivity.storeId);
-  const storeDrinks = drinks.filter((drink) => drink.storeId === groupBuyActivity.storeId);
-  if (storeDrinks.length === 0) {
+  if (loading) {
     return (
-      <MobileScreen
-        title="選擇飲料"
-        subtitle={store?.name}
-        onBack={() => navigation.back()}
-        onMemberPress={memberAction}
-      >
-        <Section title="目前沒有菜單">
-          <Text style={styles.meta}>這間店尚未建立 prototype 菜單資料。</Text>
+      <MobileScreen title="選擇飲料" onBack={() => navigation.back()} onMemberPress={memberAction}>
+        <Section title="正在載入"><Text style={styles.meta}>正在讀取店家最新菜單與價格…</Text></Section>
+      </MobileScreen>
+    );
+  }
+  if (error || !menu || menu.menuItems.length === 0) {
+    return (
+      <MobileScreen title="選擇飲料" onBack={() => navigation.back()} onMemberPress={memberAction}>
+        <Section title="目前沒有可用菜單">
+          <Text style={styles.meta}>{error || "這間店目前沒有上架飲品。"}</Text>
         </Section>
       </MobileScreen>
     );
   }
 
+  return (
+    <DrinkMenuContent
+      navigation={navigation}
+      route={route}
+      appState={appState}
+      actions={actions}
+      memberAction={memberAction}
+      selectedCustomerId={selectedCustomerId}
+      groupBuyActivity={groupBuyActivity}
+      menu={menu}
+    />
+  );
+}
+
+function DrinkMenuContent({ navigation, route, appState, actions, memberAction, selectedCustomerId, groupBuyActivity, menu }) {
+  const store = menu.store;
+  const storeDrinks = menu.menuItems;
+
   const editOrderItem = route.params?.editOrderItem;
   const editOrderId = route.params?.editOrderId;
   const initialDrinkId = storeDrinks.find((item) => item.id === editOrderItem?.drinkId)?.id ?? storeDrinks[0]?.id;
   const [drinkId, setDrinkId] = useState(initialDrinkId);
-  const drink = getDrinkById(storeDrinks, drinkId);
-  const initialTopping = drink.toppings.find((item) => editOrderItem?.toppings?.includes(item.name));
-  const [sweetness, setSweetness] = useState(editOrderItem?.sweetness ?? drink.sweetnessOptions[0]);
-  const [ice, setIce] = useState(editOrderItem?.ice ?? drink.iceOptions[0]);
-  const [toppingId, setToppingId] = useState(initialTopping?.id ?? drink.toppings[0].id);
+  const drink = storeDrinks.find((item) => item.id === drinkId) || storeDrinks[0];
+  const [selectedOptionIds, setSelectedOptionIds] = useState(() => buildInitialSelections(drink, editOrderItem));
   const [quantity, setQuantity] = useState(editOrderItem?.quantity ?? 1);
   const [submitted, setSubmitted] = useState(false);
   const [customizing, setCustomizing] = useState(Boolean(editOrderItem));
@@ -58,13 +95,13 @@ export function DrinkSelectionScreen({ navigation, route, appState, actions, mem
   const cartQuantity = cartItemsForGroupBuyActivity.reduce((sum, item) => sum + item.quantity, 0);
   const cartTotal = cartItemsForGroupBuyActivity.reduce((sum, item) => sum + item.subtotal, 0);
 
-  const subtotal = useMemo(() => calculateDrinkSubtotal(drink, toppingId, quantity), [drink, toppingId, quantity]);
-  const categories = [
-    { id: "recommended", label: "推薦" },
-    { id: "tea", label: "純茶系列" },
-    { id: "milk_tea", label: "鮮奶系列" },
-    { id: "fruit", label: "果茶系列" }
-  ];
+  const selectedOptions = drink.customizationGroups
+    .flatMap((group) => group.options)
+    .filter((option) => selectedOptionIds.includes(option.id));
+  const unitPrice = drink.basePrice + selectedOptions.reduce((sum, option) => sum + option.priceDelta, 0);
+  const subtotal = unitPrice * quantity;
+  const categories = [{ id: "recommended", label: "全部" }, ...[...new Set(storeDrinks.map((item) => item.category))]
+    .map((categoryId) => ({ id: categoryId, label: categoryId }))];
   const [category, setCategory] = useState("recommended");
   const filteredDrinks = category === "recommended"
     ? storeDrinks
@@ -103,9 +140,7 @@ export function DrinkSelectionScreen({ navigation, route, appState, actions, mem
             key={item.id}
             onPress={() => {
               setDrinkId(item.id);
-              setSweetness(item.sweetnessOptions[0]);
-              setIce(item.iceOptions[0]);
-              setToppingId(item.toppings[0].id);
+              setSelectedOptionIds(buildInitialSelections(item, null));
               setCustomizing(true);
             }}
             style={({ pressed }) => [
@@ -122,7 +157,7 @@ export function DrinkSelectionScreen({ navigation, route, appState, actions, mem
               </View>
               <Text style={styles.menuDescription}>{item.description}</Text>
             </View>
-            <Text style={styles.menuPrice}>{formatCurrency(item.price)}</Text>
+            <Text style={styles.menuPrice}>{formatCurrency(item.basePrice)}</Text>
           </Pressable>
         )) : (
           <Text style={styles.meta}>此分類目前沒有品項。</Text>
@@ -134,24 +169,27 @@ export function DrinkSelectionScreen({ navigation, route, appState, actions, mem
 
       {customizing ? (
         <>
-          <Section title="甜度">
-            <OptionGroup options={drink.sweetnessOptions} value={sweetness} onChange={setSweetness} />
-          </Section>
-
-          <Section title="冰塊">
-            <OptionGroup options={drink.iceOptions} value={ice} onChange={setIce} />
-          </Section>
-
-          <Section title="加料">
-            {drink.toppings.map((item) => (
-              <OptionButton
-                key={item.id}
-                active={toppingId === item.id}
-                label={`${item.name}${item.price ? ` +${formatCurrency(item.price)}` : ""}`}
-                onPress={() => setToppingId(item.id)}
-              />
-            ))}
-          </Section>
+          {drink.customizationGroups.map((group) => (
+            <Section key={group.optionType} title={getGroupTitle(group.optionType)}>
+              {group.options.length === 0 || group.maxSelections === 0 ? (
+                <Text style={styles.meta}>此飲品不提供{getGroupTitle(group.optionType)}選項。</Text>
+              ) : (
+                <View style={styles.optionWrap}>
+                  {group.options.map((option) => (
+                    <OptionButton
+                      key={option.id}
+                      active={selectedOptionIds.includes(option.id)}
+                      label={`${option.label}${option.priceDelta ? ` +${formatCurrency(option.priceDelta)}` : ""}`}
+                      onPress={() => setSelectedOptionIds((current) => toggleOption(current, option.id, group))}
+                    />
+                  ))}
+                </View>
+              )}
+              {group.optionType === "topping" && group.maxSelections > 0 ? (
+                <Text style={styles.meta}>最多可選 {group.maxSelections} 種加料。</Text>
+              ) : null}
+            </Section>
+          ))}
 
           <Section title="數量">
             <View style={styles.quantityRow}>
@@ -170,18 +208,20 @@ export function DrinkSelectionScreen({ navigation, route, appState, actions, mem
               label={editOrderItem ? "儲存修改（Mock）" : editOrderId ? "加入訂單並重新預授權" : "加入購物車"}
               style={styles.stickyButton}
               onPress={() => {
-                const selectedTopping = drink.toppings.find((item) => item.id === toppingId);
+                const orderItem = buildCartItem({
+                  drink,
+                  store,
+                  groupBuyActivity,
+                  quantity,
+                  unitPrice,
+                  subtotal,
+                  selectedOptions,
+                  selectedOptionIds
+                });
                 if (editOrderItem) {
                   route.params?.onSaveOrderItem?.({
                     ...editOrderItem,
-                    drinkId: drink.id,
-                    name: drink.name,
-                    quantity,
-                    sweetness,
-                    ice,
-                    toppings: selectedTopping && selectedTopping.id !== "none" ? [selectedTopping.name] : ["不加料"],
-                    unitPrice: quantity > 0 ? Math.round(subtotal / quantity) : subtotal,
-                    subtotal
+                    ...orderItem
                   });
                   setSubmitted(true);
                   navigation.back();
@@ -189,18 +229,8 @@ export function DrinkSelectionScreen({ navigation, route, appState, actions, mem
                 }
                 if (editOrderId) {
                   actions.addToCart({
-                    groupBuyActivityId: groupBuyActivity.id,
-                    drinkId: drink.id,
+                    ...orderItem,
                     targetOrderId: editOrderId,
-                    storeName: store?.name ?? "Mock store",
-                    name: drink.name,
-                    itemName: drink.name,
-                    size: "L",
-                    quantity,
-                    sweetness,
-                    ice,
-                    toppings: selectedTopping && selectedTopping.id !== "none" ? [selectedTopping.name] : ["不加料"],
-                    subtotal
                   });
                   setSubmitted(true);
                   setCustomizing(false);
@@ -208,17 +238,7 @@ export function DrinkSelectionScreen({ navigation, route, appState, actions, mem
                   return;
                 }
                 actions.addToCart({
-                  groupBuyActivityId: groupBuyActivity.id,
-                  drinkId: drink.id,
-                  storeName: store?.name ?? "Mock store",
-                  name: drink.name,
-                  itemName: drink.name,
-                  size: "L",
-                  quantity,
-                  sweetness,
-                  ice,
-                  toppings: selectedTopping && selectedTopping.id !== "none" ? [selectedTopping.name] : ["不加料"],
-                  subtotal
+                  ...orderItem
                 });
                 setSubmitted(true);
                 setCustomizing(false);
@@ -252,14 +272,60 @@ export function DrinkSelectionScreen({ navigation, route, appState, actions, mem
   );
 }
 
-function OptionGroup({ options, value, onChange }) {
-  return (
-    <View style={styles.optionWrap}>
-      {options.map((option) => (
-        <OptionButton key={option} active={value === option} label={option} onPress={() => onChange(option)} />
-      ))}
-    </View>
-  );
+function buildInitialSelections(drink, editOrderItem) {
+  const existingIds = new Set(editOrderItem?.customizationOptionIds || []);
+  const selected = [];
+  for (const group of drink.customizationGroups) {
+    const matchingById = group.options.filter((option) => existingIds.has(option.id));
+    const matchingByLabel = group.options.filter((option) => {
+      if (group.optionType === "topping") return editOrderItem?.toppings?.includes(option.label);
+      return editOrderItem?.[group.optionType] === option.label;
+    });
+    const matches = matchingById.length ? matchingById : matchingByLabel;
+    if (matches.length) {
+      selected.push(...matches.slice(0, group.maxSelections));
+    } else if (group.minSelections > 0 && group.options[0]) {
+      selected.push(group.options[0]);
+    }
+  }
+  return selected.map((option) => option.id);
+}
+
+function toggleOption(current, optionId, group) {
+  const groupIds = new Set(group.options.map((option) => option.id));
+  const activeGroupIds = current.filter((id) => groupIds.has(id));
+  if (activeGroupIds.includes(optionId)) {
+    if (activeGroupIds.length <= group.minSelections) return current;
+    return current.filter((id) => id !== optionId);
+  }
+  if (group.maxSelections === 1) {
+    return [...current.filter((id) => !groupIds.has(id)), optionId];
+  }
+  if (activeGroupIds.length >= group.maxSelections) return current;
+  return [...current, optionId];
+}
+
+function buildCartItem({ drink, store, groupBuyActivity, quantity, unitPrice, subtotal, selectedOptions, selectedOptionIds }) {
+  const labelFor = (optionType) => selectedOptions.find((option) => option.optionType === optionType)?.label || "";
+  return {
+    groupBuyActivityId: groupBuyActivity.id,
+    drinkId: drink.id,
+    storeName: store.name,
+    name: drink.name,
+    itemName: drink.name,
+    size: labelFor("size"),
+    quantity,
+    sweetness: labelFor("sweetness"),
+    ice: labelFor("ice"),
+    toppings: selectedOptions.filter((option) => option.optionType === "topping").map((option) => option.label),
+    customizationOptionIds: selectedOptionIds,
+    unitPrice,
+    subtotal
+  };
+}
+
+function getGroupTitle(optionType) {
+  return { size: "尺寸", sweetness: "甜度", ice: "冰塊", topping: "加料" }[optionType] || optionType;
 }
 
 function OptionButton({ active, label, onPress }) {

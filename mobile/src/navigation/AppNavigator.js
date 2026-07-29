@@ -13,6 +13,7 @@ import { PaymentAuthorizationScreen } from "../screens/PaymentAuthorizationScree
 import { PickupInfoScreen } from "../screens/PickupInfoScreen";
 import { MerchantGroupBuyActivityCreateScreen } from "../screens/MerchantGroupBuyActivityCreateScreen";
 import { MerchantDashboardScreen } from "../screens/MerchantDashboardScreen";
+import { MerchantMenuManagementScreen } from "../screens/MerchantMenuManagementScreen";
 import { CustomerPlaceholderScreen } from "../screens/CustomerPlaceholderScreen";
 import { CustomerOrdersScreen } from "../screens/CustomerOrdersScreen";
 import { AdminDashboardScreen } from "../screens/AdminDashboardScreen";
@@ -24,7 +25,17 @@ import { getGroupBuyActivityCapacityInfo, wouldExceedGroupBuyActivityCapacity } 
 import { normalizeOrderItem } from "../utils/orderItems";
 import { buildOrderItemsChange, rollbackAuthorizedCups } from "../utils/orderState";
 import { clearPrototypeStateOnce, loadPrototypeState, savePrototypeState } from "../utils/prototypeStorage";
-import { createOrder, createOrderRevision, getOrder, listGroupBuyActivities, updateOrder } from "../utils/apiClient";
+import {
+  createOrder,
+  createOrderRevision,
+  getOrder,
+  getPickupCredential as fetchPickupCredential,
+  listGroupBuyActivities,
+  lookupPickupCredential as lookupPickupCredentialApi,
+  markGroupBuyActivityReadyForPickup,
+  redeemPickupCredential as redeemPickupCredentialApi,
+  updateOrder
+} from "../utils/apiClient";
 
 const initialRoute = { name: "roleSelect", params: {} };
 const backendCustomerUserIds = {
@@ -41,6 +52,7 @@ function toBackendOrderItems(orderItems) {
     quantity: item.quantity,
     unitPrice: item.unitPrice,
     subtotal: item.subtotal,
+    customizationOptionIds: item.customizationOptionIds,
     size: item.size,
     sweetness: item.sweetness,
     ice: item.ice,
@@ -62,7 +74,10 @@ function toLocalOrderItem(item) {
     ice: item.customizations?.find((customization) => customization.optionType === "ice")?.label ?? "",
     toppings: (item.customizations || [])
       .filter((customization) => customization.optionType === "topping")
-      .map((customization) => customization.label)
+      .map((customization) => customization.label),
+    customizationOptionIds: (item.customizations || [])
+      .map((customization) => customization.customizationOptionId)
+      .filter(Boolean)
   };
 }
 
@@ -208,7 +223,7 @@ export function AppNavigator() {
   const current = stack[stack.length - 1];
 
   useEffect(() => {
-    clearPrototypeStateOnce("2026-07-08-clear-group-buys-orders-cart");
+    clearPrototypeStateOnce("2026-07-29-clear-all-group-buys-orders-cart");
     const storedState = loadPrototypeState();
     if (storedState) {
       setGroupBuyActivities(getStoredArray(storedState, "groupBuyActivities", "deals", initialGroupBuyActivities));
@@ -747,6 +762,15 @@ export function AppNavigator() {
     },
     async syncOrderFromBackend(orderId) {
       const backendOrder = await getOrder(orderId);
+      let pickupCredential = null;
+      if (["ready", "picked_up"].includes(backendOrder.pickupStatus)) {
+        try {
+          pickupCredential = await fetchPickupCredential(orderId);
+        } catch {
+          pickupCredential = undefined;
+        }
+      }
+
       const authorization = backendOrder.latestLinePayAuthorization;
       const capture = backendOrder.latestPaymentCapture;
       const authorizedAmount = authorization?.authorizedAmount ?? backendOrder.originalAmount;
@@ -757,7 +781,7 @@ export function AppNavigator() {
 
       setOrders((items) => {
         const existingOrder = items.find((order) => order.id === orderId);
-        const syncedOrder = buildLocalOrderFromBackend({
+        const syncedOrderBase = buildLocalOrderFromBackend({
           backendOrder,
           existingOrder,
           selectedCustomerId,
@@ -765,6 +789,9 @@ export function AppNavigator() {
           pendingRevision,
           pendingRevisionItems
         });
+        const syncedOrder = pickupCredential === undefined
+          ? syncedOrderBase
+          : { ...syncedOrderBase, pickupCredential };
         return existingOrder
           ? items.map((order) => (order.id === orderId ? syncedOrder : order))
           : [...items, syncedOrder];
@@ -814,19 +841,54 @@ export function AppNavigator() {
 
       return { order: backendOrder, activity: backendActivity };
     },
-    markOrdersReadyForPickupForGroupBuyActivity(groupBuyActivityId) {
-      setOrders((items) => items.map((order) => (
-        order.groupBuyActivityId === groupBuyActivityId
-          && order.status !== "cancelled"
-          && order.paymentStatus === "captured"
-          && !["ready", "picked_up", "cancelled"].includes(order.pickupStatus)
+    async markOrdersReadyForPickupForGroupBuyActivity(groupBuyActivityId) {
+      const result = await markGroupBuyActivityReadyForPickup(groupBuyActivityId);
+      const credentialByOrderId = new Map(
+        (result.credentials || []).map((credential) => [credential.orderId, credential])
+      );
+
+      setOrders((items) => items.map((order) => {
+        const pickupCredential = credentialByOrderId.get(order.id);
+        return pickupCredential
           ? {
               ...order,
-              status: order.status === "locked" ? "readyForPickup" : order.status,
-              pickupStatus: "ready"
+              pickupStatus: "ready",
+              pickupCredential
+            }
+          : order;
+      }));
+      setGroupBuyActivities((items) => items.map((groupBuyActivity) => (
+        groupBuyActivity.id === groupBuyActivityId
+          ? { ...groupBuyActivity, status: result.status }
+          : groupBuyActivity
+      )));
+      return result;
+    },
+    lookupPickupCredential(pickupCode) {
+      return lookupPickupCredentialApi(pickupCode);
+    },
+    async redeemPickupCredential(pickupCode) {
+      const result = await redeemPickupCredentialApi(pickupCode);
+      const credential = result.credential;
+
+      setOrders((items) => items.map((order) => (
+        order.id === credential.orderId
+          ? {
+              ...order,
+              status: credential.orderStatus,
+              pickupStatus: credential.pickupStatus,
+              pickupCredential: credential
             }
           : order
       )));
+      if (result.activityCompleted) {
+        setGroupBuyActivities((items) => items.map((groupBuyActivity) => (
+          groupBuyActivity.id === credential.activity.id
+            ? { ...groupBuyActivity, status: "completed" }
+            : groupBuyActivity
+        )));
+      }
+      return result;
     },
     createMerchantGroupBuyActivity(form) {
       const groupBuyActivityId = `groupBuyActivity-merchant-${Date.now()}`;
@@ -998,6 +1060,7 @@ export function AppNavigator() {
         {current.name === "pickupInfo" && <PickupInfoScreen {...screenProps} />}
         {current.name === "merchantCreate" && <MerchantGroupBuyActivityCreateScreen {...screenProps} />}
         {current.name === "merchantDashboard" && <MerchantDashboardScreen {...screenProps} />}
+        {current.name === "merchantMenu" && <MerchantMenuManagementScreen {...screenProps} />}
         {current.name === "customerPlaceholder" && <CustomerPlaceholderScreen {...screenProps} />}
         {current.name === "customerOrders" && <CustomerOrdersScreen {...screenProps} />}
         {current.name === "adminDashboard" && <AdminDashboardScreen {...screenProps} />}

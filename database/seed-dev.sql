@@ -68,3 +68,52 @@ INSERT INTO menu_items (
   ('drink-006', 'store-005', '高山四季春', 'tea', '清香回甘的純茶', 40, 1, '2026-06-05T00:00:00+08:00', '2026-06-05T00:00:00+08:00'),
   ('drink-007', 'store-006', '柳橙百香綠', 'fruit', '柳橙與百香果搭配清爽綠茶', 60, 1, '2026-06-05T00:00:00+08:00', '2026-06-05T00:00:00+08:00'),
   ('drink-008', 'store-007', '雙十鮮乳茶', 'milk_tea', '濃郁鮮乳與熟香紅茶', 65, 1, '2026-06-05T00:00:00+08:00', '2026-06-05T00:00:00+08:00');
+
+WITH option_templates (suffix, option_type, label, price_delta, sort_order) AS (
+  VALUES
+    ('sweet-regular', 'sweetness', '正常糖', 0, 0),
+    ('sweet-half', 'sweetness', '半糖', 0, 1),
+    ('sweet-light', 'sweetness', '微糖', 0, 2),
+    ('sweet-none', 'sweetness', '無糖', 0, 3),
+    ('ice-regular', 'ice', '正常冰', 0, 0),
+    ('ice-less', 'ice', '少冰', 0, 1),
+    ('ice-light', 'ice', '微冰', 0, 2),
+    ('ice-none', 'ice', '去冰', 0, 3),
+    ('size-medium', 'size', '中杯', 0, 0),
+    ('size-large', 'size', '大杯', 10, 1),
+    ('top-pearl', 'topping', '珍珠', 10, 0),
+    ('top-coconut', 'topping', '椰果', 10, 1)
+)
+INSERT INTO customization_options (
+  id, menu_item_id, option_type, label, price_delta, sort_order, is_available
+)
+SELECT
+  menu_item.id || '-opt-' || option_template.suffix,
+  menu_item.id,
+  option_template.option_type,
+  option_template.label,
+  option_template.price_delta,
+  option_template.sort_order,
+  1
+FROM menu_items menu_item
+CROSS JOIN option_templates option_template;
+
+WITH rule_templates (option_type, min_selections, max_selections) AS (
+  VALUES
+    ('sweetness', 1, 1),
+    ('ice', 1, 1),
+    ('size', 1, 1),
+    ('topping', 0, 2)
+)
+INSERT INTO menu_item_customization_rules (
+  menu_item_id, option_type, min_selections, max_selections, created_at, updated_at
+)
+SELECT
+  menu_item.id,
+  rule_template.option_type,
+  rule_template.min_selections,
+  rule_template.max_selections,
+  '2026-06-05T00:00:00+08:00',
+  '2026-06-05T00:00:00+08:00'
+FROM menu_items menu_item
+CROSS JOIN rule_templates rule_template;

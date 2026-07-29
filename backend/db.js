@@ -2,7 +2,9 @@ const path = require("node:path");
 const { randomUUID } = require("node:crypto");
 const { DatabaseSync } = require("node:sqlite");
 
-const databasePath = path.join(__dirname, "..", "database", "drink-group-buy-dev.sqlite");
+const databasePath = process.env.DRINK_GROUP_BUY_DB_PATH
+  ? path.resolve(process.env.DRINK_GROUP_BUY_DB_PATH)
+  : path.join(__dirname, "..", "database", "drink-group-buy-dev.sqlite");
 
 function openDatabase() {
   const database = new DatabaseSync(databasePath);
@@ -12,6 +14,18 @@ function openDatabase() {
 }
 
 function ensureRuntimeSchema(database) {
+  database.exec(`
+    CREATE TABLE IF NOT EXISTS menu_item_customization_rules (
+      menu_item_id TEXT NOT NULL REFERENCES menu_items(id) ON DELETE CASCADE,
+      option_type TEXT NOT NULL CHECK (option_type IN ('sweetness', 'ice', 'topping', 'size')),
+      min_selections INTEGER NOT NULL DEFAULT 0 CHECK (min_selections >= 0),
+      max_selections INTEGER NOT NULL CHECK (max_selections >= min_selections),
+      created_at TEXT NOT NULL,
+      updated_at TEXT NOT NULL,
+      PRIMARY KEY (menu_item_id, option_type)
+    );
+  `);
+
   database.exec(`
     CREATE TABLE IF NOT EXISTS order_revisions (
       id TEXT PRIMARY KEY,
@@ -83,6 +97,27 @@ function ensureRuntimeSchema(database) {
   database.exec(`
     CREATE INDEX IF NOT EXISTS idx_payment_captures_authorization_attempt
     ON payment_captures(payment_authorization_id, attempt_number);
+  `);
+
+  const pickupCredentialColumns = database.prepare("PRAGMA table_info(pickup_credentials)").all();
+  if (!pickupCredentialColumns.some((column) => column.name === "expires_at")) {
+    database.exec("ALTER TABLE pickup_credentials ADD COLUMN expires_at TEXT;");
+  }
+  if (!pickupCredentialColumns.some((column) => column.name === "expired_at")) {
+    database.exec("ALTER TABLE pickup_credentials ADD COLUMN expired_at TEXT;");
+  }
+  if (!pickupCredentialColumns.some((column) => column.name === "redeemed_at")) {
+    database.exec("ALTER TABLE pickup_credentials ADD COLUMN redeemed_at TEXT;");
+  }
+  if (!pickupCredentialColumns.some((column) => column.name === "redeemed_by_user_id")) {
+    database.exec("ALTER TABLE pickup_credentials ADD COLUMN redeemed_by_user_id TEXT REFERENCES users(id);");
+  }
+  database.exec(`
+    CREATE INDEX IF NOT EXISTS idx_pickup_credentials_expires_at
+    ON pickup_credentials(expires_at);
+    CREATE UNIQUE INDEX IF NOT EXISTS idx_pickup_credentials_active_code
+    ON pickup_credentials(pickup_code)
+    WHERE redeemed_at IS NULL AND expired_at IS NULL;
   `);
 
   database.exec(`
@@ -431,6 +466,241 @@ function listDueGroupBuyActivitiesForSettlement(input = {}) {
       .sort((left, right) => left.deadlineTime - right.deadlineTime)
       .slice(0, limit)
       .map(({ deadlineTime, ...activity }) => activity);
+  } finally {
+    database.close();
+  }
+}
+
+function listDueGroupBuyActivitiesForPickupExpiration(input = {}) {
+  const database = openDatabase();
+  const now = input.now || new Date().toISOString();
+  const nowTime = Date.parse(now);
+  const limit = normalizePositiveInteger(input.limit, 20);
+
+  try {
+    const rows = database.prepare(`
+      SELECT id, status, pickup_start_at, pickup_end_at
+      FROM group_buy_activities
+      WHERE status IN ('ordering', 'ready_for_pickup')
+      ORDER BY pickup_start_at ASC
+    `).all();
+
+    return rows
+      .map((row) => {
+        const expiresAt = calculatePickupExpirationAt(row.pickup_start_at, row.pickup_end_at);
+        return {
+          id: row.id,
+          status: row.status,
+          pickupStartAt: row.pickup_start_at,
+          pickupEndAt: row.pickup_end_at,
+          expiresAt,
+          expiresTime: expiresAt ? Date.parse(expiresAt) : Number.NaN
+        };
+      })
+      .filter((activity) => !Number.isNaN(nowTime)
+        && !Number.isNaN(activity.expiresTime)
+        && activity.expiresTime <= nowTime)
+      .sort((left, right) => left.expiresTime - right.expiresTime)
+      .slice(0, limit)
+      .map(({ expiresTime, ...activity }) => activity);
+  } finally {
+    database.close();
+  }
+}
+
+function expireGroupBuyPickupWindow(activityId, input = {}) {
+  const database = openDatabase();
+  const now = input.now || new Date().toISOString();
+  const actorUserId = input.actorUserId || null;
+  let transactionStarted = false;
+
+  try {
+    const activity = database.prepare(`
+      SELECT id, status, pickup_start_at, pickup_end_at
+      FROM group_buy_activities
+      WHERE id = ?
+    `).get(activityId);
+    if (!activity) {
+      return { status: "not_found", activityId };
+    }
+
+    const expiresAt = calculatePickupExpirationAt(activity.pickup_start_at, activity.pickup_end_at);
+    const expiresTime = expiresAt ? Date.parse(expiresAt) : Number.NaN;
+    const nowTime = Date.parse(now);
+    if (Number.isNaN(expiresTime) || Number.isNaN(nowTime)) {
+      return { status: "invalid_pickup_window", activityId, expiresAt };
+    }
+    if (nowTime < expiresTime) {
+      return { status: "not_due", activityId, expiresAt };
+    }
+    if (activity.status === "completed") {
+      return { status: "already_completed", activityId, expiresAt };
+    }
+    if (!["ordering", "ready_for_pickup"].includes(activity.status)) {
+      return { status: "not_expirable", activityId, activityStatus: activity.status, expiresAt };
+    }
+
+    database.exec("BEGIN IMMEDIATE;");
+    transactionStarted = true;
+
+    const claimActivity = database.prepare(`
+      UPDATE group_buy_activities
+      SET status = 'completed',
+          updated_at = ?
+      WHERE id = ?
+        AND status IN ('ordering', 'ready_for_pickup')
+    `).run(now, activityId);
+    if (claimActivity.changes !== 1) {
+      database.exec("ROLLBACK;");
+      transactionStarted = false;
+      return { status: "already_processed", activityId, expiresAt };
+    }
+
+    const orders = database.prepare(`
+      SELECT id, status, payment_status, pickup_status
+      FROM orders
+      WHERE activity_id = ?
+      ORDER BY submitted_at ASC, id ASC
+    `).all(activityId);
+    const expireOrder = database.prepare(`
+      UPDATE orders
+      SET status = 'completed',
+          pickup_status = 'expired',
+          updated_at = ?
+      WHERE id = ?
+        AND payment_status = 'captured'
+        AND pickup_status IN ('not_ready', 'ready')
+        AND status != 'cancelled'
+    `);
+    const completePickedUpOrder = database.prepare(`
+      UPDATE orders
+      SET status = 'completed',
+          updated_at = ?
+      WHERE id = ?
+        AND payment_status = 'captured'
+        AND pickup_status = 'picked_up'
+        AND status != 'completed'
+        AND status != 'cancelled'
+    `);
+    const insertHistory = database.prepare(`
+      INSERT INTO status_history (
+        id, resource_type, resource_id, from_status, to_status, reason, actor_user_id, created_at
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+    `);
+    let expiredOrderCount = 0;
+    let completedPickedUpOrderCount = 0;
+
+    for (const order of orders) {
+      if (order.payment_status === "captured"
+        && ["not_ready", "ready"].includes(order.pickup_status)
+        && order.status !== "cancelled") {
+        const update = expireOrder.run(now, order.id);
+        if (update.changes === 1) {
+          expiredOrderCount += 1;
+          insertHistory.run(
+            `status-history-${randomUUID()}`,
+            "pickup",
+            order.id,
+            order.pickup_status,
+            "expired",
+            "pickup_window_expired",
+            actorUserId,
+            now
+          );
+          if (order.status !== "completed") {
+            insertHistory.run(
+              `status-history-${randomUUID()}`,
+              "order",
+              order.id,
+              order.status,
+              "completed",
+              "pickup_window_expired",
+              actorUserId,
+              now
+            );
+          }
+        }
+        continue;
+      }
+
+      if (order.payment_status === "captured"
+        && order.pickup_status === "picked_up"
+        && !["completed", "cancelled"].includes(order.status)) {
+        const update = completePickedUpOrder.run(now, order.id);
+        if (update.changes === 1) {
+          completedPickedUpOrderCount += 1;
+          insertHistory.run(
+            `status-history-${randomUUID()}`,
+            "order",
+            order.id,
+            order.status,
+            "completed",
+            "pickup_completed_before_window_expired",
+            actorUserId,
+            now
+          );
+        }
+      }
+    }
+
+    database.prepare(`
+      UPDATE pickup_credentials
+      SET expires_at = COALESCE(expires_at, ?),
+          expired_at = CASE
+            WHEN order_id IN (
+              SELECT id
+              FROM orders
+              WHERE activity_id = ?
+                AND pickup_status = 'expired'
+            ) THEN COALESCE(expired_at, ?)
+            ELSE expired_at
+          END
+      WHERE order_id IN (
+        SELECT id
+        FROM orders
+        WHERE activity_id = ?
+      )
+    `).run(expiresAt, activityId, now, activityId);
+
+    insertHistory.run(
+      `status-history-${randomUUID()}`,
+      "activity",
+      activityId,
+      activity.status,
+      "completed",
+      "pickup_window_expired",
+      actorUserId,
+      now
+    );
+
+    database.prepare(`
+      INSERT INTO audit_logs (
+        id, actor_user_id, action_type, resource_type, resource_id, metadata_json, created_at
+      ) VALUES (?, ?, 'system_expire_pickup_window', 'activity', ?, ?, ?)
+    `).run(
+      `audit-log-${randomUUID()}`,
+      actorUserId,
+      activityId,
+      JSON.stringify({
+        expiresAt,
+        expiredOrderCount,
+        completedPickedUpOrderCount
+      }),
+      now
+    );
+
+    database.exec("COMMIT;");
+    transactionStarted = false;
+    return {
+      status: "completed",
+      activityId,
+      expiresAt,
+      expiredOrderCount,
+      completedPickedUpOrderCount
+    };
+  } catch (error) {
+    if (transactionStarted) database.exec("ROLLBACK;");
+    throw error;
   } finally {
     database.close();
   }
@@ -828,18 +1098,250 @@ function listDevAuthUsers() {
   }
 }
 
+const defaultCustomizationRules = {
+  sweetness: { minSelections: 1, maxSelections: 1 },
+  ice: { minSelections: 1, maxSelections: 1 },
+  size: { minSelections: 1, maxSelections: 1 },
+  topping: { minSelections: 0, maxSelections: 1 }
+};
+
+function listStoreMenu(storeId, input = {}) {
+  const database = openDatabase();
+  const includeUnavailable = Boolean(input.includeUnavailable);
+  try {
+    const store = database.prepare(`
+      SELECT id, merchant_id, name, address, phone, business_status
+      FROM stores
+      WHERE id = ?
+    `).get(storeId);
+    if (!store) return null;
+
+    const menuItems = database.prepare(`
+      SELECT id, store_id, name, category, description, base_price, is_available
+      FROM menu_items
+      WHERE store_id = ?
+        AND (? = 1 OR is_available = 1)
+      ORDER BY category ASC, name ASC, id ASC
+    `).all(storeId, includeUnavailable ? 1 : 0);
+    const optionRows = database.prepare(`
+      SELECT option.id, option.menu_item_id, option.option_type, option.label,
+             option.price_delta, option.sort_order, option.is_available
+      FROM customization_options option
+      JOIN menu_items menu_item ON menu_item.id = option.menu_item_id
+      WHERE menu_item.store_id = ?
+        AND (? = 1 OR option.is_available = 1)
+      ORDER BY option.menu_item_id, option.option_type, option.sort_order, option.id
+    `).all(storeId, includeUnavailable ? 1 : 0);
+    const ruleRows = database.prepare(`
+      SELECT rule.menu_item_id, rule.option_type, rule.min_selections, rule.max_selections
+      FROM menu_item_customization_rules rule
+      JOIN menu_items menu_item ON menu_item.id = rule.menu_item_id
+      WHERE menu_item.store_id = ?
+    `).all(storeId);
+
+    return {
+      store: {
+        id: store.id,
+        merchantId: store.merchant_id,
+        name: store.name,
+        address: store.address,
+        phone: store.phone,
+        businessStatus: store.business_status
+      },
+      menuItems: menuItems.map((menuItem) => mapMenuItem(
+        menuItem,
+        optionRows.filter((option) => option.menu_item_id === menuItem.id),
+        ruleRows.filter((rule) => rule.menu_item_id === menuItem.id),
+        includeUnavailable
+      ))
+    };
+  } finally {
+    database.close();
+  }
+}
+
+function saveMerchantMenuItem(input) {
+  const database = openDatabase();
+  const now = input.now || new Date().toISOString();
+  const menuItemId = input.menuItemId || `menu-item-${randomUUID()}`;
+  const creating = !input.menuItemId;
+  let transactionStarted = false;
+
+  try {
+    const store = database.prepare("SELECT id FROM stores WHERE id = ?").get(input.storeId);
+    if (!store) return { error: "store_not_found" };
+
+    const existingItem = database.prepare(`
+      SELECT id, store_id
+      FROM menu_items
+      WHERE id = ?
+    `).get(menuItemId);
+    if (!creating && !existingItem) return { error: "menu_item_not_found" };
+    if (existingItem && existingItem.store_id !== input.storeId) {
+      return { error: "menu_item_store_mismatch" };
+    }
+
+    database.exec("BEGIN IMMEDIATE;");
+    transactionStarted = true;
+
+    if (creating) {
+      database.prepare(`
+        INSERT INTO menu_items (
+          id, store_id, name, category, description, base_price, is_available, created_at, updated_at
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+      `).run(
+        menuItemId,
+        input.storeId,
+        input.name,
+        input.category,
+        input.description || null,
+        Number(input.basePrice),
+        input.isAvailable ? 1 : 0,
+        now,
+        now
+      );
+    } else {
+      database.prepare(`
+        UPDATE menu_items
+        SET name = ?, category = ?, description = ?, base_price = ?, is_available = ?, updated_at = ?
+        WHERE id = ? AND store_id = ?
+      `).run(
+        input.name,
+        input.category,
+        input.description || null,
+        Number(input.basePrice),
+        input.isAvailable ? 1 : 0,
+        now,
+        menuItemId,
+        input.storeId
+      );
+    }
+
+    const upsertRule = database.prepare(`
+      INSERT INTO menu_item_customization_rules (
+        menu_item_id, option_type, min_selections, max_selections, created_at, updated_at
+      ) VALUES (?, ?, ?, ?, ?, ?)
+      ON CONFLICT(menu_item_id, option_type) DO UPDATE SET
+        min_selections = excluded.min_selections,
+        max_selections = excluded.max_selections,
+        updated_at = excluded.updated_at
+    `);
+    const existingOptions = database.prepare(`
+      SELECT id, option_type
+      FROM customization_options
+      WHERE menu_item_id = ?
+    `).all(menuItemId);
+    const updateOption = database.prepare(`
+      UPDATE customization_options
+      SET option_type = ?, label = ?, price_delta = ?, sort_order = ?, is_available = ?
+      WHERE id = ? AND menu_item_id = ?
+    `);
+    const insertOption = database.prepare(`
+      INSERT INTO customization_options (
+        id, menu_item_id, option_type, label, price_delta, sort_order, is_available
+      ) VALUES (?, ?, ?, ?, ?, ?, ?)
+    `);
+
+    for (const group of input.customizationGroups) {
+      upsertRule.run(
+        menuItemId,
+        group.optionType,
+        Number(group.minSelections),
+        Number(group.maxSelections),
+        now,
+        now
+      );
+
+      const submittedOptionIds = new Set();
+      for (const [index, option] of group.options.entries()) {
+        const optionId = option.id || `customization-option-${randomUUID()}`;
+        const existingOption = existingOptions.find((item) => item.id === optionId);
+        const optionWithSameId = option.id
+          ? database.prepare(`
+            SELECT id, menu_item_id
+            FROM customization_options
+            WHERE id = ?
+          `).get(optionId)
+          : null;
+        if (optionWithSameId && optionWithSameId.menu_item_id !== menuItemId) {
+          database.exec("ROLLBACK;");
+          transactionStarted = false;
+          return { error: "customization_option_item_mismatch", optionId };
+        }
+        if (existingOption && existingOption.option_type !== group.optionType) {
+          database.exec("ROLLBACK;");
+          transactionStarted = false;
+          return { error: "customization_option_type_mismatch", optionId };
+        }
+        submittedOptionIds.add(optionId);
+        if (existingOption) {
+          updateOption.run(
+            group.optionType,
+            option.label,
+            Number(option.priceDelta),
+            index,
+            option.isAvailable ? 1 : 0,
+            optionId,
+            menuItemId
+          );
+        } else {
+          insertOption.run(
+            optionId,
+            menuItemId,
+            group.optionType,
+            option.label,
+            Number(option.priceDelta),
+            index,
+            option.isAvailable ? 1 : 0
+          );
+        }
+      }
+
+      for (const existingOption of existingOptions.filter((item) => item.option_type === group.optionType)) {
+        if (!submittedOptionIds.has(existingOption.id)) {
+          database.prepare(`
+            UPDATE customization_options
+            SET is_available = 0
+            WHERE id = ? AND menu_item_id = ?
+          `).run(existingOption.id, menuItemId);
+        }
+      }
+    }
+
+    database.prepare(`
+      INSERT INTO audit_logs (
+        id, actor_user_id, action_type, resource_type, resource_id, metadata_json, created_at
+      ) VALUES (?, ?, ?, 'menu_item', ?, ?, ?)
+    `).run(
+      `audit-log-${randomUUID()}`,
+      input.actorUserId,
+      creating ? "merchant_create_menu_item" : "merchant_update_menu_item",
+      menuItemId,
+      JSON.stringify({ storeId: input.storeId, isAvailable: input.isAvailable }),
+      now
+    );
+
+    database.exec("COMMIT;");
+    transactionStarted = false;
+    return { menuItem: listStoreMenu(input.storeId, { includeUnavailable: true })
+      .menuItems.find((item) => item.id === menuItemId) };
+  } catch (error) {
+    if (transactionStarted) database.exec("ROLLBACK;");
+    throw error;
+  } finally {
+    database.close();
+  }
+}
+
 function createOrder(input) {
   const database = openDatabase();
   const now = new Date().toISOString();
   const orderId = `order-${randomUUID()}`;
-  const items = normalizeOrderItems(input.items);
-  const totalCups = items.reduce((sum, item) => sum + item.quantity, 0);
-  const originalAmount = items.reduce((sum, item) => sum + item.subtotal, 0);
   let transactionStarted = false;
 
   try {
     const activity = database.prepare(`
-      SELECT id, status, maximum_cups
+      SELECT id, store_id, status, maximum_cups
       FROM group_buy_activities
       WHERE id = ?
     `).get(input.activityId);
@@ -848,6 +1350,19 @@ function createOrder(input) {
     }
     if (!["recruiting", "confirmed"].includes(activity.status)) {
       return { error: "activity_not_joinable", status: activity.status };
+    }
+
+    const pricedItems = priceOrderItems(database, activity.store_id, input.items);
+    if (pricedItems.error) return pricedItems;
+    const items = pricedItems.items;
+    const totalCups = items.reduce((sum, item) => sum + item.quantity, 0);
+    const originalAmount = items.reduce((sum, item) => sum + item.subtotal, 0);
+    if (pricedItems.priceChanged) {
+      return {
+        error: "order_price_changed",
+        originalAmount,
+        items: toAuthoritativeOrderItems(items)
+      };
     }
 
     const user = database.prepare(`
@@ -927,7 +1442,7 @@ function createOrder(input) {
         label_snapshot,
         price_delta_snapshot,
         sort_order
-      ) VALUES (?, ?, NULL, ?, ?, 0, ?)
+      ) VALUES (?, ?, ?, ?, ?, ?, ?)
     `);
 
     items.forEach((item) => {
@@ -950,8 +1465,10 @@ function createOrder(input) {
         insertCustomization.run(
           `order-item-customization-${randomUUID()}`,
           orderItemId,
+          customization.optionId,
           customization.optionType,
           customization.label,
+          customization.priceDelta,
           index
         );
       });
@@ -1014,9 +1531,6 @@ function createOrder(input) {
 function updatePendingOrder(input) {
   const database = openDatabase();
   const now = new Date().toISOString();
-  const items = normalizeOrderItems(input.items);
-  const totalCups = items.reduce((sum, item) => sum + item.quantity, 0);
-  const originalAmount = items.reduce((sum, item) => sum + item.subtotal, 0);
   let transactionStarted = false;
 
   try {
@@ -1041,7 +1555,7 @@ function updatePendingOrder(input) {
     }
 
     const activity = database.prepare(`
-      SELECT id, status, maximum_cups
+      SELECT id, store_id, status, maximum_cups
       FROM group_buy_activities
       WHERE id = ?
     `).get(order.activity_id);
@@ -1050,6 +1564,19 @@ function updatePendingOrder(input) {
     }
     if (!["recruiting", "confirmed"].includes(activity.status)) {
       return { error: "activity_not_joinable", status: activity.status };
+    }
+
+    const pricedItems = priceOrderItems(database, activity.store_id, input.items);
+    if (pricedItems.error) return pricedItems;
+    const items = pricedItems.items;
+    const totalCups = items.reduce((sum, item) => sum + item.quantity, 0);
+    const originalAmount = items.reduce((sum, item) => sum + item.subtotal, 0);
+    if (pricedItems.priceChanged) {
+      return {
+        error: "order_price_changed",
+        originalAmount,
+        items: toAuthoritativeOrderItems(items)
+      };
     }
 
     const authorizedCups = database.prepare(`
@@ -1139,7 +1666,7 @@ function updatePendingOrder(input) {
         label_snapshot,
         price_delta_snapshot,
         sort_order
-      ) VALUES (?, ?, NULL, ?, ?, 0, ?)
+      ) VALUES (?, ?, ?, ?, ?, ?, ?)
     `);
 
     items.forEach((item) => {
@@ -1162,8 +1689,10 @@ function updatePendingOrder(input) {
         insertCustomization.run(
           `order-item-customization-${randomUUID()}`,
           orderItemId,
+          customization.optionId,
           customization.optionType,
           customization.label,
+          customization.priceDelta,
           index
         );
       });
@@ -1231,9 +1760,6 @@ function createOrderRevision(input) {
   const database = openDatabase();
   const now = new Date().toISOString();
   const revisionId = `order-revision-${randomUUID()}`;
-  const items = normalizeOrderItems(input.items);
-  const totalCups = items.reduce((sum, item) => sum + item.quantity, 0);
-  const originalAmount = items.reduce((sum, item) => sum + item.subtotal, 0);
   let transactionStarted = false;
 
   try {
@@ -1248,6 +1774,7 @@ function createOrderRevision(input) {
         orders.total_cups,
         orders.original_amount,
         activity.status AS activity_status,
+        activity.store_id,
         activity.maximum_cups,
         activity.deadline_at,
         activity.withdrawal_lock_minutes
@@ -1276,6 +1803,19 @@ function createOrderRevision(input) {
     }
     if (!["recruiting", "confirmed"].includes(order.activity_status)) {
       return { error: "activity_not_joinable", status: order.activity_status };
+    }
+
+    const pricedItems = priceOrderItems(database, order.store_id, input.items);
+    if (pricedItems.error) return pricedItems;
+    const items = pricedItems.items;
+    const totalCups = items.reduce((sum, item) => sum + item.quantity, 0);
+    const originalAmount = items.reduce((sum, item) => sum + item.subtotal, 0);
+    if (pricedItems.priceChanged) {
+      return {
+        error: "order_price_changed",
+        originalAmount,
+        items: toAuthoritativeOrderItems(items)
+      };
     }
 
     const lockMinutes = Number(order.withdrawal_lock_minutes || 30);
@@ -1425,7 +1965,7 @@ function insertOrderRevisionItems(database, revisionId, items) {
       label_snapshot,
       price_delta_snapshot,
       sort_order
-    ) VALUES (?, ?, NULL, ?, ?, 0, ?)
+    ) VALUES (?, ?, ?, ?, ?, ?, ?)
   `);
 
   items.forEach((item) => {
@@ -1448,8 +1988,10 @@ function insertOrderRevisionItems(database, revisionId, items) {
       insertRevisionCustomization.run(
         `order-revision-item-customization-${randomUUID()}`,
         revisionItemId,
+        customization.optionId,
         customization.optionType,
         customization.label,
+        customization.priceDelta,
         index
       );
     });
@@ -1489,7 +2031,7 @@ function copyOrderRevisionItemsToOrder(database, revisionId, orderId) {
       label_snapshot,
       price_delta_snapshot,
       sort_order
-    ) VALUES (?, ?, NULL, ?, ?, 0, ?)
+    ) VALUES (?, ?, ?, ?, ?, ?, ?)
   `);
 
   revisionItems.forEach((item) => {
@@ -1508,8 +2050,10 @@ function copyOrderRevisionItemsToOrder(database, revisionId, orderId) {
       insertOrderCustomization.run(
         `order-item-customization-${randomUUID()}`,
         orderItemId,
+        customization.customization_option_id,
         customization.option_type,
         customization.label_snapshot,
+        customization.price_delta_snapshot,
         index
       );
     });
@@ -3925,58 +4469,219 @@ function normalizePositiveInteger(value, fallback) {
   return numberValue;
 }
 
-function normalizeOrderItems(items) {
+function calculatePickupExpirationAt(pickupStartAt, pickupEndAt) {
+  const pickupStartTime = Date.parse(pickupStartAt);
+  if (Number.isNaN(pickupStartTime)) return null;
+
+  const threeHoursAfterPickupStart = pickupStartTime + 3 * 60 * 60 * 1000;
+  const pickupEndTime = Date.parse(pickupEndAt);
+  const expiresTime = Number.isNaN(pickupEndTime)
+    ? threeHoursAfterPickupStart
+    : Math.min(threeHoursAfterPickupStart, pickupEndTime);
+  return new Date(expiresTime).toISOString();
+}
+
+function priceOrderItems(database, storeId, items) {
   if (!Array.isArray(items) || items.length === 0) {
-    throw new Error("items must be a non-empty array");
+    return {
+      error: "order_items_invalid",
+      issues: [{ code: "items_required", field: "items" }]
+    };
   }
 
-  return items.map((item, index) => {
-    const quantity = Number(item.quantity);
-    const subtotal = Number(item.subtotal);
-    const unitPrice = Number(item.unitPrice ?? item.price ?? (quantity > 0 ? subtotal / quantity : NaN));
-    const itemName = String(item.itemName ?? item.name ?? "").trim();
+  const issues = [];
+  let priceChanged = false;
+  const authoritativeItems = [];
 
-    if (!itemName) {
-      throw new Error(`items[${index}].itemName is required`);
+  items.forEach((inputItem, index) => {
+    const quantity = Number(inputItem.quantity);
+    const menuItemId = String(inputItem.menuItemId ?? inputItem.drinkId ?? "").trim();
+    if (!menuItemId) {
+      issues.push({ code: "menu_item_required", itemIndex: index });
+      return;
     }
     if (!Number.isInteger(quantity) || quantity <= 0) {
-      throw new Error(`items[${index}].quantity must be a positive integer`);
-    }
-    if (!Number.isInteger(subtotal) || subtotal < 0) {
-      throw new Error(`items[${index}].subtotal must be a non-negative integer`);
-    }
-    if (!Number.isInteger(unitPrice) || unitPrice < 0) {
-      throw new Error(`items[${index}].unitPrice must be a non-negative integer`);
+      issues.push({ code: "quantity_invalid", itemIndex: index, menuItemId });
+      return;
     }
 
-    return {
-      menuItemId: item.menuItemId ?? item.drinkId ?? null,
-      itemName,
+    const menuItem = database.prepare(`
+      SELECT id, store_id, name, base_price, is_available
+      FROM menu_items
+      WHERE id = ?
+    `).get(menuItemId);
+    if (!menuItem) {
+      issues.push({ code: "menu_item_not_found", itemIndex: index, menuItemId });
+      return;
+    }
+    if (menuItem.store_id !== storeId) {
+      issues.push({ code: "menu_item_store_mismatch", itemIndex: index, menuItemId });
+      return;
+    }
+    if (menuItem.is_available !== 1) {
+      issues.push({ code: "menu_item_unavailable", itemIndex: index, menuItemId });
+      return;
+    }
+
+    const options = database.prepare(`
+      SELECT id, option_type, label, price_delta, sort_order
+      FROM customization_options
+      WHERE menu_item_id = ?
+        AND is_available = 1
+      ORDER BY option_type, sort_order, id
+    `).all(menuItemId);
+    const rules = database.prepare(`
+      SELECT option_type, min_selections, max_selections
+      FROM menu_item_customization_rules
+      WHERE menu_item_id = ?
+    `).all(menuItemId);
+    const requestedOptionIds = normalizeRequestedCustomizationIds(inputItem, options, index, issues);
+    const selectedOptions = [];
+
+    for (const optionId of requestedOptionIds) {
+      const option = options.find((item) => item.id === optionId);
+      if (!option) {
+        issues.push({ code: "customization_option_invalid", itemIndex: index, menuItemId, optionId });
+        continue;
+      }
+      if (!selectedOptions.some((item) => item.id === option.id)) selectedOptions.push(option);
+    }
+
+    const groupTypes = new Set([
+      ...options.map((option) => option.option_type),
+      ...rules.map((rule) => rule.option_type)
+    ]);
+    for (const optionType of groupTypes) {
+      const configuredRule = rules.find((rule) => rule.option_type === optionType);
+      const defaultRule = defaultCustomizationRules[optionType] || { minSelections: 0, maxSelections: 1 };
+      const minSelections = configuredRule?.min_selections ?? defaultRule.minSelections;
+      const maxSelections = configuredRule?.max_selections ?? defaultRule.maxSelections;
+      const selectedCount = selectedOptions.filter((option) => option.option_type === optionType).length;
+      if (selectedCount < minSelections || selectedCount > maxSelections) {
+        issues.push({
+          code: "customization_selection_count_invalid",
+          itemIndex: index,
+          menuItemId,
+          optionType,
+          minSelections,
+          maxSelections,
+          selectedCount
+        });
+      }
+    }
+
+    const unitPrice = Number(menuItem.base_price)
+      + selectedOptions.reduce((sum, option) => sum + Number(option.price_delta), 0);
+    const subtotal = unitPrice * quantity;
+    const submittedUnitPrice = inputItem.unitPrice ?? inputItem.price;
+    const submittedSubtotal = inputItem.subtotal;
+    if (submittedUnitPrice != null && Number(submittedUnitPrice) !== unitPrice) priceChanged = true;
+    if (submittedSubtotal != null && Number(submittedSubtotal) !== subtotal) priceChanged = true;
+
+    authoritativeItems.push({
+      menuItemId,
+      itemName: menuItem.name,
       quantity,
       unitPrice,
       subtotal,
-      customizations: normalizeItemCustomizations(item)
-    };
+      customizations: selectedOptions.map((option) => ({
+        optionId: option.id,
+        optionType: option.option_type,
+        label: option.label,
+        priceDelta: option.price_delta
+      }))
+    });
   });
+
+  if (issues.length > 0) return { error: "order_items_invalid", issues };
+  return { items: authoritativeItems, priceChanged };
 }
 
-function normalizeItemCustomizations(item) {
-  const customizations = [];
-  if (item.size) {
-    customizations.push({ optionType: "size", label: item.size });
+function normalizeRequestedCustomizationIds(item, options, itemIndex, issues) {
+  if (Array.isArray(item.customizationOptionIds)) {
+    return [...new Set(item.customizationOptionIds.map((value) => String(value).trim()).filter(Boolean))];
   }
-  if (item.sweetness) {
-    customizations.push({ optionType: "sweetness", label: item.sweetness });
-  }
-  if (item.ice) {
-    customizations.push({ optionType: "ice", label: item.ice });
-  }
-  const toppings = Array.isArray(item.toppings) ? item.toppings : [];
-  toppings.forEach((topping) => {
-    customizations.push({ optionType: "topping", label: String(topping) });
-  });
 
-  return customizations;
+  const requestedLabels = [];
+  for (const optionType of ["size", "sweetness", "ice"]) {
+    const label = String(item[optionType] ?? "").trim();
+    if (label) requestedLabels.push({ optionType, label });
+  }
+  for (const topping of Array.isArray(item.toppings) ? item.toppings : []) {
+    const label = String(topping).trim();
+    if (label && label !== "不加料") requestedLabels.push({ optionType: "topping", label });
+  }
+
+  const ids = [];
+  for (const requested of requestedLabels) {
+    const option = options.find((itemOption) => (
+      itemOption.option_type === requested.optionType && itemOption.label === requested.label
+    ));
+    if (!option) {
+      issues.push({
+        code: "customization_option_invalid",
+        itemIndex,
+        optionType: requested.optionType,
+        label: requested.label
+      });
+    } else {
+      ids.push(option.id);
+    }
+  }
+  return [...new Set(ids)];
+}
+
+function toAuthoritativeOrderItems(items) {
+  return items.map((item) => ({
+    menuItemId: item.menuItemId,
+    itemName: item.itemName,
+    quantity: item.quantity,
+    unitPrice: item.unitPrice,
+    subtotal: item.subtotal,
+    customizationOptionIds: item.customizations.map((customization) => customization.optionId),
+    customizations: item.customizations
+  }));
+}
+
+function mapMenuItem(row, options, rules, includeUnavailable) {
+  const optionTypeOrder = ["size", "sweetness", "ice", "topping"];
+  const groupTypes = [...new Set([
+    ...optionTypeOrder,
+    ...rules.map((rule) => rule.option_type),
+    ...options.map((option) => option.option_type)
+  ])].filter((optionType) => (
+    rules.some((rule) => rule.option_type === optionType)
+    || options.some((option) => option.option_type === optionType)
+  ));
+
+  return {
+    id: row.id,
+    storeId: row.store_id,
+    name: row.name,
+    category: row.category,
+    description: row.description,
+    basePrice: row.base_price,
+    isAvailable: row.is_available === 1,
+    customizationGroups: groupTypes.map((optionType) => {
+      const configuredRule = rules.find((rule) => rule.option_type === optionType);
+      const fallback = defaultCustomizationRules[optionType] || { minSelections: 0, maxSelections: 1 };
+      return {
+        optionType,
+        minSelections: configuredRule?.min_selections ?? fallback.minSelections,
+        maxSelections: configuredRule?.max_selections ?? fallback.maxSelections,
+        options: options
+          .filter((option) => option.option_type === optionType)
+          .filter((option) => includeUnavailable || option.is_available === 1)
+          .map((option) => ({
+            id: option.id,
+            optionType,
+            label: option.label,
+            priceDelta: option.price_delta,
+            isAvailable: option.is_available === 1
+          }))
+      };
+    })
+  };
 }
 
 function getOrderById(orderId) {
@@ -4631,8 +5336,10 @@ function mapOrder(row, items = []) {
       subtotal: item.subtotal,
       customizations: (item.customizations || []).map((customization) => ({
         id: customization.id,
+        customizationOptionId: customization.customization_option_id,
         optionType: customization.option_type,
-        label: customization.label_snapshot
+        label: customization.label_snapshot,
+        priceDelta: customization.price_delta_snapshot
       }))
     }))
   };
@@ -4664,8 +5371,10 @@ function mapOrderRevision(row, items = []) {
       subtotal: item.subtotal,
       customizations: (item.customizations || []).map((customization) => ({
         id: customization.id,
+        customizationOptionId: customization.customization_option_id,
         optionType: customization.option_type,
-        label: customization.label_snapshot
+        label: customization.label_snapshot,
+        priceDelta: customization.price_delta_snapshot
       }))
     }))
   };
@@ -4673,6 +5382,7 @@ function mapOrderRevision(row, items = []) {
 
 module.exports = {
   authorizeLinePayPaymentInDatabase,
+  calculatePickupExpirationAt,
   cancelPendingLinePayAuthorizationInDatabase,
   cancelGroupBuyActivity,
   captureLinePayAuthorizationInDatabase,
@@ -4685,6 +5395,7 @@ module.exports = {
   createOrderRevision,
   createPendingLinePayRefundInDatabase,
   createPendingLinePayAuthorization,
+  expireGroupBuyPickupWindow,
   failLinePayRefundInDatabase,
   getLinePayAuthorizationContext,
   getOrderDetail,
@@ -4700,9 +5411,13 @@ module.exports = {
   getUserAuthProfileById,
   listDevAuthUsers,
   listDueGroupBuyActivitiesForSettlement,
+  listDueGroupBuyActivitiesForPickupExpiration,
   listGroupBuyActivities,
+  listStoreMenu,
+  openDatabase,
   recordLinePayCaptureFailureInDatabase,
   recordLinePayVoidFailureInDatabase,
+  saveMerchantMenuItem,
   toPublicUser,
   updatePendingOrder,
   voidLinePayAuthorizationInDatabase

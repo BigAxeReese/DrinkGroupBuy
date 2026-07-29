@@ -179,6 +179,9 @@ function OrderDetailCard({ order, groupBuyActivities, payments, actions, navigat
   const displayTotal = payment?.captureAmount ?? displaySubtotal;
   const authorizedTotal = payment?.authorizedAmount ?? displaySubtotal;
   const pickupReady = ["ready", "picked_up"].includes(order.pickupStatus);
+  const pickupCode = order.pickupCredential?.status === "active"
+    ? order.pickupCredential.pickupCode
+    : null;
   const pickupPendingContent = getPickupPendingContent(order);
   const orderLocked = order.status === "locked";
   const withdrawalLocked = !historical && (orderLocked || isWithdrawalLocked(groupBuyActivity));
@@ -333,15 +336,24 @@ function OrderDetailCard({ order, groupBuyActivities, payments, actions, navigat
       </Section>
 
       {pickupReady && !historical ? (
-        <View style={styles.pickupPass}>
-          <View>
-            <Text style={styles.passLabel}>取貨憑證</Text>
-            <Text style={styles.passCode}>A7924</Text>
+        pickupCode ? (
+          <View style={styles.pickupPass}>
+            <Text style={styles.passLabel}>六位取餐碼</Text>
+            <Text style={styles.passCode}>{pickupCode}</Text>
+            <Text style={styles.passHint}>到店取餐時，將此代碼提供給店家。</Text>
           </View>
-          <View style={styles.qrBox}>
-            <Text style={styles.qrText}>QR</Text>
+        ) : (
+          <View style={styles.pickupPending}>
+            <Text style={styles.pickupPendingTitle}>
+              {order.pickupStatus === "picked_up" ? "已取餐" : "正在取得取餐碼"}
+            </Text>
+            <Text style={styles.pickupPendingText}>
+              {order.pickupStatus === "picked_up"
+                ? "店家已完成核銷。"
+                : "請稍候，或重新進入訂單更新取餐資訊。"}
+            </Text>
           </View>
-        </View>
+        )
       ) : !historical ? (
         <View style={styles.pickupPending}>
           <Text style={styles.pickupPendingTitle}>{pickupPendingContent.title}</Text>
@@ -764,14 +776,14 @@ const styles = StyleSheet.create({
     paddingVertical: 3
   },
   pickupPass: {
+    gap: 6,
     margin: 12,
     marginTop: 4,
     minHeight: 68,
     borderRadius: 14,
     backgroundColor: "#111827",
-    flexDirection: "row",
     alignItems: "center",
-    justifyContent: "space-between",
+    justifyContent: "center",
     padding: 13
   },
   pickupPending: {
@@ -830,26 +842,20 @@ const styles = StyleSheet.create({
   passLabel: {
     color: "#cbd5e1",
     fontSize: 11,
-    fontWeight: "800"
+    fontWeight: "800",
+    textAlign: "center"
   },
   passCode: {
     color: "#ffffff",
-    fontSize: 23,
+    fontSize: 30,
     fontWeight: "900",
-    letterSpacing: 2,
-    marginTop: 8
+    letterSpacing: 0,
+    textAlign: "center"
   },
-  qrBox: {
-    width: 50,
-    height: 50,
-    borderRadius: 10,
-    alignItems: "center",
-    justifyContent: "center",
-    backgroundColor: "#ffffff"
-  },
-  qrText: {
-    color: "#111827",
-    fontSize: 15,
-    fontWeight: "900"
+  passHint: {
+    color: "#cbd5e1",
+    fontSize: 11,
+    lineHeight: 17,
+    textAlign: "center"
   }
 });

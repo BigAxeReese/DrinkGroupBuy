@@ -1,0 +1,6 @@
+appId: com.android.settings
+name: Maestro environment smoke
+---
+- launchApp
+- assertVisible: "Settings"
+- takeScreenshot: maestro-environment-smoke

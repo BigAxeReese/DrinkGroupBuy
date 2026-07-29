@@ -109,6 +109,16 @@ CREATE TABLE customization_options (
   is_available boolean NOT NULL DEFAULT true
 );
 
+CREATE TABLE menu_item_customization_rules (
+  menu_item_id text NOT NULL REFERENCES menu_items(id) ON DELETE CASCADE,
+  option_type text NOT NULL CHECK (option_type IN ('sweetness', 'ice', 'topping', 'size')),
+  min_selections integer NOT NULL DEFAULT 0 CHECK (min_selections >= 0),
+  max_selections integer NOT NULL CHECK (max_selections >= min_selections),
+  created_at timestamptz NOT NULL,
+  updated_at timestamptz NOT NULL,
+  PRIMARY KEY (menu_item_id, option_type)
+);
+
 CREATE INDEX idx_customization_options_menu_item ON customization_options(menu_item_id);
 
 CREATE TABLE group_buy_activities (
@@ -338,8 +348,17 @@ CREATE TABLE pickup_credentials (
   order_id text NOT NULL UNIQUE REFERENCES orders(id),
   pickup_code text NOT NULL,
   visible_after_merchant_acceptance boolean NOT NULL DEFAULT true,
+  expires_at timestamptz NOT NULL,
+  expired_at timestamptz,
+  redeemed_at timestamptz,
+  redeemed_by_user_id text REFERENCES users(id),
   created_at timestamptz NOT NULL
 );
+
+CREATE INDEX idx_pickup_credentials_expires_at ON pickup_credentials(expires_at);
+CREATE UNIQUE INDEX idx_pickup_credentials_active_code
+ON pickup_credentials(pickup_code)
+WHERE redeemed_at IS NULL AND expired_at IS NULL;
 
 CREATE TABLE status_history (
   id text PRIMARY KEY,

@@ -223,4 +223,23 @@ INSERT INTO customization_options (
   ('drink-008-opt-top-pearl', 'drink-008', 'topping', '珍珠', 10, 0, true),
   ('drink-008-opt-top-coconut', 'drink-008', 'topping', '椰果', 10, 1, true);
 
+INSERT INTO menu_item_customization_rules (
+  menu_item_id, option_type, min_selections, max_selections, created_at, updated_at
+)
+SELECT
+  menu_item.id,
+  rule.option_type,
+  rule.min_selections,
+  rule.max_selections,
+  '2026-06-05T00:00:00+08:00',
+  '2026-06-05T00:00:00+08:00'
+FROM menu_items menu_item
+CROSS JOIN (
+  VALUES
+    ('sweetness', 1, 1),
+    ('ice', 1, 1),
+    ('size', 1, 1),
+    ('topping', 0, 2)
+) AS rule(option_type, min_selections, max_selections);
+
 COMMIT;

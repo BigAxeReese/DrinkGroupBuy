@@ -130,6 +130,60 @@ export async function listGroupBuyActivities() {
   });
 }
 
+export async function getStoreMenu(storeId) {
+  return getMenuRequest(`/api/stores/${encodeURIComponent(storeId)}/menu`, false);
+}
+
+export async function getMerchantStoreMenu(storeId) {
+  return getMenuRequest(`/api/merchant/stores/${encodeURIComponent(storeId)}/menu`, true);
+}
+
+export async function createMerchantMenuItem(storeId, input) {
+  return writeMenuItemRequest(
+    `/api/merchant/stores/${encodeURIComponent(storeId)}/menu-items`,
+    "POST",
+    input
+  );
+}
+
+export async function updateMerchantMenuItem(storeId, menuItemId, input) {
+  return writeMenuItemRequest(
+    `/api/merchant/stores/${encodeURIComponent(storeId)}/menu-items/${encodeURIComponent(menuItemId)}`,
+    "PATCH",
+    input
+  );
+}
+
+async function getMenuRequest(path, authenticated) {
+  const response = await fetch(`${backendBaseUrl}${path}`, {
+    headers: authenticated ? withAuthHeaders() : undefined
+  });
+  const payload = await response.json();
+  if (!response.ok) {
+    const error = new Error(payload.error ?? "Get store menu failed");
+    error.status = response.status;
+    error.payload = payload;
+    throw error;
+  }
+  return payload;
+}
+
+async function writeMenuItemRequest(path, method, body) {
+  const response = await fetch(`${backendBaseUrl}${path}`, {
+    method,
+    headers: withAuthHeaders({ "Content-Type": "application/json" }),
+    body: JSON.stringify(body)
+  });
+  const payload = await response.json();
+  if (!response.ok) {
+    const error = new Error(payload.error ?? "Save menu item failed");
+    error.status = response.status;
+    error.payload = payload;
+    throw error;
+  }
+  return payload.menuItem;
+}
+
 export async function deleteGroupBuyActivity(activityId, input = {}) {
   const requestKey = `deleteGroupBuyActivity:${activityId}:${stableStringify(input)}`;
   return dedupeRequest(requestKey, async () => {
@@ -163,7 +217,9 @@ export async function createOrder(input) {
 
     const payload = await response.json();
     if (!response.ok) {
-      throw new Error(payload.error ?? "Create order failed");
+      const error = new Error(getOrderWriteErrorMessage(payload, "Create order failed"));
+      error.payload = payload;
+      throw error;
     }
 
     return payload.order;
@@ -198,7 +254,7 @@ export async function updateOrder(orderId, input) {
 
     const payload = await response.json();
     if (!response.ok) {
-      const error = new Error(payload.error ?? "Update order failed");
+      const error = new Error(getOrderWriteErrorMessage(payload, "Update order failed"));
       error.payload = payload;
       throw error;
     }
@@ -220,7 +276,7 @@ export async function createOrderRevision(orderId, input) {
 
     const payload = await response.json();
     if (!response.ok) {
-      const error = new Error(payload.error ?? "Create order revision failed");
+      const error = new Error(getOrderWriteErrorMessage(payload, "Create order revision failed"));
       error.payload = payload;
       throw error;
     }
@@ -273,6 +329,51 @@ export async function requestLinePayRepayment(input) {
   });
 }
 
+export async function markGroupBuyActivityReadyForPickup(activityId) {
+  return postPickupRequest(
+    `/api/merchant/group-buy-activities/${encodeURIComponent(activityId)}/ready-for-pickup`
+  );
+}
+
+export async function lookupPickupCredential(pickupCode) {
+  return postPickupRequest("/api/merchant/pickup-credentials/lookup", { pickupCode });
+}
+
+export async function redeemPickupCredential(pickupCode) {
+  return postPickupRequest("/api/merchant/pickup-credentials/redeem", { pickupCode });
+}
+
+export async function getPickupCredential(orderId) {
+  const response = await fetch(
+    `${backendBaseUrl}/api/orders/${encodeURIComponent(orderId)}/pickup-credential`,
+    { headers: withAuthHeaders() }
+  );
+  const payload = await response.json();
+  if (!response.ok) {
+    const error = new Error(payload.error ?? "Get pickup credential failed");
+    error.status = response.status;
+    error.payload = payload;
+    throw error;
+  }
+  return payload.credential;
+}
+
+async function postPickupRequest(path, body) {
+  const response = await fetch(`${backendBaseUrl}${path}`, {
+    method: "POST",
+    headers: withAuthHeaders(body ? { "Content-Type": "application/json" } : {}),
+    body: body ? JSON.stringify(body) : undefined
+  });
+  const payload = await response.json();
+  if (!response.ok) {
+    const error = new Error(payload.error ?? "Pickup request failed");
+    error.status = response.status;
+    error.payload = payload;
+    throw error;
+  }
+  return payload;
+}
+
 async function dedupeRequest(key, requestFn) {
   if (inflightRequests.has(key)) {
     return inflightRequests.get(key);
@@ -283,6 +384,16 @@ async function dedupeRequest(key, requestFn) {
   });
   inflightRequests.set(key, requestPromise);
   return requestPromise;
+}
+
+function getOrderWriteErrorMessage(payload, fallback) {
+  if (payload?.error === "order_price_changed") {
+    return "菜單價格已更新，請重新確認購物車金額後再送出。";
+  }
+  if (payload?.error === "order_items_invalid") {
+    return "飲品、供應狀態或客製化選項已變更，請重新選擇後再送出。";
+  }
+  return payload?.error ?? fallback;
 }
 
 function stableStringify(value) {

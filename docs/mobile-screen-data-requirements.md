@@ -1,6 +1,6 @@
 # Mobile 畫面資料需求
 
-最後更新：2026-07-21
+最後更新：2026-07-30
 
 ## 文件用途
 
@@ -25,7 +25,7 @@
 | Partial backend | 部分資料已接 API，但列表、歷史或錯誤恢復仍靠 local state | 文件需列出缺哪個 API 或同步策略 |
 | Prototype/local | 主要靠 mocks、localStorage 或 app state | 不可視為正式資料契約，後續需改接 backend |
 
-目前優先收斂順序：顧客活動/訂單列表、菜單 API、商家訂單/取貨 API、provider 狀態查詢與付款錯誤恢復。
+目前優先收斂順序：顧客活動／訂單列表、商家訂單 API、provider 狀態查詢與付款錯誤恢復、完整 mobile E2E。
 
 ## 畫面資料需求
 
@@ -35,15 +35,16 @@
 | `NearbyGroupBuyActivitiesScreen` | 顧客首頁，顯示已參加與推薦團購             | 會員資訊、目前顧客已參加的團購進度、推薦店家 / 團購                                                              | 開啟團購詳情、地圖、訂單、會員頁                                                                            | Prototype/local：Mobile mocks、本機 state；已有 `GET /api/group-buy-activities` 但啟動尚未完整接入 | 顧客已參加訂單列表 API、定位載入 / 錯誤狀態、首頁啟動同步                                              |
 | `LiveMapScreen`             | 用地圖瀏覽附近店家                               | Google Map、店家 marker、店名、進行中的團購杯數進度                                                              | 地圖拖曳 / 縮放、查看 marker                                                                                | Google Maps SDK + 匯出 / mock 店家資料                                                  | 附近店家 API、即時團購同步                                                                             |
 | `GroupBuyActivityDetailScreen` | 下單前查看團購詳情                            | 店家、團購狀態、優惠門檻、目前進度、截止時間、取餐時間、公告                                                     | 開啟菜單、查看進度                                                                                          | Mobile app state + store mocks                                                          | 詳情 API、是否可加入的後端驗證                                                                         |
-| `StoreMenuScreen`           | 瀏覽飲料菜單                                     | 分類、品項、價格                                                                                                 | 選擇飲料                                                                                                    | Mobile drink/store mocks                                                                | 菜單 API、品項供應狀態、價格異動                                                                       |
-| `DrinkSelectionScreen`      | 客製化單杯飲料                                   | 尺寸、甜度、冰塊、加料、數量、小計                                                                               | 加入購物車、編輯後儲存                                                                                      | Mobile state + mocks                                                                    | 後端驗證、不可用選項處理                                                                               |
-| `CartScreen`                | 檢查購物車並送出訂單                             | 飲料明細、數量、客製化、金額、是否接受原價購買                                                                   | 刪除項目、繼續選購、建立訂單、更新 pending 訂單、為已授權訂單建立 revision                                  | Mobile cart state / localStorage；`POST /api/orders`；`PATCH /api/orders/:orderId`；`POST /api/orders/:orderId/revisions` | 價格衝突處理、revision 失敗提示仍需細化                                                               |
+| `StoreMenuScreen`           | 瀏覽活動店家的全部上架飲料菜單                   | 店家摘要、分類、`isAvailable = true` 的品項、說明、價格、客製化選項與選擇上限                                   | 瀏覽店家權威菜單                                                                                            | `GET /api/stores/:storeId/menu`；mobile 已串接後端菜單                                    | 店家基本資料仍有部分 prototype/mock 來源                                                              |
+| `DrinkSelectionScreen`      | 客製化單杯飲料                                   | 尺寸、甜度、冰塊、可多選加料、店家設定的明確加料上限、數量、小計                                                 | 加入購物車、編輯後儲存                                                                                      | Backend menu API + Mobile cart state；傳送 `customizationOptionIds`                       | 完整裝置 E2E、選項異動後返回購物車的更細 UX                                                           |
+| `CartScreen`                | 檢查購物車並送出訂單                             | 飲料明細、數量、客製化、金額、是否接受原價購買                                                                   | 刪除項目、繼續選購、建立訂單、更新 pending 訂單、為已授權訂單建立 revision                                  | Mobile cart state / localStorage；三種 order write API 均使用後端權威菜單驗證與價格重算  | `order_price_changed`／`order_items_invalid` 的逐項修正提示、revision 失敗提示仍需細化                  |
 | `PaymentAuthorizationScreen` | LINE Pay sandbox 預授權 / 重新預授權 / 重新付款 | 原價金額、授權金額、最終金額、請款金額、釋放金額、付款狀態、provider `transactionId`、`paymentUrl`、backend 結果、deep link 返回結果 | 開啟 LINE Pay sandbox 授權 URL、由 deep link 返回付款畫面、自動刷新 backend 訂單狀態、手動刷新付款狀態、revision 重新預授權、請款失敗後重新付款 | Partial backend：Mobile payment state；`POST /api/payments/line-pay/request`；`POST /api/payments/line-pay/repay`；`GET /api/orders/:orderId` | provider 狀態查詢 / 錯誤恢復；refund 是開發 / 補救後端 API，尚未有正式 mobile 操作 UI |
 | `GroupProgressScreen`       | 顯示團購與顧客訂單進度                           | 團購徽章、目前 / 下一門檻杯數、參與者、剩餘時間、訂單摘要                                                        | 前往付款或取餐資訊                                                                                          | Mobile app state                                                                        | 進度 API、權威結算結果                                                                                 |
 | `CustomerOrdersScreen`      | 顧客查看進行中 / 歷史訂單與編輯訂單              | 店家、品項、客製化、品項金額、訂單總額、訂單狀態、取餐碼、取餐憑證有效期限                                       | 開啟團購、鎖單前編輯 / 刪除、建立 revision、前往重新授權、取餐前 15 分鐘以前重新付款、查看歷史訂單           | Partial backend：Mobile orders/payments/localStorage；`GET /api/orders/:orderId`；`POST /api/orders/:orderId/revisions` | 顧客訂單列表 API、revision 錯誤提示、退出團購 API、逾期取餐狀態                                         |
-| `PickupInfoScreen`          | 顯示取餐資訊                                     | 店家、地址、取餐時間、取餐憑證有效期限、訂單摘要、取餐狀態                                                       | 查看位置 / 取餐碼 placeholder                                                                               | Mobile state + mocks                                                                    | 取餐 API、取餐憑證驗證、逾期未取處理                                                                   |
-| `MerchantDashboardScreen`   | 商家管理團購與履約                               | 進行中團購、訂單數、付款數、取餐數、取餐憑證有效期限、歷史紀錄                                                   | 建立團購、查看有效訂單、標記可取餐、核銷取餐                                                                | Partial backend：團購部分接 API；訂單與取貨仍偏 local                                  | 商家總覽 API、商家訂單 API、商家授權、可取餐 / 核銷取貨 / 逾期未取處理                                  |
+| `PickupInfoScreen`          | 顯示取餐資訊                                     | 店家、地址、取餐時間、取餐憑證有效期限、訂單摘要、取餐狀態                                                       | 查看位置 / 取餐碼 placeholder                                                                               | Mobile state + mocks；Backend 逾期排程已完成                                             | 取貨憑證建立／驗證 API、逾期未取 UI 與歷史訂單串接                                                       |
+| `MerchantDashboardScreen`   | 商家管理團購與履約                               | 進行中團購、訂單數、付款數、取餐數、取餐憑證有效期限、歷史紀錄                                                   | 建立團購、查看有效訂單、標記可取餐、核銷取餐                                                                | Partial backend：團購與取貨逾期 job 已完成；訂單與取貨操作仍偏 local                    | 商家總覽 API、商家訂單 API、商家授權、可取餐／核銷取貨 API、逾期未取 UI                                 |
 | `MerchantGroupBuyActivityCreateScreen` | 商家建立團購與優惠門檻                | 固定店家、標題、24 小時內截止時間、取餐開始與結束時間、公告、優惠門檻                                            | 新增 / 刪除門檻、建立團購；截止時間超過 24 小時、取餐開始早於截止後 30 分鐘、取餐結束早於開始時阻擋送出        | POST API + local fallback                                                               | 重試 UX                                                                                                  |
+| `MerchantMenuManagementScreen` | 店家查看、修改與上下架店內菜單                  | 完整菜單、分類、名稱、說明、價格、客製化選項、`isAvailable`、每杯加料上限                                       | 新增品項、修改資料、上架或停售、輸入明確加料上限                                                           | Merchant menu GET/POST/PATCH API + merchant-store permission；mobile 第一版已串接         | 更完整的表單元件、刪除前確認與 mobile E2E                                                            |
 | `AdminDashboardScreen`      | 開發 / 補救工具，不屬於第一階段正式 App 流程     | 團購進度、訂單 / 付款摘要、取消狀態                                                                              | 開發或營運補救時查看詳情、取消團購                                                                          | DELETE API + local fallback                                                             | 若未來要做正式後台，需另開管理員需求與權限設計                                                          |
 | `CustomerPlaceholderScreen` | 討論區 / 個人中心 placeholder                    | placeholder 文字                                                                                                 | 只做頁面切換                                                                                                | Static                                                                                  | 功能尚未設計                                                                                           |
 
@@ -60,6 +61,10 @@
 - 取餐憑證需顯示有效期限；到期後訂單移至歷史訂單，顧客仍可用歷史訂單向店家協調，但不再顯示有效取貨碼。
 - `cancelled`、`completed` 的團購與訂單應進入歷史紀錄，不應顯示在進行中清單；扣款失敗訂單在重新付款期限內仍需保留重新付款入口，逾期後才移入歷史紀錄。
 - 最高優惠門檻杯數目前視為團購容量上限。送出購物車與付款授權不得讓杯數超過該上限。
+- 團購不另設適用飲品清單；菜單畫面只顯示活動所屬店家目前 `isAvailable = true` 的品項。
+- 送出購物車或重新預授權前必須以最新菜單重新驗證。價格、停售狀態或客製化選項變更時，應提示顧客重新確認。
+- 已送出的訂單顯示訂單快照，不因後續菜單修改而改變。
+- 客製化選擇限制由 `menu_item_customization_rules` 提供；店家可為每杯飲品設定明確 `maxSelections`，mobile 與 backend 都必須遵守，以 backend 驗證為準。
 
 ## 目前操作流程
 
@@ -87,6 +92,7 @@ Google Login
 Google Login
 -> Backend 判斷角色
 -> 商家後台
+-> 菜單管理（可新增、修改、上架或停售）
 -> 建立團購
 -> 回到商家後台查看進度
 -> 查看有效訂單

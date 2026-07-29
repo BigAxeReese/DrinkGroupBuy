@@ -1,0 +1,8 @@
+appId: host.exp.exponent
+name: DrinkGroupBuy login smoke
+---
+- extendedWaitUntil:
+    visible: "使用Google登入"
+    timeout: 30000
+- assertVisible: "使用Google登入"
+- takeScreenshot: drinkgroupbuy-login-smoke

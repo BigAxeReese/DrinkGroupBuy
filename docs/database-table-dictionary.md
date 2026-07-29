@@ -1,6 +1,6 @@
 # 資料庫資料表字典
 
-最後更新：2026-07-11
+最後更新：2026-07-30
 
 ## 文件用途
 
@@ -24,7 +24,7 @@
 | ---------- | ----------------------------------------------------------------------- |
 | 身份與角色 | `users`, `user_roles`, `user_private_profiles`, `user_public_profiles`  |
 | 商家與門市 | `merchants`, `merchant_users`, `stores`                                 |
-| 菜單       | `menu_items`, `customization_options`                                   |
+| 菜單       | `menu_items`, `customization_options`, `menu_item_customization_rules`  |
 | 團購活動   | `group_buy_activities`, `promotion_tiers`, `activity_notices`           |
 | 購物車     | `cart_drafts`, `cart_draft_items`, `cart_draft_item_customizations`     |
 | 訂單       | `orders`, `order_items`, `order_item_customizations`                    |
@@ -160,6 +160,19 @@
 | `price_delta`  | 加價金額     | INTEGER | N    |       |
 | `sort_order`   | 排序         | INTEGER | N    |       |
 | `is_available` | 是否可選     | INTEGER | N    |       |
+
+## `menu_item_customization_rules` 品項客製化選擇規則資料表
+
+用途：保存單一菜單品項在甜度、冰塊、加料、尺寸等類型的明確最少與最多選擇數。`max_selections = 0` 表示不提供、`1` 表示單選、`2` 以上表示限制數量的多選。
+
+| 欄位名稱       | 中文名稱       | 型別    | NULL | PK/FK |
+| -------------- | -------------- | ------- | ---- | ----- |
+| `menu_item_id` | 菜單品項編號   | TEXT    | N    | PK, FK |
+| `option_type`  | 選項類型       | TEXT    | N    | PK    |
+| `min_selections` | 最少選擇數   | INTEGER | N    |       |
+| `max_selections` | 最多選擇數   | INTEGER | N    |       |
+| `created_at`   | 建立時間       | TEXT    | N    |       |
+| `updated_at`   | 更新時間       | TEXT    | N    |       |
 
 ## `group_buy_activities` 團購活動資料表
 
@@ -405,12 +418,14 @@
 | `order_id`                          | 訂單編號       | TEXT    | N    | FK, UNIQUE |
 | `pickup_code`                       | 取貨代碼       | TEXT    | N    |            |
 | `visible_after_merchant_acceptance` | 接單後才顯示   | INTEGER | N    |            |
+| `expires_at`                        | 憑證到期時間   | TEXT    | N    | INDEX      |
+| `expired_at`                        | 實際逾期時間   | TEXT    | Y    |            |
 | `created_at`                        | 建立時間       | TEXT    | N    |            |
 
 備註：
 
 - 最新產品規則不需要店家逐筆確認接單，`visible_after_merchant_acceptance` 欄位名稱與規則需後續 review。
-- 取貨憑證需要補 `expires_at` 或等效欄位：自取餐開始時間起保留 3 小時；若店家當日營業結束早於 3 小時，則保留至當日營業結束；24 小時營業店家保留 3 小時。
+- `expires_at` 保存依取餐時間規則算出的憑證到期時間；系統實際執行逾期處理時寫入 `expired_at`。
 - 憑證到期後，訂單取貨狀態應更新為 `expired` 並移至歷史訂單。
 
 ## `status_history` 狀態歷程資料表

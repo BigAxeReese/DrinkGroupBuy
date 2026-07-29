@@ -1,6 +1,6 @@
 # 資料庫欄位規格
 
-最後更新：2026-07-20
+最後更新：2026-07-30
 
 ## 語言與範圍
 
@@ -140,6 +140,17 @@ PostgreSQL draft 另有 `phone_verified_at`、`email_verified_at`、`last_login_
 | 5   | `price_delta`  | 加價金額     | INTEGER |     | 預設 `0`，可為正數                    | `10`            |
 | 6   | `sort_order`   | 排序         | INTEGER |     | 數字越小越前面                        | `1`             |
 | 7   | `is_available` | 是否可選     | INTEGER |     | SQLite：`1` = yes，`0` = no           | `1`             |
+
+## `menu_item_customization_rules`
+
+| No. | Field name      | 中文名稱       | Type    | Key    | 規則 / 格式 / 範圍                                                   | Example         |
+| --- | --------------- | -------------- | ------- | ------ | -------------------------------------------------------------------- | --------------- |
+| 1   | `menu_item_id`  | 菜單品項編號   | TEXT    | PK, FK | References `menu_items(id)`；刪除品項時一併刪除規則                  | `menu_item_001` |
+| 2   | `option_type`   | 選項類型       | TEXT    | PK     | `sweetness`, `ice`, `topping`, `size`                                | `topping`       |
+| 3   | `min_selections` | 最少選擇數    | INTEGER |        | `>= 0` 且不得大於 `max_selections`                                   | `0`             |
+| 4   | `max_selections` | 最多選擇數    | INTEGER |        | `0` = 不提供、`1` = 單選、`2` 以上 = 限制數量的多選；不得超過可用選項數 | `2`             |
+| 5   | `created_at`    | 建立時間       | TEXT    |        | ISO datetime string                                                  | `2026-07-30T10:00:00+08:00` |
+| 6   | `updated_at`    | 更新時間       | TEXT    |        | ISO datetime string                                                  | `2026-07-30T10:00:00+08:00` |
 
 ## `group_buy_activities`
 
@@ -399,14 +410,9 @@ PostgreSQL draft 另有 `phone_verified_at`、`email_verified_at`、`last_login_
 | 2   | `order_id`                          | 訂單編號       | TEXT    | FK, UNIQUE | 每個 order 一筆 credential                  | `order_001`                 |
 | 3   | `pickup_code`                       | 取貨代碼       | TEXT    |            | 必填；格式待定                              | `A7924`                     |
 | 4   | `visible_after_merchant_acceptance` | 接單後才顯示   | INTEGER |            | 舊欄位；最新規則不需逐筆接單，需後續 review | `1`                         |
-| 5   | `created_at`                        | 建立時間       | TEXT    |            | ISO datetime string                         | `2026-06-25T15:40:00+08:00` |
-
-候選補充欄位（目前尚未存在於 `database/schema.sql`）：
-
-| Field name   | 中文名稱       | Type | 規則 / 格式 / 範圍 |
-| ------------ | -------------- | ---- | ------------------ |
-| `expires_at` | 憑證到期時間   | TEXT | 由取餐開始時間、店家當日營業結束時間與 24 小時營業規則計算；到期後訂單移至歷史訂單 |
-| `expired_at` | 實際逾期處理時間 | TEXT | 可為 NULL；系統實際把取貨狀態改為 `expired` 的時間 |
+| 5   | `expires_at`                        | 憑證到期時間     | TEXT    | INDEX      | 依取餐時間規則計算；到期後訂單應移至歷史訂單        | `2026-06-25T18:30:00+08:00` |
+| 6   | `expired_at`                        | 實際逾期處理時間 | TEXT    |            | 可為 NULL；系統實際改為 `expired` 的時間           | `2026-06-25T18:30:05+08:00` |
+| 7   | `created_at`                        | 建立時間         | TEXT    |            | ISO datetime string                          | `2026-06-25T15:40:00+08:00` |
 
 ## `status_history`
 
@@ -440,7 +446,7 @@ PostgreSQL draft 另有 `phone_verified_at`、`email_verified_at`、`last_login_
 | Order revisions         | SQLite 第一版已建立 `order_revisions` 與 revision item tables，欄位字典已補；仍缺完整歷史查詢 API 與 UI 呈現。 |
 | Merchant acceptance     | 最新規則不需要店家逐筆確認接單，`merchant_acceptance_status` 與相關欄位需後續 review。            |
 | Pickup visibility       | `visible_after_merchant_acceptance` 可能需要改名或改為與付款/可取餐狀態連動。                     |
-| Pickup expiry schema    | `pickup_credentials.expires_at` / `expired_at` 仍是候選欄位，尚未進入目前 SQLite schema。         |
+| Pickup expiry handling  | Schema、單一 backend process 排程、狀態歷程與 audit log 已完成；仍缺取貨憑證建立／驗證 API 與 UI 串接。 |
 | Activity deadline       | 24 小時截止限制與截止前 30 分鐘鎖定規則需落實到 API validation 與可能的 DB constraint。           |
 | Pricing snapshots       | 最終折扣、適用 tier 與 per-order 分攤方式仍需更完整保存。                                         |
 | Authentication          | `users` 保留 legacy password 欄位，但正式方向是 Firebase Auth + Google Login。                    |

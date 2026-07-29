@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import { Pressable, StyleSheet, Text, View } from "react-native";
+import { Pressable, StyleSheet, Text, TextInput, View } from "react-native";
 import { MobileScreen, Section } from "../components/MobileScreen";
 import { PrimaryButton } from "../components/PrimaryButton";
 import { ProgressSummary } from "../components/ProgressSummary";
@@ -8,10 +8,17 @@ import { stores } from "../mock/stores";
 import { formatCurrency, getStoreById } from "../utils/calculations";
 
 export function MerchantDashboardScreen({ navigation, appState, actions, memberAction, selectedMerchantStoreId }) {
+  const [pickupCode, setPickupCode] = useState("");
+  const [pickupLookup, setPickupLookup] = useState(null);
+  const [pickupNotice, setPickupNotice] = useState(null);
+  const [pickupBusy, setPickupBusy] = useState(false);
+  const [readyAction, setReadyAction] = useState(null);
   const [tab, setTab] = useState("active");
   const merchantStore = stores.find((store) => store.id === selectedMerchantStoreId) ?? stores[0];
   const merchantGroupBuyActivities = appState.groupBuyActivities.filter((groupBuyActivity) => groupBuyActivity.storeId === merchantStore.id);
-  const activeGroupBuyActivities = merchantGroupBuyActivities.filter((groupBuyActivity) => ["recruiting", "confirmed", "ordering"].includes(groupBuyActivity.status));
+  const activeGroupBuyActivities = merchantGroupBuyActivities.filter((groupBuyActivity) => (
+    ["recruiting", "confirmed", "ordering", "ready_for_pickup"].includes(groupBuyActivity.status)
+  ));
   const activeGroupBuyActivityIds = new Set(activeGroupBuyActivities.map((groupBuyActivity) => groupBuyActivity.id));
   const merchantGroupBuyActivityIds = new Set(merchantGroupBuyActivities.map((groupBuyActivity) => groupBuyActivity.id));
   const merchantOrderIds = appState.orders
@@ -26,8 +33,8 @@ export function MerchantDashboardScreen({ navigation, appState, actions, memberA
   const historyOrders = appState.orders.filter((order) => {
     const groupBuyActivity = appState.groupBuyActivities.find((item) => item.id === order.groupBuyActivityId);
     return merchantGroupBuyActivityIds.has(order.groupBuyActivityId) && (
-      ["readyForPickup", "completed", "cancelled"].includes(order.status)
-      || ["ready", "picked_up", "cancelled"].includes(order.pickupStatus)
+      ["completed", "cancelled"].includes(order.status)
+      || ["picked_up", "cancelled", "expired"].includes(order.pickupStatus)
       || ["cancelled", "failed", "completed"].includes(groupBuyActivity?.status)
     );
   });
@@ -41,6 +48,71 @@ export function MerchantDashboardScreen({ navigation, appState, actions, memberA
       merchantOrderIds.split("|").map((orderId) => actions.syncOrderFromBackend(orderId))
     );
   }, [merchantOrderIds]);
+
+  function handlePickupCodeChange(value) {
+    setPickupCode(value.replace(/[^0-9]/g, "").slice(0, 6));
+    setPickupLookup(null);
+    setPickupNotice(null);
+  }
+
+  async function handlePickupLookup() {
+    if (pickupCode.length !== 6) {
+      setPickupNotice({ type: "error", text: "請輸入六位取餐碼。" });
+      return;
+    }
+
+    setPickupBusy(true);
+    setPickupLookup(null);
+    setPickupNotice(null);
+    try {
+      const result = await actions.lookupPickupCredential(pickupCode);
+      setPickupLookup(result.credential);
+    } catch (error) {
+      setPickupNotice({ type: "error", text: getPickupErrorMessage(error) });
+    } finally {
+      setPickupBusy(false);
+    }
+  }
+
+  async function handlePickupRedeem() {
+    if (!pickupLookup || pickupLookup.status !== "active" || pickupBusy) return;
+
+    setPickupBusy(true);
+    setPickupNotice(null);
+    try {
+      const result = await actions.redeemPickupCredential(pickupCode);
+      setPickupLookup(null);
+      setPickupCode("");
+      setPickupNotice({
+        type: "success",
+        text: `${result.credential.customerDisplayName || "顧客"}的訂單已確認取餐。`
+      });
+    } catch (error) {
+      setPickupNotice({ type: "error", text: getPickupErrorMessage(error) });
+    } finally {
+      setPickupBusy(false);
+    }
+  }
+
+  async function handleMarkReady(groupBuyActivityId) {
+    setReadyAction({ activityId: groupBuyActivityId, busy: true, text: null, type: null });
+    try {
+      const result = await actions.markOrdersReadyForPickupForGroupBuyActivity(groupBuyActivityId);
+      setReadyAction({
+        activityId: groupBuyActivityId,
+        busy: false,
+        type: "success",
+        text: `已產生 ${result.createdCredentialCount} 筆六位取餐碼。`
+      });
+    } catch (error) {
+      setReadyAction({
+        activityId: groupBuyActivityId,
+        busy: false,
+        type: "error",
+        text: getPickupErrorMessage(error)
+      });
+    }
+  }
 
   return (
     <MobileScreen title="" compactHeader>
@@ -67,9 +139,14 @@ export function MerchantDashboardScreen({ navigation, appState, actions, memberA
       <View style={styles.sectionHeader}>
         <Text style={styles.sectionTitle}>{tab === "active" ? "進行中的團購" : "歷史訂單"}</Text>
         {tab === "active" ? (
-          <Pressable accessibilityRole="button" onPress={() => navigation.go("merchantCreate")}>
-            <Text style={styles.createLink}>＋ 開團</Text>
-          </Pressable>
+          <View style={styles.headerActions}>
+            <Pressable accessibilityRole="button" onPress={() => navigation.go("merchantMenu")}>
+              <Text style={styles.createLink}>管理菜單</Text>
+            </Pressable>
+            <Pressable accessibilityRole="button" onPress={() => navigation.go("merchantCreate")}>
+              <Text style={styles.createLink}>＋ 開團</Text>
+            </Pressable>
+          </View>
         ) : null}
       </View>
 
@@ -92,7 +169,51 @@ export function MerchantDashboardScreen({ navigation, appState, actions, memberA
       </View>
 
       {tab === "active" ? (
-        <Section title="活動清單">
+        <>
+          <Section title="取餐核銷">
+            <TextInput
+              accessibilityLabel="六位取餐碼"
+              autoCorrect={false}
+              keyboardType="number-pad"
+              maxLength={6}
+              onChangeText={handlePickupCodeChange}
+              onSubmitEditing={handlePickupLookup}
+              placeholder="六位取餐碼"
+              placeholderTextColor="#94a3b8"
+              returnKeyType="done"
+              style={styles.pickupInput}
+              value={pickupCode}
+            />
+            <PrimaryButton
+              disabled={pickupCode.length !== 6 || pickupBusy}
+              label={pickupBusy ? "查詢中" : "查詢訂單"}
+              onPress={handlePickupLookup}
+            />
+            {pickupNotice ? (
+              <Text style={pickupNotice.type === "error" ? styles.errorText : styles.successText}>
+                {pickupNotice.text}
+              </Text>
+            ) : null}
+            {pickupLookup ? (
+              <View style={styles.pickupLookupCard}>
+                <Text style={styles.lookupTitle}>{pickupLookup.customerDisplayName || "顧客訂單"}</Text>
+                <Text style={styles.lookupMeta}>{pickupLookup.activity.title}</Text>
+                <Text style={styles.lookupMeta}>
+                  {pickupLookup.totalCups} 杯 · {formatCurrency(pickupLookup.finalAmount)}
+                </Text>
+                <PrimaryButton
+                  disabled={pickupBusy || pickupLookup.status !== "active"}
+                  label={pickupBusy
+                    ? "處理中"
+                    : pickupLookup.status === "redeemed"
+                      ? "已取餐"
+                      : pickupLookup.status === "expired" ? "取餐碼已過期" : "確認已取餐"}
+                  onPress={handlePickupRedeem}
+                />
+              </View>
+            ) : null}
+          </Section>
+          <Section title="活動清單">
         {activeGroupBuyActivities.length === 0 ? (
           <Text style={styles.emptyText}>目前沒有進行中的團購。點右上「＋ 開團」建立測試活動。</Text>
         ) : null}
@@ -136,10 +257,13 @@ export function MerchantDashboardScreen({ navigation, appState, actions, memberA
               ) : null}
               {manufacturableOrders > 0 ? (
                 <PrimaryButton
-                  label={`標記可取餐（${manufacturableOrders} 筆）`}
+                  disabled={readyAction?.activityId === groupBuyActivity.id && readyAction.busy}
+                  label={readyAction?.activityId === groupBuyActivity.id && readyAction.busy
+                    ? "處理中"
+                    : `標記可取餐（${manufacturableOrders} 筆）`}
                   onPress={(event) => {
                     event.stopPropagation?.();
-                    actions.markOrdersReadyForPickupForGroupBuyActivity(groupBuyActivity.id);
+                    handleMarkReady(groupBuyActivity.id);
                   }}
                 />
               ) : readyPickups > 0 ? (
@@ -147,10 +271,16 @@ export function MerchantDashboardScreen({ navigation, appState, actions, memberA
               ) : (
                 <Text style={styles.settledText}>目前沒有待製作訂單</Text>
               )}
+              {readyAction?.activityId === groupBuyActivity.id && readyAction.text ? (
+                <Text style={readyAction.type === "error" ? styles.errorText : styles.successText}>
+                  {readyAction.text}
+                </Text>
+              ) : null}
             </View>
           );
         })}
         </Section>
+        </>
       ) : (
         <Section title={`歷史訂單 ${historyOrders.length} 筆`}>
           {historyOrders.length === 0 ? (
@@ -181,6 +311,24 @@ export function MerchantDashboardScreen({ navigation, appState, actions, memberA
       )}
     </MobileScreen>
   );
+}
+
+function getPickupErrorMessage(error) {
+  const errorCode = error?.payload?.error;
+  const messages = {
+    activity_not_found: "找不到這筆團購活動。",
+    activity_access_denied: "你沒有管理這筆團購的權限。",
+    activity_not_readyable: "目前活動狀態不能標記為可取餐。",
+    no_captured_orders: "目前沒有已扣款且可製作的訂單。",
+    pickup_window_expired: "這筆團購的取餐期限已結束。",
+    pickup_code_invalid: "請輸入六位取餐碼。",
+    pickup_code_rate_limited: "輸入錯誤次數過多，請稍後再試。",
+    credential_not_found: "找不到有效的取餐碼。",
+    credential_already_redeemed: "這組取餐碼已經使用過。",
+    credential_expired: "這組取餐碼已經過期。",
+    order_not_ready_for_pickup: "這筆訂單目前尚不可取餐。"
+  };
+  return messages[errorCode] || "取餐操作失敗，請稍後再試。";
 }
 
 function getOrderStatusLabel(status) {
@@ -282,6 +430,11 @@ const styles = StyleSheet.create({
     fontSize: 17,
     fontWeight: "900"
   },
+  headerActions: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 14
+  },
   createLink: {
     color: "#1f6feb",
     fontSize: 12,
@@ -316,6 +469,48 @@ const styles = StyleSheet.create({
   },
   activeTabText: {
     color: "#1f6feb"
+  },
+  pickupInput: {
+    width: "100%",
+    minHeight: 48,
+    borderWidth: 1,
+    borderColor: "#94a3b8",
+    borderRadius: 8,
+    backgroundColor: "#ffffff",
+    color: "#0f172a",
+    fontSize: 22,
+    fontWeight: "900",
+    letterSpacing: 0,
+    paddingHorizontal: 12,
+    textAlign: "center"
+  },
+  pickupLookupCard: {
+    gap: 7,
+    borderWidth: 1,
+    borderColor: "#cbd5e1",
+    borderRadius: 8,
+    backgroundColor: "#f8fafc",
+    padding: 12
+  },
+  lookupTitle: {
+    color: "#0f172a",
+    fontSize: 16,
+    fontWeight: "900"
+  },
+  lookupMeta: {
+    color: "#475569",
+    fontSize: 12,
+    lineHeight: 18
+  },
+  errorText: {
+    color: "#b91c1c",
+    fontSize: 12,
+    fontWeight: "800"
+  },
+  successText: {
+    color: "#047857",
+    fontSize: 12,
+    fontWeight: "800"
   },
   card: {
     gap: 10,

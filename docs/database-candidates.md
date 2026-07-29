@@ -1,6 +1,6 @@
 # 資料庫盤點與候選設計
 
-最後更新：2026-07-20
+最後更新：2026-07-30
 
 ## 語言與命名規則
 
@@ -21,7 +21,7 @@
 | `users`, `user_roles`                                               | 帳號身份與顧客/店家/管理員角色 | User 1:N roles                                             |
 | `merchants`                                                         | 商家組織或品牌                 | Merchant 1:N stores                                        |
 | `stores`, `merchant_users`                                          | 實體門市與店家登入帳號         | PostgreSQL draft 中 Store 1:1 merchant account             |
-| `menu_items`, `customization_options`                               | 門市菜單與可選客製化項目       | Store 1:N items；item 1:N options                          |
+| `menu_items`, `customization_options`, `menu_item_customization_rules` | 門市菜單、可選客製化項目與選擇數量限制 | Store 1:N items；item 1:N options／rules |
 | `group_buy_activities`                                              | 店家建立的團購活動             | Store 1:N activities                                       |
 | `promotion_tiers`                                                   | 杯數門檻與總折扣金額           | Activity 1:N tiers                                         |
 | `activity_notices`                                                  | 團購活動備註                   | Activity 1:N notices                                       |
@@ -40,7 +40,7 @@
 ## 目前資料保存狀態
 
 - Backend 已經會讀寫 `group_buy_activities`、`promotion_tiers`、`activity_notices`、`status_history` 與 `audit_logs`，用於目前已實作的活動 API。
-- 開發 SQLite seed 會建立 users、roles、merchant/store 與 menu items；`customization_options` 目前在 SQLite runtime 為 0 筆。runtime activities、tiers、orders、payments、settlements 與 pickup credentials 由 API 或 smoke test 產生，不預先 seed 成固定資料。PostgreSQL seed draft 另有較完整的 customization options。
+- 開發 SQLite seed 會建立 users、roles、merchant/store、8 個 menu items、96 個 customization options 與 32 組選擇限制；runtime activities、tiers、orders、payments、settlements 與 pickup credentials 由 API 或 smoke test 產生，不預先 seed 成固定資料。
 - `orders`、`order_revisions`、payment、settlement、pickup 相關資料表目前仍偏向候選設計與付款模組串接準備，尚未完整連到所有 mobile 流程。
 - `payment_authorizations.provider` 目前支援 `line_pay` 與本機測試用 `mock_line_pay`；`mock_line_pay` 只用於開發 smoke 測試，不代表正式金流。
 - `payment_authorizations.payment_flow` 用來區分一般 `authorization` 與請款失敗後的 `direct_repayment`，避免重新付款被誤當成新的預授權。
@@ -64,6 +64,9 @@
 - 取貨憑證到期後，訂單移至歷史訂單；逾期未取不自動退款，店家不再負原飲品保管責任。
 - 若顧客修改已預授權訂單，採 replacement flow：舊預授權先保留，新預授權成功後才替換；新預授權失敗時，原訂單與原預授權維持有效。
 - 已扣款成功後若需要退費，需建立 `payment_refunds` 並保留 provider event 與 audit log；全額退款完成後，訂單付款狀態可更新為 `refunded`。
+- 團購活動自動適用活動所屬店家目前 `menu_items.is_available = 1` 的全部飲品，不保存活動專屬適用飲品清單，也不新增 activity-menu item 關聯表。
+- 新選取與未送出的購物車以最新菜單為準；已送出的訂單保留品名、單價與客製化快照，不受後續菜單異動影響。
+- 已被訂單引用的飲品應以 `is_available = 0` 停售，不直接刪除，以保留交易追溯能力。
 
 ## 已知 schema 缺口
 
@@ -74,8 +77,9 @@
 | Activity deadline       | 24 小時截止限制已先落到商家建立團購 API；截止前 30 分鐘鎖定規則仍需落到訂單修改 / 退出與取消 API。                   |
 | Merchant acceptance     | `orders.merchant_acceptance_status` 是早期候選欄位；最新規則不需要店家逐筆確認接單，未來可考慮移除或固定為 accepted。 |
 | Pickup status           | Mobile 曾使用 `preparing`，目前 schema 沒有該值；應優先用 activity/order 狀態與 `pickup_status = ready` 表示。        |
-| Pickup credential expiry | `pickup_credentials` 目前仍缺 `expires_at` / `expired_at`；取貨 API 實作時需補憑證到期時間與逾期處理紀錄。            |
+| Pickup credential expiry | 欄位、到期時間計算、單一 backend process 排程、狀態歷程與 audit log 已實作；仍缺取貨憑證建立／驗證 API 與 App 串接。 |
 | Store/menu source       | 七間店家的測試資料與正式開發資料需統一來源。                                                                          |
+| Menu authority          | 第一版已完成顧客／商家菜單 API、店家管理畫面、選擇上限、訂單品項驗證與後端價格重算；尚缺完整 Android E2E。 |
 | Authentication          | Password 欄位屬於開發相容；正式方向以 Firebase UID 對應 backend user 與角色權限。                                     |
 | Notification            | 尚未有通知 delivery 或 notification event 資料表。                                                                    |
 | Migrations              | 目前 SQLite schema 可重建，尚未有正式 production migration history。                                                  |
@@ -93,7 +97,7 @@
 
 ## 後續需要的交易邊界
 
-1. 送出訂單：驗證活動、菜單、價格、剩餘容量，建立 order/items，並啟動 LINE Pay 預授權。
+1. 送出訂單：驗證活動、品項屬於活動店家、`is_available = 1`、客製化選項、資料庫權威價格與剩餘容量，建立 order/items 快照，並啟動 LINE Pay 預授權。
 2. 修改已預授權訂單：保存 revision，進行 replacement authorization，避免杯數重複計算或超過上限。
 3. 截止結算：鎖定活動與合格訂單，計算 authorized cups，選擇適用 tier，保存 settlement，並以 idempotent 方式 capture/void payment。
 4. 取消活動：只允許截止前 30 分鐘以前取消，取消 eligible orders，處理 authorizations，寫入 history 與 audit log。

@@ -1,6 +1,6 @@
 # 目前進度
 
-最後更新：2026-07-22
+最後更新：2026-07-30
 
 換電腦或交接給其他 AI 時，請先閱讀 `docs/handoff-summary.md`。
 
@@ -18,6 +18,15 @@
 - 三次自動請款失敗或遇到不可重試錯誤後，顧客可在取餐開始前 15 分鐘以前使用結算後金額直接重新付款；後端會先查原交易狀態並解除仍有效的原授權，付款成功後訂單改為已扣款並加入製作流程。
 - 已新增 `npm run check:sql-safety`，用來檢查 backend、database 與 scripts 內是否出現未審核的動態 SQL、SQL 字串插值或字串相加，降低後續開發時引入 SQL 注入風險。
 - 系統分析書已整理為五大功能，五組描述性綱目已更新，並已抽出 `docs/system-analysis-extracted.md`；各小節使用個案描述與活動圖仍待更新。
+
+## 2026-07-28 團購菜單規則更新
+
+- 產品規則已確認：每個團購自動開放該活動所屬店家目前上架的全部飲品，商家建立活動時不逐一選擇適用飲品。
+- 資料庫不需要新增 activity-menu item 多對多關聯表；顧客菜單查詢條件為 activity 的 `store_id` 加上 `menu_items.is_available = 1`。
+- 店家可以修改店內菜單；新選取與未送出的購物車使用最新菜單，已送出的訂單保留品名、價格與客製化快照。
+- 顧客權威菜單 API、商家菜單管理 API／畫面與訂單送出時的店家歸屬、供應狀態、客製化選項、選擇數量及價格重算已完成第一版。
+- 每個飲品可由店家以明確整數設定各客製化類型的 `minSelections`／`maxSelections`；目前 mobile 菜單管理可編輯品名、分類、說明、價格、上下架、選項與每杯加料上限。
+- 藍圖可用「每杯折 10／15 元」呈現門檻優惠；顯示換算與截止時依實際有效杯數分攤總折扣的公式仍需再收斂，避免顯示金額與最終請款不一致。
 
 ## 2026-07-05 登入方向更新
 
@@ -84,6 +93,7 @@
 - 訂單、付款、取貨與大部分 runtime progress 仍有 mobile-local state。
 - LINE Pay 完成後仍會先回 backend HTML 頁；HTML 頁會提供返回 App deep link，mobile 端仍保留 polling / foreground refresh 作為備援。
 - 部分流程仍保留 fallback 行為。
+- `StoreMenuScreen` / `DrinkSelectionScreen` 已改讀後端菜單；地圖與部分店家基本資料仍保留 prototype mock data。
 
 ## Backend 端
 
@@ -114,6 +124,10 @@
 | `GET`    | `/health`                                     | 健康檢查                              |
 | `GET`    | `/api/group-buy-activities`                   | 查詢團購活動與優惠級距                |
 | `POST`   | `/api/merchant/group-buy-activities`          | 商家建立團購活動                      |
+| `GET`    | `/api/stores/:storeId/menu`                   | 顧客查詢上架飲品、選項與選擇限制      |
+| `GET`    | `/api/merchant/stores/:storeId/menu`          | 商家查詢完整菜單                      |
+| `POST`   | `/api/merchant/stores/:storeId/menu-items`    | 商家新增飲品                          |
+| `PATCH`  | `/api/merchant/stores/:storeId/menu-items/:menuItemId` | 商家修改、上架或停售飲品     |
 | `POST`   | `/api/orders`                                 | 建立訂單與訂單品項快照                |
 | `PATCH`  | `/api/orders/:orderId`                        | 更新尚未預授權成功的 pending 訂單明細 |
 | `POST`   | `/api/orders/:orderId/revisions`              | 建立已授權訂單的待重新預授權修改版本  |
@@ -130,6 +144,8 @@
 
 - 活動建立與取消使用交易。
 - 訂單建立會保存品項與客製化快照。
+- 建立、更新 pending 訂單與建立 revision 都會重新驗證飲品店家歸屬、上架狀態、客製化選項與店家設定的選擇數量，並由後端以基本價格加選項價差重算單價與小計。
+- Client 金額與權威金額不同時回傳 `order_price_changed`，不會靜默改價或直接進入付款；無效／停售品項或超過加料上限時回傳 `order_items_invalid`。
 - 尚未預授權成功的 pending 訂單可以用目前購物車內容更新；更新時會把舊的 pending LINE Pay 授權標成 `failed`，避免下一次預授權被阻擋。
 - 已授權訂單修改第一版已加入：`POST /api/orders/:orderId/revisions` 會建立 pending revision 與 item snapshots，不會立即修改原訂單；mobile 購物車與訂單明細修改會建立 revision，付款頁會帶 `orderRevisionId` 重新發起 LINE Pay 預授權；新預授權 confirm 成功後才套用 revision，並嘗試 void 舊授權。
 - 付款畫面可在 LINE Pay redirect 後透過 app deep link、自動輪詢、回前景刷新或手動刷新同步後端訂單狀態。
@@ -164,11 +180,11 @@
 - 已授權後的訂單修改 / 重新授權 mobile 第一版已串接；仍需把訂單列表完全改為後端權威資料。
 - LINE Pay refund 目前只有 dev/backend 後端 API 與 smoke test；尚未做正式操作 UI、退款失敗重試 queue 與正式 sandbox 人工端對端測試。
 - LINE Pay webhook 第一版不列為必要入口；目前付款同步以 confirm/cancel redirect、polling 與後續 provider 狀態查詢為主。
-- 取貨 API。
+- 顧客與商家訂單列表仍需改成後端權威查詢；目前取貨 route 已有，但列表仍偏 local state。
 - 付款結算失敗規則已決定：第一版以自動重試為主，不做人工處理介面；失敗中的訂單不進入製作或取貨。
 - 尚未實作跨執行個體 deadline settlement locking、持久化重試 queue 與失敗告警；單一 backend process 內的 provider 狀態查詢、三次上限與 30 秒重試已實作。
 - 正式 migration 系統。
-- 完整自動化測試；目前只有付款結算 smoke script。
+- 完整 mobile E2E；目前已有付款結算、取餐逾期、取餐碼與菜單／訂單權威驗證 smoke scripts。
 
 目前重要限制：
 
@@ -200,7 +216,7 @@ database/seed-dev.sql
 - `users` / `user_roles`
 - `user_private_profiles` / `user_public_profiles`
 - `merchants` / `merchant_users` / `stores`
-- `menu_items` / `customization_options`
+- `menu_items` / `customization_options` / `menu_item_customization_rules`
 - `group_buy_activities` / `promotion_tiers` / `activity_notices`
 - `cart_drafts` / `cart_draft_items` / `cart_draft_item_customizations`
 - `orders` / `order_items` / `order_item_customizations`
@@ -211,10 +227,22 @@ database/seed-dev.sql
 - `status_history`
 - `audit_logs`
 
+取貨逾期資料結構：
+
+- `pickup_credentials.expires_at` 保存取貨憑證到期時間。
+- `pickup_credentials.expired_at` 保存系統實際執行逾期處理的時間。
+- `orders.pickup_status` 已支援 `expired`，`status_history` 已支援保存取貨狀態變更。
+- 既有 SQLite 會在後端開啟資料庫時自動補欄位與到期時間索引，不會重建或清除資料。
+- 取貨逾期排程每 30 秒掃描一次；期限取 `pickupStartAt + 3 小時` 與 `pickupEndAt` 較早者。
+- 到期後，已扣款但未取餐的訂單更新為 `pickup_status = expired`，已取餐維持 `picked_up`，活動更新為 `completed`。
+- 狀態歷程、audit log、同活動交易鎖定與重複執行防護已完成，並可用 `npm run pickup-expiration:smoke` 驗證。
+- 取貨憑證建立／驗證 API 與 App 歷史訂單顯示仍待下一階段實作。
+
 資料正規化方向：
 
 - 飲料客製化選項以 child rows 儲存，不把甜度、冰塊、加料塞成 JSON 或逗號字串。
 - 訂單品項與客製化選項保留 snapshot，避免菜單改價後影響舊訂單。
+- `menu_item_customization_rules` 以飲品與選項類型為複合主鍵，保存最少／最多選擇數；`max_selections = 0` 表示不提供該類型，加料可由店家設定明確上限。
 
 PostgreSQL 方向：
 
@@ -259,7 +287,7 @@ database/test/drink-group-buy-test.sqlite
 
 建議下一步：
 
-1. 讓訂單列表與訂單明細改成以後端資料為準，避免 localStorage 與後端狀態分歧。
+1. 讓顧客與商家訂單列表改成以後端資料為準，避免 localStorage 與後端狀態分歧。
 2. 補 LINE Pay provider 狀態查詢與自動重試 queue。
 3. 補 revision 失敗、容量不足、舊授權 void 失敗時的 mobile 錯誤提示。
 4. 補取貨憑證與取貨完成 API。

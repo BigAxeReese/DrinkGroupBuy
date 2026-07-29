@@ -1,6 +1,6 @@
 # API 清單與候選項
 
-最後更新：2026-07-21
+最後更新：2026-07-30
 
 ## 語言規則
 
@@ -103,10 +103,10 @@ API JSON 使用 `camelCase`。已實作 routes 只對目前開發 prototype 具�
 | ------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | Method / path | `POST /api/orders`                                                                                                                                                                                                                                                                                      |
 | 相關畫面      | `CartScreen`                                                                                                                                                                                                                                                                                            |
-| Request       | 需要 bearer token。Body: `{ activityId, fallbackPurchasePreference, items: [{ menuItemId?, itemName, quantity, unitPrice, subtotal, size?, sweetness?, ice?, toppings? }] }`                                                                                                                            |
+| Request       | 需要 bearer token。Body: `{ activityId, fallbackPurchasePreference, items: [{ menuItemId, quantity, unitPrice, subtotal, customizationOptionIds[] }] }`；品名與金額只作 client 顯示／衝突偵測，不作權威來源 |
 | Response      | `{ order }`                                                                                                                                                                                                                                                                                             |
-| 已實作規則    | 需要 customer role、從登入使用者推導 `customerUserId`、需要既有 backend `group_buy_activities` row、需要 active customer user、在同一個 transaction 寫入 `orders`、`order_items`、`order_item_customizations`、`status_history`、`audit_logs`、阻擋不可加入活動、用 `maximum_cups` 檢查 authorized cups |
-| 尚缺規則      | 依目前菜單驗證價格、idempotency key、同時加入時完整 concurrency locking                                                                                                                                                                                                                                 |
+| 已實作規則    | 需要 customer role、從登入使用者推導 `customerUserId`、驗證活動與 active customer、驗證飲品屬於活動店家且已上架、驗證客製化 option ID 與 min/max 選擇數、由後端重算價格、保存 option ID／label／價差快照、以 transaction 寫入訂單與稽核資料、檢查容量 |
+| 尚缺規則      | 建立訂單 idempotency key、同一顧客同活動重複 POST 的明確 conflict response，以及正式多人同時加入時的 PostgreSQL row locking |
 
 ### 更新尚未預授權成功的顧客訂單
 
@@ -114,10 +114,10 @@ API JSON 使用 `camelCase`。已實作 routes 只對目前開發 prototype 具�
 | ------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | Method / path | `PATCH /api/orders/:orderId`                                                                                                                                                                                                                                                                                |
 | 相關畫面      | `CartScreen`、`PaymentAuthorizationScreen`                                                                                                                                                                                                                                                                 |
-| Request       | 需要 bearer token。Body: `{ fallbackPurchasePreference, items: [{ menuItemId?, itemName, quantity, unitPrice, subtotal, size?, sweetness?, ice?, toppings? }] }`                                                                                                                                            |
+| Request       | 需要 bearer token。Body 同建立訂單，使用 `menuItemId`、`customizationOptionIds[]` 與 client 顯示金額 |
 | Response      | `{ order }`                                                                                                                                                                                                                                                                                                 |
 | 已實作規則    | 需要 customer role 與 order ownership；只允許 `status = submitted` 且 `payment_status = pending`；替換 `order_items` 與 `order_item_customizations`；重新計算 `total_cups` 與 `original_amount`；用已 authorized/captured 杯數檢查容量；允許新 request 前，將 pending LINE Pay authorizations 標成 `failed` |
-| 尚缺規則      | 明確 customer cancel/exit API、revision 失敗 / 容量不足 / void 舊授權失敗時的 mobile 錯誤提示                                                                                                                                                                                                                |
+| 尚缺規則      | 明確 customer cancel/exit API、revision 失敗／容量不足／void 舊授權失敗時更細的 mobile 錯誤提示 |
 
 ### 建立已授權訂單修改版本
 
@@ -125,11 +125,11 @@ API JSON 使用 `camelCase`。已實作 routes 只對目前開發 prototype 具�
 | ------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | Method / path | `POST /api/orders/:orderId/revisions`                                                                                                                                                                                                    |
 | 相關畫面      | `CustomerOrdersScreen`、`CartScreen`、`PaymentAuthorizationScreen`；mobile 第一版已串接                                                                                                                                                    |
-| Request       | 需要 customer bearer token。Body: `{ fallbackPurchasePreference, items: [{ menuItemId?, itemName, quantity, unitPrice, subtotal, size?, sweetness?, ice?, toppings? }] }`                                                                |
+| Request       | 需要 customer bearer token。Body 同建立訂單；重新預授權前再次使用最新菜單驗證與重算 |
 | Response      | `{ revision }`；revision 包含 `id`, `orderId`, `status`, `totalCups`, `originalAmount`, `items`                                                                                                                                          |
 | 已實作規則    | 只允許 owner 修改 `status = submitted` 且 `payment_status = authorized` 的訂單；截止前 30 分鐘內不可建立 revision；檢查活動可加入與容量上限；建立 `order_revisions` 與 revision item snapshots；不直接修改原訂單，也不取消舊預授權 |
 | 後續付款      | 使用 `POST /api/payments/line-pay/request` 並帶入 `{ orderId, orderRevisionId, amount }` 對 revision 金額重新預授權                                                                                                                     |
-| 尚缺規則      | revision 取消 API、完整 revision 歷史查詢 API、失敗狀態的 mobile 告知與重試入口                                                                                                                                                            |
+| 尚缺規則      | revision 取消 API、完整 revision 歷史查詢 API、失敗狀態的 mobile 告知與重試入口 |
 
 ### 查詢訂單明細
 
@@ -210,10 +210,15 @@ API JSON 使用 `camelCase`。已實作 routes 只對目前開發 prototype 具�
 
 ### 店家與菜單
 
-| Method / path candidate                                     | 用途               | 主要不確定點                     |
-| ----------------------------------------------------------- | ------------------ | -------------------------------- |
-| `GET /api/stores/nearby?latitude=&longitude=&radiusMeters=` | 地圖與附近店家資料 | 距離來源與 Google Places 關係    |
-| `GET /api/stores/:storeId/menu`                             | 菜單與客製化選項   | 供應狀態與 snapshot/version 規則 |
+| Method / path                                                | 用途                         | 實作狀態／規則 |
+| ------------------------------------------------------------ | ---------------------------- | ------------------- |
+| `GET /api/stores/nearby?latitude=&longitude=&radiusMeters=`  | 地圖與附近店家資料           | 距離來源與 Google Places 關係仍待收斂 |
+| `GET /api/stores/:storeId/menu`                              | 顧客查詢菜單與客製化選項     | 已實作；只回傳上架品項／選項與 min/max 選擇數 |
+| `GET /api/merchant/stores/:storeId/menu`                     | 店家查看完整菜單             | 已實作；需 merchant-store permission，包含停售品項／選項 |
+| `POST /api/merchant/stores/:storeId/menu-items`              | 店家新增菜單品項             | 已實作；驗證價格、分類、選項、價差及明確選擇上限 |
+| `PATCH /api/merchant/stores/:storeId/menu-items/:menuItemId` | 店家修改品項或上／下架       | 已實作；未提交的舊選項採軟停用，保留歷史訂單 FK 與快照 |
+
+菜單查詢規則：活動菜單由 `menu_items.store_id = activity.store_id AND menu_items.is_available = 1` 決定，不需要活動與飲品的多對多關聯。建立訂單、更新 pending 訂單與建立 revision 時，後端均會重新驗證並以資料庫價格重算金額；client 金額不一致時回傳 `order_price_changed`，品項／選項失效或選擇數不符時回傳 `order_items_invalid`。
 
 ### 訂單與購物車
 
@@ -242,7 +247,7 @@ API JSON 使用 `camelCase`。已實作 routes 只對目前開發 prototype 具�
 | `GET /api/merchant/group-buy-activities/:activityId/orders`         | 商家訂單佇列與歷史           | 可曝光的 customer fields         |
 | `POST /api/merchant/orders/:orderId/ready`                          | 標記製作完成並顯示取貨碼     | 目前 UI 將此動作標為「完成訂單」 |
 | `POST /api/merchant/orders/:orderId/pickup`                         | 驗證取貨並完成訂單           | 需拒絕已過期憑證；Code/QR verification method |
-| Internal pickup expiration job                                      | 將逾期未取訂單移至歷史訂單   | 需依取餐開始時間、店家營業結束時間與 24 小時營業規則計算 expiresAt |
+| Internal pickup expiration job                                      | 將逾期未取訂單移至歷史訂單   | Backend interval 已實作；期限取 `pickupStartAt + 3 小時` 與 `pickupEndAt` 較早者，仍缺取貨 API 與 App 串接 |
 
 備註：最新產品規則不需要店家逐筆接受訂單，因此不再規劃店家接單 API。商家端應改以「標記可取餐」與「核銷取貨」作為履約操作。
 
