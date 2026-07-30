@@ -23,8 +23,7 @@
 | Medium | PostgreSQL runtime adapter | Reliability schema parity、`pg`、SQLite/PostgreSQL adapter 與 smoke 已完成；`backend/db.js` 尚未搬移，runtime 仍是 SQLite |
 | Medium | Notification table / delivery | 尚未設計 notification 或 delivery event schema |
 | Medium | 菜單管理與下單 E2E | 權威菜單 API、商家管理畫面、後端驗證與價格重算已完成第一版；仍需完整 Android E2E 與更細的逐項衝突修正 UX |
-| Medium | 每杯折扣顯示與實際結算公式一致性 | 藍圖可顯示「每杯折 10／15 元」，但仍需確認顯示換算與截止時依實際有效杯數分攤總折扣的差異如何向顧客說明 |
-| Medium | 正式退款 UI 與退款失敗重試 | Admin/dev 後端 refund route 已有；正式操作介面與 retry/reconciliation 尚未完成 |
+| Medium | 正式退款申請 UI 與退款失敗重試 | 商家只提出退款申請、營運執行退款的規則已確認；Admin/dev 後端 refund route 已有，正式申請／審核介面與 retry/reconciliation 尚未完成 |
 
 ## 身份與權限
 
@@ -41,6 +40,8 @@
 | Resolved | 商家使用者如何被授權管理一間或多間店？                                        | 目前方向是一個商家帳號只透過 `merchant_users.store_id` 管理一間店；暫不拆 owner/manager/staff。                              |
 | Resolved | 管理員角色如何授權與稽核？                                                    | 第一階段正式 App 不做管理員入口；目前 backend 僅保留開發 / 後端補救 API 供活動取消、結算與退款測試，敏感操作必須寫入 audit log。 |
 | Resolved | 除了 alias 與取餐/訂單資料外，商家可以看到哪些顧客公開資料？                  | 商家只看得到顧客 alias、訂單品項、客製化內容、金額、付款狀態、取貨狀態與取貨憑證；不顯示 email、Firebase UID 或敏感身份資料。 |
+| Resolved | 第一階段是否保存顧客電話？ | 電話為選填而非必填；必須採加密或等效保護，商家介面不得顯示完整號碼。 |
+| Resolved | 使用者是否可以刪除帳號？ | 不採「永久不可刪除」。使用者可申請關閉帳號並立即停用登入；非必要個資刪除或去識別化，付款、退款、訂單與稽核紀錄只在法定保存、會計及爭議處理必要範圍內限制性保留。正式營運前需由法律與會計專業確認保存範圍及年限。 |
 
 ## 店家與菜單
 
@@ -62,7 +63,9 @@
 | Resolved | 達到最高優惠級距後，是否立即停止新訂單？                 | 是。最高優惠級距杯數就是最大容量；新訂單不得超過此容量。                                                         |
 | Resolved | 商家建立的團購活動最長可以開放多久？                     | 截止時間必須在活動發布或開放招募後 24 小時內。                                                                   |
 | Resolved | 達到某個優惠級距後，截止前有人退出是否會讓最終級距下降？ | 會。最終級距以截止結算時仍有效的已預授權訂單為準；但進入截止前 30 分鐘後，顧客不可退出或修改。                   |
-| Resolved | 團購折扣是依杯數、訂單數，還是品項金額分配？             | 折扣是該級距的總折扣金額，截止結算時平均分攤給每一杯有效授權飲品；無法整除的餘額不分配給訂單，作為系統維運補貼。   |
+| Resolved | 團購折扣是依杯數、訂單數，還是品項金額分配？ | 折扣是該級距的總折扣金額。每杯折扣為 `floor(級距總折扣 / 有效授權杯數)`；例如 3 杯、總折扣 100 元時每杯折 33 元、實際分配 99 元。無法整除的尾差不分配給顧客；目前優惠由商家出資，因此尾差退回商家。未來若有明確標示的平台出資活動，尾差才留在平台。 |
+| Resolved | 進行中的每杯折扣如何顯示？ | 依目前有效已授權杯數及目前達成級距即時計算並標示為「預估」；顯示目前杯數、目前級距、預估每杯折扣及下一級距所差杯數。截止時重新計算並保存最終快照。 |
+| Resolved | 如何避免每杯折扣為 0 或高於飲料金額？ | 發布活動時逐級驗證可達杯數區間：在該級距最高可達杯數時，每杯折扣至少 1 元；在門檻杯數時，每杯折扣不得高於店內最低可售單杯權威金額。招募中若菜單降價、客製化最低價差或上架動作會破壞此規則，後端必須拒絕。建立／修改訂單、重新授權與截止結算仍須重驗，應付金額不得為負數。 |
 | Resolved | 團購發布後，商家可以修改哪些 activity fields？           | 第一階段發布後不允許修改截止時間、優惠門檻、折扣規則或取餐時間；活動沒有獨立適用飲品欄位。商家仍可管理店家菜單，並依菜單異動規則影響後續新選取。 |
 | Resolved | 誰負責執行 deadline settlement？                         | 系統排程負責自動結算；開發或營運用手動觸發只能作補救工具，不是一般使用者流程。                                   |
 | Resolved | deadline settlement 失敗後，重試、告警與人工補救怎麼做？ | 第一版以自動重試為主，不做人工處理介面；仍無法處理時保留失敗狀態與紀錄，訂單不得進入製作或取貨。                 |
@@ -90,6 +93,8 @@
 | Resolved | 團購活動如何降低 authorization 過期風險？                                                                                                         | 團購截止時間限制為 24 小時內；LINE Pay authorization 後，授權到期時間仍必須涵蓋截止時間與結算緩衝時間。                                                           |
 | Resolved | 活動未達標時，authorization 何時 void？                                                                                                           | 截止結算時立即處理；未達標且顧客未接受原價購買的訂單，系統取消授權 `void` 並取消訂單。                                                                             |
 | Resolved | capture 失敗如何重試或升級處理？                                                                                                                  | 截止時立即請款；暫時性失敗每 30 秒重試一次，總計最多三次。每次重試前先查 provider 狀態避免重複請款；三次失敗或不可重試時停止自動請款，訂單不進入製作，並開放期限內手動重新付款。 |
+| Resolved | void 失敗如何重試或升級處理？ | 暫時性失敗每 30 秒重試一次，總計最多三次；每次重試前查詢 provider 狀態。三次失敗或不可重試時停止自動 void 並告警，在 provider 狀態確認前不得標記為 `authorization_voided`。 |
+| Resolved | 商家是否可以直接執行退款？ | 第一階段不可以。商家只能針對自己門市的已請款訂單提出退款申請並填寫金額與原因；由營運／補救權限確認後呼叫 provider。正式流程需有可退餘額檢查、冪等、跨執行個體鎖、audit log、reconciliation 與失敗告警。 |
 | Resolved | webhook 簽章、重複事件與 out-of-order events 如何處理？                                                                                           | 第一版不做 LINE Pay webhook endpoint；LINE Pay Online API 以 confirm/cancel redirect 加 provider 狀態查詢為主。若未來接 provider webhook，必須先驗簽、保存 raw payload、用 idempotency key 去重，並以資料庫狀態轉換規則處理亂序事件。 |
 | Resolved | LINE Pay confirm 是否立即把訂單更新為 `authorized`？                                                                                              | 第一個 backend slice 先這樣做：confirm 更新 `payment_authorizations`、`orders.payment_status`、`orders.authorization_status`。                                      |
 | Resolved | LINE Pay redirect 後，mobile app 如何取得更新後的 `authorized` 狀態？                                                                             | 第一階段用付款結果頁 polling、返回前景重新讀取訂單、手動重新整理；deep link 可留到後續。                                                                           |
@@ -116,6 +121,7 @@
 | Resolved | activity cancellation 如何連動 orders 與 payment authorizations？ | 取消團購需在同一交易中更新 activity、eligible orders、authorization 狀態，並寫入 history/audit。       |
 | Resolved | 除了 admin cancellation，哪些操作也需要 audit logs？              | 付款授權、請款、取消授權、結算、活動取消、訂單 revision 套用與敏感權限變更都需要 audit log。           |
 | Resolved | 是否需要、以及何時要用 PostgreSQL/MySQL 取代 SQLite？             | SQLite 只作本機開發；正式多人測試、真金流或部署前應切到 PostgreSQL。                                  |
+| Resolved | 第一階段通知如何交付？ | 先建立可持久化的站內通知與 delivery 狀態；付款、結算、void、退款等重要通知必須可重試與追蹤，手機推播留待後續整合。 |
 
 ## 文件與命名
 
@@ -123,3 +129,4 @@
 | -------- | --------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------- |
 | Resolved | mobile legacy `deal` 變數與 routes 何時遷移到 `groupBuyActivity`？    | 已遷移。Mobile state、route、screen、mock 與主要工具函式改用 `groupBuyActivity`；舊本機儲存只保留相容讀取。             |
 | Resolved | `PaymentReportScreen` 是否現在就改名為 `PaymentAuthorizationScreen`？ | 已改名。付款預授權畫面、route 與 mock state 使用 `PaymentAuthorizationScreen` / `paymentAuthorization` 命名。           |
+| Resolved | 第一階段支援哪些行動平台？ | 第一版只以 Android 作為正式開發與驗收範圍；Expo Web 僅作開發預覽，iOS 不列入第一階段。 |

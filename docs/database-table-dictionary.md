@@ -204,7 +204,7 @@
 | `id`              | 優惠門檻編號 | TEXT    | N    | PK                                   |
 | `activity_id`     | 團購活動編號 | TEXT    | N    | FK, UNIQUE(activity_id, target_cups) |
 | `target_cups`     | 目標杯數     | INTEGER | N    | UNIQUE(activity_id, target_cups)     |
-| `discount_amount` | 總折扣金額   | INTEGER | N    | 結算時平均分攤到有效杯數，未整除餘額作維運補貼 |
+| `discount_amount` | 總折扣金額   | INTEGER | N    | 每杯折扣為 `floor(discount_amount / 有效授權杯數)`；商家出資優惠的未分配尾差退回商家；應用層驗證每杯折扣上下限 |
 | `sort_order`      | 排序         | INTEGER | N    |                                      |
 
 ## `activity_notices` 活動備註資料表
@@ -397,6 +397,8 @@
 
 用途：保存團購截止後的結算結果與適用優惠門檻。
 
+注意：`discount_per_cup` 至 `calculation_version` 是 PostgreSQL `003` migration draft 欄位；目前 SQLite runtime 尚未加入。
+
 | 欄位名稱          | 中文名稱         | 型別    | NULL | PK/FK      |
 | ----------------- | ---------------- | ------- | ---- | ---------- |
 | `id`              | 活動結算編號     | TEXT    | N    | PK         |
@@ -405,6 +407,11 @@
 | `authorized_cups` | 預授權杯數       | INTEGER | N    |            |
 | `applied_tier_id` | 適用優惠門檻編號 | TEXT    | Y    | FK         |
 | `discount_amount` | 適用總折扣金額   | INTEGER | N    |            |
+| `discount_per_cup` | 每杯實際折扣 | INTEGER | N | |
+| `allocated_discount_amount` | 實際分配折扣總額 | INTEGER | N | |
+| `undistributed_discount_amount` | 未分配尾差 | INTEGER | N | |
+| `discount_funder` | 優惠出資方 | TEXT | N | |
+| `calculation_version` | 折扣計算版本 | TEXT | N | |
 | `settled_at`      | 結算時間         | TEXT    | N    |            |
 | `reason`          | 結算原因         | TEXT    | Y    |            |
 

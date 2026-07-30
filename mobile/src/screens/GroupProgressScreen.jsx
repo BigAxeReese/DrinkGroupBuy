@@ -1,12 +1,16 @@
 import { StyleSheet, Text, View } from "react-native";
+import { ActivitySyncNotice } from "../components/ActivitySyncNotice";
 import { MobileScreen, Section } from "../components/MobileScreen";
+import { DiscountSummaryCard } from "../components/DiscountSummaryCard";
 import { PrimaryButton } from "../components/PrimaryButton";
 import { ProgressSummary } from "../components/ProgressSummary";
 import { StatusBadge } from "../components/StatusBadge";
 import { getGroupBuyActivityById, formatCurrency } from "../utils/calculations";
 
-export function GroupProgressScreen({ navigation, route, appState, memberAction, selectedCustomerId }) {
+export function GroupProgressScreen({ navigation, route, appState, actions, memberAction, selectedCustomerId }) {
   const groupBuyActivity = getGroupBuyActivityById(appState.groupBuyActivities, route.params?.groupBuyActivityId);
+  const activitySyncStatus = appState.groupBuyActivitySyncStatus ?? "idle";
+  const retryActivitySync = () => actions.syncGroupBuyActivities().catch(() => {});
   if (!groupBuyActivity) {
     return (
       <MobileScreen
@@ -14,6 +18,7 @@ export function GroupProgressScreen({ navigation, route, appState, memberAction,
         onBack={() => navigation.back()}
         onMemberPress={memberAction}
       >
+        <ActivitySyncNotice status={activitySyncStatus} onRetry={retryActivitySync} />
         <Section title="目前沒有團購資料">
           <Text style={styles.meta}>團購已清空，或目前尚未有商家建立活動。</Text>
           <PrimaryButton label="返回首頁" variant="secondary" onPress={() => navigation.replace("nearby")} />
@@ -49,6 +54,7 @@ export function GroupProgressScreen({ navigation, route, appState, memberAction,
       onBack={() => navigation.back()}
       onMemberPress={memberAction}
     >
+      <ActivitySyncNotice status={activitySyncStatus} onRetry={retryActivitySync} />
       <Section title="狀態">
         <StatusBadge value={groupBuyActivity.status} />
         <ProgressSummary
@@ -59,6 +65,7 @@ export function GroupProgressScreen({ navigation, route, appState, memberAction,
         />
         <Text style={styles.explain}>只有預授權成功的杯數才計入優惠門檻。</Text>
         <Text style={styles.meta}>{nextTierText}</Text>
+        <DiscountSummaryCard groupBuyActivity={groupBuyActivity} />
       </Section>
 
       <Section title="我的訂單摘要">

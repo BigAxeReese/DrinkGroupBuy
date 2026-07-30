@@ -7,10 +7,10 @@ const {
   createOrderRevision,
   getCustomerOrderCancellationEligibility,
   getOrderDetail,
-  getUserAuthProfileByFirebaseUid,
-  getUserAuthProfileByLoginIdentifier,
-  getUserAuthProfileById,
-  listDevAuthUsers,
+  getUserAuthProfileByFirebaseUid: getSqliteUserAuthProfileByFirebaseUid,
+  getUserAuthProfileByLoginIdentifier: getSqliteUserAuthProfileByLoginIdentifier,
+  getUserAuthProfileById: getSqliteUserAuthProfileById,
+  listDevAuthUsers: listSqliteDevAuthUsers,
   listCustomerOrders,
   listGroupBuyActivities,
   listPaymentReliabilityAlerts,
@@ -55,11 +55,22 @@ const {
 const {
   createGroupBuyActivityReadRepository
 } = require("./database/repositories/groupBuyActivityReadRepository");
+const {
+  createAuthProfileReadRepository
+} = require("./database/repositories/authProfileReadRepository");
 
 const port = Number(process.env.PORT ?? 3000);
 const storeMenuReadRepository = createStoreMenuReadRepository({ sqliteReader: listStoreMenu });
 const groupBuyActivityReadRepository = createGroupBuyActivityReadRepository({
   sqliteReader: listGroupBuyActivities,
+});
+const authProfileReadRepository = createAuthProfileReadRepository({
+  sqliteReaders: {
+    getByFirebaseUid: getSqliteUserAuthProfileByFirebaseUid,
+    getByLoginIdentifier: getSqliteUserAuthProfileByLoginIdentifier,
+    getById: getSqliteUserAuthProfileById,
+    listDevUsers: listSqliteDevAuthUsers,
+  },
 });
 
 const server = http.createServer(async (request, response) => {
@@ -101,7 +112,7 @@ const server = http.createServer(async (request, response) => {
         return;
       }
 
-      const user = getUserAuthProfileByFirebaseUid(firebaseUser.uid);
+      const user = await authProfileReadRepository.getByFirebaseUid(firebaseUser.uid);
       if (!user) {
         sendJson(response, 403, {
           error: "Firebase user is not mapped to an active backend user",
@@ -121,7 +132,7 @@ const server = http.createServer(async (request, response) => {
         return;
       }
 
-      sendJson(response, 200, { users: listDevAuthUsers() });
+      sendJson(response, 200, { users: await authProfileReadRepository.listDevUsers() });
       return;
     }
 
@@ -137,7 +148,7 @@ const server = http.createServer(async (request, response) => {
         return;
       }
 
-      const user = getUserAuthProfileById(body.userId);
+      const user = await authProfileReadRepository.getById(body.userId);
       if (!user) {
         sendJson(response, 404, { error: "Dev user not found" });
         return;
@@ -156,7 +167,7 @@ const server = http.createServer(async (request, response) => {
         return;
       }
 
-      const user = getUserAuthProfileByLoginIdentifier(loginIdentifier);
+      const user = await authProfileReadRepository.getByLoginIdentifier(loginIdentifier);
       if (!user || !verifyPassword(body.password, user.passwordHash)) {
         sendJson(response, 401, { error: "Invalid phoneNumber/loginName or password" });
         return;
@@ -187,7 +198,7 @@ const server = http.createServer(async (request, response) => {
 
     const merchantStoreMenuMatch = url.pathname.match(/^\/api\/merchant\/stores\/([^/]+)\/menu$/);
     if (request.method === "GET" && merchantStoreMenuMatch) {
-      const authUser = getAuthenticatedUser(request);
+      const authUser = await getAuthenticatedUser(request);
       if (!authUser) {
         sendJson(response, 401, { error: "Authentication required" });
         return;
@@ -203,7 +214,7 @@ const server = http.createServer(async (request, response) => {
 
     const merchantMenuItemsMatch = url.pathname.match(/^\/api\/merchant\/stores\/([^/]+)\/menu-items$/);
     if (request.method === "POST" && merchantMenuItemsMatch) {
-      const authUser = getAuthenticatedUser(request);
+      const authUser = await getAuthenticatedUser(request);
       if (!authUser) {
         sendJson(response, 401, { error: "Authentication required" });
         return;
@@ -239,7 +250,7 @@ const server = http.createServer(async (request, response) => {
       /^\/api\/merchant\/stores\/([^/]+)\/menu-items\/([^/]+)$/
     );
     if (request.method === "PATCH" && merchantMenuItemMatch) {
-      const authUser = getAuthenticatedUser(request);
+      const authUser = await getAuthenticatedUser(request);
       if (!authUser) {
         sendJson(response, 401, { error: "Authentication required" });
         return;
@@ -273,7 +284,7 @@ const server = http.createServer(async (request, response) => {
     }
 
     if (request.method === "POST" && url.pathname === "/api/merchant/group-buy-activities") {
-      const authUser = getAuthenticatedUser(request);
+      const authUser = await getAuthenticatedUser(request);
       if (!authUser) {
         sendJson(response, 401, { error: "Authentication required" });
         return;
@@ -298,6 +309,10 @@ const server = http.createServer(async (request, response) => {
         ...body,
         createdByUserId: authUser.id
       });
+      if (activity?.error) {
+        sendJson(response, 409, activity);
+        return;
+      }
       sendJson(response, 201, { activity });
       return;
     }
@@ -306,7 +321,7 @@ const server = http.createServer(async (request, response) => {
       /^\/api\/merchant\/group-buy-activities\/([^/]+)\/ready-for-pickup$/
     );
     if (request.method === "POST" && merchantReadyForPickupMatch) {
-      const authUser = getAuthenticatedUser(request);
+      const authUser = await getAuthenticatedUser(request);
       if (!authUser) {
         sendJson(response, 401, { error: "Authentication required" });
         return;
@@ -326,7 +341,7 @@ const server = http.createServer(async (request, response) => {
 
     if (request.method === "POST"
       && url.pathname === "/api/merchant/pickup-credentials/lookup") {
-      const authUser = getAuthenticatedUser(request);
+      const authUser = await getAuthenticatedUser(request);
       if (!authUser) {
         sendJson(response, 401, { error: "Authentication required" });
         return;
@@ -347,7 +362,7 @@ const server = http.createServer(async (request, response) => {
 
     if (request.method === "POST"
       && url.pathname === "/api/merchant/pickup-credentials/redeem") {
-      const authUser = getAuthenticatedUser(request);
+      const authUser = await getAuthenticatedUser(request);
       if (!authUser) {
         sendJson(response, 401, { error: "Authentication required" });
         return;
@@ -370,7 +385,7 @@ const server = http.createServer(async (request, response) => {
       /^\/api\/orders\/([^/]+)\/pickup-credential$/
     );
     if (request.method === "GET" && orderPickupCredentialMatch) {
-      const authUser = getAuthenticatedUser(request);
+      const authUser = await getAuthenticatedUser(request);
       if (!authUser) {
         sendJson(response, 401, { error: "Authentication required" });
         return;
@@ -392,7 +407,7 @@ const server = http.createServer(async (request, response) => {
     }
 
     if (request.method === "GET" && url.pathname === "/api/customers/me/orders") {
-      const authUser = getAuthenticatedUser(request);
+      const authUser = await getAuthenticatedUser(request);
       if (!authUser) return sendJson(response, 401, { error: "Authentication required" });
       if (!authUser.roles.includes("customer")) return sendJson(response, 403, { error: "Customer role required" });
       sendJson(response, 200, listCustomerOrders(authUser.id, readOrderListQuery(url)));
@@ -401,7 +416,7 @@ const server = http.createServer(async (request, response) => {
 
     const merchantOrdersMatch = url.pathname.match(/^\/api\/merchant\/stores\/([^/]+)\/orders$/);
     if (request.method === "GET" && merchantOrdersMatch) {
-      const authUser = getAuthenticatedUser(request);
+      const authUser = await getAuthenticatedUser(request);
       if (!authUser) return sendJson(response, 401, { error: "Authentication required" });
       if (!authUser.roles.includes("merchant") || !canManageStore(authUser, merchantOrdersMatch[1])) {
         return sendJson(response, 403, { error: "Store access denied" });
@@ -411,7 +426,7 @@ const server = http.createServer(async (request, response) => {
     }
 
     if (request.method === "POST" && url.pathname === "/api/orders") {
-      const authUser = getAuthenticatedUser(request);
+      const authUser = await getAuthenticatedUser(request);
       if (!authUser) {
         sendJson(response, 401, { error: "Authentication required" });
         return;
@@ -468,7 +483,7 @@ const server = http.createServer(async (request, response) => {
 
     const orderRevisionMatch = url.pathname.match(/^\/api\/orders\/([^/]+)\/revisions$/);
     if (request.method === "POST" && orderRevisionMatch) {
-      const authUser = getAuthenticatedUser(request);
+      const authUser = await getAuthenticatedUser(request);
       if (!authUser) {
         sendJson(response, 401, { error: "Authentication required" });
         return;
@@ -547,7 +562,7 @@ const server = http.createServer(async (request, response) => {
 
     const orderCancelMatch = url.pathname.match(/^\/api\/orders\/([^/]+)\/cancel$/);
     if (request.method === "POST" && orderCancelMatch) {
-      const authUser = getAuthenticatedUser(request);
+      const authUser = await getAuthenticatedUser(request);
       if (!authUser) return sendJson(response, 401, { error: "Authentication required" });
       if (!authUser.roles.includes("customer")) return sendJson(response, 403, { error: "Customer role required" });
       const body = await readJsonBody(request);
@@ -611,7 +626,7 @@ const server = http.createServer(async (request, response) => {
 
     const orderMatch = url.pathname.match(/^\/api\/orders\/([^/]+)$/);
     if (request.method === "PATCH" && orderMatch) {
-      const authUser = getAuthenticatedUser(request);
+      const authUser = await getAuthenticatedUser(request);
       if (!authUser) {
         sendJson(response, 401, { error: "Authentication required" });
         return;
@@ -678,7 +693,7 @@ const server = http.createServer(async (request, response) => {
     }
 
     if (request.method === "GET" && orderMatch) {
-      const authUser = getAuthenticatedUser(request);
+      const authUser = await getAuthenticatedUser(request);
       if (!authUser) {
         sendJson(response, 401, { error: "Authentication required" });
         return;
@@ -699,7 +714,7 @@ const server = http.createServer(async (request, response) => {
     }
 
     if (request.method === "POST" && url.pathname === "/api/payments/line-pay/request") {
-      const authUser = getAuthenticatedUser(request);
+      const authUser = await getAuthenticatedUser(request);
       if (!authUser) {
         sendJson(response, 401, { error: "Authentication required" });
         return;
@@ -720,7 +735,7 @@ const server = http.createServer(async (request, response) => {
     }
 
     if (request.method === "POST" && url.pathname === "/api/payments/line-pay/repay") {
-      const authUser = getAuthenticatedUser(request);
+      const authUser = await getAuthenticatedUser(request);
       if (!authUser) {
         sendJson(response, 401, { error: "Authentication required" });
         return;
@@ -741,7 +756,7 @@ const server = http.createServer(async (request, response) => {
     }
 
     if (request.method === "POST" && url.pathname === "/api/payments/line-pay/refund") {
-      const authUser = getAuthenticatedUser(request);
+      const authUser = await getAuthenticatedUser(request);
       if (!authUser) {
         sendJson(response, 401, { error: "Authentication required" });
         return;
@@ -859,7 +874,7 @@ const server = http.createServer(async (request, response) => {
 
     const adminSettleActivityMatch = url.pathname.match(/^\/api\/admin\/group-buy-activities\/([^/]+)\/settle$/);
     if (request.method === "GET" && url.pathname === "/api/admin/payment-reliability/alerts") {
-      const authUser = getAuthenticatedUser(request);
+      const authUser = await getAuthenticatedUser(request);
       if (!authUser) {
         sendJson(response, 401, { error: "Authentication required" });
         return;
@@ -898,7 +913,7 @@ const server = http.createServer(async (request, response) => {
     }
 
     if (request.method === "POST" && adminSettleActivityMatch) {
-      const authUser = getAuthenticatedUser(request);
+      const authUser = await getAuthenticatedUser(request);
       if (!authUser) {
         sendJson(response, 401, { error: "Authentication required" });
         return;
@@ -950,7 +965,7 @@ const server = http.createServer(async (request, response) => {
 
     const adminActivityMatch = url.pathname.match(/^\/api\/admin\/group-buy-activities\/([^/]+)$/);
     if (request.method === "DELETE" && adminActivityMatch) {
-      const authUser = getAuthenticatedUser(request);
+      const authUser = await getAuthenticatedUser(request);
       if (!authUser) {
         sendJson(response, 401, { error: "Authentication required" });
         return;
@@ -1188,7 +1203,7 @@ function sendOrderItemValidationError(response, result) {
     sendJson(response, 409, result);
     return true;
   }
-  if (result?.error === "order_price_changed") {
+  if (result?.error === "order_price_changed" || result?.error === "order_discount_conflict") {
     sendJson(response, 409, result);
     return true;
   }
@@ -1205,11 +1220,11 @@ function readOrderListQuery(url) {
   };
 }
 
-function getAuthenticatedUser(request) {
+async function getAuthenticatedUser(request) {
   const token = getBearerToken(request);
   const payload = verifyAuthToken(token);
   if (!payload?.sub) return null;
-  return getUserAuthProfileById(payload.sub);
+  return authProfileReadRepository.getById(payload.sub);
 }
 
 function canAccessOrder(user, order) {

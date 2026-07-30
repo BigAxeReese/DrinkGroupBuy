@@ -1,6 +1,16 @@
 const path = require("node:path");
 const { randomUUID } = require("node:crypto");
 const { DatabaseSync } = require("node:sqlite");
+const {
+  calculateDiscountPerCup,
+  calculateGroupBuyDiscountSummary,
+  validateDiscountTierConfiguration
+} = require("./pricing/groupBuyDiscount");
+const {
+  getStoreDiscountPricingContext,
+  validateActiveStoreDiscountPricing,
+  validateOrderItemsForActivityDiscount
+} = require("./pricing/groupBuyDiscountDatabase");
 
 const databasePath = process.env.DRINK_GROUP_BUY_DB_PATH
   ? path.resolve(process.env.DRINK_GROUP_BUY_DB_PATH)
@@ -253,6 +263,7 @@ function listGroupBuyActivities() {
       const progress = progressByActivityId.get(row.id);
       const authorizedCups = Number(progress?.authorized_cups ?? 0);
       const participantCount = Number(progress?.participant_count ?? 0);
+      const discountSummary = calculateGroupBuyDiscountSummary(activityTiers, authorizedCups);
       const firstTargetCups = activityTiers[0]?.targetCups ?? row.maximum_cups ?? 0;
       const displayStatus = row.status === "recruiting" && authorizedCups >= firstTargetCups
         ? "confirmed"
@@ -274,6 +285,7 @@ function listGroupBuyActivities() {
         currentCups: authorizedCups,
         authorizedCups,
         participantCount,
+        ...discountSummary,
         withdrawalLockMinutes: row.withdrawal_lock_minutes,
         cancellationReason: row.cancellation_reason,
         store: {
@@ -294,8 +306,9 @@ function createGroupBuyActivity(input) {
   const database = openDatabase();
   const now = new Date().toISOString();
   const activityId = `activity-${randomUUID()}`;
-  const tiers = normalizeTiers(input.tiers);
+  let tiers = normalizeTiers(input.tiers);
   const idempotencyKey = input.idempotencyKey || null;
+  let transactionStarted = false;
 
   try {
     if (idempotencyKey) {
@@ -313,7 +326,24 @@ function createGroupBuyActivity(input) {
       }
     }
 
+    const menuPricing = getStoreDiscountPricingContext(database, input.storeId);
+    if (menuPricing.error || menuPricing.menuItemCount === 0) {
+      return {
+        error: "discount_menu_invalid",
+        reason: menuPricing.error || "store_menu_empty",
+        storeId: input.storeId
+      };
+    }
+    const tierValidation = validateDiscountTierConfiguration({
+      tiers,
+      maximumCups: tiers.at(-1)?.targetCups,
+      minimumSellableUnitPrice: menuPricing.minimumSellableUnitPrice
+    });
+    if (!tierValidation.valid) return tierValidation;
+    tiers = tierValidation.tiers;
+
     database.exec("BEGIN;");
+    transactionStarted = true;
     database.prepare(`
       INSERT INTO group_buy_activities (
         id,
@@ -386,14 +416,19 @@ function createGroupBuyActivity(input) {
       `audit-log-${randomUUID()}`,
       input.createdByUserId,
       activityId,
-      JSON.stringify({ idempotencyKey }),
+      JSON.stringify({
+        idempotencyKey,
+        minimumSellableUnitPrice: menuPricing.minimumSellableUnitPrice,
+        discountRanges: tierValidation.ranges
+      }),
       now
     );
 
     database.exec("COMMIT;");
+    transactionStarted = false;
     return listGroupBuyActivities().find((activity) => activity.id === activityId);
   } catch (error) {
-    database.exec("ROLLBACK;");
+    if (transactionStarted) database.exec("ROLLBACK;");
     throw error;
   } finally {
     database.close();
@@ -820,7 +855,12 @@ function createGroupBuySettlementPlan(activityId, input = {}) {
         authorization.provider AS payment_provider,
         authorization.provider_authorization_id,
         authorization.authorized_amount,
-        authorization.status AS payment_authorization_status
+        authorization.status AS payment_authorization_status,
+        (
+          SELECT MIN(unit_price_snapshot)
+          FROM order_items
+          WHERE order_id = orders.id
+        ) AS minimum_unit_price
       FROM orders
       LEFT JOIN payment_authorizations authorization
         ON authorization.id = (
@@ -839,11 +879,31 @@ function createGroupBuySettlementPlan(activityId, input = {}) {
     `).all(activityId);
 
     const authorizedCups = orderRows.reduce((sum, order) => sum + order.total_cups, 0);
-    const appliedTier = tiers
-      .filter((tier) => authorizedCups >= tier.target_cups)
-      .at(-1) || null;
+    const discountSummary = calculateGroupBuyDiscountSummary(tiers, authorizedCups);
+    const appliedTier = tiers.find((tier) => tier.id === discountSummary.currentTierId) || null;
     const outcome = appliedTier ? "qualified" : "failed";
-    const orderDiscounts = calculateOrderDiscountAllocations(orderRows, appliedTier, authorizedCups);
+    const discountPerCup = discountSummary.estimatedDiscountPerCup;
+    const discountIssues = appliedTier
+      ? orderRows
+          .filter((order) => !Number.isInteger(Number(order.minimum_unit_price))
+            || Number(order.minimum_unit_price) < discountPerCup)
+          .map((order) => ({
+            orderId: order.id,
+            minimumUnitPrice: Number(order.minimum_unit_price),
+            discountPerCup
+          }))
+      : [];
+    if (discountIssues.length > 0) {
+      return {
+        error: "settlement_discount_conflict",
+        reason: "order_unit_price_below_discount_per_cup",
+        activityId,
+        authorizedCups,
+        discountPerCup,
+        issues: discountIssues
+      };
+    }
+    const orderDiscounts = calculateOrderDiscountAllocations(orderRows, discountPerCup);
     const settlementOrders = orderRows.map((order) => mapSettlementOrder(order, {
       outcome,
       appliedTier,
@@ -911,7 +971,11 @@ function createGroupBuySettlementPlan(activityId, input = {}) {
         force,
         authorizedCups,
         outcome,
-        appliedTierId: appliedTier?.id || null
+        appliedTierId: appliedTier?.id || null,
+        discountPerCup,
+        allocatedDiscountAmount: discountSummary.estimatedAllocatedDiscountAmount,
+        undistributedDiscountAmount: discountSummary.estimatedUndistributedDiscountAmount,
+        discountFunder: "merchant"
       }),
       now
     );
@@ -924,6 +988,10 @@ function createGroupBuySettlementPlan(activityId, input = {}) {
       outcome,
       authorizedCups,
       appliedTier: appliedTier ? mapSettlementTier(appliedTier) : null,
+      discountPerCup,
+      allocatedDiscountAmount: discountSummary.estimatedAllocatedDiscountAmount,
+      undistributedDiscountAmount: discountSummary.estimatedUndistributedDiscountAmount,
+      discountFunder: "merchant",
       capturedOrderCount,
       orders: settlementOrders
     };
@@ -1363,6 +1431,13 @@ function saveMerchantMenuItem(input) {
       }
     }
 
+    const discountValidation = validateActiveStoreDiscountPricing(database, input.storeId);
+    if (!discountValidation.valid) {
+      database.exec("ROLLBACK;");
+      transactionStarted = false;
+      return discountValidation;
+    }
+
     database.prepare(`
       INSERT INTO audit_logs (
         id, actor_user_id, action_type, resource_type, resource_id, metadata_json, created_at
@@ -1419,6 +1494,13 @@ function createOrder(input) {
         items: toAuthoritativeOrderItems(items)
       };
     }
+
+    const discountValidation = validateOrderItemsForActivityDiscount(
+      database,
+      activity.id,
+      items
+    );
+    if (!discountValidation.valid) return discountValidation;
 
     const user = database.prepare(`
       SELECT id
@@ -1650,6 +1732,13 @@ function updatePendingOrder(input) {
         items: toAuthoritativeOrderItems(items)
       };
     }
+
+    const discountValidation = validateOrderItemsForActivityDiscount(
+      database,
+      activity.id,
+      items
+    );
+    if (!discountValidation.valid) return discountValidation;
 
     const authorizedCups = database.prepare(`
       SELECT COALESCE(SUM(total_cups), 0) AS cups
@@ -1889,6 +1978,13 @@ function createOrderRevision(input) {
         items: toAuthoritativeOrderItems(items)
       };
     }
+
+    const discountValidation = validateOrderItemsForActivityDiscount(
+      database,
+      order.activity_id,
+      items
+    );
+    if (!discountValidation.valid) return discountValidation;
 
     const lockMinutes = Number(order.withdrawal_lock_minutes || 30);
     const deadlineTime = Date.parse(order.deadline_at);
@@ -4784,24 +4880,16 @@ function recordLinePayCaptureFailureInDatabase(input) {
 }
 
 function normalizeTiers(tiers) {
-  const normalized = Array.isArray(tiers)
+  const source = Array.isArray(tiers) && tiers.length > 0
     ? tiers
-        .map((tier) => ({
-          targetCups: Number(tier.targetCups ?? tier.cups),
-          discountAmount: Number(tier.discountAmount)
-        }))
-        .filter((tier) => Number.isFinite(tier.targetCups)
-          && Number.isFinite(tier.discountAmount)
-          && tier.targetCups > 0
-          && tier.discountAmount >= 0)
-        .sort((left, right) => left.targetCups - right.targetCups)
-    : [];
+    : [{ targetCups: 20, discountAmount: 200 }];
 
-  if (normalized.length === 0) {
-    return [{ targetCups: 20, discountAmount: 200 }];
-  }
-
-  return normalized;
+  return source
+    .map((tier) => ({
+      targetCups: Number(tier.targetCups ?? tier.cups),
+      discountAmount: Number(tier.discountAmount)
+    }))
+    .sort((left, right) => left.targetCups - right.targetCups);
 }
 
 function normalizePositiveInteger(value, fallback) {
@@ -5406,6 +5494,8 @@ function mapPaymentRefund(row) {
 }
 
 function mapActivitySettlement(row) {
+  const discountPerCup = calculateDiscountPerCup(row.discount_amount, row.authorized_cups);
+  const allocatedDiscountAmount = discountPerCup * Number(row.authorized_cups || 0);
   return {
     id: row.id,
     activityId: row.activity_id,
@@ -5413,6 +5503,13 @@ function mapActivitySettlement(row) {
     authorizedCups: row.authorized_cups,
     appliedTierId: row.applied_tier_id,
     discountAmount: row.discount_amount,
+    discountPerCup,
+    allocatedDiscountAmount,
+    undistributedDiscountAmount: Math.max(
+      Number(row.discount_amount || 0) - allocatedDiscountAmount,
+      0
+    ),
+    discountFunder: "merchant",
     settledAt: row.settled_at,
     reason: row.reason
   };
@@ -5472,6 +5569,7 @@ function mapSettlementOrder(row, context) {
     fallbackPurchasePreference: row.fallback_purchase_preference,
     totalCups: row.total_cups,
     originalAmount: row.original_amount,
+    discountAmount: orderDiscount,
     authorizedAmount: row.authorized_amount,
     finalAmount,
     captureAmount: finalAmount,
@@ -5480,31 +5578,30 @@ function mapSettlementOrder(row, context) {
   };
 }
 
-function calculateOrderDiscountAllocations(orderRows, tier, authorizedCups) {
+function calculateOrderDiscountAllocations(orderRows, discountPerCup) {
   const allocations = new Map();
-  if (!tier || !Number.isFinite(authorizedCups) || authorizedCups <= 0) {
+  const normalizedDiscountPerCup = Number(discountPerCup);
+  if (!Number.isInteger(normalizedDiscountPerCup) || normalizedDiscountPerCup <= 0) {
     return allocations;
   }
 
-  const totalOriginalAmount = orderRows.reduce((sum, order) => sum + order.original_amount, 0);
-  const totalDiscount = Math.min(Number(tier.discount_amount || 0), totalOriginalAmount);
-  const baseDiscountPerCup = Math.floor(totalDiscount / authorizedCups);
-
   orderRows.forEach((order) => {
-    const orderDiscount = Math.min(
-      order.original_amount,
-      baseDiscountPerCup * order.total_cups
-    );
-    allocations.set(order.id, orderDiscount);
+    allocations.set(order.id, normalizedDiscountPerCup * order.total_cups);
   });
 
   return allocations;
 }
 
 function calculateDiscountedFinalAmount(order, orderDiscount) {
-  const normalizedDiscount = Math.max(Number(orderDiscount || 0), 0);
-  const cappedDiscount = Math.min(order.original_amount, normalizedDiscount);
-  return Math.max(order.original_amount - cappedDiscount, 0);
+  const normalizedDiscount = Number(orderDiscount);
+  if (
+    !Number.isInteger(normalizedDiscount)
+    || normalizedDiscount < 0
+    || normalizedDiscount > order.original_amount
+  ) {
+    throw new Error(`Invalid order discount allocation for order ${order.id}`);
+  }
+  return order.original_amount - normalizedDiscount;
 }
 
 function extractLinePayAuthorizationExpiresAt(providerPayload) {

@@ -1,12 +1,15 @@
 import { Pressable, StyleSheet, Text, View } from "react-native";
+import { ActivitySyncNotice } from "../components/ActivitySyncNotice";
 import { MobileScreen, Section } from "../components/MobileScreen";
+import { DiscountSummaryCard } from "../components/DiscountSummaryCard";
 import { customerUsers } from "../mock/customerUsers";
 import { stores } from "../mock/stores";
 import { getStoreById } from "../utils/calculations";
 import { getGroupBuyActivityProgress } from "../utils/groupBuyActivityProgress";
 
-export function NearbyGroupBuyActivitiesScreen({ navigation, appState, memberAction, selectedCustomerId }) {
+export function NearbyGroupBuyActivitiesScreen({ navigation, appState, actions, memberAction, selectedCustomerId }) {
   const { groupBuyActivities, orders } = appState;
+  const activitySyncStatus = appState.groupBuyActivitySyncStatus ?? "idle";
   const currentCustomer = customerUsers.find((user) => user.id === selectedCustomerId) ?? customerUsers[0];
   const recruitingGroupBuyActivities = groupBuyActivities.filter(isVisibleRecruitingGroupBuyActivity);
   const joinedGroupBuyActivityIds = new Set(
@@ -35,6 +38,11 @@ export function NearbyGroupBuyActivitiesScreen({ navigation, appState, memberAct
         </View>
       </View>
 
+      <ActivitySyncNotice
+        status={activitySyncStatus}
+        onRetry={() => actions.syncGroupBuyActivities().catch(() => {})}
+      />
+
       <View style={styles.sectionHeader}>
         <Text style={styles.sectionTitle}>進行中的團購</Text>
         {activeGroupBuyActivity ? (
@@ -55,7 +63,7 @@ export function NearbyGroupBuyActivitiesScreen({ navigation, appState, memberAct
             <View style={styles.cardHeader}>
               <View style={styles.cardTitleGroup}>
                 <Text style={styles.groupBuyActivityTitle}>{activeGroupBuyActivity.title}</Text>
-                <Text style={styles.deadline}>剩餘 {activeGroupBuyActivity.remainingTimeText}</Text>
+                <Text style={styles.deadline}>{activeGroupBuyActivity.remainingTimeText}</Text>
               </View>
               <Text style={styles.cupCount}>
                 {activeProgress.currentCups} / {activeProgress.nextTarget}
@@ -69,6 +77,7 @@ export function NearbyGroupBuyActivitiesScreen({ navigation, appState, memberAct
             <View style={styles.progressTrack}>
               <View style={[styles.progressFill, { width: `${activeProgress.progressPercent}%` }]} />
             </View>
+            <DiscountSummaryCard compact groupBuyActivity={activeGroupBuyActivity} />
             <Text style={styles.storeLine}>{activeStore?.name} · {activeStore?.distanceText}</Text>
           </View>
         </Pressable>

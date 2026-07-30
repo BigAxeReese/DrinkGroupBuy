@@ -178,7 +178,7 @@ PostgreSQL draft 另有 `phone_verified_at`、`email_verified_at`、`last_login_
 | 1   | `id`              | 優惠門檻編號 | TEXT    | PK              | 建議使用 `tier_` 加唯一後綴                                  | `tier_001`     |
 | 2   | `activity_id`     | 團購活動編號 | TEXT    | FK, UNIQUE pair | References `group_buy_activities(id)`；與 `target_cups` 唯一 | `activity_001` |
 | 3   | `target_cups`     | 目標杯數     | INTEGER | UNIQUE pair     | `> 0`                                                        | `20`           |
-| 4   | `discount_amount` | 總折扣金額   | INTEGER |                 | `>= 0`，以 NTD 整數保存；結算時平均分攤到有效杯數，未整除餘額作維運補貼 | `200`          |
+| 4   | `discount_amount` | 總折扣金額   | INTEGER |                 | `>= 0`，以 NTD 整數保存；每杯折扣為 `floor(discount_amount / 有效授權杯數)`，商家出資優惠的未分配尾差退回商家；應用層須驗證可達杯數區間內每杯至少折 1 元且不高於最低可售單杯權威金額 | `200`          |
 | 5   | `sort_order`      | 排序         | INTEGER |                 | 數字越小越前面                                               | `1`            |
 
 ## `activity_notices`
@@ -391,6 +391,8 @@ PostgreSQL draft 另有 `phone_verified_at`、`email_verified_at`、`last_login_
 
 ## `activity_settlements`
 
+注意：第 7 至 11 項是 PostgreSQL `003` migration draft 欄位；目前 SQLite runtime 尚未加入。
+
 | No. | Field name        | 中文名稱         | Type    | Key        | 規則 / 格式 / 範圍                    | Example                     |
 | --- | ----------------- | ---------------- | ------- | ---------- | ------------------------------------- | --------------------------- |
 | 1   | `id`              | 活動結算編號     | TEXT    | PK         | 建議使用 `settlement_` 加唯一後綴     | `settlement_001`            |
@@ -399,8 +401,13 @@ PostgreSQL draft 另有 `phone_verified_at`、`email_verified_at`、`last_login_
 | 4   | `authorized_cups` | 預授權杯數       | INTEGER |            | `>= 0`；結算時的權威杯數              | `25`                        |
 | 5   | `applied_tier_id` | 適用優惠門檻編號 | TEXT    | FK         | 未達標或取消時可為 NULL               | `tier_002`                  |
 | 6   | `discount_amount` | 適用總折扣金額   | INTEGER |            | `>= 0`；保存結算時套用級距的總折扣金額 | `300`                       |
-| 7   | `settled_at`      | 結算時間         | TEXT    |            | ISO datetime string                   | `2026-06-25T15:30:00+08:00` |
-| 8   | `reason`          | 結算原因         | TEXT    |            | 可為 NULL                             | `deadline_reached`          |
+| 7   | `discount_per_cup` | 每杯實際折扣 | INTEGER | | `>= 0`；`floor(discount_amount / authorized_cups)` | `12` |
+| 8   | `allocated_discount_amount` | 實際分配折扣總額 | INTEGER | | 等於每杯折扣乘以有效授權杯數 | `300` |
+| 9   | `undistributed_discount_amount` | 未分配尾差 | INTEGER | | 與實際分配合計必須等於總折扣 | `0` |
+| 10  | `discount_funder` | 優惠出資方 | TEXT | | `merchant` 或 `platform` | `merchant` |
+| 11  | `calculation_version` | 折扣計算版本 | TEXT | | 第一版為 `floor_per_cup_v1` | `floor_per_cup_v1` |
+| 12  | `settled_at`      | 結算時間         | TEXT    |            | ISO datetime string                   | `2026-06-25T15:30:00+08:00` |
+| 13  | `reason`          | 結算原因         | TEXT    |            | 可為 NULL                             | `deadline_reached`          |
 
 ## `pickup_credentials`
 

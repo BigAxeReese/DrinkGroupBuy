@@ -93,6 +93,67 @@ function getStoredArray(storedState, key, legacyKey, fallback) {
   return fallback;
 }
 
+function normalizeBackendGroupBuyActivity(activity, existingActivity = {}) {
+  const tiers = (activity?.tiers ?? existingActivity.tiers ?? []).map((tier) => ({
+    id: tier.id ?? null,
+    cups: Number(tier.targetCups ?? tier.cups),
+    targetCups: Number(tier.targetCups ?? tier.cups),
+    discountAmount: Number(tier.discountAmount),
+    sortOrder: tier.sortOrder
+  }));
+  const currentCups = Number(
+    activity?.authorizedCups ?? activity?.currentCups ?? existingActivity.currentCups ?? 0
+  );
+  const deadlineAt = activity?.deadlineAt ?? existingActivity.deadlineAt;
+  const minutesUntilDeadline = getMinutesUntilDeadline({ deadlineAt });
+  const status = activity?.status ?? existingActivity.status ?? "recruiting";
+  const pickupStartAt = activity?.pickupStartAt ?? existingActivity.pickupStartAt;
+  const pickupEndAt = activity?.pickupEndAt ?? existingActivity.pickupEndAt;
+
+  return {
+    ...existingActivity,
+    id: activity?.id ?? existingActivity.id,
+    storeId: activity?.storeId ?? existingActivity.storeId,
+    store: activity?.store ?? existingActivity.store,
+    storeName: activity?.store?.name ?? existingActivity.storeName,
+    title: activity?.title ?? existingActivity.title,
+    status,
+    rawStatus: activity?.rawStatus ?? existingActivity.rawStatus ?? status,
+    startTime: activity?.startAt ?? existingActivity.startTime,
+    deadlineAt,
+    endTime: deadlineAt ? formatDeadlineLabel(deadlineAt) : existingActivity.endTime,
+    pickupStartAt,
+    pickupEndAt,
+    pickupTime: pickupStartAt && pickupEndAt
+      ? `${pickupStartAt} - ${pickupEndAt}`
+      : existingActivity.pickupTime,
+    maximumCups: activity?.maximumCups ?? existingActivity.maximumCups ?? tiers[tiers.length - 1]?.targetCups ?? 0,
+    targetCups: activity?.targetCups ?? existingActivity.targetCups ?? tiers[0]?.targetCups ?? 0,
+    currentCups,
+    authorizedCups: currentCups,
+    participantCount: Number(activity?.participantCount ?? existingActivity.participantCount ?? 0),
+    currentTierId: activity?.currentTierId ?? null,
+    currentTierTargetCups: activity?.currentTierTargetCups ?? null,
+    currentTierDiscountAmount: Number(activity?.currentTierDiscountAmount ?? 0),
+    estimatedDiscountPerCup: Number(activity?.estimatedDiscountPerCup ?? 0),
+    estimatedAllocatedDiscountAmount: Number(activity?.estimatedAllocatedDiscountAmount ?? 0),
+    estimatedUndistributedDiscountAmount: Number(activity?.estimatedUndistributedDiscountAmount ?? 0),
+    nextTierTargetCups: activity?.nextTierTargetCups ?? null,
+    cupsToNextTier: Number(activity?.cupsToNextTier ?? 0),
+    discountSummaryAuthorizedCups: currentCups,
+    withdrawalLockMinutes: activity?.withdrawalLockMinutes ?? existingActivity.withdrawalLockMinutes ?? 30,
+    cancellationReason: activity?.cancellationReason ?? existingActivity.cancellationReason ?? null,
+    minutesUntilDeadline,
+    remainingTimeText: minutesUntilDeadline == null
+      ? existingActivity.remainingTimeText
+      : minutesUntilDeadline <= 0 ? "已截止" : `剩 ${minutesUntilDeadline} 分鐘`,
+    canJoin: ["recruiting", "confirmed"].includes(status)
+      && (minutesUntilDeadline == null || minutesUntilDeadline > 0)
+      && !activity?.cancellationReason,
+    tiers,
+    notices: activity?.notices ?? existingActivity.notices ?? []
+  };
+}
 function normalizeStoredOrder(order) {
   if (!order || typeof order !== "object") return order;
   return {
@@ -272,6 +333,7 @@ export function AppNavigator() {
   const [selectedCustomerId, setSelectedCustomerId] = useState("customer-yinji");
   const [selectedMerchantStoreId, setSelectedMerchantStoreId] = useState("store-001");
   const [groupBuyActivities, setGroupBuyActivities] = useState(initialGroupBuyActivities);
+  const [groupBuyActivitySyncStatus, setGroupBuyActivitySyncStatus] = useState("idle");
   const [orders, setOrders] = useState(initialOrders);
   const [paymentAuthorizations, setPaymentAuthorizations] = useState(initialPaymentAuthorizations);
   // Prototype only, not final API contract. Cart contents are saved locally when available.
@@ -383,6 +445,23 @@ export function AppNavigator() {
   }), []);
 
   const actions = useMemo(() => ({
+    async syncGroupBuyActivities() {
+      setGroupBuyActivitySyncStatus("loading");
+      try {
+        const backendActivities = await listGroupBuyActivities();
+        setGroupBuyActivities((current) => backendActivities.map((activity) => (
+          normalizeBackendGroupBuyActivity(
+            activity,
+            current.find((candidate) => candidate.id === activity.id)
+          )
+        )));
+        setGroupBuyActivitySyncStatus("ready");
+        return backendActivities;
+      } catch (error) {
+        setGroupBuyActivitySyncStatus("error");
+        throw error;
+      }
+    },
     addToCart(cartItem) {
       setCartItems((items) => [
         ...items,
@@ -873,21 +952,7 @@ export function AppNavigator() {
       if (backendActivity) {
         setGroupBuyActivities((items) => items.map((groupBuyActivity) => (
           groupBuyActivity.id === backendActivity.id
-            ? {
-                ...groupBuyActivity,
-                status: backendActivity.status,
-                currentCups: backendActivity.authorizedCups ?? backendActivity.currentCups ?? groupBuyActivity.currentCups,
-                participantCount: backendActivity.participantCount ?? groupBuyActivity.participantCount,
-                targetCups: backendActivity.targetCups ?? groupBuyActivity.targetCups,
-                maximumCups: backendActivity.maximumCups ?? groupBuyActivity.maximumCups,
-                tiers: backendActivity.tiers?.map((tier) => ({
-                  id: tier.id,
-                  cups: tier.targetCups ?? tier.cups,
-                  targetCups: tier.targetCups ?? tier.cups,
-                  discountAmount: tier.discountAmount,
-                  sortOrder: tier.sortOrder
-                })) ?? groupBuyActivity.tiers
-              }
+            ? normalizeBackendGroupBuyActivity(backendActivity, groupBuyActivity)
             : groupBuyActivity
         )));
       }
@@ -1029,31 +1094,11 @@ export function AppNavigator() {
       return groupBuyActivityId;
     },
     addMerchantGroupBuyActivityFromApi(activity) {
-      const tiers = activity.tiers.map((tier) => ({
-        cups: tier.targetCups,
-        discountAmount: tier.discountAmount
-      }));
-      const newGroupBuyActivity = {
-        id: activity.id,
-        storeId: activity.storeId,
-        title: activity.title,
-        status: activity.status,
-        currentCups: 0,
-        targetCups: tiers[0]?.cups ?? 20,
-        maximumCups: activity.maximumCups ?? tiers[tiers.length - 1]?.cups ?? 20,
-        participantCount: 0,
-        remainingTimeText: "剛建立",
-        minutesUntilDeadline: getMinutesUntilDeadline({ deadlineAt: activity.deadlineAt }) ?? 120,
-        withdrawalLockMinutes: activity.withdrawalLockMinutes ?? 30,
-        startTime: activity.startAt,
-        deadlineAt: activity.deadlineAt,
-        endTime: formatDeadlineLabel(activity.deadlineAt),
-        pickupTime: `${activity.pickupStartAt} - ${activity.pickupEndAt}`,
-        canJoin: true,
-        tiers,
-        notices: ["由 backend API 建立，並同步到 mobile prototype state。"]
-      };
-      setGroupBuyActivities((items) => [newGroupBuyActivity, ...items.filter((item) => item.id !== newGroupBuyActivity.id)]);
+      const newGroupBuyActivity = normalizeBackendGroupBuyActivity(activity);
+      setGroupBuyActivities((items) => [
+        newGroupBuyActivity,
+        ...items.filter((item) => item.id !== newGroupBuyActivity.id)
+      ]);
       return newGroupBuyActivity.id;
     },
     cancelGroupBuyActivity(groupBuyActivityId, cancellationReason = "管理員刪除團購") {
@@ -1109,14 +1154,15 @@ export function AppNavigator() {
   useEffect(() => {
     if (!storageLoaded || !currentRole) return undefined;
 
-    function syncActiveOrders() {
+    function syncBackendState() {
+      actionsRef.current.syncGroupBuyActivities().catch(() => {});
       if (currentRole === "customer") actionsRef.current.syncCustomerOrderList("active").catch(() => {});
       if (currentRole === "merchant") actionsRef.current.syncMerchantOrderList("active").catch(() => {});
     }
 
-    syncActiveOrders();
+    syncBackendState();
     const subscription = AppState.addEventListener("change", (state) => {
-      if (state === "active") syncActiveOrders();
+      if (state === "active") syncBackendState();
     });
     return () => subscription.remove();
   }, [currentRole, selectedCustomerId, selectedMerchantStoreId, storageLoaded]);
@@ -1153,7 +1199,13 @@ export function AppNavigator() {
     return () => subscription?.remove?.();
   }, [actions, navigation]);
 
-  const appState = { groupBuyActivities, orders, paymentAuthorizations, cartItems };
+  const appState = {
+    groupBuyActivities,
+    groupBuyActivitySyncStatus,
+    orders,
+    paymentAuthorizations,
+    cartItems
+  };
   const screenProps = {
     navigation,
     route: current,

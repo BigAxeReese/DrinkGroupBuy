@@ -5,6 +5,10 @@ import { PrimaryButton } from "../components/PrimaryButton";
 import { stores } from "../mock/stores";
 import { createGroupBuyActivity } from "../utils/apiClient";
 import { createDeadlineIsoFromInput, getDefaultDeadlineInput } from "../utils/deadlineTime";
+import {
+  mapGroupBuyActivityCreateError,
+  validateGroupBuyActivityTierDrafts
+} from "../utils/groupBuyActivityErrors";
 
 const NativeDateTimePicker = Platform.OS === "web"
   ? null
@@ -30,6 +34,7 @@ export function MerchantGroupBuyActivityCreateScreen({ navigation, actions, memb
   const [submitMessage, setSubmitMessage] = useState("");
   const [submitMessageKind, setSubmitMessageKind] = useState("success");
   const [submitting, setSubmitting] = useState(false);
+  const [tierErrors, setTierErrors] = useState({});
   const deadlineLimit = getDeadlineLimit();
 
   const handleDeadlineChange = (nextDate) => {
@@ -42,6 +47,12 @@ export function MerchantGroupBuyActivityCreateScreen({ navigation, actions, memb
     setTiers((items) => items.map((tier) => (
       tier.id === tierId ? { ...tier, [field]: value } : tier
     )));
+    setTierErrors((current) => {
+      if (!current[tierId]) return current;
+      const next = { ...current };
+      delete next[tierId];
+      return next;
+    });
   };
 
   const addTier = () => {
@@ -60,6 +71,12 @@ export function MerchantGroupBuyActivityCreateScreen({ navigation, actions, memb
 
   const removeTier = (tierId) => {
     setTiers((items) => items.filter((tier) => tier.id !== tierId));
+    setTierErrors((current) => {
+      if (!current[tierId]) return current;
+      const next = { ...current };
+      delete next[tierId];
+      return next;
+    });
   };
 
   async function handleCreateGroupBuyActivity() {
@@ -67,6 +84,16 @@ export function MerchantGroupBuyActivityCreateScreen({ navigation, actions, memb
     setSubmitting(true);
     setSubmitMessage("");
     setSubmitMessageKind("success");
+    setTierErrors({});
+
+    const tierValidation = validateGroupBuyActivityTierDrafts(tiers);
+    if (!tierValidation.valid) {
+      setTierErrors(tierValidation.tierErrors);
+      setSubmitMessageKind("error");
+      setSubmitMessage(tierValidation.message);
+      setSubmitting(false);
+      return;
+    }
 
     const startDate = new Date();
     const deadlineError = getDeadlineValidationError(startDate, deadlineDate);
@@ -110,8 +137,10 @@ export function MerchantGroupBuyActivityCreateScreen({ navigation, actions, memb
       setSubmitMessage("活動已建立，並寫入 backend SQLite。");
     } catch (error) {
       if (error.status) {
+        const mappedError = mapGroupBuyActivityCreateError(error, tiers);
+        setTierErrors(mappedError.tierErrors);
         setSubmitMessageKind("error");
-        setSubmitMessage(`建立失敗：${error.message}`);
+        setSubmitMessage(mappedError.message);
         return;
       }
 
@@ -207,6 +236,9 @@ export function MerchantGroupBuyActivityCreateScreen({ navigation, actions, memb
             <Text style={styles.tierSummary}>
               滿 {tier.cups || "0"} 杯折 {tier.discountAmount || "0"} 元
             </Text>
+            {tierErrors[tier.id] ? (
+              <Text accessibilityRole="alert" style={styles.tierError}>{tierErrors[tier.id]}</Text>
+            ) : null}
           </View>
         ))}
         <Pressable
@@ -473,6 +505,12 @@ const styles = StyleSheet.create({
     color: "#1d4ed8",
     fontSize: 12,
     fontWeight: "800"
+  },
+  tierError: {
+    color: "#b91c1c",
+    fontSize: 12,
+    fontWeight: "800",
+    lineHeight: 18
   },
   addTierButton: {
     minHeight: 44,

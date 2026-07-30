@@ -47,6 +47,7 @@
 - `payment_authorizations.provider` 目前支援 `line_pay` 與本機測試用 `mock_line_pay`；`mock_line_pay` 只用於開發 smoke 測試，不代表正式金流。
 - `payment_authorizations.payment_flow` 用來區分一般 `authorization` 與請款失敗後的 `direct_repayment`，避免重新付款被誤當成新的預授權。
 - `payment_refunds` 用來保存已請款成功後的退款紀錄；尚未請款的預授權取消仍使用 `void`，不寫入退款表。
+- PostgreSQL `003` draft 會在 `activity_settlements` 保存 `discount_per_cup`、`allocated_discount_amount`、`undistributed_discount_amount`、`discount_funder`、`calculation_version`；SQLite runtime 尚未加入這些欄位。
 - `database/test/` 是舊 prototype fixture database，不應視為正式 schema 或目前 mobile 的權威資料來源。
 - 購物車與訂單客製化資料已朝 first normal form 調整：甜度、冰塊、加料與尺寸以 child rows 表示，不以 JSON array 當主要資料結構。
 - 活動容量目前由最高 `promotion_tiers.target_cups` 推導；除非未來明確新增獨立容量規則，`group_buy_activities.maximum_cups` 應與最高門檻一致。
@@ -66,6 +67,11 @@
 - 取貨憑證到期後，訂單移至歷史訂單；逾期未取不自動退款，店家不再負原飲品保管責任。
 - 若顧客修改已預授權訂單，採 replacement flow：舊預授權先保留，新預授權成功後才替換；新預授權失敗時，原訂單與原預授權維持有效。
 - 已扣款成功後若需要退費，需建立 `payment_refunds` 並保留 provider event 與 audit log；全額退款完成後，訂單付款狀態可更新為 `refunded`。
+- 商家第一階段只能提出退款申請，由營運／補救權限核准並執行；退款申請、實際 provider refund 與審核紀錄必須分開保存。
+- 每杯折扣為 `floor(級距總折扣 / 最終有效授權杯數)`；實際分配總額等於每杯折扣乘以杯數，未分配尾差由優惠出資方保留。現行商家出資優惠的尾差退回商家。
+- 每個級距的可達杯數區間必須保證每杯折扣至少 1 元；在門檻杯數時的每杯折扣不得高於店內最低可售單杯權威金額。招募中的菜單降價、客製化最低價差或上架動作若會破壞此條件，後端必須拒絕。
+- 顧客電話第一階段為選填並需採加密或等效保護，商家查詢不得取得完整號碼。
+- 帳號關閉後立即停用登入；非必要個資刪除或去識別化，仍有法定保存、會計、付款對帳或爭議處理需求的交易及稽核資料限制性保留。
 - 團購活動自動適用活動所屬店家目前 `menu_items.is_available = 1` 的全部飲品，不保存活動專屬適用飲品清單，也不新增 activity-menu item 關聯表。
 - 新選取與未送出的購物車以最新菜單為準；已送出的訂單保留品名、單價與客製化快照，不受後續菜單異動影響。
 - 已被訂單引用的飲品應以 `is_available = 0` 停售，不直接刪除，以保留交易追溯能力。
@@ -75,15 +81,17 @@
 | 範圍                    | 缺口或待決策項目                                                                                                      |
 | ----------------------- | --------------------------------------------------------------------------------------------------------------------- |
 | Order revision          | `order_revisions` 與 replacement authorization、Mobile 改單第一版已完成；仍缺完整歷史查詢 API 與歷史 UI。 |
-| Pricing snapshot        | 實際適用門檻、折扣分配與請款金額需要可重現，目前仍需補強欄位或 settlement 設計。                                      |
+| Pricing snapshot        | SQLite 已實作 tier 可達區間、最低單杯金額、菜單／訂單／結算重驗與每筆訂單折扣分配；既有 settlement 保存最終級距、有效杯數與級距總折扣，可推導每杯折扣／分配／尾差。仍需決定正式 PostgreSQL migration 是否增加專用快照與出資方欄位。 |
 | Activity deadline       | 24 小時限制與截止前 30 分鐘修改／退出鎖定已落到 API；SQLite 已用 operation lease 保護結算、取消、補付款與取餐狀態變更，正式 PostgreSQL 仍需改為 transaction／row lock 驗收。 |
-| Merchant acceptance     | `orders.merchant_acceptance_status` 是早期候選欄位；最新規則不需要店家逐筆確認接單，未來可考慮移除或固定為 accepted。 |
+| Merchant acceptance     | `orders.merchant_acceptance_status` 是早期候選欄位；最新規則不需要店家逐筆確認接單，應在正式 migration 中移除，不再維持重複狀態。 |
 | Pickup status           | Mobile 曾使用 `preparing`，目前 schema 沒有該值；應優先用 activity/order 狀態與 `pickup_status = ready` 表示。        |
 | Pickup credential expiry | 欄位、到期時間計算、單一 backend process 排程、狀態歷程、audit log、建立／驗證 API 與 App 第一版串接已實作；仍待完整 Android E2E。 |
 | Store/menu source       | Canonical dev schema／seed 為權威來源；`database/test/` 僅保留作 prototype fixture，不得回流為正式模型。 |
 | Menu authority          | 第一版已完成顧客／商家菜單 API、店家管理畫面、選擇上限、訂單品項驗證與後端價格重算；尚缺完整 Android E2E。 |
 | Authentication          | Password 欄位屬於開發相容；正式方向以 Firebase UID 對應 backend user 與角色權限。                                     |
 | Notification            | 尚未有通知 delivery 或 notification event 資料表。                                                                    |
+| Refund request          | 尚未有商家退款申請、營運審核人員、原因、申請金額、審核結果與 provider refund 關聯資料表。 |
+| Account closure         | 尚未有帳號關閉時間、登入停用與個資去識別化流程；不可用直接刪除 `users` 取代完整關閉流程。 |
 | Migrations              | 目前 SQLite schema 可重建，尚未有正式 production migration history。                                                  |
 | Test fixture            | `database/test/` 仍有 JSON 欄位供 prototype 匯出，不是權威 normalized schema。                                        |
 

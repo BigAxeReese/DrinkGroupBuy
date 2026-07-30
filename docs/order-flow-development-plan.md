@@ -389,10 +389,15 @@ Body 建議包含：
 | --- | --- | --- |
 | U-13 | Revision 是否要顯示完整每次修改歷史？ | 完成基本列表後，再做 order history API |
 | U-14 | 歷史訂單保存多久？ | 正式隱私與資料保留政策階段 |
-| U-15 | 通知使用 push、email 或 App inbox？ | 訂單／取貨權威狀態穩定後 |
-| U-16 | 每杯折扣顯示如何對齊最終總折扣分攤？ | 商業顯示與結算 UX 收斂階段 |
-| U-17 | 正式退款 UI 給商家或只給營運人員？ | 退款與客服流程設計階段 |
 | U-18 | 何時切換 PostgreSQL？ | 列表與狀態契約穩定、進入多執行個體前 |
+
+### E. 2026-07-30 已確認
+
+- 通知第一階段採可持久化的 App inbox／delivery 狀態，手機 push 後續整合。
+- 每杯預估與最終折扣均使用 `floor(級距總折扣 / 有效授權杯數)`；商家出資優惠的未分配尾差退回商家。
+- 折扣級距必須在所有可達杯數下維持每杯至少 1 元，且不得高於最低可售單杯權威金額；活動發布、菜單降價／上架、訂單寫入、重新授權與結算都由 Backend 重驗。
+- 第一階段由商家提出退款申請，營運／補救權限確認後執行，商家不直接呼叫 provider refund。
+- 使用者可申請關閉帳號；登入立即停用，非必要個資刪除或去識別化，必要交易與稽核紀錄限制性保留。
 
 ## 五、風險排序
 
@@ -429,7 +434,7 @@ Body 建議包含：
 4. 將 terminal job 的 `alert_required` 接到正式告警通知管道。
 5. 補建立訂單與付款 request 的通用 idempotency 紀錄。
 
-這個切片仍不包含正式通知系統、正式退款 UI 與 QR Code。Request status reconciliation 已依 LINE Pay Online API v3 官方狀態語意實作；Android 實機、Firebase 正式設定、LINE Pay sandbox 人工 E2E 與多 process 驗證仍是發布前必要工作。
+這個切片仍不包含正式通知系統、商家退款申請／營運審核 UI 與 QR Code。Request status reconciliation 已依 LINE Pay Online API v3 官方狀態語意實作；Android 實機、Firebase 正式設定、LINE Pay sandbox 人工 E2E 與多 process 驗證仍是發布前必要工作。
 
 ## 七、預計主要修改檔案
 

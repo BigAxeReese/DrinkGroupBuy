@@ -196,19 +196,21 @@ npm run payment-reliability:multiprocess
 
 ## PostgreSQL runtime 唯讀切片
 
-大部分 HTTP backend 與 `backend/db.js` 仍使用 SQLite；顧客公開菜單 `GET /api/stores/:storeId/menu` 與團購活動列表 `GET /api/group-buy-activities` 已可各自透過 repository 切換 SQLite 或 PostgreSQL，不會雙寫。商家菜單查詢／修改、團購活動寫入、訂單與付款仍固定使用 SQLite。
+大部分業務資料仍使用 SQLite；公開菜單、團購活動列表，以及登入／bearer token 的使用者角色與門市權限解析，已可各自透過 repository 切換 SQLite 或 PostgreSQL，不會雙寫。商家菜單資料、團購活動寫入、訂單與付款仍固定使用 SQLite。
 
 - `backend/database/sqliteAdapter.js`
 - `backend/database/postgresAdapter.js`
 - `backend/database/index.js`
 - `backend/database/repositories/storeMenuReadRepository.js`
 - `backend/database/repositories/groupBuyActivityReadRepository.js`
+- `backend/database/repositories/authProfileReadRepository.js`
 
 預設不改變目前行為：
 
 ```env
 STORE_MENU_READ_RUNTIME=sqlite
 GROUP_BUY_ACTIVITY_READ_RUNTIME=sqlite
+AUTH_PROFILE_READ_RUNTIME=sqlite
 ```
 
 已套用 PostgreSQL migrations／seed 並設定 `DATABASE_URL` 後，才可把個別唯讀切片切成：
@@ -216,6 +218,7 @@ GROUP_BUY_ACTIVITY_READ_RUNTIME=sqlite
 ```env
 STORE_MENU_READ_RUNTIME=postgres
 GROUP_BUY_ACTIVITY_READ_RUNTIME=postgres
+AUTH_PROFILE_READ_RUNTIME=postgres
 ```
 
 本機契約測試會驗證 SQLite 委派、adapter 與 PostgreSQL API 格式：
@@ -224,6 +227,7 @@ GROUP_BUY_ACTIVITY_READ_RUNTIME=postgres
 npm run database-adapter:smoke
 npm run store-menu-read:smoke
 npm run group-buy-activity-read:smoke
+npm run auth-profile-read:smoke
 ```
 
 設定本機 `DATABASE_URL` 並套用 PostgreSQL migrations 後，可執行：
@@ -231,10 +235,11 @@ npm run group-buy-activity-read:smoke
 ```powershell
 npm run postgres-runtime:smoke
 npm run group-buy-activity-postgres-http:smoke
+npm run auth-profile-postgres-http:smoke
 ```
-`group-buy-activity-postgres-http:smoke` 會建立只存在 PostgreSQL 的臨時活動，從 HTTP route 驗證來源後自動清除。
+兩個 `*-postgres-http:smoke` 會建立只存在 PostgreSQL 的臨時資料，從 HTTP route 驗證活動或登入／bearer token 的實際來源後自動清除。
 
-2026-07-30 已在本機 PostgreSQL 16 套用 migrations／seed，真實 runtime smoke、公開菜單與團購活動列表 HTTP source proof 均通過。開發服務限制為只監聽 `localhost`；兩個切片預設仍是 SQLite，其他 route 也仍使用 SQLite。
+2026-07-31 已在本機 PostgreSQL 16 驗證三個唯讀切片：公開菜單、團購活動列表、登入／角色／門市權限。開發服務限制為只監聽 `localhost`；三個切片預設仍是 SQLite，商家菜單資料、活動寫入、訂單與付款也仍使用 SQLite。PostgreSQL v1 不分店家內部權限等級，因此相容欄位 `permissionLevel` 回傳 `null`，授權邊界為 `merchant_users.store_id`。
 
 
 

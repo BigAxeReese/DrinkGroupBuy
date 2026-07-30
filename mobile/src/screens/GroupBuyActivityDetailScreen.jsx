@@ -1,13 +1,17 @@
 import { StyleSheet, Text, View } from "react-native";
+import { ActivitySyncNotice } from "../components/ActivitySyncNotice";
 import { MobileScreen, Section } from "../components/MobileScreen";
+import { DiscountSummaryCard } from "../components/DiscountSummaryCard";
 import { PrimaryButton } from "../components/PrimaryButton";
 import { ProgressSummary } from "../components/ProgressSummary";
 import { StatusBadge } from "../components/StatusBadge";
 import { stores } from "../mock/stores";
 import { getGroupBuyActivityById, getStoreById, formatCurrency, isWithdrawalLocked } from "../utils/calculations";
 
-export function GroupBuyActivityDetailScreen({ navigation, route, appState, memberAction }) {
+export function GroupBuyActivityDetailScreen({ navigation, route, appState, actions, memberAction }) {
   const groupBuyActivity = getGroupBuyActivityById(appState.groupBuyActivities, route.params?.groupBuyActivityId);
+  const activitySyncStatus = appState.groupBuyActivitySyncStatus ?? "idle";
+  const retryActivitySync = () => actions.syncGroupBuyActivities().catch(() => {});
   if (!groupBuyActivity) {
     return (
       <MobileScreen
@@ -15,6 +19,7 @@ export function GroupBuyActivityDetailScreen({ navigation, route, appState, memb
         onBack={() => navigation.back()}
         onMemberPress={memberAction}
       >
+        <ActivitySyncNotice status={activitySyncStatus} onRetry={retryActivitySync} />
         <Section title="目前沒有團購資料">
           <Text style={styles.meta}>團購已清空，或目前尚未有商家建立活動。</Text>
           <PrimaryButton label="返回首頁" variant="secondary" onPress={() => navigation.replace("nearby")} />
@@ -32,6 +37,7 @@ export function GroupBuyActivityDetailScreen({ navigation, route, appState, memb
       onBack={() => navigation.back()}
       onMemberPress={memberAction}
     >
+      <ActivitySyncNotice status={activitySyncStatus} onRetry={retryActivitySync} />
       <Section title="店家資訊">
         <View style={styles.rowBetween}>
           <View style={styles.flex}>
@@ -51,6 +57,7 @@ export function GroupBuyActivityDetailScreen({ navigation, route, appState, memb
           participantCount={groupBuyActivity.participantCount}
           remainingTimeText={groupBuyActivity.remainingTimeText}
         />
+        <DiscountSummaryCard groupBuyActivity={groupBuyActivity} />
         <Text style={styles.meta}>截止：{groupBuyActivity.endTime}</Text>
         <Text style={styles.meta}>取貨：{groupBuyActivity.pickupTime}</Text>
       </Section>

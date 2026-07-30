@@ -45,3 +45,69 @@ export function wouldExceedGroupBuyActivityCapacity(groupBuyActivity, additional
   if (!maximumCups) return false;
   return currentCups + Number(additionalCups ?? 0) > maximumCups;
 }
+
+export function getGroupBuyActivityDiscountInfo(groupBuyActivity) {
+  const currentCups = Math.max(Number(groupBuyActivity?.currentCups ?? 0), 0);
+  const tiers = (groupBuyActivity?.tiers ?? [])
+    .map((tier) => ({
+      id: tier.id ?? null,
+      targetCups: Number(tier.cups ?? tier.targetCups),
+      discountAmount: Number(tier.discountAmount)
+    }))
+    .filter((tier) => Number.isInteger(tier.targetCups)
+      && tier.targetCups > 0
+      && Number.isInteger(tier.discountAmount)
+      && tier.discountAmount >= 0)
+    .sort((left, right) => left.targetCups - right.targetCups);
+  const reachedTiers = tiers.filter((tier) => currentCups >= tier.targetCups);
+  const reachedTier = reachedTiers[reachedTiers.length - 1] ?? null;
+  const nextTier = tiers.find((tier) => currentCups < tier.targetCups) ?? null;
+  const hasCurrentBackendSummary = Number(groupBuyActivity?.discountSummaryAuthorizedCups) === currentCups;
+  const discountPerCup = hasCurrentBackendSummary
+    ? normalizeNonNegativeInteger(groupBuyActivity?.estimatedDiscountPerCup)
+    : reachedTier && currentCups > 0
+      ? Math.floor(reachedTier.discountAmount / currentCups)
+      : 0;
+  const allocatedDiscountAmount = hasCurrentBackendSummary
+    ? normalizeNonNegativeInteger(groupBuyActivity?.estimatedAllocatedDiscountAmount)
+    : discountPerCup * currentCups;
+  const undistributedDiscountAmount = hasCurrentBackendSummary
+    ? normalizeNonNegativeInteger(groupBuyActivity?.estimatedUndistributedDiscountAmount)
+    : reachedTier
+      ? Math.max(reachedTier.discountAmount - allocatedDiscountAmount, 0)
+      : 0;
+
+  return {
+    currentCups,
+    currentTierId: hasCurrentBackendSummary
+      ? groupBuyActivity?.currentTierId ?? reachedTier?.id ?? null
+      : reachedTier?.id ?? null,
+    currentTierTargetCups: hasCurrentBackendSummary
+      ? normalizeNullablePositiveInteger(groupBuyActivity?.currentTierTargetCups)
+      : reachedTier?.targetCups ?? null,
+    currentTierDiscountAmount: hasCurrentBackendSummary
+      ? normalizeNonNegativeInteger(groupBuyActivity?.currentTierDiscountAmount)
+      : reachedTier?.discountAmount ?? 0,
+    estimatedDiscountPerCup: discountPerCup,
+    estimatedAllocatedDiscountAmount: allocatedDiscountAmount,
+    estimatedUndistributedDiscountAmount: undistributedDiscountAmount,
+    nextTierTargetCups: hasCurrentBackendSummary
+      ? normalizeNullablePositiveInteger(groupBuyActivity?.nextTierTargetCups)
+      : nextTier?.targetCups ?? null,
+    cupsToNextTier: hasCurrentBackendSummary
+      ? normalizeNonNegativeInteger(groupBuyActivity?.cupsToNextTier)
+      : nextTier ? Math.max(nextTier.targetCups - currentCups, 0) : 0,
+    isQualified: Boolean(reachedTier),
+    isEstimated: ["recruiting", "confirmed"].includes(groupBuyActivity?.status)
+  };
+}
+
+function normalizeNonNegativeInteger(value) {
+  const normalized = Number(value);
+  return Number.isInteger(normalized) && normalized >= 0 ? normalized : 0;
+}
+
+function normalizeNullablePositiveInteger(value) {
+  const normalized = Number(value);
+  return Number.isInteger(normalized) && normalized > 0 ? normalized : null;
+}

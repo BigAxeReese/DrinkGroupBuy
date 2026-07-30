@@ -44,6 +44,11 @@ function initializeDatabase() {
     now,
     now
   );
+  database.prepare(`
+    INSERT INTO promotion_tiers (
+      id, activity_id, target_cups, discount_amount, sort_order
+    ) VALUES (\'menu-order-smoke-tier\', \'menu-order-smoke-activity\', 20, 200, 0)
+  `).run();
   database.close();
 }
 

@@ -228,7 +228,7 @@ PostgreSQL 方向：
 - Deadline settlement scheduler 已使用持久化工作、跨程序 lease claim／takeover、admin 警示查詢與結構化日誌；正式通知通道仍待實作。
 - LINE Pay capture 已在付款模組內部實作。
 - LINE Pay void 已在付款模組內部實作。
-- LINE Pay refund 已有後端開發 / 補救切片；仍缺正式退款操作 UI、退款失敗重試與正式 sandbox 人工端對端測試。
+- LINE Pay refund 已有後端開發 / 補救切片；正式規則為商家提出退款申請、營運／補救權限執行，仍缺申請與審核 UI、退款失敗重試及正式 sandbox 人工端對端測試。
 - Provider 狀態查詢、付款重試與 reconciliation。
 - Order replacement authorization 已有 SQLite revision tables；仍缺對外歷史查詢 API、UI 呈現與 PostgreSQL draft 同步。
 
@@ -249,6 +249,7 @@ PostgreSQL 方向：
 重要規則：
 
 - 團購截止後，系統計算 authorized cups 與適用 discount tier。
+- 每杯折扣使用 `floor(級距總折扣 / 有效授權杯數)`；最終結算保存每杯折扣、實際分配、尾差、出資方與計算版本。
 - 達標且完成 capture 後，符合條件的訂單進入製作流程。
 - 店家完成製作後，可標記可取餐；系統此時才顯示或產生取貨憑證或取貨代碼。
 - 顧客到店取餐時，店家核對取貨憑證或取貨代碼。
@@ -261,6 +262,7 @@ PostgreSQL 方向：
 PostgreSQL 方向：
 
 - 保留 `activity_settlements` 與 `pickup_credentials`。
+- `003_activity_settlement_discount_snapshot_postgres.sql` 為 settlement 增加不可變折扣快照與一致性 constraints。
 - 每個 activity 只能有一筆 settlement。
 - 每個 order 只能有一筆 pickup credential。
 

@@ -1,6 +1,8 @@
 import { useState } from "react";
 import { Pressable, StyleSheet, Text, TextInput, View } from "react-native";
+import { ActivitySyncNotice } from "../components/ActivitySyncNotice";
 import { MobileScreen, Section } from "../components/MobileScreen";
+import { DiscountSummaryCard } from "../components/DiscountSummaryCard";
 import { PrimaryButton } from "../components/PrimaryButton";
 import { ProgressSummary } from "../components/ProgressSummary";
 import { StatusBadge } from "../components/StatusBadge";
@@ -20,6 +22,7 @@ export function MerchantDashboardScreen({ navigation, appState, actions, memberA
     tab,
     selectedMerchantStoreId
   );
+  const activitySyncStatus = appState.groupBuyActivitySyncStatus ?? "idle";
   const merchantStore = stores.find((store) => store.id === selectedMerchantStoreId) ?? stores[0];
   const merchantGroupBuyActivities = appState.groupBuyActivities.filter((groupBuyActivity) => groupBuyActivity.storeId === merchantStore.id);
   const activeGroupBuyActivities = merchantGroupBuyActivities.filter((groupBuyActivity) => (
@@ -166,6 +169,10 @@ export function MerchantDashboardScreen({ navigation, appState, actions, memberA
           <PrimaryButton label="重新整理" variant="secondary" onPress={refreshOrders} />
         </View>
       ) : null}
+      <ActivitySyncNotice
+        status={activitySyncStatus}
+        onRetry={() => actions.syncGroupBuyActivities().catch(() => {})}
+      />
 
       {tab === "active" ? (
         <>
@@ -246,6 +253,7 @@ export function MerchantDashboardScreen({ navigation, appState, actions, memberA
                 participantCount={groupBuyActivity.participantCount}
                 remainingTimeText={groupBuyActivity.remainingTimeText}
               />
+              <DiscountSummaryCard compact groupBuyActivity={groupBuyActivity} />
               <View style={styles.summaryRow}>
                 <Text style={styles.summary}>訂單 {relatedOrders.length} 筆</Text>
                 <Text style={styles.summary}>已付款 {paidOrders} 筆</Text>

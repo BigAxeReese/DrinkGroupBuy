@@ -29,6 +29,8 @@ API JSON 使用 `camelCase`。已實作 routes 只對目前開發 prototype 具�
 | Backend 責任      | 驗證 Firebase ID token，將 Firebase UID/email 對應到 `users`，並從資料庫解析 roles 與 store permissions |
 | 目前 session 行為 | Backend 在 Firebase 驗證後回傳既有 bearer token                                                         |
 | 目前對應行為      | 查詢 `users.firebase_uid`；未對應的 Firebase users 回傳 403                                             |
+| 可切換資料來源    | `AUTH_PROFILE_READ_RUNTIME=sqlite|postgres`；預設 `sqlite`，Firebase session、dev auth 與 bearer token 後續角色／門市權限解析共用同一 repository |
+| PostgreSQL 差異   | PostgreSQL v1 以 `merchant_users.store_id` 作授權邊界且不分內部權限等級；`merchantStores[].permissionLevel` 保留但回傳 `null` |
 | 遷移備註          | 不要再新增依賴 phone/password 或 email/password login 的 production features                            |
 
 ### 開發期角色測試登入
@@ -59,8 +61,9 @@ API JSON 使用 `camelCase`。已實作 routes 只對目前開發 prototype 具�
 | ------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | Method / path | `GET /api/group-buy-activities`                                                                                                                                                                                                                                  |
 | 用途          | 從 SQLite 回傳 activities、stores 與 promotion tiers                                                                                                                                                                                                             |
-| Response      | `{ activities: [{ id, storeId, createdByUserId, title, status, rawStatus, startAt, deadlineAt, pickupStartAt, pickupEndAt, maximumCups, targetCups, currentCups, authorizedCups, participantCount, withdrawalLockMinutes, cancellationReason, store, tiers }] }` |
+| Response      | `{ activities: [{ id, storeId, createdByUserId, title, status, rawStatus, startAt, deadlineAt, pickupStartAt, pickupEndAt, maximumCups, targetCups, currentCups, authorizedCups, participantCount, currentTierId, currentTierTargetCups, currentTierDiscountAmount, estimatedDiscountPerCup, estimatedAllocatedDiscountAmount, estimatedUndistributedDiscountAmount, nextTierTargetCups, cupsToNextTier, withdrawalLockMinutes, cancellationReason, store, tiers }] }` |
 | 目前缺口      | Mobile 啟動時尚未呼叫此 endpoint                                                                                                                                                                                                                                 |
+| 已實作折扣欄位 | 已回傳目前達成級距、`estimatedDiscountPerCup = floor(tierTotalDiscount / authorizedCups)`、預估分配總額、未分配尾差與下一級距差杯數；Mobile 仍須把截止前數值標示為預估 |
 
 ### 商家建立團購活動
 
@@ -72,6 +75,7 @@ API JSON 使用 `camelCase`。已實作 routes 只對目前開發 prototype 具�
 | Response      | `{ activity }`                                                                                                                                                                                |
 | 已實作規則    | 需要 merchant role、驗證 merchant-store access、從登入使用者推導 `createdByUserId`、必填欄位驗證、`deadlineAt` 不可超過 `startAt` 後 24 小時、`pickupStartAt` 至少晚於 `deadlineAt` 30 分鐘、`pickupEndAt` 必須晚於 `pickupStartAt`、tier normalization、由最高 tier 推導 maximum cups、transaction、簡單 idempotency、audit log |
 | 最終商業規則  | `deadlineAt` 必須在活動發布或開放招募後 24 小時內；取餐時間由店家開團時設定，顧客加入前可見；取餐開始至少晚於截止時間 30 分鐘，表單預設為截止後 30 分鐘 |
+| 已實作驗證    | SQLite backend 會對每個 tier 驗證可達杯數區間：上限為下一級距 `targetCups - 1`，最高級距上限為 `maximumCups`。必須滿足 `floor(discountAmount / 區間上限) >= 1`，且 `floor(discountAmount / targetCups)` 不得高於店內最低可售單杯權威金額；相關菜單降價／上架、訂單寫入／revision 與結算皆會重驗並以 409 回傳衝突 |
 | 尚缺規則      | 較完整的 merchant permission model                                                                                                                                                            |
 
 ### 開發 / 補救用：後端取消團購活動
@@ -173,7 +177,8 @@ API JSON 使用 `camelCase`。已實作 routes 只對目前開發 prototype 具�
 | Request       | 需要後端補救權限；目前 route 使用 admin bearer token。Body: `{ orderId?, captureId?, providerTransactionId?, refundAmount?, reason?, idempotencyKey?, provider? }`；正式使用預設 `provider = line_pay`，`mock_line_pay` 只供非 production smoke test |
 | Response      | `{ refund, capture, order, status, fullyRefunded, totalRefundedAmount, remainingRefundableAmount, providerTransactionId }` |
 | 已實作規則    | 只允許已 capture 的付款退款；未指定 `refundAmount` 時退剩餘全額；退款金額不可超過剩餘可退金額；用 `payment_refunds.idempotency_key` 防止重複退款；同一 key 已退款時回傳 idempotent 結果；成功寫入 `payment_refunds`、provider event 與 audit log；全額退款後 `orders.payment_status = refunded` |
-| 尚缺實作      | 正式退款操作 UI、退款失敗專用 retry／reconciliation job、正式告警通知與 sandbox 人工端對端測試 |
+| 正式產品規則  | 商家不得直接呼叫此 route；商家只能針對自己門市的已請款訂單提出退款申請並填寫金額與原因，由營運／補救權限核准後執行 |
+| 尚缺實作      | 商家退款申請與營運審核／執行 UI、退款失敗專用 retry／reconciliation job、正式告警通知與 sandbox 人工端對端測試 |
 
 ### LINE Pay Confirm Redirect
 
@@ -205,9 +210,11 @@ API JSON 使用 `camelCase`。已實作 routes 只對目前開發 prototype 具�
 | High   | provider reconciliation validation | 第一版已完成；仍需 LINE Pay sandbox 與 redirect 遺失人工驗證 |
 | High   | persisted job alerts | Retry jobs 與 terminal flag 已完成；仍需正式告警通知管道 |
 | High   | cross-instance locking hardening | Payment／settlement DB lease 已完成；仍需雙 process 測試與 cancel／repay／pickup 完整鎖定 |
+| High   | pricing snapshot and live discount | SQLite API 即時欄位、結算分配與公式 smoke 已完成；仍需 Mobile 顯示、專用持久化快照設計與 PostgreSQL 寫入 runtime |
 | Medium | provider-neutral payment routes | 目前先以 LINE Pay 專用 route 前進，正式 API shape 後續再收斂       |
 | Medium | order revision history UI | 修改與重新授權主幹已有第一版，仍缺完整歷史查詢與 UI 呈現 |
 | Medium | PostgreSQL runtime adapter | Migration draft 已驗證，但 Backend runtime 仍使用 SQLite |
+| Medium | refund request and account closure | 商家退款申請／營運執行及帳號關閉／去識別化規則已確認，API 與權限尚未實作 |
 
 已完成並移出候選優先清單：顧客訂單列表／取消、商家訂單列表、店家菜單管理，以及取貨碼／可取餐／核銷／逾期未取第一版。
 
@@ -250,6 +257,8 @@ API JSON 使用 `camelCase`。已實作 routes 只對目前開發 prototype 具�
 | `POST /api/payment-authorizations/:authorizationId/void`    | 取消未使用授權               | Provider expiry 與 idempotency                 |
 | `POST /api/payment-authorizations/:authorizationId/capture` | Partial capture final amount | Backend payment module 已有內部 capture service、持久化重試與跨程序 lease；尚未開公開 API |
 | `POST /api/payment-captures/:captureId/refunds`             | Provider-neutral refund      | 目前已先實作 LINE Pay 專用開發 / 後端補救 route；正式 API shape 尚未決定 |
+| `POST /api/merchant/orders/:orderId/refund-requests`        | 商家提出退款申請              | 只允許所屬門市、已請款且仍有可退餘額的訂單；需金額、原因與 idempotency key，不直接呼叫 provider |
+| `POST /api/operations/refund-requests/:requestId/approve`   | 營運核准並執行退款            | 需補正式營運權限、跨程序鎖、audit log、provider reconciliation 與失敗重試 |
 | `GET /api/payments/line-pay/status/:transactionId`          | 查詢 provider 狀態並對帳     | 正式上線前用於重試、redirect 遺失與付款狀態 reconciliation |
 | `GET /api/admin/payment-reliability/alerts`                  | 查詢終止失敗工作             | 已實作 admin-only、jobType/status/limit 白名單篩選；通知通道尚未接入 |
 
@@ -284,3 +293,6 @@ API JSON 使用 `camelCase`。已實作 routes 只對目前開發 prototype 具�
 - 最高 promotion tier 是 activity cup capacity。建立訂單與付款 authorization 必須拒絕會超過 `maximumCups` 的 request。
 - 敏感狀態轉換需要 status history 與 audit logs。
 - 取貨憑證有效期限必須在顧客付款前清楚顯示；逾期未取不自動退款，但店家不得交付有食品安全疑慮的飲品。
+- 團購進行中以有效已授權杯數即時計算預估每杯折扣；截止結算時重新計算並保存級距、杯數、每杯折扣、實際分配總額及未分配尾差。
+- 所有金額驗證由 Backend 使用權威菜單與客製化最低價差計算；若活動或菜單異動會造成每杯折扣為 0、超過最低單杯金額或應付金額為負數，API 必須拒絕並回傳可修正的 validation error。
+- 帳號關閉 API 必須先停用登入與撤銷 session，再刪除或去識別化非必要個資；不得直接刪除仍受法定保存、付款對帳或爭議處理需求約束的交易紀錄。

@@ -10,7 +10,7 @@
 
 - Firebase Auth + Google Login 已實作，backend 會驗證 Firebase ID token，再依開發資料庫的 `users.firebase_uid`、`user_roles` 與 `merchant_users` 判斷身份。
 - 本機開發已新增 dev-only 身份切換器；只有 backend `AUTH_DEV_MODE=true` 且 mobile `EXPO_PUBLIC_AUTH_MODE=dev` 時才會顯示，可用下拉選單切換 SQLite 內所有有效顧客、商家與開發補救身份。
-- 開發 runtime 預設仍使用 SQLite；顧客公開菜單與團購活動列表已可分別由 `STORE_MENU_READ_RUNTIME`、`GROUP_BUY_ACTIVITY_READ_RUNTIME` 獨立切換 PostgreSQL，其餘 route 與 `backend/db.js` 仍使用 SQLite，現在沒有雙寫。
+- 開發 runtime 預設仍使用 SQLite；公開菜單、團購活動列表、登入／角色／門市權限已可分別由 `STORE_MENU_READ_RUNTIME`、`GROUP_BUY_ACTIVITY_READ_RUNTIME`、`AUTH_PROFILE_READ_RUNTIME` 獨立切換 PostgreSQL；商家菜單資料、活動寫入、訂單與付款仍使用 SQLite，現在沒有雙寫。
 - LINE Pay 付款主幹已拆成獨立模組，已有 request、confirm、cancel、capture、void、refund、訂單修改後重新預授權與截止結算排程。
 - 付款結算 smoke test 已於 2026-07-19 通過，包含達標請款、未達標原價請款／取消授權、排程結算、修改訂單替換授權、截止後拒絕預授權、三次自動請款上限、取餐前 15 分鐘以前的手動重新付款，以及退款 idempotency。
 - 開發資料庫曾暴露同一筆 LINE Pay 失敗請款被無限重試的問題；目前已改為截止時第一次請款，暫時性失敗後每 30 秒重試，總計最多三次，並在重試前查詢 provider 狀態。
@@ -26,6 +26,16 @@
 - 已執行非強制 `npm audit fix`；最近一次結果為 Root `11` 項（`6 moderate`、`5 high`、`0 critical`），Mobile `46` 項（`1 low`、`11 moderate`、`33 high`、`1 critical`）。剩餘項目需要 Expo／React Native 或相關傳遞依賴的主版本升級，因此未使用 `--force` 破壞目前 Expo SDK 51 相容性。
 - 系統分析書已整理為五大功能，五組描述性綱目已更新，並已抽出 `docs/system-analysis-extracted.md`；各小節使用個案描述與活動圖仍待更新。
 
+## 2026-07-30 產品規則收斂
+
+- 級距保存總折扣金額；目前與截止時的每杯折扣均使用 `floor(級距總折扣 / 有效授權杯數)`。例如 3 杯、總折扣 100 元時，每杯折 33 元、實際分配 99 元。
+- 無法整除的尾差不分配給顧客。現行優惠由商家出資，因此尾差退回商家；未來只有明確的平台出資活動才由平台保留尾差。
+- 折扣上下限已定案：活動發布時逐級驗證整個可達杯數區間，保證每杯至少折 1 元且不超過店內最低可售單杯權威金額；招募中的菜單降價／上架、訂單寫入、重新授權與截止結算都必須重新驗證，不允許負數應付金額。
+- Backend 已回傳目前有效杯數、目前／下一級距、預估每杯折扣、實際預估分配與尾差；Mobile 已在顧客首頁、活動詳情、團購進度與商家儀表板接上共用折扣摘要。截止結算已依相同公式產生每筆訂單折扣與應付金額；PostgreSQL `003` migration 已決定保存每杯折扣、實際分配、尾差、出資方與計算版本的不可變快照。
+- 第一階段商家只能提出退款申請，由營運／補救權限確認後執行；商家 App 不直接持有金流憑證或直接呼叫 LINE Pay refund。
+- 帳號可申請關閉並立即停用登入；非必要個資刪除或去識別化，必要交易與稽核紀錄依法律、會計及爭議處理需求限制性保留。顧客電話第一階段為選填，且商家不得看到完整號碼。
+- 第一階段正式平台範圍為 Android；Expo Web 只作開發預覽，iOS 不列入驗收。
+
 ## 2026-07-28 團購菜單規則更新
 
 - 產品規則已確認：每個團購自動開放該活動所屬店家目前上架的全部飲品，商家建立活動時不逐一選擇適用飲品。
@@ -33,7 +43,7 @@
 - 店家可以修改店內菜單；新選取與未送出的購物車使用最新菜單，已送出的訂單保留品名、價格與客製化快照。
 - 顧客權威菜單 API、商家菜單管理 API／畫面與訂單送出時的店家歸屬、供應狀態、客製化選項、選擇數量及價格重算已完成第一版。
 - 每個飲品可由店家以明確整數設定各客製化類型的 `minSelections`／`maxSelections`；目前 mobile 菜單管理可編輯品名、分類、說明、價格、上下架、選項與每杯加料上限。
-- 藍圖可用「每杯折 10／15 元」呈現門檻優惠；顯示換算與截止時依實際有效杯數分攤總折扣的公式仍需再收斂，避免顯示金額與最終請款不一致。
+- 藍圖的每杯折扣已定義為 `floor(目前達成級距總折扣 / 目前有效授權杯數)`，顯示時必須標示為預估；截止時以最終有效授權杯數重算並保存結算快照。
 
 ## 2026-07-05 登入方向更新
 
@@ -83,6 +93,8 @@
 - 顧客首頁會區分「目前顧客已加入的團購」與「附近招募中的團購推薦」。
 - 顧客可查看進行中訂單、訂單明細、修改訂單、團購進度、取貨碼與歷史訂單。
 - 活動容量依最高優惠級距判斷，例如 20 / 30 / 40 杯代表最多接受 40 杯。
+- App 選定角色與回到前景時會同步 `GET /api/group-buy-activities`；顧客首頁、活動詳情、團購進度與商家儀表板會顯示目前級距、預估每杯折扣、實際預估分配、尾差及下一級距差杯數。
+- 顧客首頁與商家儀表板已提供活動同步載入、失敗提示與手動重試；同步失敗時保留上次成功資料，不再靜默失敗。
 - LINE Pay 預授權與 partial capture 的 mobile UI / 狀態流程已串接第一版。
 - 付款畫面可向後端建立 LINE Pay sandbox 授權網址，並開啟 LINE Pay 付款頁。
 - 付款畫面在開啟 LINE Pay 後會短時間自動輪詢 backend 訂單狀態；App / 瀏覽器回到前景時也會安靜刷新，授權完成後同步顯示 `authorized`。
@@ -96,8 +108,8 @@
 
 目前 mobile 限制：
 
-- App 啟動時尚未完整載入後端權威活動列表。
-- 顧客與商家訂單列表已由 Backend 同步，mobile local state 僅作畫面 cache；團購活動、地圖與部分店家摘要仍混用 local state 或 mock。
+- 公開團購活動與顧客／商家訂單列表已由 Backend 同步，mobile local state 僅作 cache；顧客首頁、商家儀表板、活動詳情與團購進度均使用共用活動載入／錯誤／重試元件，同步失敗時保留上次成功資料。
+- 地圖位置、距離與部分店家摘要仍混用 local state 或 mock。
 - LINE Pay 完成後仍會先回 backend HTML 頁；HTML 頁會提供返回 App deep link，mobile 端仍保留 polling / foreground refresh 作為備援。
 - 部分流程仍保留 fallback 行為。
 - `StoreMenuScreen` / `DrinkSelectionScreen` 已改讀後端菜單；地圖與部分店家基本資料仍保留 prototype mock data。
@@ -112,6 +124,8 @@
 | ----------------------------------------- | --------------------------------------------- |
 | `backend/server.js`                       | HTTP API server                               |
 | `backend/db.js`                           | SQLite 資料庫存取                             |
+| `backend/pricing/groupBuyDiscount.js`     | 每杯折扣、尾差與級距上下限的純運算             |
+| `backend/pricing/groupBuyDiscountDatabase.js` | 菜單、訂單與活動折扣的 SQLite 權威驗證      |
 | `backend/auth.js`                         | 開發用登入、token、密碼雜湊                   |
 | `backend/payments/linePayClient.js`       | LINE Pay sandbox request 簽章                 |
 | `backend/payments/linePayService.js`      | LINE Pay request / confirm / cancel、手動重新付款、void / capture / refund 流程 |
@@ -164,7 +178,9 @@
 - 尚未預授權成功的 pending 訂單可以用目前購物車內容更新；更新時會把舊的 pending LINE Pay 授權標成 `failed`，避免下一次預授權被阻擋。
 - 已授權訂單修改第一版已加入：`POST /api/orders/:orderId/revisions` 會建立 pending revision 與 item snapshots，不會立即修改原訂單；mobile 購物車與訂單明細修改會建立 revision，付款頁會帶 `orderRevisionId` 重新發起 LINE Pay 預授權；新預授權 confirm 成功後才套用 revision，並嘗試 void 舊授權。
 - 付款畫面可在 LINE Pay redirect 後透過 app deep link、自動輪詢、回前景刷新或手動刷新同步後端訂單狀態。
-- 團購列表會回傳 `authorizedCups` 與 `participantCount`。
+- 團購列表會回傳 `authorizedCups`、`participantCount`、目前／下一級距、`estimatedDiscountPerCup`、預估分配總額、未分配尾差與下一級距尚差杯數；SQLite 與 PostgreSQL 唯讀 repository 契約一致。
+- 活動建立會逐級驗證可達杯數區間，阻擋每杯折扣為 0 或高於店內最低可售單杯權威金額的級距；招募中的菜單降價／上架、訂單建立／更新／revision 與截止結算都會重驗。
+- 結算不再用上限截斷折扣或把負數應付金額靜默改成 0；若快照價格與折扣衝突，回傳 `settlement_discount_conflict` 並停止結算。
 - 活動建立有基本 idempotency 處理。
 - 開發 / 補救用取消活動會寫入 `status_history` 與 `audit_logs`。
 - LINE Pay Channel ID / Secret 只放後端。
@@ -179,12 +195,13 @@
 - LINE Pay confirm 在寫入 `authorized` 前會用資料庫交易重新檢查團購容量；容量不足時會把 authorization 標記為 `failed`，訂單不會計入團購。
 - LINE Pay void 已加入付款模組；容量不足但 provider confirm 已成功時，系統會自動嘗試 void，成功後寫入 `authorization_voided`、provider event、status history 與 audit log；void 失敗時會留下 provider event 與 audit log。
 - LINE Pay capture 已加入付款模組；成功後會寫入 `payment_captures`、更新 authorization/order 狀態與 `orders.final_amount`，失敗時會留下 failed capture、provider event 與 audit log。
-- LINE Pay refund 已加入付款模組；dev/backend 後端 API 可針對已 capture 交易建立全額或部分退款，寫入 `payment_refunds`、provider event 與 audit log，並用 idempotency key 防止重複退款；全額退款後訂單付款狀態會更新為 `refunded`。
+- LINE Pay refund 已加入付款模組；dev/backend 後端 API 可針對已 capture 交易建立全額或部分退款，寫入 `payment_refunds`、provider event 與 audit log，並用 idempotency key 防止重複退款；全額退款後訂單付款狀態會更新為 `refunded`。正式產品規則已定為商家提出申請、營運執行，申請與審核流程尚未實作。
 - 單一團購手動結算 API 已加入；開發 / 補救權限可觸發已截止活動結算，系統會計算最終級距，對有效授權訂單執行 capture 或 void，並寫入 `activity_settlements`。
 - deadline settlement scheduler 已加入後端啟動流程；預設每 30 秒掃描已截止、尚未結算的團購並呼叫同一套 settlement service。`LINE_PAY_ENV=production` 時需要明確允許才會啟動。
 - 本機付款結算 smoke script 已加入：`npm run settlement:smoke` 會用乾淨 schema 與 `mock_line_pay` 驗證達標 capture、未達標 fallback capture / void，以及 scheduler due activity 結算，並在測試後還原開發 SQLite。
 - 商家建立團購 API 已強制 `deadlineAt` 必須晚於 `startAt`，且不得超過 `startAt` 後 24 小時；`pickupStartAt` 至少晚於 `deadlineAt` 30 分鐘，`pickupEndAt` 必須晚於 `pickupStartAt`。
 - Mobile 建立團購表單已將取餐開始預設為截止後 30 分鐘，並阻擋低於 30 分鐘的取餐開始時間。
+- Mobile 建立團購表單會先標示空值、非正整數與重複杯數，再把 Backend 的 `discount_tier_invalid`／`discount_menu_invalid` 轉成對應級距或菜單中文提示；每杯折扣上下限仍以 Backend 最新菜單驗證為準。
 - 已授權或 pending 的授權會阻擋重複 LINE Pay request。
 - 顧客下單、訂單查詢與 LINE Pay request 需要 bearer token。
 - 商家建立活動需要 merchant bearer token，並檢查該商家帳號是否綁定店家。
@@ -193,12 +210,14 @@
 尚未完成：
 
 - 已授權後的訂單修改 / 重新授權 mobile 第一版已串接；訂單列表現以 Backend 回應為權威、local state 僅作 cache，仍需細化失敗提示。
-- LINE Pay refund 目前只有 dev/backend 後端 API 與 smoke test；尚未做正式操作 UI、退款失敗重試 queue 與正式 sandbox 人工端對端測試。
+- LINE Pay refund 目前只有 dev/backend 後端 API 與 smoke test；尚未做商家退款申請、營運審核／執行 UI、退款失敗重試 queue 與正式 sandbox 人工端對端測試。
 - LINE Pay webhook 第一版不列為必要入口；目前付款同步以 confirm/cancel redirect、polling 與後續 provider 狀態查詢為主。
 - 顧客與商家權威訂單列表 API 與 Mobile 第一版已串接，登入、切換分頁及 App 回到前景會同步；Backend 統一回傳 `lifecycleBucket` 與 `availableActions`。已移除訂單清單中的舊 local 訂單覆蓋，其他活動畫面仍有 mock fallback。
 - 顧客鎖定前取消訂單已完成第一版：pending 授權失效、authorized 先 void、pending revision 一併取消，captured 訂單拒絕自行取消。
 - 付款結算失敗規則已決定：第一版以自動重試為主，不做人工處理介面；失敗中的訂單不進入製作或取貨。
 - Provider reconciliation、持久化 retry jobs、payment／settlement／cancel／repay／pickup DB lease 與 terminal job 告警旗標已完成第一版；兩程序 claim／lease takeover 測試已通過，仍缺正式告警通知管道、LINE Pay sandbox 人工端對端與 PostgreSQL row-lock 驗收。
+- Mobile 即時預估折扣／尾差已接上 Backend 活動列表；顧客首頁、商家儀表板、活動詳情與團購進度的同步失敗提示／重試已完成。尚未完成 Android 實機 E2E 與截止後專用最終快照顯示。
+- PostgreSQL `003_activity_settlement_discount_snapshot_postgres.sql` 已完成專用折扣快照設計與 rollback smoke；SQLite runtime 仍以既有欄位重算，尚未新增欄位、切換 runtime 或雙寫。
 - 正式 migration 系統。
 - 完整 Android mobile E2E 與 LINE Pay sandbox 人工驗證仍未完成；目前自動 smoke、Expo Doctor 與 Web bundle 已通過。
 
@@ -266,16 +285,17 @@ PostgreSQL 方向：
 - PostgreSQL 遷移規劃：`docs/postgresql-migration-plan.md`
 - PostgreSQL schema draft：`database/migrations/001_initial_postgres.sql`
 - PostgreSQL seed draft：`database/migrations/002_seed_dev_postgres.sql`
+- PostgreSQL 結算快照 migration draft：`database/migrations/003_activity_settlement_discount_snapshot_postgres.sql`
 - PostgreSQL 本機驗證設定：`database/docker-compose.postgres.yml`
 
 目前 PostgreSQL 狀態：
 
-- 兩個 PostgreSQL 唯讀 runtime vertical slices 已完成：公開菜單與團購活動列表可由各自環境變數獨立切換。
-- 預設仍是 `sqlite`；商家菜單管理、活動寫入、訂單、付款與其他 API 仍使用 SQLite，沒有雙寫。
-- 本機 PostgreSQL 16 已套用 `001_initial_postgres.sql` 與 `002_seed_dev_postgres.sql`；服務只監聽 `localhost`，`postgres-runtime:smoke` 已驗證連線、可靠性表、seed 公開菜單與活動列表契約。
-- 公開菜單與團購活動列表 HTTP route 均已用只存在 PostgreSQL 的臨時資料證明來源；驗證後臨時資料已刪除。
+- 三個 PostgreSQL 唯讀 runtime vertical slices 已完成：公開菜單、團購活動列表，以及登入／角色／門市權限解析可由各自環境變數獨立切換。
+- 預設仍是 `sqlite`；商家菜單資料、活動寫入、訂單與付款仍使用 SQLite，沒有雙寫。登入成功後的 bearer token 權限解析也會持續使用同一個 auth repository。
+- 本機 PostgreSQL 16 已套用 `001_initial_postgres.sql` 與 `002_seed_dev_postgres.sql`；服務只監聽 `localhost`，`postgres-runtime:smoke` 已驗證連線、可靠性表、seed 公開菜單、活動列表與商家角色／門市綁定契約。
+- 公開菜單、團購活動列表及 dev session／後續 bearer token 權限解析，均已用只存在 PostgreSQL 的臨時資料證明來源；驗證後臨時資料已刪除。
 - PostgreSQL draft 已拆分 `users`、`user_private_profiles`、`user_public_profiles`。
-- PostgreSQL draft 中每個商家帳號透過 `merchant_users.store_id` 對應一間店。
+- PostgreSQL draft 中每個商家帳號透過 `merchant_users.store_id` 對應一間店；不分 owner／manager／staff，API 相容欄位 `permissionLevel` 在 PostgreSQL 回傳 `null`。
 - PostgreSQL seed draft 有 4 個顧客、7 個商家、1 個 dev/admin 補救帳號、7 間店、8 個菜單項目與 96 個客製化選項。
 
 目前開發資料概況：
@@ -304,11 +324,13 @@ database/test/drink-group-buy-test.sqlite
 
 建議下一步：
 
-1. 搬移登入／角色／門市權限解析為第三個 PostgreSQL 唯讀 repository，維持 SQLite 預設與無雙寫。
-2. 三個唯讀切片穩定後，再規劃第一個 PostgreSQL 寫入 transaction 與 row lock。
+1. 規劃第一個 PostgreSQL 寫入 transaction 與 row lock；優先選擇不接觸真實付款的活動建立或訂單草稿邊界。
+2. 寫入切片開始前，先明確定義 SQLite 停寫／切換策略，禁止雙寫。
 3. LINE Pay 核准分離式請款後，執行 sandbox reconciliation、capture、void 與 lease takeover 人工端對端驗證。
-4. 補正式告警通知管道，並細化 revision、容量不足及 void 失敗的 mobile 錯誤提示。
-5. 執行 Android 實機 E2E、Firebase Console／OAuth／UID mapping 驗證。
+4. PostgreSQL settlement 寫入 vertical slice 時必須顯式寫入 `003` 的五個快照欄位；在此之前維持 SQLite runtime 與無雙寫。
+5. 建立站內通知／delivery schema 與正式告警管道，並細化 revision、容量不足及 void 失敗提示。
+6. 實作商家退款申請、營運審核執行與帳號關閉／去識別化流程。
+7. 執行 Android 實機 E2E、Firebase Console／OAuth／UID mapping 驗證。
 
 ## 系統分析書進度
 

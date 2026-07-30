@@ -8,6 +8,9 @@ const {
 const {
   createGroupBuyActivityReadRepository,
 } = require("../backend/database/repositories/groupBuyActivityReadRepository");
+const {
+  createAuthProfileReadRepository,
+} = require("../backend/database/repositories/authProfileReadRepository");
 
 async function main() {
   if (!process.env.DATABASE_URL) {
@@ -43,6 +46,16 @@ async function main() {
     });
     const activities = await groupBuyActivityRepository.listActivities();
     assert.ok(Array.isArray(activities));
+    const authProfileRepository = createAuthProfileReadRepository({
+      runtime: "postgres",
+      database,
+    });
+    const merchant = await authProfileRepository.getById("user-merchant-001");
+    assert.deepEqual(merchant?.roles, ["merchant"]);
+    assert.equal(merchant?.merchantStores[0]?.id, "store-001");
+    assert.equal(merchant?.merchantStores[0]?.permissionLevel, null);
+    const devUsers = await authProfileRepository.listDevUsers();
+    assert.equal(devUsers.length, 12);
     console.log("PostgreSQL runtime smoke test passed.");
   } finally {
     await database.close();

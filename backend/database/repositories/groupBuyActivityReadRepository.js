@@ -1,4 +1,5 @@
 const { createRuntimeDatabaseAdapter } = require("..");
+const { calculateGroupBuyDiscountSummary } = require("../../pricing/groupBuyDiscount");
 
 function resolveGroupBuyActivityReadRuntime(input = {}) {
   const env = input.env || process.env;
@@ -95,6 +96,7 @@ async function listPostgresGroupBuyActivities(database) {
     const progress = progressByActivityId.get(row.id);
     const authorizedCups = Number(progress?.authorized_cups ?? 0);
     const participantCount = Number(progress?.participant_count ?? 0);
+    const discountSummary = calculateGroupBuyDiscountSummary(activityTiers, authorizedCups);
     const firstTargetCups = activityTiers[0]?.targetCups ?? row.maximum_cups ?? 0;
     const displayStatus = row.status === "recruiting" && authorizedCups >= firstTargetCups
       ? "confirmed"
@@ -116,6 +118,7 @@ async function listPostgresGroupBuyActivities(database) {
       currentCups: authorizedCups,
       authorizedCups,
       participantCount,
+      ...discountSummary,
       withdrawalLockMinutes: row.withdrawal_lock_minutes,
       cancellationReason: row.cancellation_reason,
       store: {

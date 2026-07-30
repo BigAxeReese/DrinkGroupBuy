@@ -38,7 +38,9 @@
 9. 顧客端對未請款金額的說明使用：「未請款金額會由 LINE Pay 或發卡銀行依規定釋放，實際時間以付款服務為準」。
 10. `promotion_tiers.discount_amount` 代表該優惠級距的總折扣金額，不是單杯折扣。
 11. 達標結算時，系統會把適用級距的總折扣金額平均分攤給每一杯有效授權飲品。
-12. 若總折扣無法被有效杯數整除，顧客折扣以整數每杯折扣計算；未分配的餘額不進入任何訂單折扣，作為系統維運補貼。
+12. 每杯折扣使用 `floor(適用級距總折扣 / 有效授權杯數)`；例如總折扣 100 元、有效 3 杯時，每杯折 33 元，實際分配 99 元。
+13. 無法整除的尾差不進入任何顧客訂單折扣。現行優惠由商家出資，因此尾差退回商家；未來若活動明確由平台出資，尾差才由平台保留。進行中依目前有效授權杯數即時顯示「預估每杯折扣」，截止時重新計算；PostgreSQL 最終快照保存 `discount_per_cup`、`allocated_discount_amount`、`undistributed_discount_amount`、`discount_funder` 與 `calculation_version`。
+14. 活動發布時逐級驗證可達杯數區間。一般級距上限為下一級距 `target_cups - 1`，最高級距上限為 `maximum_cups`；必須滿足 `floor(discount_amount / 區間上限) >= 1`，且門檻杯數時計算的每杯折扣不得高於店內最低可售單杯權威金額。招募中的菜單降價／上架、訂單寫入、重新授權與截止結算皆須重驗，任何應付金額不得為負數。
 
 ### 活動時間限制
 
@@ -180,8 +182,9 @@
 11. LINE Pay void 使用官方 `POST /v3/payments/authorizations/{transactionId}/void`；成功後更新 `payment_authorizations.status = authorization_voided`，並同步更新訂單付款狀態與稽核紀錄；失敗時至少記錄 provider event 與 audit log。
 12. LINE Pay capture 使用官方 `POST /v3/payments/authorizations/{transactionId}/capture`；成功後新增 `payment_captures`，更新 `payment_authorizations.status = captured`、`orders.payment_status = captured` 與 `orders.final_amount`，並記錄 provider event、status history 與 audit log。
 13. LINE Pay refund 使用官方 `POST /v3/payments/{transactionId}/refund`；成功後新增 `payment_refunds`，全額退款時更新 `orders.payment_status = refunded`，並記錄 provider event 與 audit log。
-14. 結算的折扣分攤規則：將適用級距的 `promotion_tiers.discount_amount` 平均到截止時有效授權總杯數，再依各訂單杯數計算折扣；若無法整除，未分配餘額作為系統維運補貼。
-15. 本機開發可使用 `mock_line_pay` 測試截止結算與退款，不呼叫外部 LINE Pay API；`npm run settlement:smoke` 會使用乾淨 schema 暫時建立 mock 預授權訂單，驗證達標 capture、未達標 fallback capture、void、scheduler due activity 結算、order revision 套用與 refund idempotency，並在測試後還原開發資料庫。
+14. 結算的折扣分攤規則：每杯折扣為 `floor(promotion_tiers.discount_amount / 截止時有效授權總杯數)`，各訂單折扣為每杯折扣乘以該訂單杯數；未分配尾差由優惠出資方保留，現行商家出資活動的尾差退回商家。PostgreSQL `003` 會保存不可變快照並以 constraints 驗證分配總額，但尚未切換 Backend runtime。
+15. 第一階段商家只能提出退款申請，由營運／補救權限確認後執行 LINE Pay refund；正式流程需檢查門市權限、可退餘額、冪等、跨程序鎖、audit log、reconciliation 與失敗告警。
+16. 本機開發可使用 `mock_line_pay` 測試截止結算與退款，不呼叫外部 LINE Pay API；`npm run settlement:smoke` 會使用乾淨 schema 暫時建立 mock 預授權訂單，驗證達標 capture、未達標 fallback capture、void、scheduler due activity 結算、order revision 套用與 refund idempotency，並在測試後還原開發資料庫。
 
 ## 尚未決定
 

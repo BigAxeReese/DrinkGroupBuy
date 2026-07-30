@@ -1,6 +1,6 @@
 # PostgreSQL 遷移規劃
 
-最後更新：2026-07-30
+最後更新：2026-07-31
 
 本文件整理從目前 SQLite 開發資料庫遷移到 PostgreSQL 的方向。它是規劃文件，不是可直接執行的 production migration。
 
@@ -12,6 +12,7 @@
 - Backend 目前仍以本機 SQLite 作為開發資料來源。
 - PostgreSQL schema draft：`database/migrations/001_initial_postgres.sql`。
 - PostgreSQL seed draft：`database/migrations/002_seed_dev_postgres.sql`。
+- PostgreSQL 結算折扣快照 migration draft：`database/migrations/003_activity_settlement_discount_snapshot_postgres.sql`。
 - 本機 PostgreSQL 設定草案：`database/docker-compose.postgres.yml`。
 
 ## 為什麼要遷移到 PostgreSQL
@@ -219,12 +220,25 @@ payment_status text not null check (payment_status in ('pending', 'authorized', 
 - 將 SQLite schema 轉為 PostgreSQL-compatible SQL。
 - 補上 constraints 與 indexes。
 - 使用 `jsonb` 保存 provider/audit payload。
+- 使用 `003_activity_settlement_discount_snapshot_postgres.sql` 為既有 settlement 回填不可變折扣快照與一致性 constraints。
 
 驗收：
 
 - migration 可在乾淨 dev database 成功執行。
 - 尚未切換 backend runtime。
 - 尚未碰正式資料。
+
+#### 活動結算折扣快照決策
+
+`activity_settlements.discount_amount` 繼續代表適用級距的總折扣。PostgreSQL `003` 額外保存：
+
+- `discount_per_cup`：截止時每杯實際折扣。
+- `allocated_discount_amount`：實際分配到顧客訂單的總額。
+- `undistributed_discount_amount`：無法整除的尾差。
+- `discount_funder`：優惠出資方，第一版允許 `merchant` 或 `platform`。
+- `calculation_version`：第一版固定為 `floor_per_cup_v1`。
+
+保存衍生欄位是為了讓歷史結算不受未來公式與出資規則變更影響。Database constraints 強制「實際分配 + 尾差 = 級距總折扣」以及「實際分配 = 每杯折扣 × 有效授權杯數」。SQLite runtime 目前仍由既有 `discount_amount` 與 `authorized_cups` 重算；本 migration 不代表 runtime 切換或雙寫。
 
 ### Phase 4：完成 PostgreSQL seed data
 
@@ -234,11 +248,11 @@ payment_status text not null check (payment_status in ('pending', 'authorized', 
 
 ### Phase 5：建立 backend repository layer
 
-以 adapter / repository layer 逐步抽換資料庫存取。目前前兩個唯讀切片已完成程式、真實 runtime 與 HTTP source proof：
+以 adapter / repository layer 逐步抽換資料庫存取。目前前三個唯讀切片已完成程式、真實 runtime 與 HTTP source proof：
 
 1. Customer public store menu read（已完成；repository、真實 PostgreSQL runtime 與 HTTP source proof 均通過）。
 2. List activities（已完成；repository、真實 PostgreSQL runtime 與 HTTP source proof 均通過）。
-3. Login（下一個唯讀切片）。
+3. Login／role／merchant-store permission（已完成；repository、真實 PostgreSQL runtime 與 HTTP source proof 均通過）。
 4. Merchant creates activity。
 5. Customer creates order。
 6. LINE Pay authorization confirm。
@@ -277,6 +291,7 @@ payment_status text not null check (payment_status in ('pending', 'authorized', 
 DATABASE_URL=postgres://user:password@localhost:5432/drink_group_buy
 STORE_MENU_READ_RUNTIME=sqlite
 GROUP_BUY_ACTIVITY_READ_RUNTIME=sqlite
+AUTH_PROFILE_READ_RUNTIME=sqlite
 AUTH_SESSION_SECRET=...
 LINE_PAY_CHANNEL_ID=...
 LINE_PAY_CHANNEL_SECRET=...
@@ -326,7 +341,7 @@ PostgreSQL 遷移後，以下流程需要 transaction：
 
 ## 下一步
 
-下一步搬移登入／角色／門市權限解析為第三個 PostgreSQL 唯讀 repository。商家菜單寫入、活動寫入、訂單與付款不得雙寫，也不得一次替換全部 `backend/db.js`。
+下一步規劃第一個 PostgreSQL 寫入 transaction 與 row lock，優先從不接觸真實付款的活動建立或訂單草稿邊界開始。切換時要明確停止該 slice 的 SQLite 寫入，商家菜單、訂單與付款不得雙寫，也不得一次替換全部 `backend/db.js`。
 
 ## 2026-07-30 驗證進度
 
@@ -337,4 +352,14 @@ PostgreSQL 遷移後，以下流程需要 transaction：
 - 本機 PostgreSQL 16 已重新套用 `001_initial_postgres.sql` 與 `002_seed_dev_postgres.sql`，並限制只監聽 `localhost`；真實 `npm run postgres-runtime:smoke` 已通過。
 - 顧客公開菜單 route 已用 PostgreSQL 專用臨時品項完成 HTTP source proof；臨時資料已清除。
 - 團購活動列表 route 已用 PostgreSQL 專用臨時活動完成 HTTP source proof；活動與級距均已清除。
-- 其他 route 仍使用 SQLite，目前沒有 SQLite/PostgreSQL 雙寫；下一個切片是登入／角色／門市權限唯讀 repository。
+- 登入／角色／門市權限 repository 已完成；Firebase UID、dev session、legacy dev login 與 bearer token 後續解析共用 `AUTH_PROFILE_READ_RUNTIME`。
+- PostgreSQL-only 臨時顧客已完成 dev session 與 bearer token HTTP source proof，測試後資料已刪除。
+- PostgreSQL v1 以 `merchant_users.store_id` 授權，不分店家內部權限等級；相容欄位 `permissionLevel` 回傳 `null`。
+- 商家菜單資料、活動寫入、訂單與付款仍使用 SQLite，目前沒有 SQLite/PostgreSQL 雙寫；下一階段才進入第一個 PostgreSQL 寫入 transaction／row lock。
+
+## 2026-07-31 結算快照 migration 驗證
+
+- `003_activity_settlement_discount_snapshot_postgres.sql` 已完成回填、NOT NULL、非負數、出資方與金額一致性 constraints。
+- `npm run postgres-settlement-snapshot:smoke` 已在本機 PostgreSQL 16 transaction 中驗證 3 杯折 100 元會保存每杯 33 元、分配 99 元、尾差 1 元。
+- 不一致快照會被 PostgreSQL `CHECK` constraint 拒絕。
+- smoke 最後執行 rollback；`003` 尚未永久套用，本機 Backend runtime 仍為 SQLite。
