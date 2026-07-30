@@ -160,6 +160,11 @@ const server = http.createServer(async (request, response) => {
     }
 
     if (request.method === "POST" && url.pathname === "/api/auth/login") {
+      if (!isDevAuthModeEnabled()) {
+        sendJson(response, 404, { error: "Not found" });
+        return;
+      }
+
       const body = await readJsonBody(request);
       const loginIdentifier = body.phoneNumber || body.loginName || body.email;
       if (!loginIdentifier || !body.password) {

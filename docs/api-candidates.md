@@ -23,7 +23,7 @@ API JSON 使用 `camelCase`。已實作 routes 只對目前開發 prototype 具�
 | 決策日期          | 2026-07-05                                                                                              |
 | 正式方向          | 只使用 Firebase Auth + Google Login                                                                     |
 | 目前已實作 route  | `POST /api/auth/firebase-session`                                                                       |
-| 舊版相容 route    | `POST /api/auth/login` 暫時保留為開發相容功能                                                           |
+| 舊版相容 route    | `POST /api/auth/login` 暫時保留為開發相容功能；僅在非 production 且 `AUTH_DEV_MODE=true` 時存在          |
 | Request           | `{ idToken }`，其中 `idToken` 是 Google Login 後取得的 Firebase ID token                                |
 | Response          | `{ token, user: { id, loginName, phoneNumber, email, displayName, surname, roles, merchantStores } }`   |
 | Backend 責任      | 驗證 Firebase ID token，將 Firebase UID/email 對應到 `users`，並從資料庫解析 roles 與 store permissions |
