@@ -13,6 +13,12 @@ const reviewedDynamicSql = [
     reason: "Static internal query fragment in findRefundablePaymentCapture."
   },
   {
+    file: "backend/database/sqliteAdapter.js",
+    method: "prepare",
+    expression: "sql",
+    reason: "Reviewed runtime adapter boundary; callers must pass static SQL and bound parameters."
+  },
+  {
     file: "scripts/settlement-smoke.js",
     method: "prepare",
     expression: "placeholders",
@@ -135,7 +141,7 @@ function inspectSqlArgument({ file, method, line, argument }) {
     return;
   }
 
-  if (method === "prepare" && !startsWithStringLiteral(argument)) {
+  if (method === "prepare" && !startsWithStringLiteral(argument) && !isReviewedDynamicSql(file, method, argument)) {
     findings.push({
       file,
       line,

@@ -1,6 +1,6 @@
 # 付款規則與流程
 
-最後更新：2026-07-21
+最後更新：2026-07-30
 
 本文件紀錄目前已確認的付款商業規則，作為下一階段 LINE Pay 實作依據。
 
@@ -186,4 +186,4 @@
 ## 尚未決定
 
 1. void 失敗時的具體重試間隔、最大重試時間與告警方式尚未設計。
-2. Deadline settlement scheduler 目前是單一 backend process interval；跨執行個體 locking、失敗重試佇列與告警尚未完成。
+2. Deadline settlement 已使用持久化 job 與 DB lease；兩程序 claim／lease takeover 測試已通過，仍需 PostgreSQL row-lock 驗收與正式告警通知管道。

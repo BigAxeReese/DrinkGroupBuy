@@ -225,7 +225,7 @@ PostgreSQL 方向：
 
 尚未完成：
 
-- Deadline settlement scheduler 已先以單一 backend process interval 實作；仍缺跨執行個體 locking、重試佇列與告警。
+- Deadline settlement scheduler 已使用持久化工作、跨程序 lease claim／takeover、admin 警示查詢與結構化日誌；正式通知通道仍待實作。
 - LINE Pay capture 已在付款模組內部實作。
 - LINE Pay void 已在付款模組內部實作。
 - LINE Pay refund 已有後端開發 / 補救切片；仍缺正式退款操作 UI、退款失敗重試與正式 sandbox 人工端對端測試。

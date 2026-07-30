@@ -1,6 +1,6 @@
 # PostgreSQL 遷移規劃
 
-最後更新：2026-07-11
+最後更新：2026-07-30
 
 本文件整理從目前 SQLite 開發資料庫遷移到 PostgreSQL 的方向。它是規劃文件，不是可直接執行的 production migration。
 
@@ -173,22 +173,24 @@ payment_status text not null check (payment_status in ('pending', 'authorized', 
 | -------------- | ----------------------------------------------------------------------- |
 | 身份與角色     | `users`, `user_roles`, `user_private_profiles`, `user_public_profiles`  |
 | 商家與門市     | `merchants`, `merchant_users`, `stores`                                 |
-| 菜單           | `menu_items`, `customization_options`                                   |
+| 菜單           | `menu_items`, `customization_options`；仍需補 `menu_item_customization_rules` |
 | 團購活動       | `group_buy_activities`, `promotion_tiers`, `activity_notices`           |
 | 購物車草稿     | `cart_drafts`, `cart_draft_items`, `cart_draft_item_customizations`     |
-| 訂單           | `orders`, `order_items`, `order_item_customizations`                    |
-| 付款           | `payment_authorizations`, `payment_captures`, `payment_provider_events` |
+| 訂單           | `orders`, `order_items`, `order_item_customizations`；仍需補 revision 與 idempotency tables |
+| 付款           | `payment_authorizations`, `payment_captures`, `payment_provider_events`；仍需補 `payment_refunds` |
 | 結算與取貨     | `activity_settlements`, `pickup_credentials`                            |
 | 狀態與稽核     | `status_history`, `audit_logs`                                          |
 
-## PostgreSQL 可後續補充的 schema
+## PostgreSQL parity 與後續候選 schema
 
-以下不放進第一版 migration，除非正式功能開始實作。
+切換 Backend runtime 前，必須先補齊目前 SQLite 已使用的交易結構；純未來功能則可延後。
 
 | 候選項目             | 可能資料表或欄位                         | 原因                                      |
 | -------------------- | ---------------------------------------- | ----------------------------------------- |
-| 訂單修改歷史         | `order_revisions`, revision item tables  | 需要保存已預授權訂單修改前後內容          |
-| Idempotency          | order/payment API idempotency key        | 避免重複送單、重複確認或重複請款          |
+| 必要 parity：訂單修改 | `order_revisions`, revision item tables | SQLite runtime 已使用，切換前必須補齊 |
+| 必要 parity：菜單規則 | `menu_item_customization_rules` | SQLite runtime 已用於 min/max 選擇限制 |
+| 必要 parity：冪等紀錄 | `order_action_idempotency` | SQLite runtime 已用於取消等操作 |
+| 必要 parity：退款 | `payment_refunds` | SQLite runtime 已保存退款結果 |
 | Session              | `sessions`, `refresh_tokens`             | 若未來 backend 自行管理 session           |
 | Settlement job log   | settlement job attempt table             | 追蹤截止結算重試與失敗原因                |
 | Notification         | `notifications`, `notification_events`   | 實作推播或站內通知時需要                  |
@@ -232,13 +234,16 @@ payment_status text not null check (payment_status in ('pending', 'authorized', 
 
 ### Phase 5：建立 backend repository layer
 
-以 adapter / repository layer 逐步抽換資料庫存取，優先做：
+以 adapter / repository layer 逐步抽換資料庫存取。目前前兩個唯讀切片已完成程式、真實 runtime 與 HTTP source proof：
 
-1. Login。
-2. List activities。
-3. Merchant creates activity。
-4. Customer creates order。
-5. LINE Pay authorization confirm。
+1. Customer public store menu read（已完成；repository、真實 PostgreSQL runtime 與 HTTP source proof 均通過）。
+2. List activities（已完成；repository、真實 PostgreSQL runtime 與 HTTP source proof 均通過）。
+3. Login（下一個唯讀切片）。
+4. Merchant creates activity。
+5. Customer creates order。
+6. LINE Pay authorization confirm。
+
+商家完整菜單查詢／修改仍使用 SQLite，避免唯讀切片造成跨資料庫寫入不一致。
 
 要求：
 
@@ -270,6 +275,8 @@ payment_status text not null check (payment_status in ('pending', 'authorized', 
 
 ```text
 DATABASE_URL=postgres://user:password@localhost:5432/drink_group_buy
+STORE_MENU_READ_RUNTIME=sqlite
+GROUP_BUY_ACTIVITY_READ_RUNTIME=sqlite
 AUTH_SESSION_SECRET=...
 LINE_PAY_CHANNEL_ID=...
 LINE_PAY_CHANNEL_SECRET=...
@@ -319,4 +326,15 @@ PostgreSQL 遷移後，以下流程需要 transaction：
 
 ## 下一步
 
-先保留 SQLite runtime，完成 PostgreSQL migration draft 與付款/訂單流程設計。等一個完整 vertical slice 穩定後，再開始把 backend 資料存取從 SQLite 抽換成 PostgreSQL。
+下一步搬移登入／角色／門市權限解析為第三個 PostgreSQL 唯讀 repository。商家菜單寫入、活動寫入、訂單與付款不得雙寫，也不得一次替換全部 `backend/db.js`。
+
+## 2026-07-30 驗證進度
+
+- `001_initial_postgres.sql` 已補上 `payment_reliability_jobs` 與 `operation_locks`，與目前 SQLite 可靠性核心 schema 對齊。
+- Root 已安裝 `pg`，`backend/database/` 提供 SQLite／PostgreSQL adapter、query、execute、transaction、health check 與 close 邊界。
+- `npm run database-adapter:smoke` 已驗證 SQLite commit／rollback 與模擬 PostgreSQL transaction 契約。
+- `npm run store-menu-read:smoke` 與 `npm run group-buy-activity-read:smoke` 已驗證兩個切片的 SQLite 委派、PostgreSQL SQL 與 API JSON 契約。
+- 本機 PostgreSQL 16 已重新套用 `001_initial_postgres.sql` 與 `002_seed_dev_postgres.sql`，並限制只監聽 `localhost`；真實 `npm run postgres-runtime:smoke` 已通過。
+- 顧客公開菜單 route 已用 PostgreSQL 專用臨時品項完成 HTTP source proof；臨時資料已清除。
+- 團購活動列表 route 已用 PostgreSQL 專用臨時活動完成 HTTP source proof；活動與級距均已清除。
+- 其他 route 仍使用 SQLite，目前沒有 SQLite/PostgreSQL 雙寫；下一個切片是登入／角色／門市權限唯讀 repository。

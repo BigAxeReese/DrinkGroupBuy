@@ -2,6 +2,7 @@ const {
   expireGroupBuyPickupWindow,
   listDueGroupBuyActivitiesForPickupExpiration
 } = require("../db");
+const { withOperationLeaseSync } = require("../reliability/operationLease");
 
 async function runDuePickupExpirations(input = {}) {
   const now = input.now || new Date().toISOString();
@@ -13,7 +14,11 @@ async function runDuePickupExpirations(input = {}) {
 
   for (const activity of dueActivities) {
     try {
-      const result = expireGroupBuyPickupWindow(activity.id, { now, actorUserId });
+      const result = withOperationLeaseSync({
+        lockKey: `pickup:activity:${activity.id}:transition`,
+        leaseMs: 120_000,
+        now
+      }, () => expireGroupBuyPickupWindow(activity.id, { now, actorUserId }));
       results.push({ activityId: activity.id, status: result.status, ...result });
     } catch (error) {
       failures.push({ activityId: activity.id, error: error.message });

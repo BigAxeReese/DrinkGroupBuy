@@ -1,10 +1,17 @@
+const { randomUUID } = require("node:crypto");
 const {
+  acquireOperationLock,
   captureLinePayAuthorizationInDatabase,
+  claimPaymentReliabilityJobs,
   completeGroupBuySettlement,
+  completePaymentReliabilityJob,
   createGroupBuySettlementPlan,
+  enqueuePaymentReliabilityJob,
   getLinePayCaptureRetryState,
   listDueGroupBuyActivitiesForSettlement,
-  recordLinePayCaptureFailureInDatabase
+  recordLinePayCaptureFailureInDatabase,
+  releaseOperationLock,
+  reschedulePaymentReliabilityJob
 } = require("../db");
 const {
   captureLinePayAuthorization,
@@ -15,7 +22,30 @@ const {
 const CAPTURE_MAX_ATTEMPTS = 3;
 const CAPTURE_RETRY_INTERVAL_MS = 30_000;
 
-async function settleGroupBuyActivity({ activityId, actorUserId, force = false, now } = {}) {
+async function settleGroupBuyActivity(input = {}) {
+  const ownerId = input.lockOwnerId || `settlement-${process.pid}-${randomUUID()}`;
+  const lockKey = `settlement:activity:${input.activityId}`;
+  const lock = acquireOperationLock({
+    lockKey,
+    ownerId,
+    leaseMs: input.leaseMs || 300_000,
+    now: input.now
+  });
+  if (!lock.acquired) {
+    return {
+      error: "settlement_locked",
+      activityId: input.activityId,
+      lockedUntil: lock.lockedUntil
+    };
+  }
+  try {
+    return await settleGroupBuyActivityUnlocked(input);
+  } finally {
+    releaseOperationLock({ lockKey, ownerId });
+  }
+}
+
+async function settleGroupBuyActivityUnlocked({ activityId, actorUserId, force = false, now } = {}) {
   const plan = createGroupBuySettlementPlan(activityId, {
     actorUserId,
     force,
@@ -340,6 +370,91 @@ async function runDueGroupBuySettlements(input = {}) {
   };
 }
 
+
+function enqueueDueGroupBuySettlementJobs(input = {}) {
+  const now = input.now || new Date().toISOString();
+  return listDueGroupBuyActivitiesForSettlement({
+    now,
+    limit: input.limit
+  }).map((activity) => enqueuePaymentReliabilityJob({
+    jobType: "settle_group_buy_activity",
+    resourceType: "activity",
+    resourceId: activity.id,
+    payload: {
+      activityId: activity.id,
+      actorUserId: input.actorUserId || null
+    },
+    maxAttempts: input.maxAttempts || 20,
+    runAfter: now,
+    now
+  }));
+}
+
+async function runDueGroupBuySettlementJobs(input = {}) {
+  const now = input.now || new Date().toISOString();
+  const workerId = input.workerId || `settlement-worker-${process.pid}-${randomUUID()}`;
+  const retryIntervalMs = normalizeSchedulerNumber(
+    input.retryIntervalMs,
+    null,
+    CAPTURE_RETRY_INTERVAL_MS
+  );
+  const queued = enqueueDueGroupBuySettlementJobs(input);
+  const jobs = claimPaymentReliabilityJobs({
+    jobType: "settle_group_buy_activity",
+    workerId,
+    limit: input.limit || 20,
+    leaseMs: input.leaseMs || 300_000,
+    now
+  });
+  const results = [];
+
+  for (const job of jobs) {
+    try {
+      const result = await settleGroupBuyActivity({
+        activityId: job.payload.activityId || job.resourceId,
+        actorUserId: job.payload.actorUserId || input.actorUserId || null,
+        lockOwnerId: `${workerId}:${job.id}`,
+        leaseMs: input.leaseMs || 300_000,
+        now
+      });
+      const retryable = !result
+        || result.error === "settlement_retry_pending"
+        || result.error === "settlement_locked"
+        || (result.error && result.error !== "activity_already_settled" && result.error !== "settlement_not_due");
+      const persisted = retryable
+        ? reschedulePaymentReliabilityJob({
+            jobId: job.id,
+            workerId,
+            runAfter: new Date(Date.parse(now) + retryIntervalMs).toISOString(),
+            error: result || { error: "activity_not_found" },
+            terminal: !result,
+            now
+          })
+        : completePaymentReliabilityJob({ jobId: job.id, workerId, now });
+      results.push({ job: persisted, result });
+    } catch (error) {
+      const persisted = reschedulePaymentReliabilityJob({
+        jobId: job.id,
+        workerId,
+        runAfter: new Date(Date.parse(now) + retryIntervalMs).toISOString(),
+        error: error.payload || { message: error.message },
+        now
+      });
+      results.push({ job: persisted, error: error.payload || { message: error.message } });
+    }
+  }
+
+  return {
+    checkedAt: now,
+    queuedCount: queued.length,
+    claimedCount: jobs.length,
+    succeededCount: results.filter((entry) => entry.job?.status === "succeeded").length,
+    retryPendingCount: results.filter((entry) => entry.job?.status === "retry_wait").length,
+    failedCount: results.filter((entry) => entry.job?.status === "failed").length,
+    results
+  };
+}
+
 function startDeadlineSettlementScheduler(input = {}) {
   const env = input.env || process.env;
   const enabled = readBooleanEnv(env.SETTLEMENT_SCHEDULER_ENABLED, true);
@@ -368,22 +483,35 @@ function startDeadlineSettlementScheduler(input = {}) {
 
     running = true;
     try {
-      const summary = await runDueGroupBuySettlements({
+      const summary = await runDueGroupBuySettlementJobs({
         actorUserId,
         limit
       });
 
-      if (summary.dueActivityCount > 0 || summary.failedCount > 0) {
+      if (summary.queuedCount > 0 || summary.failedCount > 0) {
         logger.info?.("[settlement-scheduler] run completed", {
           checkedAt: summary.checkedAt,
-          dueActivityCount: summary.dueActivityCount,
-          settledCount: summary.settledCount,
+          queuedCount: summary.queuedCount,
+          claimedCount: summary.claimedCount,
+          succeededCount: summary.succeededCount,
           retryPendingCount: summary.retryPendingCount,
-          skippedCount: summary.skippedCount,
           failedCount: summary.failedCount
         });
       }
 
+      for (const entry of summary.results || []) {
+        if (!entry.job?.alertRequired) continue;
+        logger.error?.("[payment-reliability-alert]", {
+          source: "group_buy_settlement",
+          jobId: entry.job.id,
+          jobType: entry.job.jobType,
+          resourceId: entry.job.resourceId,
+          status: entry.job.status,
+          attemptCount: entry.job.attemptCount,
+          maxAttempts: entry.job.maxAttempts,
+          lastError: entry.job.lastError
+        });
+      }
       return summary;
     } catch (error) {
       logger.error?.("[settlement-scheduler] run failed", {
@@ -437,6 +565,8 @@ function readBooleanEnv(value, fallback) {
 }
 
 module.exports = {
+  enqueueDueGroupBuySettlementJobs,
+  runDueGroupBuySettlementJobs,
   runDueGroupBuySettlements,
   startDeadlineSettlementScheduler,
   settleGroupBuyActivity

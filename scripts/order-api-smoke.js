@@ -2,6 +2,7 @@ const fs = require("node:fs");
 const os = require("node:os");
 const path = require("node:path");
 const { spawn } = require("node:child_process");
+const { DatabaseSync } = require("node:sqlite");
 
 const repoRoot = path.resolve(__dirname, "..");
 const tempDirectory = fs.mkdtempSync(path.join(os.tmpdir(), "drink-group-buy-api-smoke-"));
@@ -54,7 +55,9 @@ async function main() {
       PORT: String(port),
       AUTH_DEV_MODE: "true",
       AUTH_TOKEN_SECRET: "local-api-smoke-secret",
-      DRINK_GROUP_BUY_DB_PATH: databasePath
+      DRINK_GROUP_BUY_DB_PATH: databasePath,
+      STORE_MENU_READ_RUNTIME: "sqlite",
+      GROUP_BUY_ACTIVITY_READ_RUNTIME: "sqlite",
     },
     windowsHide: true
   });
@@ -62,7 +65,32 @@ async function main() {
   backend.stderr.on("data", (chunk) => { backendOutput += chunk; });
 
   await waitForBackend();
+  const publicMenu = await request("/api/stores/store-001/menu");
+  if (!publicMenu.response.ok || !Array.isArray(publicMenu.payload.menuItems)) {
+    throw new Error("Public store menu route failed");
+  }
+  if (publicMenu.payload.store?.id !== "store-001" || publicMenu.payload.menuItems.length !== 2) {
+    throw new Error("Public store menu route returned an unexpected contract");
+  }
+  const groupBuyActivities = await request("/api/group-buy-activities");
+  if (!groupBuyActivities.response.ok || !Array.isArray(groupBuyActivities.payload.activities)) {
+    throw new Error("Group-buy activity list route failed");
+  }
+  const alertDatabase = new DatabaseSync(databasePath);
+  const alertTime = new Date().toISOString();
+  alertDatabase.prepare(`
+    INSERT INTO payment_reliability_jobs (
+      id, job_type, resource_type, resource_id, status, payload_json,
+      attempt_count, max_attempts, run_after, last_error_json,
+      alert_required, created_at, updated_at, completed_at
+    ) VALUES (?, ?, ?, ?, 'failed', '{}', 3, 3, ?, ?, 1, ?, ?, ?)
+  `).run(
+    "job-api-smoke-alert", "reconcile_line_pay_request", "payment_authorization",
+    "authorization-api-smoke", alertTime, JSON.stringify({ message: "smoke failure" }),
+    alertTime, alertTime, alertTime
+  );
   const customerToken = await createDevSession("user-customer-yinji");
+  alertDatabase.close();
   const customerList = await request("/api/customers/me/orders?scope=active&limit=2", {
     token: customerToken
   });
@@ -82,8 +110,26 @@ async function main() {
   });
   if (crossStore.response.status !== 403) throw new Error("Cross-store order access should return 403");
 
+  const customerAlerts = await request("/api/admin/payment-reliability/alerts", {
+    token: customerToken
+  });
+  if (customerAlerts.response.status !== 403) {
+    throw new Error("Customer access to reliability alerts should return 403");
+  }
+  const adminToken = await createDevSession("user-admin-001");
+  const adminAlerts = await request(
+    "/api/admin/payment-reliability/alerts?jobType=reconcile_line_pay_request&status=failed&limit=10",
+    { token: adminToken }
+  );
+  if (!adminAlerts.response.ok || adminAlerts.payload.count !== 1) {
+    throw new Error("Admin reliability alert query failed");
+  }
+  if (adminAlerts.payload.alerts[0]?.id !== "job-api-smoke-alert") {
+    throw new Error("Admin reliability alert query returned the wrong job");
+  }
+
   console.log("Order API smoke passed");
-  console.log("routes: health=1, customer_list=1, merchant_list=1, cross_store_403=1");
+  console.log("routes: health=1, public_menu=1, group_buy_activities=1, customer_list=1, merchant_list=1, cross_store_403=1, reliability_alerts=1");
   console.log(`rows: customer=${customerList.payload.orders.length}, merchant=${merchantList.payload.orders.length}`);
 }
 

@@ -1,6 +1,6 @@
 # 資料字典
 
-最後更新：2026-06-25
+最後更新：2026-07-30
 
 ## 語言規則
 
@@ -24,6 +24,7 @@
 | 門市 / 店家      | 實體下單與取貨地點              | `store`, `storeId`               | `stores`, `store_id`                  | 優先使用 `store`，避免再引入 `shop`          |
 | 菜單品項         | 店家販售的飲品或商品            | `menuItem`, `menuItemId`         | `menu_items`, `menu_item_id`          | 基本價格存放於此                             |
 | 客製化選項       | 甜度、冰塊、加料或尺寸選項      | `customizationOption`            | `customization_options`               | 部分選項可能加價                             |
+| 客製化選擇規則   | 每個品項、選項類型的最少與最多選擇數 | `menuItemCustomizationRule` | `menu_item_customization_rules` | 由店家設定，Backend 驗證為準 |
 | 團購活動         | 商家建立的團購事件              | `groupBuyActivity`, `activityId` | `group_buy_activities`, `activity_id` | Mobile prototype 已改用此命名；舊 `deal` 僅作相容或測試表脈絡 |
 | 優惠級距         | 杯數門檻與總折扣金額            | `promotionTier`, `tierId`        | `promotion_tiers`, `tier_id`          | 例如 20 杯共折 200 元                        |
 | 活動注意事項     | 顯示於活動詳情的商家備註        | `activityNotice`                 | `activity_notices`                    | 多筆注意事項分開儲存                         |
@@ -33,6 +34,8 @@
 | 訂單             | 顧客參與某一個團購活動的紀錄    | `order`, `orderId`               | `orders`, `order_id`                  | 包含一個或多個訂單品項                       |
 | 訂單品項         | 訂單中的單杯飲料 snapshot       | `orderItem`, `orderItemId`       | `order_items`, `order_item_id`        | 保留品項名稱與價格 snapshot                  |
 | 訂單客製化明細   | 訂單品項的一個已選選項 snapshot | `orderItemCustomization`         | `order_item_customizations`           | 甜度、冰塊、加料與尺寸以 rows 保存           |
+| 訂單修改版本     | 已授權訂單重新預授權前的待確認快照 | `orderRevision` | `order_revisions` 與 revision item tables | 新授權成功後才套用 |
+| 訂單操作冪等紀錄 | 防止取消等敏感操作重複執行 | `orderActionIdempotency` | `order_action_idempotency` | 保存 action、key 與結果 |
 | 原價金額         | 折扣前計算出的金額              | `originalAmount`                 | `original_amount`                     | 台幣整數金額                                 |
 | 預授權金額       | 金流服務商已授權的金額          | `authorizedAmount`               | `authorized_amount`                   | 尚未請款                                     |
 | 最終金額         | 最終優惠級距計算後的金額        | `finalAmount`                    | `final_amount`                        | 在結算時決定                                 |
@@ -40,6 +43,9 @@
 | 釋放金額         | 已授權但未請款的金額            | `releasedAmount`                 | `released_amount`                     | 實際釋放時間取決於 provider/bank             |
 | 付款預授權       | 金流服務商的付款授權嘗試        | `paymentAuthorization`           | `payment_authorizations`              | 目標流程類似 LINE Pay authorization          |
 | 付款請款         | 活動結算後的 capture            | `paymentCapture`                 | `payment_captures`                    | 可能是 partial capture                       |
+| 付款可靠性工作   | Provider 對帳或活動結算的持久化工作 | `paymentReliabilityJob` | `payment_reliability_jobs` | 狀態為 queued／running／retry_wait／succeeded／failed／cancelled |
+| 跨執行個體租約   | 保護 provider 操作與整團結算的短期鎖 | `operationLock` | `operation_locks` | 以 `locked_until` 判斷能否由其他 worker 接手 |
+| 付款退款         | 已請款交易的全額或部分退款紀錄 | `paymentRefund` | `payment_refunds` | 與 void 未請款授權不同 |
 | 金流事件         | Provider event payload          | `paymentProviderEvent`           | `payment_provider_events`             | 用於 idempotency 與 reconciliation；未來可包含 webhook |
 | 活動結算         | 截止結果與套用級距              | `activitySettlement`             | `activity_settlements`                | 應只建立一次且可稽核                         |
 | 商家接單狀態     | 舊候選：商家是否接受製作        | `merchantAcceptanceStatus`       | `merchant_acceptance_status`          | 最新規則不需逐筆接單；可固定 accepted 或後續移除 |

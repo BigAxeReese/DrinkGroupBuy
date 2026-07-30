@@ -2,9 +2,9 @@
 
 這個資料夾放 DrinkGroupBuy 的本機開發資料庫設計與初始化腳本。
 
-目前 backend runtime 使用 SQLite，主要目的是讓開發階段可以先把資料流程跑起來。
+目前 backend runtime 預設與多數流程使用 SQLite，主要目的是讓開發階段可以先把資料流程跑起來。
 
-PostgreSQL 是未來正式資料庫方向。`database/migrations/` 內已開始保存 PostgreSQL schema/seed draft，但尚未接到 backend runtime。
+PostgreSQL 是未來正式資料庫方向。`database/migrations/` 保存 schema/seed draft，`backend/database/` 已有隔離 adapter；公開菜單與團購活動列表已有獨立唯讀切片，`backend/db.js` 尚未整體切換。
 
 ## 目前用途
 
@@ -22,8 +22,8 @@ PostgreSQL 是未來正式資料庫方向。`database/migrations/` 內已開始�
 | `init-dev-db.js` | 依照 `schema.sql` 重建 SQLite 資料庫 |
 | `seed-dev-db.js` | 匯入 `seed-dev.sql` |
 | `drink-group-buy-dev.sqlite` | 產生出的本機資料庫檔案，不應上傳 Git |
-| `migrations/001_initial_postgres.sql` | PostgreSQL v1 schema draft，尚未接到 backend |
-| `migrations/002_seed_dev_postgres.sql` | PostgreSQL dev seed draft，尚未接到 backend |
+| `migrations/001_initial_postgres.sql` | PostgreSQL v1 schema draft，含付款可靠性工作與 operation lease |
+| `migrations/002_seed_dev_postgres.sql` | PostgreSQL dev seed；目前供公開菜單與團購活動列表唯讀 runtime 驗證使用 |
 | `docker-compose.postgres.yml` | 本機 PostgreSQL dev container 設定 |
 | `test/` | 測試/展示用資料，不是正式 schema 來源 |
 
@@ -46,7 +46,7 @@ database/drink-group-buy-dev.sqlite
 
 ## PostgreSQL draft 驗證方式
 
-目前 PostgreSQL 只用於 schema/seed draft 驗證，不是 backend runtime。
+目前 PostgreSQL 已用於 schema／seed、adapter、顧客公開菜單與團購活動列表 HTTP 唯讀切片驗證；其餘 HTTP route 仍使用 SQLite。
 
 本機沒有安裝 `psql` 也可以用 Docker container 內的 `psql` 驗證：
 
@@ -79,6 +79,10 @@ postgres://drink_group_buy:drink_group_buy_dev_password@localhost:5432/drink_gro
 - 2026-07-02：PostgreSQL draft 已調整為每個商家帳號只綁定一間 `stores`，並已重新用 fresh dev database 驗證。
 - 2026-07-03：PostgreSQL seed draft 已補上 96 customization_options，並已重新用 fresh dev database 驗證。
 - 驗證後 baseline 資料為 12 users、12 user_private_profiles、12 user_public_profiles、12 user_roles、7 merchants、7 merchant_users、7 stores、8 menu_items、96 customization_options。
+- 2026-07-30：PostgreSQL schema 已補上 `payment_reliability_jobs` 與 `operation_locks`。
+- 2026-07-30：本機 PostgreSQL 16 已重新套用 `001`／`002`，`npm run database-adapter:smoke` 與真實 `npm run postgres-runtime:smoke` 均通過；服務只監聽 `localhost`。
+- 2026-07-30：公開菜單 HTTP route 已用 PostgreSQL 專用臨時品項證明資料來源，驗證後臨時品項已清除。
+- 2026-07-30：團購活動列表 HTTP route 已用 PostgreSQL 專用臨時活動證明資料來源，驗證後活動與級距均已清除。
 - 驗證後 runtime 資料仍為 0 group_buy_activities、0 promotion_tiers、0 orders、0 payment_authorizations、0 payment_captures、0 pickup_credentials。
 
 ## 目前主要資料表
@@ -101,13 +105,15 @@ postgres://drink_group_buy:drink_group_buy_dev_password@localhost:5432/drink_gro
 - `payment_captures`：partial capture 請款結果、嘗試次數與下次重試時間。
 - `payment_provider_events`：金流 provider 回傳事件。
 - `activity_settlements`：團購截止後結算結果。
+- `payment_reliability_jobs`：provider 對帳與結算的持久化工作。
+- `operation_locks`：跨程序敏感操作的租約。
 - `pickup_credentials`：取貨代碼。
 - `status_history`：狀態變更歷史。
 - `audit_logs`：重要操作紀錄。
 
 ## 目前與後端的關係
 
-後端已經會讀寫這個 SQLite 資料庫。PostgreSQL migration draft 尚未接到後端。
+後端預設與多數流程仍讀寫 SQLite；顧客公開菜單 `GET /api/stores/:storeId/menu` 與團購活動列表 `GET /api/group-buy-activities` 已可透過各自 repository 切換 PostgreSQL，沒有雙寫，`backend/db.js` 尚未整體搬移。
 
 目前已接上的資料流程：
 

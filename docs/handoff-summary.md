@@ -1,6 +1,6 @@
 # 交接總整理
 
-最後更新：2026-07-21
+最後更新：2026-07-30
 
 換電腦、交接給其他人、或開新的 Codex 對話時，請先閱讀本文件。
 
@@ -23,12 +23,13 @@ project-root/
 
 - Mobile app：React Native + Expo。
 - Backend：Node.js built-in HTTP server。
-- 目前開發資料庫：SQLite。
+- 目前開發資料庫預設為 SQLite；顧客公開菜單與團購活動列表可用各自環境變數切換 PostgreSQL。
 - 未來正式資料庫目標：PostgreSQL。
 - Firebase 不作為主要資料庫方向。
 - Firebase 目前只規劃用於 Auth / Google Login。
 - 開發期優先用 Firebase Google 測試帳號；若帳號不足，本機可用 dev-only 身份切換器測顧客、商家，以及必要的後端補救權限。
 - LINE Pay sandbox 預授權、void、capture、refund、手動重新付款、單一團購手動結算與 deadline settlement scheduler 已有後端切片。
+- 訂單流程階段 0～5 的第一版已完成；GitHub 完成基準為 `7f52ed0 Complete and validate order flows`。
 
 文件語言規則：
 
@@ -82,9 +83,9 @@ backend/.env
 
 重要限制：
 
-- 部分執行狀態 `runtime state` 仍保存在 mobile local state。
-- App 啟動時尚未完整載入後端權威 activity / order / payment data。
-- 部分畫面仍可能有 prototype fallback 行為。
+- 顧客與商家訂單列表已在登入、切換頁籤及 App 回到前景時向 Backend 同步；local state 僅作畫面 cache。
+- 團購活動首頁、地圖及部分店家摘要仍混用 local state 或 mock，尚未完全由 Backend 權威資料驅動。
+- LINE Pay reconciliation、持久化 retry、admin 警示查詢及 payment／settlement／cancel／repay／pickup DB lease 已完成；公開菜單與團購活動列表兩個 PostgreSQL 唯讀切片皆已通過真實 runtime 與 HTTP source proof，尚缺 LINE Pay 核准後的 Sandbox 人工 E2E。
 
 ## 目前 Backend 狀態
 
@@ -106,6 +107,9 @@ backend/
 | `backend/payments/linePayPendingStore.js` | LINE Pay redirect 前後的記憶體快取；confirm/cancel 以 DB 查找為主                    |
 | `backend/payments/settlementService.js`   | 單一團購結算流程，依結果批次 capture / void，並處理請款重試                         |
 | `backend/linePayClient.js`                | payment client 相容匯出                       |
+| `backend/payments/reliabilityService.js` | Provider reconciliation、持久化工作 worker 與結構化警示 |
+| `backend/reliability/operationLease.js`   | 跨程序敏感狀態變更 lease 共用封裝             |
+| `backend/database/`                       | SQLite/PostgreSQL adapter 與公開菜單／團購活動列表唯讀 repositories |
 | `backend/README.md`                       | 後端啟動說明                                  |
 
 目前 API：
@@ -114,12 +118,25 @@ backend/
 | -------- | --------------------------------------------- | ------------------------------ |
 | `POST`   | `/api/auth/login`                             | 登入                           |
 | `POST`   | `/api/auth/firebase-session`                  | Firebase Google Login session   |
+| `GET`    | `/api/auth/dev-users`                         | 本機 dev-only 身份清單          |
+| `POST`   | `/api/auth/dev-session`                       | 本機 dev-only 模擬登入          |
 | `GET`    | `/health`                                     | 健康檢查                       |
 | `GET`    | `/api/group-buy-activities`                   | 查詢團購活動                   |
+| `GET`    | `/api/stores/:storeId/menu`                   | 顧客查詢上架菜單               |
+| `GET`    | `/api/merchant/stores/:storeId/menu`          | 商家查詢完整菜單               |
+| `POST`   | `/api/merchant/stores/:storeId/menu-items`    | 商家新增菜單品項               |
+| `PATCH`  | `/api/merchant/stores/:storeId/menu-items/:menuItemId` | 商家修改或上下架品項 |
 | `POST`   | `/api/merchant/group-buy-activities`          | 商家建立團購活動               |
 | `POST`   | `/api/orders`                                 | 顧客建立訂單                   |
 | `PATCH`  | `/api/orders/:orderId`                        | 更新尚未預授權成功的訂單明細   |
 | `POST`   | `/api/orders/:orderId/revisions`              | 建立已授權訂單的修改版本       |
+| `GET`    | `/api/customers/me/orders`                    | 顧客權威訂單列表               |
+| `GET`    | `/api/merchant/stores/:storeId/orders`        | 商家門市權威訂單列表           |
+| `POST`   | `/api/orders/:orderId/cancel`                 | 顧客在鎖定前取消訂單           |
+| `POST`   | `/api/merchant/group-buy-activities/:activityId/ready-for-pickup` | 商家標記活動可取餐 |
+| `GET`    | `/api/orders/:orderId/pickup-credential`      | 顧客查詢取貨憑證               |
+| `POST`   | `/api/merchant/pickup-credentials/lookup`     | 商家查詢取貨碼                 |
+| `POST`   | `/api/merchant/pickup-credentials/redeem`     | 商家核銷取貨碼                 |
 | `GET`    | `/api/orders/:orderId`                        | 查詢訂單明細                   |
 | `DELETE` | `/api/admin/group-buy-activities/:activityId` | 開發 / 補救用取消活動         |
 | `POST`   | `/api/admin/group-buy-activities/:activityId/settle` | 開發 / 補救用手動觸發單一團購結算 |
@@ -136,11 +153,19 @@ backend/
 - 沒有正式 production auth/session 設計；目前 Firebase session route 會回傳既有 bearer token。
 - LINE Pay void / capture / refund 已在付款模組與 dev/backend API 切片實作；refund 尚未有正式操作 UI、失敗重試 queue 與正式 sandbox 人工端對端驗證。
 - LINE Pay webhook 第一版不列為必要入口；付款同步先以 confirm/cancel redirect、資料庫狀態與後續 provider 狀態查詢為主。
-- 尚未實作 pickup APIs。
+- 取貨憑證、標記可取餐、取貨碼查詢／核銷與逾期處理已完成第一版；QR Code、正式通知與完整 Android E2E 尚未完成。
 - 已實作開發 / 補救用手動觸發單一團購結算，也已接上後端啟動時的 deadline settlement scheduler。
 - Scheduler 預設每 30 秒掃描已截止、尚未結算的團購；若 `LINE_PAY_ENV=production`，必須設定 `SETTLEMENT_SCHEDULER_ALLOW_PRODUCTION=true` 才會啟動。
-- 可用 `npm run settlement:smoke` 以乾淨 schema 與 `mock_line_pay` 驗證本機結算 capture / void / scheduler、order revision 替換授權、截止後拒絕預授權、三次請款重試、取餐前 15 分鐘以前手動重新付款與 refund idempotency，測試後會還原開發 SQLite。
-- 後端仍使用 SQLite。
+- 自動檢查包含 `check:sql-safety`、`database-adapter:smoke`、`store-menu-read:smoke`、`payment-reliability:smoke`、`payment-reliability:multiprocess`、`settlement:smoke`、`pickup-expiration:smoke`、`pickup-credential:smoke`、`menu-order:smoke`、`order-flow:smoke`、`order-api:smoke` 與 `postgres-runtime:smoke`；會碰觸 SQLite 的 smoke scripts 完成後會還原開發資料庫。
+- 後端預設與大多數 route 仍使用 SQLite；只有顧客公開菜單已提供獨立 PostgreSQL 唯讀切換，沒有雙寫。
+
+## 2026-07-30 驗證基準
+
+- SQL safety 與上述可在本機執行的 smoke 全數通過；`order-api:smoke` 已實際覆蓋公開菜單 route。
+- Backend／scripts／database 共 41 個 JavaScript 檔語法通過；先前 Mobile JSX parse、Expo Doctor `17/17` 與 Web production export 亦通過。
+- SQLite `integrity_check = ok`、`foreign_key_check = 0`。
+- 本機 PostgreSQL 16 已套用 migrations／seed，並限制只監聽 `localhost`；`postgres-runtime:smoke`、公開菜單與團購活動列表 PostgreSQL HTTP source proofs 均通過，臨時 proof 資料已清除。
+- 尚未完成 Android 實機、Firebase 正式設定與 LINE Pay sandbox 人工端對端驗證。
 
 ## 測試登入帳號
 
@@ -260,9 +285,10 @@ PostgreSQL v1 決策：
 
 重要狀態：
 
-- PostgreSQL 尚未接入後端 runtime。
-- 後端仍使用 SQLite。
-- PostgreSQL migration 與 seed 目前是草稿，但已用本機 Docker PostgreSQL dev container 驗證過。
+- `GET /api/stores/:storeId/menu` 已可由 `STORE_MENU_READ_RUNTIME` 獨立切換；預設及其餘 HTTP route 仍使用 SQLite。
+- PostgreSQL migration／seed 草稿與 reliability schema parity 已完成。
+- `database-adapter:smoke` 與 `store-menu-read:smoke` 已通過。
+- 本機實際 PostgreSQL 可靠性表、seed 公開菜單與 HTTP route 已驗證通過；切換只限公開菜單，沒有雙寫。
 - PostgreSQL draft 拆分 `users`、`user_private_profiles`、`user_public_profiles`，避免商家看到顧客私人資料。
 - PostgreSQL draft 透過 `merchant_users.store_id` 讓每個商家帳號對應一間店。
 - PostgreSQL seed draft 替每個菜單品項建立甜度、冰塊、尺寸、加料選項。
@@ -285,9 +311,9 @@ PostgreSQL v1 決策：
 - void / capture 已在付款模組內部實作。
 - 已實作開發 / 補救用手動觸發單一團購結算。
 - 已實作取餐前 15 分鐘以前的手動重新付款第一版。
-- refund 已有 dev/backend 後端 API 與 smoke test；尚未有正式退款 UI、退款失敗重試 queue、provider reconciliation 與正式 sandbox 人工端對端測試。
-- 第一版不做 LINE Pay webhook endpoint；後續需要補 provider 狀態查詢、重試佇列與對帳。
-- 自動 deadline settlement scheduler 已先接上單一 backend process interval；尚未有跨執行個體 locking、重試佇列與告警。
+- Refund 已有 dev/backend API、operation lease 與 smoke test；尚未有正式退款 UI、退款專用 reconciliation job 與 Sandbox 人工端對端測試。
+- 第一版不做 LINE Pay webhook endpoint；request status reconciliation、持久化重試與 redirect 遺失恢復已完成。
+- 自動 deadline settlement scheduler 已使用持久化 job、跨程序 claim／lease takeover 與結構化終止警示。
 
 安全規則：
 
@@ -309,24 +335,18 @@ PostgreSQL v1 決策：
 
 ## 高優先未完成項目
 
-1. Mobile 啟動時應從後端載入 activities。
-2. 需要菜單讀取 API。
-3. 訂單列表與訂單明細應改成以後端資料為準。
-4. 已授權訂單修改 API 與 mobile revision + LINE Pay request 第一版已完成；仍需補失敗提示與重試入口。
-5. 仍需要完整 order revision 歷史查詢與 UI 呈現。
-6. 需要跨執行個體 settlement locking、重試佇列與失敗告警。
-7. LINE Pay refund 已有後端 dev/backend 切片；仍需要正式退款 UI、退款失敗重試與正式 sandbox 人工端對端測試。
-8. 需要 provider 狀態查詢、重試佇列與跨執行個體 idempotency 處理。
-9. 需要 pickup credential API。
-10. 尚未建立 PostgreSQL backend runtime adapter。
+1. 讓 Mobile 啟動時從 Backend 載入 activities，逐步移除活動、地圖與店家摘要 mock。
+2. LINE Pay 回覆開通後，依 `docs/line-pay-separated-capture-sandbox-checklist.md` 執行人工 E2E。
+3. 將 terminal job 的 `alert_required` 接到正式告警通知管道。
+4. 搬移登入／角色／門市權限解析為第三個 PostgreSQL 唯讀切片，再處理後續寫入 transaction／row lock。
+5. 細化 revision、容量不足、void 失敗與重新付款的 Mobile 錯誤提示及重試入口。
+6. 補完整 order revision 歷史查詢與 UI 呈現。
+7. 規劃 Expo SDK／React Native 升級，處理目前無法非破壞性修正的依賴警告。
+8. 完成 Android、Firebase Google Login 與 LINE Pay sandbox 人工 E2E。
 
 ## 建議下一步
 
-可選下一步：
-
-1. 繼續用 SQLite 做功能。
-2. 開始 PostgreSQL implementation slice。
-3. 讓 mobile 更穩定地載入後端 activity / menu / order data。
+可靠性核心、兩程序 lease、admin 警示查詢，以及真實 PostgreSQL 公開菜單／團購活動列表 repositories 與 HTTP 驗證已完成。下一步是搬移登入、角色與門市權限解析為第三個唯讀切片；SQLite 仍是預設及其他 HTTP route 的 runtime。
 
 ## 換電腦後怎麼接
 

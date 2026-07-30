@@ -13,6 +13,7 @@ const {
   listDevAuthUsers,
   listCustomerOrders,
   listGroupBuyActivities,
+  listPaymentReliabilityAlerts,
   listMerchantStoreOrders,
   listStoreMenu,
   saveMerchantMenuItem,
@@ -35,14 +36,31 @@ const {
   startDeadlineSettlementScheduler
 } = require("./payments/settlementService");
 const {
+  startLinePayReconciliationScheduler
+} = require("./payments/reliabilityService");
+const {
+  OperationLeaseError,
+  withOperationLease
+} = require("./reliability/operationLease");
+const {
   getPickupCredentialForOrder,
   lookupPickupCode,
   markGroupBuyActivityReadyForPickup,
   redeemPickupCode
 } = require("./pickup/credentialService");
 const { startPickupExpirationScheduler } = require("./pickup/expirationService");
+const {
+  createStoreMenuReadRepository
+} = require("./database/repositories/storeMenuReadRepository");
+const {
+  createGroupBuyActivityReadRepository
+} = require("./database/repositories/groupBuyActivityReadRepository");
 
 const port = Number(process.env.PORT ?? 3000);
+const storeMenuReadRepository = createStoreMenuReadRepository({ sqliteReader: listStoreMenu });
+const groupBuyActivityReadRepository = createGroupBuyActivityReadRepository({
+  sqliteReader: listGroupBuyActivities,
+});
 
 const server = http.createServer(async (request, response) => {
   try {
@@ -150,13 +168,15 @@ const server = http.createServer(async (request, response) => {
     }
 
     if (request.method === "GET" && url.pathname === "/api/group-buy-activities") {
-      sendJson(response, 200, { activities: listGroupBuyActivities() });
+      sendJson(response, 200, {
+        activities: await groupBuyActivityReadRepository.listActivities(),
+      });
       return;
     }
 
     const publicStoreMenuMatch = url.pathname.match(/^\/api\/stores\/([^/]+)\/menu$/);
     if (request.method === "GET" && publicStoreMenuMatch) {
-      const menu = listStoreMenu(publicStoreMenuMatch[1]);
+      const menu = await storeMenuReadRepository.getPublicStoreMenu(publicStoreMenuMatch[1]);
       if (!menu) {
         sendJson(response, 404, { error: "Store not found" });
         return;
@@ -538,17 +558,24 @@ const server = http.createServer(async (request, response) => {
       if (!order) return sendJson(response, 404, { error: "Order not found" });
       if (!canAccessOrder(authUser, order)) return sendJson(response, 403, { error: "Order access denied" });
       const requestedAt = new Date().toISOString();
+      try {
+        await withOperationLease({
+          lockKey: `order:${order.id}:payment-lifecycle`,
+          leaseMs: 300_000
+        }, async () => {
+          const lockedOrder = getOrderDetail(order.id);
+          if (!lockedOrder) return sendJson(response, 404, { error: "Order not found" });
       const eligibility = getCustomerOrderCancellationEligibility({
-        orderId: order.id,
+        orderId: lockedOrder.id,
         customerUserId: authUser.id,
         now: requestedAt
       });
       if (eligibility.error) return sendJson(response, eligibility.error === "order_not_found" ? 404 : 409, eligibility);
-      if (order.paymentStatus === "authorized") {
+      if (lockedOrder.paymentStatus === "authorized") {
         try {
           await voidLinePayAuthorization({
-            orderId: order.id,
-            provider: order.latestLinePayAuthorization?.provider || "line_pay",
+            orderId: lockedOrder.id,
+            provider: lockedOrder.latestLinePayAuthorization?.provider || "line_pay",
             reason: "customer_cancelled_order"
           });
         } catch (error) {
@@ -557,7 +584,7 @@ const server = http.createServer(async (request, response) => {
         }
       }
       const result = cancelCustomerOrderInDatabase({
-        orderId: order.id,
+        orderId: lockedOrder.id,
         customerUserId: authUser.id,
         idempotencyKey: String(body.idempotencyKey),
         reason: body.reason || "customer_withdrawal",
@@ -565,6 +592,20 @@ const server = http.createServer(async (request, response) => {
       });
       if (result.error) return sendJson(response, result.error === "order_not_found" ? 404 : 409, result);
       sendJson(response, 200, result);
+      return;
+        });
+      } catch (error) {
+        if (error instanceof OperationLeaseError) {
+          sendJson(response, 409, {
+            error: "operation_locked",
+            status: "retry_later",
+            lockKey: error.lock.lockKey,
+            lockedUntil: error.lock.lockedUntil
+          });
+          return;
+        }
+        throw error;
+      }
       return;
     }
 
@@ -797,7 +838,7 @@ const server = http.createServer(async (request, response) => {
     if (request.method === "GET" && url.pathname === "/api/payments/line-pay/cancel") {
       const transactionId = url.searchParams.get("transactionId");
       const orderId = url.searchParams.get("orderId");
-      const cancelled = cancelLinePayAuthorization({ transactionId, orderId });
+      const cancelled = await cancelLinePayAuthorization({ transactionId, orderId });
       const directRepayment = cancelled.authorization?.paymentFlow === "direct_repayment"
         || cancelled.pendingPayment?.paymentFlow === "direct_repayment";
 
@@ -817,6 +858,45 @@ const server = http.createServer(async (request, response) => {
     }
 
     const adminSettleActivityMatch = url.pathname.match(/^\/api\/admin\/group-buy-activities\/([^/]+)\/settle$/);
+    if (request.method === "GET" && url.pathname === "/api/admin/payment-reliability/alerts") {
+      const authUser = getAuthenticatedUser(request);
+      if (!authUser) {
+        sendJson(response, 401, { error: "Authentication required" });
+        return;
+      }
+      if (!authUser.roles.includes("admin")) {
+        sendJson(response, 403, { error: "Admin role required" });
+        return;
+      }
+      const jobType = url.searchParams.get("jobType") || null;
+      const status = url.searchParams.get("status") || null;
+      const limit = Number(url.searchParams.get("limit") || 50);
+      const validJobTypes = new Set(["reconcile_line_pay_request", "settle_group_buy_activity"]);
+      const validStatuses = new Set(["failed"]);
+      if (jobType && !validJobTypes.has(jobType)) {
+        sendJson(response, 400, { error: "Invalid jobType filter" });
+        return;
+      }
+      if ((status && !validStatuses.has(status)) || !Number.isInteger(limit) || limit <= 0) {
+        sendJson(response, 400, { error: "Invalid status or limit filter" });
+        return;
+      }
+      const alerts = listPaymentReliabilityAlerts({
+        jobType,
+        status,
+        limit
+      });
+      sendJson(response, 200, {
+        alerts,
+        count: alerts.length,
+        filters: {
+          jobType,
+          status
+        }
+      });
+      return;
+    }
+
     if (request.method === "POST" && adminSettleActivityMatch) {
       const authUser = getAuthenticatedUser(request);
       if (!authUser) {
@@ -896,15 +976,32 @@ const server = http.createServer(async (request, response) => {
 
     sendJson(response, 404, { error: "Not found" });
   } catch (error) {
+    if (error instanceof PaymentServiceError) {
+      sendJson(response, error.statusCode, error.payload);
+      return;
+    }
     sendJson(response, 500, { error: error.message });
   }
 });
 
 let deadlineSettlementScheduler;
+let linePayReconciliationScheduler;
 let pickupExpirationScheduler;
 
 server.listen(port, () => {
   console.log(`DrinkGroupBuy backend listening on http://localhost:${port}`);
+  linePayReconciliationScheduler = startLinePayReconciliationScheduler();
+  if (linePayReconciliationScheduler.enabled) {
+    console.log(
+      `LINE Pay reconciliation scheduler enabled (${linePayReconciliationScheduler.intervalMs}ms interval)`
+    );
+  } else {
+    console.log(
+      `LINE Pay reconciliation scheduler disabled: ${linePayReconciliationScheduler.reason}`
+    );
+  }
+
+
   deadlineSettlementScheduler = startDeadlineSettlementScheduler();
   if (deadlineSettlementScheduler.enabled) {
     console.log(`Deadline settlement scheduler enabled (${deadlineSettlementScheduler.intervalMs}ms interval)`);

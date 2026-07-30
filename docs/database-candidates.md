@@ -30,6 +30,8 @@
 | `order_revisions`, `order_revision_items`, `order_revision_item_customizations` | 已授權訂單修改版本             | Order 1:N revisions；revision 1:N items                    |
 | `payment_authorizations`                                            | 付款預授權紀錄                 | Order 1:N authorizations                                   |
 | `payment_captures`                                                  | 請款結果                       | Authorization/order 1:N captures                           |
+| `payment_reliability_jobs`                                        | Provider 對帳與結算持久化工作 | Resource 1:N historical jobs；同資源同類型僅一筆 active job |
+| `operation_locks`                                                 | 跨執行個體操作租約           | `lock_key` 唯一；租約到期後可由其他 worker 接手             |
 | `payment_refunds`                                                   | 退款結果                       | Capture/order 1:N refunds                                  |
 | `payment_provider_events`                                           | 金流 provider event 原始紀錄   | 以邏輯方式關聯付款資源，保留未來 webhook 擴充空間           |
 | `activity_settlements`                                              | 截止後結算結果與適用門檻       | Activity 1:1 settlement                                    |
@@ -41,7 +43,7 @@
 
 - Backend 已經會讀寫 `group_buy_activities`、`promotion_tiers`、`activity_notices`、`status_history` 與 `audit_logs`，用於目前已實作的活動 API。
 - 開發 SQLite seed 會建立 users、roles、merchant/store、8 個 menu items、96 個 customization options 與 32 組選擇限制；runtime activities、tiers、orders、payments、settlements 與 pickup credentials 由 API 或 smoke test 產生，不預先 seed 成固定資料。
-- `orders`、`order_revisions`、payment、settlement、pickup 相關資料表目前仍偏向候選設計與付款模組串接準備，尚未完整連到所有 mobile 流程。
+- `orders`、`order_revisions`、payment、settlement 與 pickup 已由 Backend 實際讀寫，顧客／商家訂單列表及取貨畫面完成第一版串接；活動首頁與部分摘要仍有 mock fallback。
 - `payment_authorizations.provider` 目前支援 `line_pay` 與本機測試用 `mock_line_pay`；`mock_line_pay` 只用於開發 smoke 測試，不代表正式金流。
 - `payment_authorizations.payment_flow` 用來區分一般 `authorization` 與請款失敗後的 `direct_repayment`，避免重新付款被誤當成新的預授權。
 - `payment_refunds` 用來保存已請款成功後的退款紀錄；尚未請款的預授權取消仍使用 `void`，不寫入退款表。
@@ -72,13 +74,13 @@
 
 | 範圍                    | 缺口或待決策項目                                                                                                      |
 | ----------------------- | --------------------------------------------------------------------------------------------------------------------- |
-| Order revision          | `order_revisions` 第一版已建立並支援 replacement authorization；欄位字典已補，仍缺完整歷史查詢 API 與 mobile UI 串接。 |
+| Order revision          | `order_revisions` 與 replacement authorization、Mobile 改單第一版已完成；仍缺完整歷史查詢 API 與歷史 UI。 |
 | Pricing snapshot        | 實際適用門檻、折扣分配與請款金額需要可重現，目前仍需補強欄位或 settlement 設計。                                      |
-| Activity deadline       | 24 小時截止限制已先落到商家建立團購 API；截止前 30 分鐘鎖定規則仍需落到訂單修改 / 退出與取消 API。                   |
+| Activity deadline       | 24 小時限制與截止前 30 分鐘修改／退出鎖定已落到 API；SQLite 已用 operation lease 保護結算、取消、補付款與取餐狀態變更，正式 PostgreSQL 仍需改為 transaction／row lock 驗收。 |
 | Merchant acceptance     | `orders.merchant_acceptance_status` 是早期候選欄位；最新規則不需要店家逐筆確認接單，未來可考慮移除或固定為 accepted。 |
 | Pickup status           | Mobile 曾使用 `preparing`，目前 schema 沒有該值；應優先用 activity/order 狀態與 `pickup_status = ready` 表示。        |
 | Pickup credential expiry | 欄位、到期時間計算、單一 backend process 排程、狀態歷程、audit log、建立／驗證 API 與 App 第一版串接已實作；仍待完整 Android E2E。 |
-| Store/menu source       | 七間店家的測試資料與正式開發資料需統一來源。                                                                          |
+| Store/menu source       | Canonical dev schema／seed 為權威來源；`database/test/` 僅保留作 prototype fixture，不得回流為正式模型。 |
 | Menu authority          | 第一版已完成顧客／商家菜單 API、店家管理畫面、選擇上限、訂單品項驗證與後端價格重算；尚缺完整 Android E2E。 |
 | Authentication          | Password 欄位屬於開發相容；正式方向以 Firebase UID 對應 backend user 與角色權限。                                     |
 | Notification            | 尚未有通知 delivery 或 notification event 資料表。                                                                    |

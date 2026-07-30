@@ -8,6 +8,10 @@ const {
   markGroupBuyActivityReadyForPickup,
   redeemPickupCode
 } = require("../backend/pickup/credentialService");
+const {
+  acquireOperationLock,
+  releaseOperationLock
+} = require("../backend/db");
 
 const databasePath = path.join(__dirname, "..", "database", "drink-group-buy-dev.sqlite");
 const schemaPath = path.join(__dirname, "..", "database", "schema.sql");
@@ -190,6 +194,19 @@ try {
   resetDatabase();
   seedDatabase(now);
 
+  const readyLockKey = "pickup:activity:pickup-code-activity:transition";
+  const readyLock = acquireOperationLock({
+    lockKey: readyLockKey,
+    ownerId: "pickup-ready-blocker",
+    now
+  });
+  const blockedReady = markGroupBuyActivityReadyForPickup("pickup-code-activity", {
+    actorUserId: "pickup-merchant-user",
+    now
+  });
+  assert(blockedReady.error === "operation_locked", "activity lease should block ready transition", blockedReady);
+  releaseOperationLock({ lockKey: readyLockKey, ownerId: readyLock.ownerId });
+
   const ready = markGroupBuyActivityReadyForPickup("pickup-code-activity", {
     actorUserId: "pickup-merchant-user",
     now
@@ -225,6 +242,20 @@ try {
   });
   assert(preview.credential.status === "active", "merchant should preview active order", preview);
   assert(preview.credential.orderId === "pickup-code-order-a", "preview should match order", preview);
+
+  const redeemLockKey = `pickup:code:${firstCode}:redeem`;
+  const redeemLock = acquireOperationLock({
+    lockKey: redeemLockKey,
+    ownerId: "pickup-redeem-blocker",
+    now
+  });
+  const blockedRedeem = redeemPickupCode({
+    actorUserId: "pickup-merchant-user",
+    pickupCode: firstCode,
+    now
+  });
+  assert(blockedRedeem.error === "operation_locked", "code lease should block redemption", blockedRedeem);
+  releaseOperationLock({ lockKey: redeemLockKey, ownerId: redeemLock.ownerId });
 
   const firstRedeem = redeemPickupCode({
     actorUserId: "pickup-merchant-user",
@@ -288,6 +319,7 @@ try {
   console.log("codes: six_digits=1, active_unique=1, failed_payment_excluded=1");
   console.log("permissions: cross_store_denied=1, proxy_code_allowed=1");
   console.log("redemption: duplicate_suppressed=1, activity_completed=1");
+  console.log("locking: ready_transition_blocked=1, redeem_transition_blocked=1");
   console.log("rate_limit: failed_attempts=5, blocked=1");
 } finally {
   if (hadDatabase) {

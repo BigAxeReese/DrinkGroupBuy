@@ -144,6 +144,14 @@ async function retrieveLinePayPaymentDetails(transactionId) {
   return linePayGet("/v3/payments", `transactionId=${encodedTransactionId}`, config);
 }
 
+async function checkLinePayPaymentRequestStatus(transactionId) {
+  const config = getLinePayConfig();
+  assertLinePayConfig(config);
+  const encodedTransactionId = encodeURIComponent(requiredString(transactionId, "transactionId"));
+  return linePayGet(`/v3/payments/requests/${encodedTransactionId}/check`, "", config,
+    ["0000", "0110", "0121", "0122", "0123"]);
+}
+
 async function linePayPost(uri, body, config = getLinePayConfig()) {
   const nonce = crypto.randomUUID();
   const bodyText = body == null ? "" : JSON.stringify(body);
@@ -181,7 +189,7 @@ async function linePayPost(uri, body, config = getLinePayConfig()) {
   return payload;
 }
 
-async function linePayGet(uri, queryString = "", config = getLinePayConfig()) {
+async function linePayGet(uri, queryString = "", config = getLinePayConfig(), acceptedCodes = ["0000"]) {
   const nonce = crypto.randomUUID();
   const signature = signLinePayRequest({
     channelSecret: config.channelSecret,
@@ -200,7 +208,7 @@ async function linePayGet(uri, queryString = "", config = getLinePayConfig()) {
     }
   });
   const payload = await parseLinePayResponse(response);
-  if (!response.ok || payload.returnCode !== "0000") {
+  if (!response.ok || !acceptedCodes.includes(String(payload.returnCode || ""))) {
     const reason = payload.returnMessage || payload.message || response.statusText;
     const error = new Error(`LINE Pay request failed: ${reason}`);
     error.statusCode = response.status || 502;
@@ -287,6 +295,7 @@ function appendQuery(url, query) {
 }
 
 module.exports = {
+  checkLinePayPaymentRequestStatus,
   captureLinePayPaymentAuthorization,
   confirmLinePayPayment,
   getLinePayConfig,

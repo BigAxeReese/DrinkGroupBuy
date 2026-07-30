@@ -1,5 +1,6 @@
 const { randomUUID } = require("node:crypto");
 const {
+  acquireOperationLock,
   authorizeLinePayPaymentInDatabase,
   cancelPendingLinePayAuthorizationInDatabase,
   captureLinePayAuthorizationInDatabase,
@@ -7,6 +8,7 @@ const {
   completeLinePayRefundInDatabase,
   createPendingLinePayAuthorization,
   createPendingLinePayRefundInDatabase,
+  enqueuePaymentReliabilityJob,
   failLinePayRefundInDatabase,
   getLinePayAuthorizationContext,
   getLatestLinePayAuthorizationForOrder,
@@ -16,6 +18,7 @@ const {
   getOrderRevisionPaymentContext,
   recordLinePayCaptureFailureInDatabase,
   recordLinePayVoidFailureInDatabase,
+  releaseOperationLock,
   voidLinePayAuthorizationInDatabase
 } = require("../db");
 const {
@@ -33,6 +36,10 @@ const {
   findPendingLinePayPayment,
   savePendingLinePayPayment
 } = require("./linePayPendingStore");
+const {
+  OperationLeaseError,
+  withOperationLease
+} = require("../reliability/operationLease");
 
 const manualRepaymentRequestsInFlight = new Set();
 
@@ -175,6 +182,26 @@ function inferLinePayPaymentState(payload) {
   return infoItems.length === 0 ? "missing" : "unknown";
 }
 
+function enqueuePendingAuthorizationReconciliation(authorization, input = {}) {
+  if (!authorization?.id || !authorization.providerAuthorizationId) return null;
+  const now = input.now || new Date().toISOString();
+  return enqueuePaymentReliabilityJob({
+    jobType: "reconcile_line_pay_request",
+    resourceType: "payment_authorization",
+    resourceId: authorization.id,
+    payload: {
+      orderId: authorization.orderId,
+      providerTransactionId: authorization.providerAuthorizationId,
+      paymentFlow: authorization.paymentFlow || "authorization",
+      amount: input.amount
+    },
+    maxAttempts: 40,
+    runAfter: new Date(Date.parse(now) + 30_000).toISOString(),
+    now
+  });
+}
+
+
 async function requestLinePayAuthorization({ authUser, body }) {
   const validationError = validateLinePayRequest(body);
   if (validationError) {
@@ -273,6 +300,7 @@ async function requestLinePayAuthorization({ authUser, body }) {
     amount: Number(body.amount),
     providerTransactionId: transactionId
   });
+  enqueuePendingAuthorizationReconciliation(authorization, { amount: Number(body.amount) });
   const pendingPayment = {
     orderId: body.orderId,
     orderRevisionId: revision?.id || null,
@@ -297,7 +325,29 @@ async function requestLinePayAuthorization({ authUser, body }) {
   };
 }
 
-async function requestManualLinePayRepayment({ authUser, body, now } = {}) {
+async function requestManualLinePayRepayment(input = {}) {
+  const orderId = input.body?.orderId;
+  if (!orderId) return requestManualLinePayRepaymentUnlocked(input);
+  try {
+    return await withOperationLease({
+      lockKey: `order:${orderId}:payment-lifecycle`,
+      leaseMs: 300_000,
+      now: input.now
+    }, () => requestManualLinePayRepaymentUnlocked(input));
+  } catch (error) {
+    if (error instanceof OperationLeaseError) {
+      throw new PaymentServiceError(409, {
+        error: "payment_operation_locked",
+        status: "retry_later",
+        lockKey: error.lock.lockKey,
+        lockedUntil: error.lock.lockedUntil
+      });
+    }
+    throw error;
+  }
+}
+
+async function requestManualLinePayRepaymentUnlocked({ authUser, body, now } = {}) {
   if (!body?.orderId) {
     throw new PaymentServiceError(400, { error: "Missing required field: orderId" });
   }
@@ -412,6 +462,10 @@ async function requestManualLinePayRepayment({ authUser, body, now } = {}) {
       providerTransactionId: transactionId,
       paymentFlow: "direct_repayment"
     });
+    enqueuePendingAuthorizationReconciliation(authorization, {
+      amount: repayment.finalAmount,
+      now
+    });
     if (!authorization) {
       throw new PaymentServiceError(500, {
         error: "Unable to persist the LINE Pay repayment",
@@ -459,7 +513,34 @@ function manualRepaymentErrorMessage(reason) {
   return messages[reason] || "Order is not eligible for manual repayment";
 }
 
-async function confirmLinePayAuthorization({ transactionId, orderId }) {
+async function withLinePayOperationLock(input, operation) {
+  const ownerId = `line-pay-operation-${process.pid}-${randomUUID()}`;
+  const lockKey = `line-pay:${input.transactionId || input.orderId}`;
+  const lock = acquireOperationLock({
+    lockKey,
+    ownerId,
+    leaseMs: input.leaseMs || 120_000
+  });
+  if (!lock.acquired) {
+    throw new PaymentServiceError(409, {
+      error: "payment_operation_locked",
+      status: "retry_later",
+      lockKey,
+      lockedUntil: lock.lockedUntil
+    });
+  }
+  try {
+    return await operation();
+  } finally {
+    releaseOperationLock({ lockKey, ownerId });
+  }
+}
+
+async function confirmLinePayAuthorization(input) {
+  return withLinePayOperationLock(input, () => confirmLinePayAuthorizationUnlocked(input));
+}
+
+async function confirmLinePayAuthorizationUnlocked({ transactionId, orderId }) {
   const pendingPayment = findPendingLinePayPayment({ orderId, transactionId });
   const context = getLinePayAuthorizationContext({
     orderId,
@@ -686,7 +767,11 @@ async function voidReplacedAuthorizationIfNeeded({ authorizationResult, orderId 
   }
 }
 
-async function captureLinePayAuthorization({
+async function captureLinePayAuthorization(input) {
+  return withLinePayOperationLock(input, () => captureLinePayAuthorizationUnlocked(input));
+}
+
+async function captureLinePayAuthorizationUnlocked({
   transactionId,
   orderId,
   provider = "line_pay",
@@ -804,7 +889,14 @@ async function captureLinePayAuthorization({
   };
 }
 
-async function refundLinePayPayment({ authUser, body } = {}) {
+async function refundLinePayPayment(input = {}) {
+  const lockInput = {
+    orderId: input.body?.orderId || input.body?.paymentCaptureId || input.body?.providerTransactionId
+  };
+  return withLinePayOperationLock(lockInput, () => refundLinePayPaymentUnlocked(input));
+}
+
+async function refundLinePayPaymentUnlocked({ authUser, body } = {}) {
   if (!authUser?.roles?.includes("admin")) {
     throw new PaymentServiceError(403, { error: "Admin role required" });
   }
@@ -938,7 +1030,11 @@ function refundErrorMessage(error) {
   return messages[error] || "Refund cannot be created";
 }
 
-async function voidLinePayAuthorization({
+async function voidLinePayAuthorization(input) {
+  return withLinePayOperationLock(input, () => voidLinePayAuthorizationUnlocked(input));
+}
+
+async function voidLinePayAuthorizationUnlocked({
   transactionId,
   orderId,
   provider = "line_pay",
@@ -1008,7 +1104,29 @@ async function voidLinePayAuthorization({
   };
 }
 
-function cancelLinePayAuthorization({ transactionId, orderId }) {
+async function cancelLinePayAuthorization(input = {}) {
+  const lockResourceId = input.orderId || input.transactionId;
+  if (!lockResourceId) return cancelLinePayAuthorizationUnlocked(input);
+  try {
+    return await withOperationLease({
+      lockKey: `order:${lockResourceId}:payment-lifecycle`,
+      leaseMs: 120_000,
+      now: input.now
+    }, () => cancelLinePayAuthorizationUnlocked(input));
+  } catch (error) {
+    if (error instanceof OperationLeaseError) {
+      throw new PaymentServiceError(409, {
+        error: "payment_operation_locked",
+        status: "retry_later",
+        lockKey: error.lock.lockKey,
+        lockedUntil: error.lock.lockedUntil
+      });
+    }
+    throw error;
+  }
+}
+
+function cancelLinePayAuthorizationUnlocked({ transactionId, orderId }) {
   const pendingPayment = findPendingLinePayPayment({ orderId, transactionId });
   const context = pendingPayment
     ? null

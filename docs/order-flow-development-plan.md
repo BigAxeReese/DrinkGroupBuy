@@ -6,7 +6,7 @@
 
 本文件整理目前訂單流程的實作狀態、下一階段建議開發順序、各階段依賴關係、主要風險，以及需要在特定階段前確認的未知問題。
 
-實作更新：階段 0～5 的第一版已依本文件完成，包含統一訂單分類／可用操作、顧客與商家權威列表、登入／分頁／回前景同步、顧客取消訂單、單一活動有效訂單限制，以及沿用既有取貨服務。階段 6 的 provider reconciliation、持久化重試、跨執行個體可靠性與 PostgreSQL runtime 仍屬正式環境工作。
+實作更新：階段 0～5 的第一版已依本文件完成。階段 6 的 provider reconciliation、持久化 retry jobs 與 payment／settlement DB lease locking 已完成第一版；正式告警通知、多 process／sandbox 驗證、周邊狀態完整鎖定與 PostgreSQL runtime 仍屬正式環境工作。
 
 2026-07-30 已恢復自動檢查並完成 SQL safety、五組核心 smoke、訂單 HTTP route smoke、Expo Doctor 與 Web bundle。Android 裝置 E2E、Firebase 正式設定驗證及 LINE Pay sandbox 人工端對端測試仍保留到發布驗證階段。
 
@@ -20,7 +20,7 @@
 4. 訂單在雙方畫面都可穩定查詢後，再實作顧客退出／取消訂單。
 5. 最後收斂取貨流程、付款 reconciliation、跨執行個體鎖定與 production migration。
 
-上述順序先消除了訂單列表只依賴 `appState`、mock 與 localStorage 的主要風險，才加入取消狀態轉換。下一條主線已改為 provider reconciliation、持久化重試、跨執行個體鎖定與 production migration。
+上述順序先消除了訂單列表只依賴 `appState`、mock 與 localStorage 的主要風險，才加入取消狀態轉換。Provider reconciliation、持久化重試與跨執行個體 lease 已完成第一版，目前主線進入 PostgreSQL runtime 漸進搬移。
 
 ## 狀態定義
 
@@ -61,8 +61,8 @@
 
 - 建立訂單的通用 request idempotency key；目前已禁止同一顧客重複加入同一活動，但尚未保存成功建立訂單的 client request key。
 - 完整 revision 歷史查詢與取消 pending revision。
-- Provider status reconciliation、redirect 遺失恢復、持久化重試 queue 與告警。
-- 跨多個 Backend process 的 settlement／payment locking。
+- Provider reconciliation 與 persisted jobs 已完成第一版；仍缺正式告警通知、sandbox 人工 E2E 與多 process 壓力測試。
+- Payment／settlement／cancel／repay／pickup DB lease 已完成；兩個 Node.js 程序的 claim 與租約接管測試已通過。
 - PostgreSQL runtime adapter 與正式 migration 流程。
 
 ### 4. 文件與程式碼差異
@@ -75,7 +75,7 @@
 - 顧客查詢自己訂單的取貨憑證。
 - 系統處理取貨逾期。
 
-相關文件現已同步為既有 API 與第一版畫面串接；後續只需做 E2E、補救權限或 QR Code 等增量工作，不應重做核心取貨服務。
+相關總覽文件已同步為既有 API 與第一版畫面串接；後續只做 E2E、補救權限或 QR Code 等增量工作，不應重做核心取貨服務。
 
 ## 二、建議開發依賴順序
 
@@ -320,6 +320,9 @@ Body 建議包含：
 
 實作狀態：尚未完成，為下一個正式環境主線。
 
+2026-07-30 更新：provider request status reconciliation、SQLite persisted jobs、worker lease claim、payment／settlement operation lock 與 terminal job 告警旗標已完成第一版，並通過隔離式 smoke。階段 6 仍未完成的部分是正式告警通知管道、cancel／repay／pickup 完整鎖定、多 process／sandbox 人工驗證，以及 PostgreSQL runtime。
+
+
 #### 目標
 
 處理正式環境中 redirect 遺失、Backend 重啟、provider 狀態不同步及多個 Backend process 同時執行的情況。
@@ -417,15 +420,16 @@ Body 建議包含：
 
 ## 六、下一個實際開發切片
 
-階段 0～5 的第一版已完成，下一個切片直接進入階段 6，建議依序處理：
+階段 0～5 與階段 6 的可靠性核心已完成第一版；PostgreSQL 公開菜單與團購活動列表唯讀切片也已完成真實 runtime 與 HTTP source proof，接下來依序處理：
 
-1. 建立 provider status query 與 reconciliation service，先覆蓋 redirect 遺失的 authorization／capture 狀態恢復。
-2. 將目前 process timer 的重試資訊提升為可在 Backend 重啟後續跑的 persisted jobs。
-3. 為 capture、void、refund、settlement 與 cancel 建立跨執行個體 claim／lock 契約與失敗告警。
-4. 建立 PostgreSQL runtime adapter，讓既有 migration draft 真正成為 runtime schema 來源。
+
+1. 用真實 PostgreSQL 驗證公開菜單 repository、seed 與 HTTP route。
+2. 搬移下一個唯讀切片，再逐步處理寫入 transaction 與 row lock。
+3. LINE Pay 核准後，以 sandbox 驗證 request reconciliation、capture／void 與 lease takeover。
+4. 將 terminal job 的 `alert_required` 接到正式告警通知管道。
 5. 補建立訂單與付款 request 的通用 idempotency 紀錄。
 
-這個切片仍不包含通知系統、正式退款 UI、QR Code，且依目前決策不執行完整 E2E 或 LINE Pay sandbox 人工測試。開始 provider reconciliation 前，需以 LINE Pay 當時的官方文件確認查詢端點、狀態語意與 sandbox 行為，不應只靠既有 mock 推測。
+這個切片仍不包含正式通知系統、正式退款 UI 與 QR Code。Request status reconciliation 已依 LINE Pay Online API v3 官方狀態語意實作；Android 實機、Firebase 正式設定、LINE Pay sandbox 人工 E2E 與多 process 驗證仍是發布前必要工作。
 
 ## 七、預計主要修改檔案
 
@@ -460,4 +464,4 @@ Body 建議包含：
 
 訂單查詢、取消與取貨的第一版主線已接到相同 Backend 狀態。後續不再擴張一般訂單 UI，而應先處理付款對帳、重啟恢復、多執行個體鎖定與正式資料庫，否則部署規模增加後仍可能發生重複請款或狀態分裂。
 
-開發順序現已推進到：付款 reconciliation → persisted jobs → 跨執行個體鎖定 → PostgreSQL runtime → 延後的完整測試與發布驗證。U-01 至 U-12 已採用本文件答案作為第一版實作基準；U-13 至 U-18 維持後續階段再決定。
+開發順序現已推進到：PostgreSQL 第一個唯讀切片 → 真實 PostgreSQL 驗證 → 後續唯讀／寫入 transaction → 完整測試與發布驗證。U-01 至 U-12 已採用本文件答案作為第一版實作基準；U-13 至 U-18 維持後續階段再決定。

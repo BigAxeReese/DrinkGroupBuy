@@ -155,6 +155,46 @@ function ensureRuntimeSchema(database) {
     CREATE INDEX IF NOT EXISTS idx_payment_refunds_capture ON payment_refunds(payment_capture_id);
     CREATE INDEX IF NOT EXISTS idx_payment_refunds_order ON payment_refunds(order_id);
   `);
+
+  database.exec(`
+    CREATE TABLE IF NOT EXISTS payment_reliability_jobs (
+      id TEXT PRIMARY KEY,
+      job_type TEXT NOT NULL CHECK (job_type IN ('reconcile_line_pay_request', 'settle_group_buy_activity')),
+      resource_type TEXT NOT NULL CHECK (resource_type IN ('payment_authorization', 'activity')),
+      resource_id TEXT NOT NULL,
+      status TEXT NOT NULL DEFAULT 'queued'
+        CHECK (status IN ('queued', 'running', 'retry_wait', 'succeeded', 'failed', 'cancelled')),
+      payload_json TEXT NOT NULL DEFAULT '{}',
+      attempt_count INTEGER NOT NULL DEFAULT 0 CHECK (attempt_count >= 0),
+      max_attempts INTEGER NOT NULL DEFAULT 20 CHECK (max_attempts > 0),
+      run_after TEXT NOT NULL,
+      locked_by TEXT,
+      locked_until TEXT,
+      last_error_json TEXT,
+      alert_required INTEGER NOT NULL DEFAULT 0 CHECK (alert_required IN (0, 1)),
+      created_at TEXT NOT NULL,
+      updated_at TEXT NOT NULL,
+      completed_at TEXT
+    );
+
+    CREATE UNIQUE INDEX IF NOT EXISTS idx_payment_reliability_jobs_active_resource
+    ON payment_reliability_jobs(job_type, resource_type, resource_id)
+    WHERE status IN ('queued', 'running', 'retry_wait');
+
+    CREATE INDEX IF NOT EXISTS idx_payment_reliability_jobs_due
+    ON payment_reliability_jobs(job_type, status, run_after, locked_until);
+
+    CREATE TABLE IF NOT EXISTS operation_locks (
+      lock_key TEXT PRIMARY KEY,
+      owner_id TEXT NOT NULL,
+      locked_until TEXT NOT NULL,
+      created_at TEXT NOT NULL,
+      updated_at TEXT NOT NULL
+    );
+
+    CREATE INDEX IF NOT EXISTS idx_operation_locks_expiry
+    ON operation_locks(locked_until);
+  `);
 }
 
 function listGroupBuyActivities() {
@@ -5683,8 +5723,368 @@ function mapOrderRevision(row, items = []) {
   };
 }
 
+function enqueuePaymentReliabilityJob(input) {
+  const database = openDatabase();
+  const now = input.now || new Date().toISOString();
+  const runAfter = input.runAfter || now;
+  const maxAttempts = normalizePositiveInteger(input.maxAttempts, 20);
+  let transactionStarted = false;
+
+  try {
+    database.exec("BEGIN IMMEDIATE;");
+    transactionStarted = true;
+    const existing = database.prepare(`
+      SELECT *
+      FROM payment_reliability_jobs
+      WHERE job_type = ?
+        AND resource_type = ?
+        AND resource_id = ?
+        AND status IN ('queued', 'running', 'retry_wait')
+      LIMIT 1
+    `).get(input.jobType, input.resourceType, input.resourceId);
+
+    if (existing) {
+      database.prepare(`
+        UPDATE payment_reliability_jobs
+        SET payload_json = ?,
+            max_attempts = CASE WHEN max_attempts < ? THEN ? ELSE max_attempts END,
+            updated_at = ?
+        WHERE id = ?
+      `).run(
+        JSON.stringify(input.payload || {}),
+        maxAttempts,
+        maxAttempts,
+        now,
+        existing.id
+      );
+      database.exec("COMMIT;");
+      transactionStarted = false;
+      return mapPaymentReliabilityJob(database.prepare(`
+        SELECT * FROM payment_reliability_jobs WHERE id = ?
+      `).get(existing.id));
+    }
+
+    const id = input.id || `payment-job-${randomUUID()}`;
+    database.prepare(`
+      INSERT INTO payment_reliability_jobs (
+        id, job_type, resource_type, resource_id, status, payload_json,
+        attempt_count, max_attempts, run_after, alert_required, created_at, updated_at
+      ) VALUES (?, ?, ?, ?, 'queued', ?, 0, ?, ?, 0, ?, ?)
+    `).run(
+      id,
+      input.jobType,
+      input.resourceType,
+      input.resourceId,
+      JSON.stringify(input.payload || {}),
+      maxAttempts,
+      runAfter,
+      now,
+      now
+    );
+    database.exec("COMMIT;");
+    transactionStarted = false;
+    return mapPaymentReliabilityJob(database.prepare(`
+      SELECT * FROM payment_reliability_jobs WHERE id = ?
+    `).get(id));
+  } catch (error) {
+    if (transactionStarted) database.exec("ROLLBACK;");
+    throw error;
+  } finally {
+    database.close();
+  }
+}
+
+function claimPaymentReliabilityJobs(input) {
+  const database = openDatabase();
+  const now = input.now || new Date().toISOString();
+  const limit = Math.min(normalizePositiveInteger(input.limit, 10), 100);
+  const leaseMs = Math.max(normalizePositiveInteger(input.leaseMs, 120_000), 1_000);
+  const lockedUntil = new Date(Date.parse(now) + leaseMs).toISOString();
+  let transactionStarted = false;
+
+  try {
+    database.exec("BEGIN IMMEDIATE;");
+    transactionStarted = true;
+    database.prepare(`
+      UPDATE payment_reliability_jobs
+      SET status = 'failed',
+          locked_by = NULL,
+          locked_until = NULL,
+          alert_required = 1,
+          last_error_json = ?,
+          completed_at = ?,
+          updated_at = ?
+      WHERE status = 'running'
+        AND locked_until <= ?
+        AND attempt_count >= max_attempts
+    `).run(JSON.stringify({ reason: "worker_lease_expired_after_final_attempt" }), now, now, now);
+    const rows = database.prepare(`
+      SELECT *
+      FROM payment_reliability_jobs
+      WHERE job_type = ?
+        AND attempt_count < max_attempts
+        AND (
+          (status IN ('queued', 'retry_wait') AND run_after <= ?)
+          OR (status = 'running' AND locked_until <= ?)
+        )
+      ORDER BY run_after ASC, created_at ASC
+      LIMIT ?
+    `).all(input.jobType, now, now, limit);
+
+    const claimed = [];
+    for (const row of rows) {
+      const update = database.prepare(`
+        UPDATE payment_reliability_jobs
+        SET status = 'running',
+            attempt_count = attempt_count + 1,
+            locked_by = ?,
+            locked_until = ?,
+            updated_at = ?
+        WHERE id = ?
+          AND (
+            (status IN ('queued', 'retry_wait') AND run_after <= ?)
+            OR (status = 'running' AND locked_until <= ?)
+          )
+      `).run(input.workerId, lockedUntil, now, row.id, now, now);
+      if (update.changes > 0) {
+        claimed.push(database.prepare(`
+          SELECT * FROM payment_reliability_jobs WHERE id = ?
+        `).get(row.id));
+      }
+    }
+
+    database.exec("COMMIT;");
+    transactionStarted = false;
+    return claimed.map(mapPaymentReliabilityJob);
+  } catch (error) {
+    if (transactionStarted) database.exec("ROLLBACK;");
+    throw error;
+  } finally {
+    database.close();
+  }
+}
+
+function completePaymentReliabilityJob(input) {
+  const database = openDatabase();
+  const now = input.now || new Date().toISOString();
+  try {
+    const update = database.prepare(`
+      UPDATE payment_reliability_jobs
+      SET status = 'succeeded',
+          locked_by = NULL,
+          locked_until = NULL,
+          last_error_json = NULL,
+          alert_required = 0,
+          completed_at = ?,
+          updated_at = ?
+      WHERE id = ?
+        AND status = 'running'
+        AND locked_by = ?
+    `).run(now, now, input.jobId, input.workerId);
+    return update.changes > 0 ? getPaymentReliabilityJobById(database, input.jobId) : null;
+  } finally {
+    database.close();
+  }
+}
+
+function reschedulePaymentReliabilityJob(input) {
+  const database = openDatabase();
+  const now = input.now || new Date().toISOString();
+  try {
+    const row = database.prepare(`
+      SELECT * FROM payment_reliability_jobs
+      WHERE id = ? AND status = 'running' AND locked_by = ?
+    `).get(input.jobId, input.workerId);
+    if (!row) return null;
+
+    const terminal = Boolean(input.terminal) || row.attempt_count >= row.max_attempts;
+    const nextStatus = terminal ? 'failed' : 'retry_wait';
+    const completedAt = terminal ? now : null;
+    const runAfter = input.runAfter || now;
+    database.prepare(`
+      UPDATE payment_reliability_jobs
+      SET status = ?,
+          run_after = ?,
+          locked_by = NULL,
+          locked_until = NULL,
+          last_error_json = ?,
+          alert_required = ?,
+          completed_at = ?,
+          updated_at = ?
+      WHERE id = ? AND locked_by = ?
+    `).run(
+      nextStatus,
+      runAfter,
+      JSON.stringify(input.error || {}),
+      terminal ? 1 : 0,
+      completedAt,
+      now,
+      input.jobId,
+      input.workerId
+    );
+    return getPaymentReliabilityJobById(database, input.jobId);
+  } finally {
+    database.close();
+  }
+}
+
+function getPaymentReliabilityJob(jobId) {
+  const database = openDatabase();
+  try {
+    return getPaymentReliabilityJobById(database, jobId);
+  } finally {
+    database.close();
+  }
+}
+function listPaymentReliabilityAlerts(input = {}) {
+  const database = openDatabase();
+  const limit = Math.min(normalizePositiveInteger(input.limit, 50), 200);
+  try {
+    return database.prepare(`
+      SELECT *
+      FROM payment_reliability_jobs
+      WHERE alert_required = 1
+        AND (? IS NULL OR job_type = ?)
+        AND (? IS NULL OR status = ?)
+      ORDER BY updated_at DESC, created_at DESC
+      LIMIT ?
+    `).all(input.jobType || null, input.jobType || null, input.status || null, input.status || null, limit)
+      .map(mapPaymentReliabilityJob);
+  } finally {
+    database.close();
+  }
+}
+
+
+function listPendingLinePayAuthorizations(input = {}) {
+  const database = openDatabase();
+  const limit = Math.min(normalizePositiveInteger(input.limit, 100), 500);
+  try {
+    return database.prepare(`
+      SELECT
+        authorization.id,
+        authorization.order_id,
+        authorization.order_revision_id,
+        authorization.provider_authorization_id,
+        authorization.payment_flow,
+        authorization.original_amount,
+        authorization.created_at
+      FROM payment_authorizations authorization
+      WHERE authorization.provider = 'line_pay'
+        AND authorization.status = 'pending'
+        AND authorization.provider_authorization_id IS NOT NULL
+      ORDER BY authorization.created_at ASC
+      LIMIT ?
+    `).all(limit).map((row) => ({
+      id: row.id,
+      orderId: row.order_id,
+      orderRevisionId: row.order_revision_id,
+      providerTransactionId: row.provider_authorization_id,
+      paymentFlow: row.payment_flow || 'authorization',
+      amount: row.original_amount,
+      createdAt: row.created_at
+    }));
+  } finally {
+    database.close();
+  }
+}
+
+function acquireOperationLock(input) {
+  const database = openDatabase();
+  const now = input.now || new Date().toISOString();
+  const leaseMs = Math.max(normalizePositiveInteger(input.leaseMs, 120_000), 1_000);
+  const lockedUntil = new Date(Date.parse(now) + leaseMs).toISOString();
+  let transactionStarted = false;
+  try {
+    database.exec("BEGIN IMMEDIATE;");
+    transactionStarted = true;
+    const current = database.prepare(`
+      SELECT * FROM operation_locks WHERE lock_key = ?
+    `).get(input.lockKey);
+    if (current && current.owner_id !== input.ownerId && current.locked_until > now) {
+      database.exec("COMMIT;");
+      transactionStarted = false;
+      return { acquired: false, lockKey: input.lockKey, ownerId: current.owner_id, lockedUntil: current.locked_until };
+    }
+
+    database.prepare(`
+      INSERT INTO operation_locks (lock_key, owner_id, locked_until, created_at, updated_at)
+      VALUES (?, ?, ?, ?, ?)
+      ON CONFLICT(lock_key) DO UPDATE SET
+        owner_id = excluded.owner_id,
+        locked_until = excluded.locked_until,
+        updated_at = excluded.updated_at
+    `).run(input.lockKey, input.ownerId, lockedUntil, now, now);
+    database.exec("COMMIT;");
+    transactionStarted = false;
+    return { acquired: true, lockKey: input.lockKey, ownerId: input.ownerId, lockedUntil };
+  } catch (error) {
+    if (transactionStarted) database.exec("ROLLBACK;");
+    throw error;
+  } finally {
+    database.close();
+  }
+}
+
+function releaseOperationLock(input) {
+  const database = openDatabase();
+  try {
+    return database.prepare(`
+      DELETE FROM operation_locks WHERE lock_key = ? AND owner_id = ?
+    `).run(input.lockKey, input.ownerId).changes > 0;
+  } finally {
+    database.close();
+  }
+}
+
+function getPaymentReliabilityJobById(database, jobId) {
+  return mapPaymentReliabilityJob(database.prepare(`
+    SELECT * FROM payment_reliability_jobs WHERE id = ?
+  `).get(jobId));
+}
+
+function mapPaymentReliabilityJob(row) {
+  if (!row) return null;
+  return {
+    id: row.id,
+    jobType: row.job_type,
+    resourceType: row.resource_type,
+    resourceId: row.resource_id,
+    status: row.status,
+    payload: parseJsonObject(row.payload_json),
+    attemptCount: row.attempt_count,
+    maxAttempts: row.max_attempts,
+    runAfter: row.run_after,
+    lockedBy: row.locked_by,
+    lockedUntil: row.locked_until,
+    lastError: parseJsonObject(row.last_error_json),
+    alertRequired: Boolean(row.alert_required),
+    createdAt: row.created_at,
+    updatedAt: row.updated_at,
+    completedAt: row.completed_at
+  };
+}
+
+function parseJsonObject(value) {
+  if (!value) return null;
+  try {
+    return JSON.parse(value);
+  } catch {
+    return { raw: value };
+  }
+}
+
 module.exports = {
+  acquireOperationLock,
   authorizeLinePayPaymentInDatabase,
+  claimPaymentReliabilityJobs,
+  completePaymentReliabilityJob,
+  enqueuePaymentReliabilityJob,
+  getPaymentReliabilityJob,
+  listPendingLinePayAuthorizations,
+  listPaymentReliabilityAlerts,
+  releaseOperationLock,
+  reschedulePaymentReliabilityJob,
   calculatePickupExpirationAt,
   cancelPendingLinePayAuthorizationInDatabase,
   cancelGroupBuyActivity,

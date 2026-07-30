@@ -16,11 +16,11 @@
 
 | 優先級 | 項目 | 目前狀態 |
 | ------ | ---- | -------- |
-| Medium | 顧客退出 / 取消訂單後續強化 | 第一版 API 已完成 deadline lock、authorized void、交易防競態、冪等紀錄及 revision 終止；正式多執行個體鎖定併入 reliability backlog |
+| Medium | 顧客退出 / 取消訂單後續強化 | 第一版 API 已完成 deadline lock、authorized void、交易防競態、冪等紀錄、revision 終止與跨程序 order lease；仍需 Android E2E |
 | Medium | 商家 pickup 流程後續強化 | 標記可取餐、短碼查詢／核銷、憑證過期與逾期 job 已完成第一版；仍需完整 Android E2E 與補救權限流程 |
-| High   | Provider status reconciliation | 第一版不做 webhook；仍需 provider 狀態查詢、redirect 遺失恢復、重試佇列與告警 |
-| High   | 跨執行個體 settlement locking | 單一 backend process scheduler 已有；正式多人/多 instance 前仍需 DB lock 或等效機制 |
-| Medium | PostgreSQL runtime adapter | PostgreSQL schema/seed draft 已有；backend runtime 仍是 SQLite |
+| High   | Provider status reconciliation | Request status query、redirect 遺失恢復、持久化 retry job、admin 警示查詢與結構化日誌已完成；仍需 LINE Pay 核准後的 Sandbox 人工驗證與正式通知管道 |
+| High   | 跨執行個體 settlement locking | Provider 操作、settlement、cancel、repay 與 pickup 已加入 DB lease；兩個 Node.js 程序競爭及租約接管測試已通過，仍需 PostgreSQL row-lock 驗收 |
+| Medium | PostgreSQL runtime adapter | Reliability schema parity、`pg`、SQLite/PostgreSQL adapter 與 smoke 已完成；`backend/db.js` 尚未搬移，runtime 仍是 SQLite |
 | Medium | Notification table / delivery | 尚未設計 notification 或 delivery event schema |
 | Medium | 菜單管理與下單 E2E | 權威菜單 API、商家管理畫面、後端驗證與價格重算已完成第一版；仍需完整 Android E2E 與更細的逐項衝突修正 UX |
 | Medium | 每杯折扣顯示與實際結算公式一致性 | 藍圖可顯示「每杯折 10／15 元」，但仍需確認顯示換算與截止時依實際有效杯數分攤總折扣的差異如何向顧客說明 |
@@ -85,7 +85,7 @@
 | 優先級   | 問題                                                                                                                                              | 決策或影響                                                                                                                                                        |
 | -------- | ------------------------------------------------------------------------------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | Resolved | 選定的 LINE Pay 產品是否支援 authorization + partial capture？                                                                                    | LINE Pay 官方支援分離式 confirm/capture 與 partial capture；但台灣 channel 預設是自動請款，使用前需向 LINE Pay 申請開通。                                         |
-| Resolved | 目前 sandbox channel 對 `capture:false` 回傳 "Parameter is not allowed"；此商家帳號是否能透過其他設定或產品類型支援分離式 authorization/capture？ | 視為目前 sandbox channel 尚未開通分離式請款。後端預設不送 `capture:false`，且未設定 `LINE_PAY_CAPTURE_SEPARATED=true` 時會阻擋真 LINE Pay request。                 |
+| Resolved | 目前 sandbox channel 對 `capture:false` 回傳 "Parameter is not allowed"；此商家帳號是否能透過其他設定或產品類型支援分離式 authorization/capture？ | 已向 LINE Pay 申請 Sandbox 分離式請款，等待回覆；核准前 `LINE_PAY_CAPTURE_SEPARATED` 維持 false，核准後依 Sandbox 清單驗證。 |
 | Resolved | authorization 有效期限是多久？                                                                                                                    | 不寫死固定時數。以 LINE Pay confirm 回傳的 `info.authorizationExpireDate` 為準；該時間必須晚於團購截止時間加結算緩衝時間。                                         |
 | Resolved | 團購活動如何降低 authorization 過期風險？                                                                                                         | 團購截止時間限制為 24 小時內；LINE Pay authorization 後，授權到期時間仍必須涵蓋截止時間與結算緩衝時間。                                                           |
 | Resolved | 活動未達標時，authorization 何時 void？                                                                                                           | 截止結算時立即處理；未達標且顧客未接受原價購買的訂單，系統取消授權 `void` 並取消訂單。                                                                             |

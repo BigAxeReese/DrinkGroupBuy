@@ -11,8 +11,15 @@
     "db:seed": "node database/seed-dev-db.js",
     "db:migrate:menu-customizations": "node database/migrate-dev-menu-customizations.js",
     "payments:cleanup:preview": "node scripts/compact-duplicate-payment-failures.js",
+    "payment-reliability:multiprocess": "node scripts/payment-reliability-multiprocess-smoke.js",
     "payments:cleanup": "node scripts/compact-duplicate-payment-failures.js --apply --vacuum",
     "settlement:smoke": "node scripts/settlement-smoke.js",
+    "payment-reliability:smoke": "node scripts/payment-reliability-smoke.js",
+    "database-adapter:smoke": "node scripts/database-adapter-smoke.js",
+    "postgres-runtime:smoke": "node scripts/postgres-runtime-smoke.js",
+    "store-menu-read:smoke": "node scripts/store-menu-read-repository-smoke.js",
+    "group-buy-activity-read:smoke": "node scripts/group-buy-activity-read-repository-smoke.js",
+    "group-buy-activity-postgres-http:smoke": "node scripts/group-buy-activity-postgres-http-smoke.js",
     "pickup-expiration:smoke": "node scripts/pickup-expiration-smoke.js",
     "pickup-credential:smoke": "node scripts/pickup-credential-smoke.js",
     "menu-order:smoke": "node scripts/menu-order-smoke.js",
@@ -25,6 +32,7 @@
     "auth:map:admin": "node scripts/map-firebase-user.js admin"
   },
   "dependencies": {
-    "firebase-admin": "^14.1.0"
+    "firebase-admin": "^14.1.0",
+    "pg": "^8.22.0"
   }
 }

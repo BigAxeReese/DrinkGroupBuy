@@ -144,6 +144,7 @@ LINE Pay 相關程式目前集中在：
 | `backend/payments/linePayClient.js` | 簽章並呼叫 LINE Pay API |
 | `backend/payments/linePayService.js` | 串接訂單檢查、授權建立、confirm、cancel、void、capture 與 refund |
 | `backend/payments/linePayPendingStore.js` | LINE Pay redirect 前後的記憶體快取；實際 confirm/cancel 以 DB 查找為主 |
+| `backend/payments/reliabilityService.js` | provider reconciliation、持久化 retry job 與 worker lease |
 | `backend/payments/settlementService.js` | 單一團購結算流程，依結果批次 capture / void |
 | `backend/pickup/expirationService.js` | 掃描取餐期限並完成活動、標記逾期未取與寫入歷程 |
 | `backend/linePayClient.js` | 舊路徑相容匯出 |
@@ -168,6 +169,75 @@ SETTLEMENT_SCHEDULER_ALLOW_PRODUCTION=false
 ```
 
 若 `LINE_PAY_ENV=production`，scheduler 會被 production guard 擋下；必須明確設定 `SETTLEMENT_SCHEDULER_ALLOW_PRODUCTION=true` 才會啟動，避免意外真實請款。
+
+LINE Pay request reconciliation worker 會掃描資料庫內 pending authorization、建立持久化 job，再用 lease claim 避免多個 Backend process 同時處理。
+
+```env
+PAYMENT_RECONCILIATION_ENABLED=true
+PAYMENT_RECONCILIATION_INTERVAL_MS=15000
+PAYMENT_RECONCILIATION_BATCH_SIZE=10
+PAYMENT_RECONCILIATION_LEASE_MS=120000
+PAYMENT_RECONCILIATION_MAX_ATTEMPTS=40
+PAYMENT_RECONCILIATION_RETRY_INTERVAL_MS=30000
+PAYMENT_RECONCILIATION_ALLOW_PRODUCTION=false
+```
+
+`NODE_ENV=production` 時，必須明確設定 `PAYMENT_RECONCILIATION_ALLOW_PRODUCTION=true` 才會啟動。Terminal job 會保存 `alert_required=1`，admin 可用 `GET /api/admin/payment-reliability/alerts` 查詢，scheduler 也會輸出結構化警示日誌；目前尚未接 Email／Slack 等通知服務。
+
+本機可用以下指令驗證 job 去重、跨執行個體 claim、租約逾時接手、失敗告警旗標與 provider 狀態對帳：
+
+```powershell
+npm run payment-reliability:smoke
+npm run payment-reliability:multiprocess
+```
+
+此測試只使用系統暫存 SQLite，不呼叫外部 LINE Pay API，也不修改開發資料庫。
+`payment-reliability:multiprocess` 會啟動兩個獨立 Node.js 程序，驗證同一 job／operation lock 只能由一個程序取得，以及租約到期後可由其他程序接手。
+
+## PostgreSQL runtime 唯讀切片
+
+大部分 HTTP backend 與 `backend/db.js` 仍使用 SQLite；顧客公開菜單 `GET /api/stores/:storeId/menu` 與團購活動列表 `GET /api/group-buy-activities` 已可各自透過 repository 切換 SQLite 或 PostgreSQL，不會雙寫。商家菜單查詢／修改、團購活動寫入、訂單與付款仍固定使用 SQLite。
+
+- `backend/database/sqliteAdapter.js`
+- `backend/database/postgresAdapter.js`
+- `backend/database/index.js`
+- `backend/database/repositories/storeMenuReadRepository.js`
+- `backend/database/repositories/groupBuyActivityReadRepository.js`
+
+預設不改變目前行為：
+
+```env
+STORE_MENU_READ_RUNTIME=sqlite
+GROUP_BUY_ACTIVITY_READ_RUNTIME=sqlite
+```
+
+已套用 PostgreSQL migrations／seed 並設定 `DATABASE_URL` 後，才可把個別唯讀切片切成：
+
+```env
+STORE_MENU_READ_RUNTIME=postgres
+GROUP_BUY_ACTIVITY_READ_RUNTIME=postgres
+```
+
+本機契約測試會驗證 SQLite 委派、adapter 與 PostgreSQL API 格式：
+
+```powershell
+npm run database-adapter:smoke
+npm run store-menu-read:smoke
+npm run group-buy-activity-read:smoke
+```
+
+設定本機 `DATABASE_URL` 並套用 PostgreSQL migrations 後，可執行：
+
+```powershell
+npm run postgres-runtime:smoke
+npm run group-buy-activity-postgres-http:smoke
+```
+`group-buy-activity-postgres-http:smoke` 會建立只存在 PostgreSQL 的臨時活動，從 HTTP route 驗證來源後自動清除。
+
+2026-07-30 已在本機 PostgreSQL 16 套用 migrations／seed，真實 runtime smoke、公開菜單與團購活動列表 HTTP source proof 均通過。開發服務限制為只監聽 `localhost`；兩個切片預設仍是 SQLite，其他 route 也仍使用 SQLite。
+
+
+
 
 後端也會啟動 pickup expiration scheduler。有效期限取 `pickupStartAt + 3 小時` 與 `pickupEndAt` 兩者較早者；到期後，已扣款但未取餐的訂單會標記為 `expired`，已取餐維持 `picked_up`，活動則更新為 `completed`。相關設定：
 
@@ -205,10 +275,10 @@ npm run order-api:smoke
 ## 目前限制
 
 - 管理員登入尚未設定。
-- 已授權訂單修改 API 與 mobile 重新預授權第一版已完成；仍需補 provider 狀態查詢、自動重試 queue 與更完整的錯誤提示。
+- 已授權訂單修改 API、mobile 重新預授權、provider request status reconciliation 與持久化 retry job 已完成第一版；仍需更完整的錯誤提示與 sandbox 人工驗證。
 - LINE Pay refund 目前只有管理員後端 API 與 smoke test，尚未做正式操作 UI、退款失敗重試 queue 與正式 sandbox 人工端對端測試。
 - LINE Pay webhook 第一版不列為必要入口；付款同步先以 confirm/cancel redirect、資料庫狀態與後續 provider 狀態查詢為主。
-- deadline 自動結算已先以單一 backend process interval 實作；失敗處理規則已決定以自動重試為主，不做人工處理介面；跨執行個體 locking、重試佇列與告警尚未完成。
+- Deadline 自動結算已改用持久化 job，settlement、provider、cancel、repay 與 pickup 使用 DB lease；兩程序競爭／接管測試已通過，仍需正式通知管道與 PostgreSQL row-lock 驗收。
 - 目前仍是開發資料庫，不是 production migration。
 - 顧客與商家菜單 API、商家菜單管理 mobile 第一版、明確客製化選擇上限及訂單後端價格重算已完成；仍需完整 Android 裝置 E2E 與更細的菜單異動衝突修正 UX。
 - 取貨逾期排程、取貨憑證建立／驗證 API 與顧客／商家第一版串接已完成；仍需完整 Android E2E 與補救權限流程。

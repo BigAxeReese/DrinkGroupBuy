@@ -4,7 +4,7 @@ const path = require("node:path");
 const { randomUUID } = require("node:crypto");
 const { DatabaseSync } = require("node:sqlite");
 const {
-  runDueGroupBuySettlements,
+  runDueGroupBuySettlementJobs,
   settleGroupBuyActivity
 } = require("../backend/payments/settlementService");
 const {
@@ -535,7 +535,7 @@ async function main() {
       actorUserId: failedScenario.adminUserId,
       force: true
     });
-    const scheduledResult = await runDueGroupBuySettlements({
+    const scheduledResult = await runDueGroupBuySettlementJobs({
       actorUserId: scheduledScenario.adminUserId,
       limit: 10
     });
@@ -571,9 +571,9 @@ async function main() {
       failedSummary
     );
     assert(
-      scheduledResult.results.some((result) => (
-        result.activityId === scheduledScenario.activityId
-        && result.status === "settled"
+      scheduledResult.results.some((entry) => (
+        entry.job?.resourceId === scheduledScenario.activityId
+        && entry.job?.status === "succeeded"
       )),
       "scheduler settlement should settle the scheduled due activity",
       scheduledResult
@@ -879,7 +879,7 @@ async function main() {
     console.log("Settlement smoke passed");
     console.log(`qualified: captured=${qualifiedResult.capturedOrderCount}, voided=${qualifiedResult.voidedOrderCount}`);
     console.log(`failed: captured=${failedResult.capturedOrderCount}, voided=${failedResult.voidedOrderCount}`);
-    console.log(`scheduler: settled=${scheduledResult.settledCount}, failed=${scheduledResult.failedCount}`);
+    console.log(`scheduler: settled=${scheduledResult.succeededCount}, failed=${scheduledResult.failedCount}`);
     console.log("revision: applied=1, old_authorization_voided=1");
     console.log("cutoff: rejected_after_deadline=1");
     console.log("capture retry: interval=30s, attempts=3, fourth_attempt_suppressed=1");

@@ -10,16 +10,20 @@
 
 - Firebase Auth + Google Login 已實作，backend 會驗證 Firebase ID token，再依開發資料庫的 `users.firebase_uid`、`user_roles` 與 `merchant_users` 判斷身份。
 - 本機開發已新增 dev-only 身份切換器；只有 backend `AUTH_DEV_MODE=true` 且 mobile `EXPO_PUBLIC_AUTH_MODE=dev` 時才會顯示，可用下拉選單切換 SQLite 內所有有效顧客、商家與開發補救身份。
-- 開發資料庫仍使用 SQLite，主要 schema、seed 與付款相關資料表已建立；PostgreSQL schema / seed 草稿已在本機容器驗證，但尚未接入 backend runtime，目前還不是正式資料庫。
+- 開發 runtime 預設仍使用 SQLite；顧客公開菜單與團購活動列表已可分別由 `STORE_MENU_READ_RUNTIME`、`GROUP_BUY_ACTIVITY_READ_RUNTIME` 獨立切換 PostgreSQL，其餘 route 與 `backend/db.js` 仍使用 SQLite，現在沒有雙寫。
 - LINE Pay 付款主幹已拆成獨立模組，已有 request、confirm、cancel、capture、void、refund、訂單修改後重新預授權與截止結算排程。
 - 付款結算 smoke test 已於 2026-07-19 通過，包含達標請款、未達標原價請款／取消授權、排程結算、修改訂單替換授權、截止後拒絕預授權、三次自動請款上限、取餐前 15 分鐘以前的手動重新付款，以及退款 idempotency。
 - 開發資料庫曾暴露同一筆 LINE Pay 失敗請款被無限重試的問題；目前已改為截止時第一次請款，暫時性失敗後每 30 秒重試，總計最多三次，並在重試前查詢 provider 狀態。
+- 2026-07-30 已加入 LINE Pay request status reconciliation、SQLite 持久化工作佇列與 lease-based claim；pending authorization 即使 redirect 遺失或 Backend 重啟，仍可由 worker 依 provider 狀態繼續確認、失敗或標記人工檢視。
+- Confirm、capture、void、refund、顧客取消、手動補付款、LINE Pay 取消回跳、取餐就緒／兌換／逾期與整團 settlement 已加入資料庫 operation lease；到期結算 scheduler 改為持久化 job。
+- `GET /api/admin/payment-reliability/alerts` 已提供 admin-only 終止警示查詢；reconciliation 與 settlement scheduler 會輸出 `[payment-reliability-alert]` 結構化日誌。
+- `npm run payment-reliability:smoke` 與 `npm run payment-reliability:multiprocess` 已驗證工作去重、兩個 Node.js 程序競爭、租約逾時接手、終止警示與 provider `0121` 對帳。
 - 2026-07-19 已將該問題產生的 6,496 筆重複失敗紀錄壓縮為 1 筆原始失敗紀錄與 1 筆稽核摘要，共移除 6,495 筆；清理前 SQLite 備份保留於本機 `database/backups/`，後續可用 `npm run payments:cleanup:preview` 預覽及 `npm run payments:cleanup` 安全清理同類資料。
 - 三次自動請款失敗或遇到不可重試錯誤後，顧客可在取餐開始前 15 分鐘以前使用結算後金額直接重新付款；後端會先查原交易狀態並解除仍有效的原授權，付款成功後訂單改為已扣款並加入製作流程。
 - 已新增 `npm run check:sql-safety`，用來檢查 backend、database 與 scripts 內是否出現未審核的動態 SQL、SQL 字串插值或字串相加，降低後續開發時引入 SQL 注入風險。
-- 2026-07-30 已完成 SQL safety、付款結算、取貨逾期、取貨碼、菜單／訂單權威、訂單列表／取消與 HTTP route smoke 回歸；Expo Doctor 17/17 通過，Web production bundle 可成功輸出。
+- 2026-07-30 已完成 SQL safety、database adapter、真實 PostgreSQL runtime、SQLite／PostgreSQL 公開菜單與團購活動列表 repositories／HTTP source proofs、付款可靠性／雙程序 lease、付款結算、取貨碼、菜單／訂單權威與訂單列表／取消 smoke 回歸；41 個 Backend／script／database JavaScript 檔語法通過，SQLite `integrity_check = ok`、`foreign_key_check = 0`。
 - 訂單流程新增 `npm run order-flow:smoke` 與 `npm run order-api:smoke`，覆蓋 cursor、門市／活動篩選、匿名顧客、重複下單、取消鎖定、取消冪等、idempotency key 衝突及跨店 403。
-- 已執行非強制 `npm audit fix`；Root 與 Mobile 仍有只能透過 Expo／React Native 或相關傳遞依賴主版本升級處理的 audit 警告，未使用 `--force` 破壞目前 Expo SDK 51 相容性。
+- 已執行非強制 `npm audit fix`；最近一次結果為 Root `11` 項（`6 moderate`、`5 high`、`0 critical`），Mobile `46` 項（`1 low`、`11 moderate`、`33 high`、`1 critical`）。剩餘項目需要 Expo／React Native 或相關傳遞依賴的主版本升級，因此未使用 `--force` 破壞目前 Expo SDK 51 相容性。
 - 系統分析書已整理為五大功能，五組描述性綱目已更新，並已抽出 `docs/system-analysis-extracted.md`；各小節使用個案描述與活動圖仍待更新。
 
 ## 2026-07-28 團購菜單規則更新
@@ -93,14 +97,14 @@
 目前 mobile 限制：
 
 - App 啟動時尚未完整載入後端權威活動列表。
-- 訂單、付款、取貨與大部分 runtime progress 仍有 mobile-local state。
+- 顧客與商家訂單列表已由 Backend 同步，mobile local state 僅作畫面 cache；團購活動、地圖與部分店家摘要仍混用 local state 或 mock。
 - LINE Pay 完成後仍會先回 backend HTML 頁；HTML 頁會提供返回 App deep link，mobile 端仍保留 polling / foreground refresh 作為備援。
 - 部分流程仍保留 fallback 行為。
 - `StoreMenuScreen` / `DrinkSelectionScreen` 已改讀後端菜單；地圖與部分店家基本資料仍保留 prototype mock data。
 
 ## Backend 端
 
-技術方向：Node.js built-in HTTP server，目前使用 built-in SQLite driver。
+技術方向：Node.js built-in HTTP server；預設使用 built-in SQLite driver，公開菜單與團購活動列表唯讀 repositories 可獨立使用 PostgreSQL。
 
 重要檔案：
 
@@ -113,7 +117,11 @@
 | `backend/payments/linePayService.js`      | LINE Pay request / confirm / cancel、手動重新付款、void / capture / refund 流程 |
 | `backend/payments/linePayPendingStore.js` | LINE Pay redirect 前後的記憶體快取；confirm/cancel 以 DB 查找為主 |
 | `backend/payments/settlementService.js`   | 單一團購結算流程，依結果批次 capture / void   |
+| `backend/payments/reliabilityService.js`     | LINE Pay provider reconciliation 與持久化工作 worker |
 | `backend/linePayClient.js`                | payment client 相容匯出                       |
+| `backend/reliability/operationLease.js` | 跨程序狀態變更 lease 共用封裝                  |
+| `backend/database/`                     | SQLite/PostgreSQL adapter 與公開菜單／團購活動列表唯讀 repositories |
+| `docs/line-pay-separated-capture-sandbox-checklist.md` | LINE Pay 分離式請款 Sandbox 人工驗證清單 |
 | `backend/README.md`                       | 後端啟動與設定說明                            |
 
 目前 API：
@@ -140,6 +148,7 @@
 | `POST`   | `/api/orders/:orderId/cancel`                 | 顧客在鎖定前退出團購並取消訂單        |
 | `DELETE` | `/api/admin/group-buy-activities/:activityId` | 開發 / 補救用 soft-cancel 活動        |
 | `POST`   | `/api/admin/group-buy-activities/:activityId/settle` | 開發 / 補救用手動觸發單一團購結算 |
+| `GET`    | `/api/admin/payment-reliability/alerts`        | Admin 查詢需人工處理的付款可靠性工作    |
 | `POST`   | `/api/payments/line-pay/request`              | 建立 LINE Pay sandbox 授權請求        |
 | `POST`   | `/api/payments/line-pay/repay`                | 請款失敗後建立 LINE Pay 重新付款      |
 | `POST`   | `/api/payments/line-pay/refund`               | 開發 / 補救用已請款交易退款           |
@@ -189,7 +198,7 @@
 - 顧客與商家權威訂單列表 API 與 Mobile 第一版已串接，登入、切換分頁及 App 回到前景會同步；Backend 統一回傳 `lifecycleBucket` 與 `availableActions`。已移除訂單清單中的舊 local 訂單覆蓋，其他活動畫面仍有 mock fallback。
 - 顧客鎖定前取消訂單已完成第一版：pending 授權失效、authorized 先 void、pending revision 一併取消，captured 訂單拒絕自行取消。
 - 付款結算失敗規則已決定：第一版以自動重試為主，不做人工處理介面；失敗中的訂單不進入製作或取貨。
-- 尚未實作跨執行個體 deadline settlement locking、持久化重試 queue 與失敗告警；單一 backend process 內的 provider 狀態查詢、三次上限與 30 秒重試已實作。
+- Provider reconciliation、持久化 retry jobs、payment／settlement／cancel／repay／pickup DB lease 與 terminal job 告警旗標已完成第一版；兩程序 claim／lease takeover 測試已通過，仍缺正式告警通知管道、LINE Pay sandbox 人工端對端與 PostgreSQL row-lock 驗收。
 - 正式 migration 系統。
 - 完整 Android mobile E2E 與 LINE Pay sandbox 人工驗證仍未完成；目前自動 smoke、Expo Doctor 與 Web bundle 已通過。
 
@@ -261,9 +270,10 @@ PostgreSQL 方向：
 
 目前 PostgreSQL 狀態：
 
-- PostgreSQL 尚未接入後端 runtime。
-- 後端仍使用 SQLite。
-- PostgreSQL schema / seed draft 已在本機 Docker PostgreSQL 開發容器驗證過。
+- 兩個 PostgreSQL 唯讀 runtime vertical slices 已完成：公開菜單與團購活動列表可由各自環境變數獨立切換。
+- 預設仍是 `sqlite`；商家菜單管理、活動寫入、訂單、付款與其他 API 仍使用 SQLite，沒有雙寫。
+- 本機 PostgreSQL 16 已套用 `001_initial_postgres.sql` 與 `002_seed_dev_postgres.sql`；服務只監聽 `localhost`，`postgres-runtime:smoke` 已驗證連線、可靠性表、seed 公開菜單與活動列表契約。
+- 公開菜單與團購活動列表 HTTP route 均已用只存在 PostgreSQL 的臨時資料證明來源；驗證後臨時資料已刪除。
 - PostgreSQL draft 已拆分 `users`、`user_private_profiles`、`user_public_profiles`。
 - PostgreSQL draft 中每個商家帳號透過 `merchant_users.store_id` 對應一間店。
 - PostgreSQL seed draft 有 4 個顧客、7 個商家、1 個 dev/admin 補救帳號、7 間店、8 個菜單項目與 96 個客製化選項。
@@ -294,11 +304,11 @@ database/test/drink-group-buy-test.sqlite
 
 建議下一步：
 
-1. 補 LINE Pay provider 狀態查詢、redirect 遺失恢復與持久化重試 queue。
-2. 補跨執行個體 settlement／cancel／capture locking 與失敗告警。
-3. 建立 PostgreSQL runtime adapter 與正式 migration 流程。
-4. 細化 revision、容量不足及 void 失敗的 mobile 錯誤提示。
-5. 待恢復測試階段後執行 Android E2E 與 LINE Pay sandbox 人工驗證。
+1. 搬移登入／角色／門市權限解析為第三個 PostgreSQL 唯讀 repository，維持 SQLite 預設與無雙寫。
+2. 三個唯讀切片穩定後，再規劃第一個 PostgreSQL 寫入 transaction 與 row lock。
+3. LINE Pay 核准分離式請款後，執行 sandbox reconciliation、capture、void 與 lease takeover 人工端對端驗證。
+4. 補正式告警通知管道，並細化 revision、容量不足及 void 失敗的 mobile 錯誤提示。
+5. 執行 Android 實機 E2E、Firebase Console／OAuth／UID mapping 驗證。
 
 ## 系統分析書進度
 

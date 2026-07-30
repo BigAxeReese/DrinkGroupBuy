@@ -339,6 +339,43 @@ CREATE TABLE payment_provider_events (
   processed_at TEXT
 );
 
+CREATE TABLE payment_reliability_jobs (
+  id TEXT PRIMARY KEY,
+  job_type TEXT NOT NULL CHECK (job_type IN ('reconcile_line_pay_request', 'settle_group_buy_activity')),
+  resource_type TEXT NOT NULL CHECK (resource_type IN ('payment_authorization', 'activity')),
+  resource_id TEXT NOT NULL,
+  status TEXT NOT NULL DEFAULT 'queued'
+    CHECK (status IN ('queued', 'running', 'retry_wait', 'succeeded', 'failed', 'cancelled')),
+  payload_json TEXT NOT NULL DEFAULT '{}',
+  attempt_count INTEGER NOT NULL DEFAULT 0 CHECK (attempt_count >= 0),
+  max_attempts INTEGER NOT NULL DEFAULT 20 CHECK (max_attempts > 0),
+  run_after TEXT NOT NULL,
+  locked_by TEXT,
+  locked_until TEXT,
+  last_error_json TEXT,
+  alert_required INTEGER NOT NULL DEFAULT 0 CHECK (alert_required IN (0, 1)),
+  created_at TEXT NOT NULL,
+  updated_at TEXT NOT NULL,
+  completed_at TEXT
+);
+
+CREATE UNIQUE INDEX idx_payment_reliability_jobs_active_resource
+ON payment_reliability_jobs(job_type, resource_type, resource_id)
+WHERE status IN ('queued', 'running', 'retry_wait');
+
+CREATE INDEX idx_payment_reliability_jobs_due
+ON payment_reliability_jobs(job_type, status, run_after, locked_until);
+
+CREATE TABLE operation_locks (
+  lock_key TEXT PRIMARY KEY,
+  owner_id TEXT NOT NULL,
+  locked_until TEXT NOT NULL,
+  created_at TEXT NOT NULL,
+  updated_at TEXT NOT NULL
+);
+
+CREATE INDEX idx_operation_locks_expiry ON operation_locks(locked_until);
+
 CREATE TABLE activity_settlements (
   id TEXT PRIMARY KEY,
   activity_id TEXT NOT NULL UNIQUE REFERENCES group_buy_activities(id),

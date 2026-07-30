@@ -1,5 +1,9 @@
 const { randomInt, randomUUID } = require("node:crypto");
 const { calculatePickupExpirationAt, openDatabase } = require("../db");
+const {
+  OperationLeaseError,
+  withOperationLeaseSync
+} = require("../reliability/operationLease");
 
 const MAX_FAILED_ATTEMPTS = 5;
 const ATTEMPT_WINDOW_MS = 60_000;
@@ -7,6 +11,25 @@ const BLOCK_DURATION_MS = 60_000;
 const failedAttempts = new Map();
 
 function markGroupBuyActivityReadyForPickup(activityId, input = {}) {
+  try {
+    return withOperationLeaseSync({
+      lockKey: `pickup:activity:${activityId}:transition`,
+      leaseMs: 120_000,
+      now: input.now
+    }, () => markGroupBuyActivityReadyForPickupUnlocked(activityId, input));
+  } catch (error) {
+    if (error instanceof OperationLeaseError) {
+      return {
+        error: "operation_locked",
+        lockKey: error.lock.lockKey,
+        lockedUntil: error.lock.lockedUntil
+      };
+    }
+    throw error;
+  }
+}
+
+function markGroupBuyActivityReadyForPickupUnlocked(activityId, input = {}) {
   const database = openDatabase();
   const now = input.now || new Date().toISOString();
   const actorUserId = input.actorUserId || null;
@@ -216,7 +239,24 @@ function lookupPickupCode(input = {}) {
 }
 
 function redeemPickupCode(input = {}) {
-  return accessPickupCode(input, true);
+  const pickupCode = normalizeCode(input.pickupCode);
+  if (!pickupCode) return accessPickupCode(input, true);
+  try {
+    return withOperationLeaseSync({
+      lockKey: `pickup:code:${pickupCode}:redeem`,
+      leaseMs: 120_000,
+      now: input.now
+    }, () => accessPickupCode(input, true));
+  } catch (error) {
+    if (error instanceof OperationLeaseError) {
+      return {
+        error: "operation_locked",
+        lockKey: error.lock.lockKey,
+        lockedUntil: error.lock.lockedUntil
+      };
+    }
+    throw error;
+  }
 }
 
 function accessPickupCode(input, shouldRedeem) {
