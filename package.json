@@ -21,6 +21,8 @@
     "store-menu-read:smoke": "node scripts/store-menu-read-repository-smoke.js",
     "group-buy-activity-read:smoke": "node scripts/group-buy-activity-read-repository-smoke.js",
     "group-buy-activity-postgres-http:smoke": "node scripts/group-buy-activity-postgres-http-smoke.js",
+    "group-buy-activity-write:smoke": "node scripts/group-buy-activity-write-repository-smoke.js",
+    "group-buy-activity-postgres-write-http:smoke": "node scripts/group-buy-activity-postgres-write-http-smoke.js",
     "auth-profile-read:smoke": "node scripts/auth-profile-read-repository-smoke.js",
     "auth-profile-postgres-http:smoke": "node scripts/auth-profile-postgres-http-smoke.js",
     "pickup-expiration:smoke": "node scripts/pickup-expiration-smoke.js",

@@ -58,6 +58,9 @@ const {
 const {
   createAuthProfileReadRepository
 } = require("./database/repositories/authProfileReadRepository");
+const {
+  createGroupBuyActivityWriteRepository
+} = require("./database/repositories/groupBuyActivityWriteRepository");
 
 const port = Number(process.env.PORT ?? 3000);
 const storeMenuReadRepository = createStoreMenuReadRepository({ sqliteReader: listStoreMenu });
@@ -72,6 +75,22 @@ const authProfileReadRepository = createAuthProfileReadRepository({
     listDevUsers: listSqliteDevAuthUsers,
   },
 });
+const groupBuyActivityWriteRepository = createGroupBuyActivityWriteRepository({
+  sqliteWriter: createGroupBuyActivity,
+});
+if (groupBuyActivityWriteRepository.kind === "postgres") {
+  const requiredPostgresReaders = [
+    authProfileReadRepository,
+    storeMenuReadRepository,
+    groupBuyActivityReadRepository,
+  ];
+  if (requiredPostgresReaders.some((repository) => repository.kind !== "postgres")) {
+    throw new Error(
+      "GROUP_BUY_ACTIVITY_WRITE_RUNTIME=postgres requires AUTH_PROFILE_READ_RUNTIME, "
+      + "STORE_MENU_READ_RUNTIME, and GROUP_BUY_ACTIVITY_READ_RUNTIME to be postgres"
+    );
+  }
+}
 
 const server = http.createServer(async (request, response) => {
   try {
@@ -212,6 +231,7 @@ const server = http.createServer(async (request, response) => {
         sendJson(response, 403, { error: "Store access denied" });
         return;
       }
+      if (sendMerchantMenuRuntimeMismatch(response)) return;
       const menu = listStoreMenu(merchantStoreMenuMatch[1], { includeUnavailable: true });
       sendJson(response, 200, menu);
       return;
@@ -228,6 +248,7 @@ const server = http.createServer(async (request, response) => {
         sendJson(response, 403, { error: "Store access denied" });
         return;
       }
+      if (sendMerchantMenuRuntimeMismatch(response)) return;
       const body = await readJsonBody(request);
       const validationError = validateMenuItemInput(body);
       if (validationError) {
@@ -264,6 +285,7 @@ const server = http.createServer(async (request, response) => {
         sendJson(response, 403, { error: "Store access denied" });
         return;
       }
+      if (sendMerchantMenuRuntimeMismatch(response)) return;
       const body = await readJsonBody(request);
       const validationError = validateMenuItemInput(body);
       if (validationError) {
@@ -310,10 +332,14 @@ const server = http.createServer(async (request, response) => {
         return;
       }
 
-      const activity = createGroupBuyActivity({
+      const activity = await groupBuyActivityWriteRepository.createActivity({
         ...body,
         createdByUserId: authUser.id
       });
+      if (activity?.error === "store_access_denied") {
+        sendJson(response, 403, { error: "Store access denied" });
+        return;
+      }
       if (activity?.error) {
         sendJson(response, 409, activity);
         return;
@@ -1240,6 +1266,15 @@ function canAccessOrder(user, order) {
 function canManageStore(user, storeId) {
   if (!storeId) return false;
   return user.merchantStores.some((store) => store.id === storeId);
+}
+
+function sendMerchantMenuRuntimeMismatch(response) {
+  if (groupBuyActivityWriteRepository.kind !== "postgres") return false;
+  sendJson(response, 503, {
+    error: "merchant_menu_runtime_mismatch",
+    message: "PostgreSQL activity writes require PostgreSQL merchant menu management."
+  });
+  return true;
 }
 
 function isDevAuthModeEnabled() {

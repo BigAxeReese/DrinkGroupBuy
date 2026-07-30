@@ -73,10 +73,13 @@ API JSON 使用 `camelCase`。已實作 routes 只對目前開發 prototype 具�
 | 相關畫面      | `MerchantGroupBuyActivityCreateScreen`                                                                                                                                                        |
 | Request       | 需要 bearer token。Body: `{ storeId, title, startAt, deadlineAt, pickupStartAt, pickupEndAt, withdrawalLockMinutes?, tiers[], notice?, idempotencyKey? }`                                     |
 | Response      | `{ activity }`                                                                                                                                                                                |
-| 已實作規則    | 需要 merchant role、驗證 merchant-store access、從登入使用者推導 `createdByUserId`、必填欄位驗證、`deadlineAt` 不可超過 `startAt` 後 24 小時、`pickupStartAt` 至少晚於 `deadlineAt` 30 分鐘、`pickupEndAt` 必須晚於 `pickupStartAt`、tier normalization、由最高 tier 推導 maximum cups、transaction、簡單 idempotency、audit log |
+| 已實作規則    | 需要 merchant role、驗證 merchant-store access、從登入使用者推導 `createdByUserId`、必填欄位驗證、`deadlineAt` 不可超過 `startAt` 後 24 小時、`pickupStartAt` 至少晚於 `deadlineAt` 30 分鐘、`pickupEndAt` 必須晚於 `pickupStartAt`、tier normalization、由最高 tier 推導 maximum cups、transaction、idempotency、status history、audit log |
 | 最終商業規則  | `deadlineAt` 必須在活動發布或開放招募後 24 小時內；取餐時間由店家開團時設定，顧客加入前可見；取餐開始至少晚於截止時間 30 分鐘，表單預設為截止後 30 分鐘 |
-| 已實作驗證    | SQLite backend 會對每個 tier 驗證可達杯數區間：上限為下一級距 `targetCups - 1`，最高級距上限為 `maximumCups`。必須滿足 `floor(discountAmount / 區間上限) >= 1`，且 `floor(discountAmount / targetCups)` 不得高於店內最低可售單杯權威金額；相關菜單降價／上架、訂單寫入／revision 與結算皆會重驗並以 409 回傳衝突 |
-| 尚缺規則      | 較完整的 merchant permission model                                                                                                                                                            |
+| 已實作驗證    | SQLite 與 PostgreSQL 都會逐級驗證可達杯數區間；每杯至少折 1 元，且不得高於店內最低可售單杯權威金額 |
+| 可切換資料來源 | `GROUP_BUY_ACTIVITY_WRITE_RUNTIME=sqlite|postgres`；預設 `sqlite`，不雙寫 |
+| PostgreSQL transaction | 先 `FOR UPDATE` 鎖定 merchant/store 授權邊界，再鎖菜單資料；同 transaction 寫入 activity、tiers、notice、初始 status history 與 audit log |
+| PostgreSQL 限制 | Backend 要求 auth、公開菜單、活動讀取同步使用 PostgreSQL；仍依賴 SQLite 的商家菜單管理 API 會回傳 `503 merchant_menu_runtime_mismatch` |
+| 尚缺規則      | PostgreSQL 菜單管理與正式 runtime 切換策略；PostgreSQL v1 已決定不拆 owner／manager／staff                                                                                                    |
 
 ### 開發 / 補救用：後端取消團購活動
 

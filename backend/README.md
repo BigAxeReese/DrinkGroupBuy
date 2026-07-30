@@ -194,9 +194,9 @@ npm run payment-reliability:multiprocess
 此測試只使用系統暫存 SQLite，不呼叫外部 LINE Pay API，也不修改開發資料庫。
 `payment-reliability:multiprocess` 會啟動兩個獨立 Node.js 程序，驗證同一 job／operation lock 只能由一個程序取得，以及租約到期後可由其他程序接手。
 
-## PostgreSQL runtime 唯讀切片
+## PostgreSQL runtime 垂直切片
 
-大部分業務資料仍使用 SQLite；公開菜單、團購活動列表，以及登入／bearer token 的使用者角色與門市權限解析，已可各自透過 repository 切換 SQLite 或 PostgreSQL，不會雙寫。商家菜單資料、團購活動寫入、訂單與付款仍固定使用 SQLite。
+大部分業務資料仍使用 SQLite；公開菜單、團購活動列表、登入／bearer token 權限解析，以及商家建立團購，已可各自透過 repository 切換 SQLite 或 PostgreSQL，不會雙寫。前三項是唯讀切片；商家建立團購是第一個受控 PostgreSQL 寫入切片。商家菜單修改、訂單與付款仍固定使用 SQLite。
 
 - `backend/database/sqliteAdapter.js`
 - `backend/database/postgresAdapter.js`
@@ -204,22 +204,27 @@ npm run payment-reliability:multiprocess
 - `backend/database/repositories/storeMenuReadRepository.js`
 - `backend/database/repositories/groupBuyActivityReadRepository.js`
 - `backend/database/repositories/authProfileReadRepository.js`
+- `backend/database/repositories/groupBuyActivityWriteRepository.js`
 
 預設不改變目前行為：
 
 ```env
 STORE_MENU_READ_RUNTIME=sqlite
 GROUP_BUY_ACTIVITY_READ_RUNTIME=sqlite
+GROUP_BUY_ACTIVITY_WRITE_RUNTIME=sqlite
 AUTH_PROFILE_READ_RUNTIME=sqlite
 ```
 
-已套用 PostgreSQL migrations／seed 並設定 `DATABASE_URL` 後，才可把個別唯讀切片切成：
+已套用 PostgreSQL migrations／seed 並設定 `DATABASE_URL` 後，才可把個別切片切成：
 
 ```env
 STORE_MENU_READ_RUNTIME=postgres
 GROUP_BUY_ACTIVITY_READ_RUNTIME=postgres
+GROUP_BUY_ACTIVITY_WRITE_RUNTIME=postgres
 AUTH_PROFILE_READ_RUNTIME=postgres
 ```
+
+`GROUP_BUY_ACTIVITY_WRITE_RUNTIME=postgres` 目前只供受控驗證。Backend 會要求 auth、公開菜單與活動讀取也使用 PostgreSQL；仍依賴 SQLite 的商家菜單查詢／修改會回傳 `503 merchant_menu_runtime_mismatch`，避免菜單價格與活動折扣驗證跨資料庫失去一致性。
 
 本機契約測試會驗證 SQLite 委派、adapter 與 PostgreSQL API 格式：
 
@@ -228,6 +233,7 @@ npm run database-adapter:smoke
 npm run store-menu-read:smoke
 npm run group-buy-activity-read:smoke
 npm run auth-profile-read:smoke
+npm run group-buy-activity-write:smoke
 ```
 
 設定本機 `DATABASE_URL` 並套用 PostgreSQL migrations 後，可執行：
@@ -236,10 +242,11 @@ npm run auth-profile-read:smoke
 npm run postgres-runtime:smoke
 npm run group-buy-activity-postgres-http:smoke
 npm run auth-profile-postgres-http:smoke
+npm run group-buy-activity-postgres-write-http:smoke
 ```
-兩個 `*-postgres-http:smoke` 會建立只存在 PostgreSQL 的臨時資料，從 HTTP route 驗證活動或登入／bearer token 的實際來源後自動清除。
+三個 PostgreSQL HTTP proof 會建立臨時資料並自動清除；活動寫入 proof 額外以第二條連線持有 merchant/store row lock，確認建立請求會等待鎖、釋放後整筆 transaction 成功，且相同 idempotency key 只產生一個活動。
 
-2026-07-31 已在本機 PostgreSQL 16 驗證三個唯讀切片：公開菜單、團購活動列表、登入／角色／門市權限。開發服務限制為只監聽 `localhost`；三個切片預設仍是 SQLite，商家菜單資料、活動寫入、訂單與付款也仍使用 SQLite。PostgreSQL v1 不分店家內部權限等級，因此相容欄位 `permissionLevel` 回傳 `null`，授權邊界為 `merchant_users.store_id`。
+2026-07-31 已在本機 PostgreSQL 16 驗證三個唯讀切片與第一個受控寫入切片。商家建立團購會在同一 transaction 鎖定 merchant/store 與菜單資料，寫入 activity、tiers、notice、status history、audit log，並處理同店家 idempotency。所有 runtime 開關預設仍是 SQLite，沒有雙寫；訂單與付款尚未遷移。PostgreSQL v1 不分店家內部權限等級，因此相容欄位 `permissionLevel` 回傳 `null`。
 
 
 
