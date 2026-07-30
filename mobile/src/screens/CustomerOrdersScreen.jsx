@@ -3,6 +3,7 @@ import { Pressable, ScrollView, StyleSheet, Text, View } from "react-native";
 import { MobileScreen, Section } from "../components/MobileScreen";
 import { PrimaryButton } from "../components/PrimaryButton";
 import { StatusBadge } from "../components/StatusBadge";
+import { useOrderListSync } from "../hooks/useOrderListSync";
 import { stores } from "../mock/stores";
 import { formatCurrency, isWithdrawalLocked } from "../utils/calculations";
 import { getGroupBuyActivityProgress } from "../utils/groupBuyActivityProgress";
@@ -11,11 +12,19 @@ import { normalizeOrderItem } from "../utils/orderItems";
 export function CustomerOrdersScreen({ navigation, appState, actions, memberAction, selectedCustomerId }) {
   const [tab, setTab] = useState("active");
   const [selectedOrderId, setSelectedOrderId] = useState(null);
+  const { syncStatus, refreshOrders } = useOrderListSync(
+    actions.syncCustomerOrderList,
+    tab,
+    selectedCustomerId
+  );
   const customerOrders = appState.orders.filter((order) => order.customerId === selectedCustomerId);
-  const customerOrderIds = customerOrders.map((order) => order.id).sort().join("|");
   const cartItems = appState.cartItems.filter((item) => item.customerId === selectedCustomerId);
-  const activeOrders = customerOrders.filter((order) => !isHistoryOrder(order, appState.groupBuyActivities));
-  const historyOrders = customerOrders.filter((order) => isHistoryOrder(order, appState.groupBuyActivities));
+  const activeOrders = customerOrders.filter((order) => order.lifecycleBucket
+    ? order.lifecycleBucket === "active"
+    : !isHistoryOrder(order, appState.groupBuyActivities));
+  const historyOrders = customerOrders.filter((order) => order.lifecycleBucket
+    ? order.lifecycleBucket === "history"
+    : isHistoryOrder(order, appState.groupBuyActivities));
   const displayTab = tab;
   const visibleOrders = displayTab === "history" ? historyOrders : activeOrders;
   const selectedOrder = useMemo(
@@ -29,12 +38,9 @@ export function CustomerOrdersScreen({ navigation, appState, actions, memberActi
   const cartTotalAmount = cartItems.reduce((sum, item) => sum + item.subtotal, 0);
 
   useEffect(() => {
-    if (!customerOrderIds) return;
-
-    Promise.allSettled(
-      customerOrderIds.split("|").map((orderId) => actions.syncOrderFromBackend(orderId))
-    );
-  }, [customerOrderIds]);
+    if (!selectedOrderId) return;
+    actions.syncOrderFromBackend(selectedOrderId).catch(() => {});
+  }, [selectedOrderId]);
 
   function handleTabChange(nextTab) {
     setSelectedOrderId(null);
@@ -63,6 +69,13 @@ export function CustomerOrdersScreen({ navigation, appState, actions, memberActi
 
   return (
     <MobileScreen title="我的訂單" onMemberPress={memberAction}>
+      {syncStatus === "loading" ? <Text style={styles.meta}>正在更新後端訂單…</Text> : null}
+      {syncStatus === "error" ? (
+        <View style={styles.syncError}>
+          <Text style={styles.syncErrorText}>訂單同步失敗，目前顯示上次成功載入的資料。</Text>
+          <PrimaryButton label="重新整理" variant="secondary" onPress={refreshOrders} />
+        </View>
+      ) : null}
       {(customerOrders.length > 0 || cartItems.length > 0) ? (
         <OrderTabs tab={displayTab} setTab={handleTabChange} />
       ) : null}
@@ -135,7 +148,8 @@ function OrderListSection({ title, orders, groupBuyActivities, payments, emptyTe
 
 function OrderListCard({ order, groupBuyActivities, payments, historical, onPress }) {
   const groupBuyActivity = groupBuyActivities.find((item) => item.id === order.groupBuyActivityId) ?? null;
-  const store = groupBuyActivity ? stores.find((item) => item.id === groupBuyActivity.storeId) : null;
+  const store = order.backendStore
+    ?? (groupBuyActivity ? stores.find((item) => item.id === groupBuyActivity.storeId) : null);
   const payment = payments.find((item) => item.orderId === order.id);
   const orderItems = (order.items ?? []).map(normalizeOrderItem);
   const total = payment?.captureAmount ?? getOrderSubtotal(order);
@@ -171,9 +185,12 @@ function OrderListCard({ order, groupBuyActivities, payments, historical, onPres
 }
 
 function OrderDetailCard({ order, groupBuyActivities, payments, actions, navigation, historical }) {
+  const [cancelNotice, setCancelNotice] = useState(null);
+  const [cancelBusy, setCancelBusy] = useState(false);
   const groupBuyActivity = groupBuyActivities.find((item) => item.id === order.groupBuyActivityId) ?? null;
   const payment = payments.find((item) => item.orderId === order.id);
-  const store = groupBuyActivity ? stores.find((item) => item.id === groupBuyActivity.storeId) : null;
+  const store = order.backendStore
+    ?? (groupBuyActivity ? stores.find((item) => item.id === groupBuyActivity.storeId) : null);
   const orderItems = (order.items ?? []).map(normalizeOrderItem);
   const displaySubtotal = getOrderSubtotal(order);
   const displayTotal = payment?.captureAmount ?? displaySubtotal;
@@ -185,6 +202,10 @@ function OrderDetailCard({ order, groupBuyActivities, payments, actions, navigat
   const pickupPendingContent = getPickupPendingContent(order);
   const orderLocked = order.status === "locked";
   const withdrawalLocked = !historical && (orderLocked || isWithdrawalLocked(groupBuyActivity));
+  const hasBackendActions = Array.isArray(order.availableActions);
+  const canEdit = hasBackendActions
+    ? order.availableActions.includes("edit")
+    : !withdrawalLocked && !historical;
   const progress = groupBuyActivity ? getGroupBuyActivityProgress(groupBuyActivity) : null;
   const progressText = progress ? `${progress.currentCups} / ${progress.nextTarget} 杯` : "團購資料已不存在";
   const manualRepayment = order.manualRepayment ?? null;
@@ -258,7 +279,7 @@ function OrderDetailCard({ order, groupBuyActivities, payments, actions, navigat
               })}
               style={({ pressed }) => [
                 styles.detailCard,
-                (withdrawalLocked || historical) && styles.detailCardLocked,
+                (!canEdit || historical) && styles.detailCardLocked,
                 pressed && styles.pressed
               ]}
             >
@@ -276,7 +297,7 @@ function OrderDetailCard({ order, groupBuyActivities, payments, actions, navigat
                 </View>
                 <Pressable
                   accessibilityRole="button"
-                  disabled={withdrawalLocked || historical}
+                  disabled={!canEdit || historical}
                   onPress={(event) => {
                     event.stopPropagation?.();
                     const nextItems = orderItems.filter((current) => current.id !== item.id);
@@ -284,12 +305,12 @@ function OrderDetailCard({ order, groupBuyActivities, payments, actions, navigat
                   }}
                   style={({ pressed }) => [
                     styles.deleteButton,
-                    (withdrawalLocked || historical) && styles.deleteButtonDisabled,
+                    (!canEdit || historical) && styles.deleteButtonDisabled,
                     pressed && styles.pressed
                   ]}
                 >
-                  <Text style={[styles.deleteText, (withdrawalLocked || historical) && styles.deleteTextDisabled]}>
-                    {historical ? "歷史" : withdrawalLocked ? "鎖定" : "刪除"}
+                  <Text style={[styles.deleteText, (!canEdit || historical) && styles.deleteTextDisabled]}>
+                    {historical ? "歷史" : !canEdit ? "鎖定" : "刪除"}
                   </Text>
                 </Pressable>
               </View>
@@ -307,9 +328,10 @@ function OrderDetailCard({ order, groupBuyActivities, payments, actions, navigat
         ) : null}
 
         <PrimaryButton
-          label={historical ? "歷史訂單不可修改" : withdrawalLocked ? "訂單已鎖定" : "修改訂單"}
+          label={historical ? "歷史訂單不可修改" : !canEdit ? "訂單目前不可修改" : "修改訂單"}
           variant="secondary"
-          onPress={() => !withdrawalLocked && !historical && navigation.go("drinkSelection", {
+          disabled={!canEdit || historical}
+          onPress={() => canEdit && !historical && navigation.go("drinkSelection", {
             groupBuyActivityId: order.groupBuyActivityId,
             editOrderId: order.id
           })}
@@ -323,7 +345,9 @@ function OrderDetailCard({ order, groupBuyActivities, payments, actions, navigat
           </View>
         </View>
 
-        {order.reauthorizationReason === "order_amount_changed" && !historical ? (
+        {order.reauthorizationReason === "order_amount_changed"
+          && !historical
+          && (!hasBackendActions || order.availableActions.includes("pay")) ? (
           <View style={styles.reauthorizationNotice}>
             <Text style={styles.reauthorizationTitle}>訂單金額已變動</Text>
             <Text style={styles.reauthorizationText}>修改後需重新完成 Line Pay 預授權，訂單才會重新計入團購杯數。</Text>
@@ -334,6 +358,29 @@ function OrderDetailCard({ order, groupBuyActivities, payments, actions, navigat
           </View>
         ) : null}
       </Section>
+
+      {!historical && order.availableActions?.includes("cancel") ? (
+        <View style={styles.emptyActions}>
+          <PrimaryButton
+            label={cancelBusy ? "取消中…" : "退出團購並取消訂單"}
+            variant="secondary"
+            disabled={cancelBusy}
+            onPress={async () => {
+              setCancelBusy(true);
+              setCancelNotice(null);
+              try {
+                await actions.cancelOrder(order.id);
+                setCancelNotice("訂單已取消，付款授權已依狀態處理。");
+              } catch (error) {
+                setCancelNotice(error.message || "取消訂單失敗。");
+              } finally {
+                setCancelBusy(false);
+              }
+            }}
+          />
+          {cancelNotice ? <Text style={styles.withdrawalLockNotice}>{cancelNotice}</Text> : null}
+        </View>
+      ) : null}
 
       {pickupReady && !historical ? (
         pickupCode ? (
@@ -857,5 +904,18 @@ const styles = StyleSheet.create({
     fontSize: 11,
     lineHeight: 17,
     textAlign: "center"
+  },
+  syncError: {
+    gap: 8,
+    borderRadius: 12,
+    borderWidth: 1,
+    borderColor: "#fecaca",
+    backgroundColor: "#fef2f2",
+    padding: 12
+  },
+  syncErrorText: {
+    color: "#b91c1c",
+    fontSize: 12,
+    lineHeight: 18
   }
 });

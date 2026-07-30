@@ -1,15 +1,19 @@
 const http = require("node:http");
 const {
   cancelGroupBuyActivity,
+  cancelCustomerOrderInDatabase,
   createGroupBuyActivity,
   createOrder,
   createOrderRevision,
+  getCustomerOrderCancellationEligibility,
   getOrderDetail,
   getUserAuthProfileByFirebaseUid,
   getUserAuthProfileByLoginIdentifier,
   getUserAuthProfileById,
   listDevAuthUsers,
+  listCustomerOrders,
   listGroupBuyActivities,
+  listMerchantStoreOrders,
   listStoreMenu,
   saveMerchantMenuItem,
   updatePendingOrder
@@ -23,7 +27,8 @@ const {
   confirmLinePayAuthorization,
   requestManualLinePayRepayment,
   requestLinePayAuthorization,
-  refundLinePayPayment
+  refundLinePayPayment,
+  voidLinePayAuthorization
 } = require("./payments/linePayService");
 const {
   settleGroupBuyActivity,
@@ -366,6 +371,25 @@ const server = http.createServer(async (request, response) => {
       return;
     }
 
+    if (request.method === "GET" && url.pathname === "/api/customers/me/orders") {
+      const authUser = getAuthenticatedUser(request);
+      if (!authUser) return sendJson(response, 401, { error: "Authentication required" });
+      if (!authUser.roles.includes("customer")) return sendJson(response, 403, { error: "Customer role required" });
+      sendJson(response, 200, listCustomerOrders(authUser.id, readOrderListQuery(url)));
+      return;
+    }
+
+    const merchantOrdersMatch = url.pathname.match(/^\/api\/merchant\/stores\/([^/]+)\/orders$/);
+    if (request.method === "GET" && merchantOrdersMatch) {
+      const authUser = getAuthenticatedUser(request);
+      if (!authUser) return sendJson(response, 401, { error: "Authentication required" });
+      if (!authUser.roles.includes("merchant") || !canManageStore(authUser, merchantOrdersMatch[1])) {
+        return sendJson(response, 403, { error: "Store access denied" });
+      }
+      sendJson(response, 200, listMerchantStoreOrders(merchantOrdersMatch[1], readOrderListQuery(url)));
+      return;
+    }
+
     if (request.method === "POST" && url.pathname === "/api/orders") {
       const authUser = getAuthenticatedUser(request);
       if (!authUser) {
@@ -395,6 +419,13 @@ const server = http.createServer(async (request, response) => {
       }
       if (result?.error === "customer_not_found") {
         sendJson(response, 404, { error: "Customer not found" });
+        return;
+      }
+      if (result?.error === "order_already_exists") {
+        sendJson(response, 409, {
+          error: "Customer already has an active order for this group-buy activity",
+          orderId: result.orderId
+        });
         return;
       }
       if (result?.error === "activity_not_joinable") {
@@ -491,6 +522,49 @@ const server = http.createServer(async (request, response) => {
       }
 
       sendJson(response, 201, { revision: result.revision });
+      return;
+    }
+
+    const orderCancelMatch = url.pathname.match(/^\/api\/orders\/([^/]+)\/cancel$/);
+    if (request.method === "POST" && orderCancelMatch) {
+      const authUser = getAuthenticatedUser(request);
+      if (!authUser) return sendJson(response, 401, { error: "Authentication required" });
+      if (!authUser.roles.includes("customer")) return sendJson(response, 403, { error: "Customer role required" });
+      const body = await readJsonBody(request);
+      if (!String(body.idempotencyKey || "").trim()) {
+        return sendJson(response, 400, { error: "idempotencyKey is required" });
+      }
+      const order = getOrderDetail(orderCancelMatch[1]);
+      if (!order) return sendJson(response, 404, { error: "Order not found" });
+      if (!canAccessOrder(authUser, order)) return sendJson(response, 403, { error: "Order access denied" });
+      const requestedAt = new Date().toISOString();
+      const eligibility = getCustomerOrderCancellationEligibility({
+        orderId: order.id,
+        customerUserId: authUser.id,
+        now: requestedAt
+      });
+      if (eligibility.error) return sendJson(response, eligibility.error === "order_not_found" ? 404 : 409, eligibility);
+      if (order.paymentStatus === "authorized") {
+        try {
+          await voidLinePayAuthorization({
+            orderId: order.id,
+            provider: order.latestLinePayAuthorization?.provider || "line_pay",
+            reason: "customer_cancelled_order"
+          });
+        } catch (error) {
+          if (error instanceof PaymentServiceError) return sendJson(response, error.statusCode, error.payload);
+          throw error;
+        }
+      }
+      const result = cancelCustomerOrderInDatabase({
+        orderId: order.id,
+        customerUserId: authUser.id,
+        idempotencyKey: String(body.idempotencyKey),
+        reason: body.reason || "customer_withdrawal",
+        now: requestedAt
+      });
+      if (result.error) return sendJson(response, result.error === "order_not_found" ? 404 : 409, result);
+      sendJson(response, 200, result);
       return;
     }
 
@@ -989,6 +1063,7 @@ function validateMenuItemInput(body) {
     if (!Number.isInteger(minSelections) || minSelections < 0) {
       return "customization group minSelections must be a non-negative integer";
     }
+
     if (!Number.isInteger(maxSelections) || maxSelections < minSelections) {
       return "customization group maxSelections must be an integer greater than or equal to minSelections";
     }
@@ -1021,6 +1096,16 @@ function sendOrderItemValidationError(response, result) {
     return true;
   }
   return false;
+}
+
+function readOrderListQuery(url) {
+  const limit = Number(url.searchParams.get("limit") || 20);
+  return {
+    scope: url.searchParams.get("scope") === "history" ? "history" : "active",
+    activityId: url.searchParams.get("activityId") || undefined,
+    cursor: url.searchParams.get("cursor") || undefined,
+    limit: Number.isInteger(limit) && limit > 0 ? Math.min(limit, 100) : 20
+  };
 }
 
 function getAuthenticatedUser(request) {

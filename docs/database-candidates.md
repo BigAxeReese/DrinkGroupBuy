@@ -77,7 +77,7 @@
 | Activity deadline       | 24 小時截止限制已先落到商家建立團購 API；截止前 30 分鐘鎖定規則仍需落到訂單修改 / 退出與取消 API。                   |
 | Merchant acceptance     | `orders.merchant_acceptance_status` 是早期候選欄位；最新規則不需要店家逐筆確認接單，未來可考慮移除或固定為 accepted。 |
 | Pickup status           | Mobile 曾使用 `preparing`，目前 schema 沒有該值；應優先用 activity/order 狀態與 `pickup_status = ready` 表示。        |
-| Pickup credential expiry | 欄位、到期時間計算、單一 backend process 排程、狀態歷程與 audit log 已實作；仍缺取貨憑證建立／驗證 API 與 App 串接。 |
+| Pickup credential expiry | 欄位、到期時間計算、單一 backend process 排程、狀態歷程、audit log、建立／驗證 API 與 App 第一版串接已實作；仍待完整 Android E2E。 |
 | Store/menu source       | 七間店家的測試資料與正式開發資料需統一來源。                                                                          |
 | Menu authority          | 第一版已完成顧客／商家菜單 API、店家管理畫面、選擇上限、訂單品項驗證與後端價格重算；尚缺完整 Android E2E。 |
 | Authentication          | Password 欄位屬於開發相容；正式方向以 Firebase UID 對應 backend user 與角色權限。                                     |

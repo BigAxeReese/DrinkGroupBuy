@@ -16,8 +16,8 @@
 
 | 優先級 | 項目 | 目前狀態 |
 | ------ | ---- | -------- |
-| High   | 顧客退出 / 取消訂單 API | 規則已決定；仍需實作 deadline race、authorization void 與 authorized-cup rollback |
-| High   | 商家 pickup API | 規則已決定；仍需實作標記可取餐、核銷取貨、憑證過期與逾期未取 job |
+| Medium | 顧客退出 / 取消訂單後續強化 | 第一版 API 已完成 deadline lock、authorized void、交易防競態、冪等紀錄及 revision 終止；正式多執行個體鎖定併入 reliability backlog |
+| Medium | 商家 pickup 流程後續強化 | 標記可取餐、短碼查詢／核銷、憑證過期與逾期 job 已完成第一版；仍需完整 Android E2E 與補救權限流程 |
 | High   | Provider status reconciliation | 第一版不做 webhook；仍需 provider 狀態查詢、redirect 遺失恢復、重試佇列與告警 |
 | High   | 跨執行個體 settlement locking | 單一 backend process scheduler 已有；正式多人/多 instance 前仍需 DB lock 或等效機制 |
 | Medium | PostgreSQL runtime adapter | PostgreSQL schema/seed draft 已有；backend runtime 仍是 SQLite |

@@ -446,7 +446,7 @@ PostgreSQL draft 另有 `phone_verified_at`、`email_verified_at`、`last_login_
 | Order revisions         | SQLite 第一版已建立 `order_revisions` 與 revision item tables，欄位字典已補；仍缺完整歷史查詢 API 與 UI 呈現。 |
 | Merchant acceptance     | 最新規則不需要店家逐筆確認接單，`merchant_acceptance_status` 與相關欄位需後續 review。            |
 | Pickup visibility       | `visible_after_merchant_acceptance` 可能需要改名或改為與付款/可取餐狀態連動。                     |
-| Pickup expiry handling  | Schema、單一 backend process 排程、狀態歷程與 audit log 已完成；仍缺取貨憑證建立／驗證 API 與 UI 串接。 |
+| Pickup expiry handling  | Schema、單一 backend process 排程、狀態歷程、audit log、取貨憑證建立／驗證 API 與 UI 第一版串接已完成；仍待完整 Android E2E。 |
 | Activity deadline       | 24 小時截止限制與截止前 30 分鐘鎖定規則需落實到 API validation 與可能的 DB constraint。           |
 | Pricing snapshots       | 最終折扣、適用 tier 與 per-order 分攤方式仍需更完整保存。                                         |
 | Authentication          | `users` 保留 legacy password 欄位，但正式方向是 Firebase Auth + Google Login。                    |

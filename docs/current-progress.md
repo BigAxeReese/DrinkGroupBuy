@@ -17,6 +17,9 @@
 - 2026-07-19 已將該問題產生的 6,496 筆重複失敗紀錄壓縮為 1 筆原始失敗紀錄與 1 筆稽核摘要，共移除 6,495 筆；清理前 SQLite 備份保留於本機 `database/backups/`，後續可用 `npm run payments:cleanup:preview` 預覽及 `npm run payments:cleanup` 安全清理同類資料。
 - 三次自動請款失敗或遇到不可重試錯誤後，顧客可在取餐開始前 15 分鐘以前使用結算後金額直接重新付款；後端會先查原交易狀態並解除仍有效的原授權，付款成功後訂單改為已扣款並加入製作流程。
 - 已新增 `npm run check:sql-safety`，用來檢查 backend、database 與 scripts 內是否出現未審核的動態 SQL、SQL 字串插值或字串相加，降低後續開發時引入 SQL 注入風險。
+- 2026-07-30 已完成 SQL safety、付款結算、取貨逾期、取貨碼、菜單／訂單權威、訂單列表／取消與 HTTP route smoke 回歸；Expo Doctor 17/17 通過，Web production bundle 可成功輸出。
+- 訂單流程新增 `npm run order-flow:smoke` 與 `npm run order-api:smoke`，覆蓋 cursor、門市／活動篩選、匿名顧客、重複下單、取消鎖定、取消冪等、idempotency key 衝突及跨店 403。
+- 已執行非強制 `npm audit fix`；Root 與 Mobile 仍有只能透過 Expo／React Native 或相關傳遞依賴主版本升級處理的 audit 警告，未使用 `--force` 破壞目前 Expo SDK 51 相容性。
 - 系統分析書已整理為五大功能，五組描述性綱目已更新，並已抽出 `docs/system-analysis-extracted.md`；各小節使用個案描述與活動圖仍待更新。
 
 ## 2026-07-28 團購菜單規則更新
@@ -132,6 +135,9 @@
 | `PATCH`  | `/api/orders/:orderId`                        | 更新尚未預授權成功的 pending 訂單明細 |
 | `POST`   | `/api/orders/:orderId/revisions`              | 建立已授權訂單的待重新預授權修改版本  |
 | `GET`    | `/api/orders/:orderId`                        | 查詢訂單明細與最新 LINE Pay 授權      |
+| `GET`    | `/api/customers/me/orders`                    | 顧客權威進行中／歷史訂單列表          |
+| `GET`    | `/api/merchant/stores/:storeId/orders`        | 商家門市權威訂單列表與履約摘要        |
+| `POST`   | `/api/orders/:orderId/cancel`                 | 顧客在鎖定前退出團購並取消訂單        |
 | `DELETE` | `/api/admin/group-buy-activities/:activityId` | 開發 / 補救用 soft-cancel 活動        |
 | `POST`   | `/api/admin/group-buy-activities/:activityId/settle` | 開發 / 補救用手動觸發單一團購結算 |
 | `POST`   | `/api/payments/line-pay/request`              | 建立 LINE Pay sandbox 授權請求        |
@@ -177,14 +183,15 @@
 
 尚未完成：
 
-- 已授權後的訂單修改 / 重新授權 mobile 第一版已串接；仍需把訂單列表完全改為後端權威資料。
+- 已授權後的訂單修改 / 重新授權 mobile 第一版已串接；訂單列表現以 Backend 回應為權威、local state 僅作 cache，仍需細化失敗提示。
 - LINE Pay refund 目前只有 dev/backend 後端 API 與 smoke test；尚未做正式操作 UI、退款失敗重試 queue 與正式 sandbox 人工端對端測試。
 - LINE Pay webhook 第一版不列為必要入口；目前付款同步以 confirm/cancel redirect、polling 與後續 provider 狀態查詢為主。
-- 顧客與商家訂單列表仍需改成後端權威查詢；目前取貨 route 已有，但列表仍偏 local state。
+- 顧客與商家權威訂單列表 API 與 Mobile 第一版已串接，登入、切換分頁及 App 回到前景會同步；Backend 統一回傳 `lifecycleBucket` 與 `availableActions`。已移除訂單清單中的舊 local 訂單覆蓋，其他活動畫面仍有 mock fallback。
+- 顧客鎖定前取消訂單已完成第一版：pending 授權失效、authorized 先 void、pending revision 一併取消，captured 訂單拒絕自行取消。
 - 付款結算失敗規則已決定：第一版以自動重試為主，不做人工處理介面；失敗中的訂單不進入製作或取貨。
 - 尚未實作跨執行個體 deadline settlement locking、持久化重試 queue 與失敗告警；單一 backend process 內的 provider 狀態查詢、三次上限與 30 秒重試已實作。
 - 正式 migration 系統。
-- 完整 mobile E2E；目前已有付款結算、取餐逾期、取餐碼與菜單／訂單權威驗證 smoke scripts。
+- 完整 Android mobile E2E 與 LINE Pay sandbox 人工驗證仍未完成；目前自動 smoke、Expo Doctor 與 Web bundle 已通過。
 
 目前重要限制：
 
@@ -236,7 +243,7 @@ database/seed-dev.sql
 - 取貨逾期排程每 30 秒掃描一次；期限取 `pickupStartAt + 3 小時` 與 `pickupEndAt` 較早者。
 - 到期後，已扣款但未取餐的訂單更新為 `pickup_status = expired`，已取餐維持 `picked_up`，活動更新為 `completed`。
 - 狀態歷程、audit log、同活動交易鎖定與重複執行防護已完成，並可用 `npm run pickup-expiration:smoke` 驗證。
-- 取貨憑證建立／驗證 API 與 App 歷史訂單顯示仍待下一階段實作。
+- 取貨憑證建立／驗證、逾期排程及 App 歷史訂單第一版已串接；仍待完整 Android E2E 與補救權限流程。
 
 資料正規化方向：
 
@@ -287,11 +294,11 @@ database/test/drink-group-buy-test.sqlite
 
 建議下一步：
 
-1. 讓顧客與商家訂單列表改成以後端資料為準，避免 localStorage 與後端狀態分歧。
-2. 補 LINE Pay provider 狀態查詢與自動重試 queue。
-3. 補 revision 失敗、容量不足、舊授權 void 失敗時的 mobile 錯誤提示。
-4. 補取貨憑證與取貨完成 API。
-5. 補跨執行個體 settlement locking 與失敗告警。
+1. 補 LINE Pay provider 狀態查詢、redirect 遺失恢復與持久化重試 queue。
+2. 補跨執行個體 settlement／cancel／capture locking 與失敗告警。
+3. 建立 PostgreSQL runtime adapter 與正式 migration 流程。
+4. 細化 revision、容量不足及 void 失敗的 mobile 錯誤提示。
+5. 待恢復測試階段後執行 Android E2E 與 LINE Pay sandbox 人工驗證。
 
 ## 系統分析書進度
 

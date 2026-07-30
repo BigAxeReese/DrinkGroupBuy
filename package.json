@@ -16,6 +16,8 @@
     "pickup-expiration:smoke": "node scripts/pickup-expiration-smoke.js",
     "pickup-credential:smoke": "node scripts/pickup-credential-smoke.js",
     "menu-order:smoke": "node scripts/menu-order-smoke.js",
+    "order-flow:smoke": "node scripts/order-flow-smoke.js",
+    "order-api:smoke": "node scripts/order-api-smoke.js",
     "check:sql-safety": "node scripts/check-sql-safety.js",
     "auth:map:customer": "node scripts/map-firebase-user.js customer",
     "auth:map:customer-b": "node scripts/map-firebase-user.js customer-b",

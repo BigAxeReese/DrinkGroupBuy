@@ -6,11 +6,13 @@
 
 本文件整理目前訂單流程的實作狀態、下一階段建議開發順序、各階段依賴關係、主要風險，以及需要在特定階段前確認的未知問題。
 
-目前決策是先持續開發，不執行完整測試。本文件仍會列出每個階段應具備的完成條件，但不代表本階段要立即執行 Android E2E、付款 sandbox 人工測試或既有 smoke scripts。
+實作更新：階段 0～5 的第一版已依本文件完成，包含統一訂單分類／可用操作、顧客與商家權威列表、登入／分頁／回前景同步、顧客取消訂單、單一活動有效訂單限制，以及沿用既有取貨服務。階段 6 的 provider reconciliation、持久化重試、跨執行個體可靠性與 PostgreSQL runtime 仍屬正式環境工作。
+
+2026-07-30 已恢復自動檢查並完成 SQL safety、五組核心 smoke、訂單 HTTP route smoke、Expo Doctor 與 Web bundle。Android 裝置 E2E、Firebase 正式設定驗證及 LINE Pay sandbox 人工端對端測試仍保留到發布驗證階段。
 
 ## 結論摘要
 
-下一個最合理的開發主線是：
+本次已依下列主線完成階段 0～5 第一版：
 
 1. 先建立顧客與商家的後端權威訂單列表。
 2. 再把顧客訂單頁改接後端。
@@ -18,7 +20,7 @@
 4. 訂單在雙方畫面都可穩定查詢後，再實作顧客退出／取消訂單。
 5. 最後收斂取貨流程、付款 reconciliation、跨執行個體鎖定與 production migration。
 
-不建議先做退出訂單或付款異常恢復，因為目前 Mobile 訂單列表仍大量依賴 `appState`、mock 與 localStorage。若先增加高風險狀態轉換，畫面可能看不到後端的最新結果，容易出現「後端已取消，但 App 仍顯示進行中」之類的狀態分裂。
+上述順序先消除了訂單列表只依賴 `appState`、mock 與 localStorage 的主要風險，才加入取消狀態轉換。下一條主線已改為 provider reconciliation、持久化重試、跨執行個體鎖定與 production migration。
 
 ## 狀態定義
 
@@ -43,23 +45,21 @@
 - Deadline settlement 單一 Backend process 排程與重試控制。
 - 取貨逾期排程，以及標記可取餐、取貨碼查詢、核銷與顧客取貨憑證 API 程式碼。
 - 敏感訂單、付款、結算與取貨操作保存 status history 或 audit log。
+- 顧客與商家門市訂單列表、cursor 分頁、活動篩選、`lifecycleBucket` 與角色專屬 `availableActions`。
+- 顧客登入、切換 active／history 分頁與 App 回到前景時的權威訂單同步。
+- 顧客鎖單前取消訂單；包含冪等紀錄、authorized void、pending revision 終止、交易防競態與 audit log。
+- 同一顧客／同一活動只能存在一張非取消訂單；由交易檢查與 partial unique index 雙重保護。
 
 ### 2. 部分完成
 
-- `CustomerOrdersScreen` 可以顯示進行中／歷史訂單與修改入口，但主要資料仍來自 Mobile `appState.orders`、mock 店家及本機付款資料。
-- `MerchantDashboardScreen` 已有訂單、取貨碼查詢與核銷畫面，但訂單統計和明細仍主要從 Mobile local state 計算。
-- Mobile 可以用單筆訂單 API 刷新付款與 revision 狀態，但沒有登入後一次載入全部訂單的權威同步流程。
+- `CustomerOrdersScreen` 與 `MerchantDashboardScreen` 已以 Backend 列表覆蓋相同範圍的舊 local 訂單，但 `appState` 仍保留作畫面 cache，部分非訂單活動畫面仍有 prototype fallback。
+- 商家統計由 Backend 權威訂單列表計算，尚未另做獨立 aggregate summary API；目前資料量可接受。
 - `PickupInfoScreen` 有部分取貨憑證串接，但訂單、活動和店家摘要仍混用 local state 或 mock。
 - 團購活動列表已有 Backend API，但部分畫面仍可能使用啟動時的 prototype 資料。
 
 ### 3. 尚未完成
 
-- 顧客進行中／歷史訂單列表 API。
-- 商家依門市或團購查詢訂單、付款及取貨狀態的列表 API。
-- 商家後台權威統計摘要 API，或以單一訂單列表回應穩定計算統計的契約。
-- 登入後與回到前景時的訂單列表同步策略。
-- 顧客退出團購／取消訂單 API。
-- 建立訂單的正式 idempotency key，以及同一顧客重複加入同一活動的明確行為。
+- 建立訂單的通用 request idempotency key；目前已禁止同一顧客重複加入同一活動，但尚未保存成功建立訂單的 client request key。
 - 完整 revision 歷史查詢與取消 pending revision。
 - Provider status reconciliation、redirect 遺失恢復、持久化重試 queue 與告警。
 - 跨多個 Backend process 的 settlement／payment locking。
@@ -75,7 +75,7 @@
 - 顧客查詢自己訂單的取貨憑證。
 - 系統處理取貨逾期。
 
-因此，下一階段不應把取貨 API 從零重做；應先確認目前契約，補齊訂單列表後再整合畫面與文件。
+相關文件現已同步為既有 API 與第一版畫面串接；後續只需做 E2E、補救權限或 QR Code 等增量工作，不應重做核心取貨服務。
 
 ## 二、建議開發依賴順序
 
@@ -102,6 +102,8 @@
 ## 三、分階段開發計畫
 
 ### 階段 0：固定訂單分類與 API 回應契約
+
+實作狀態：已完成第一版。
 
 #### 目標
 
@@ -144,6 +146,8 @@ Mobile 只根據 Backend 回傳結果顯示按鈕，不自行重複實作 deadli
 - Mobile 不再用不同函式自行推導同一訂單的分類。
 
 ### 階段 1：後端權威訂單列表
+
+實作狀態：已完成第一版。
 
 #### 目標
 
@@ -194,6 +198,8 @@ GET /api/merchant/stores/:storeId/orders?scope=active|history&activityId=&limit=
 
 ### 階段 2：顧客訂單畫面改接 Backend
 
+實作狀態：已完成第一版。登入、active／history 分頁、App 回到前景及開啟訂單詳情皆有同步入口；同步失敗時保留上次 cache 並提供重試。
+
 #### 目標
 
 讓顧客重新開啟 App、重新登入或更換裝置後，仍能看到後端訂單，不依賴原裝置 localStorage。
@@ -223,6 +229,8 @@ GET /api/merchant/stores/:storeId/orders?scope=active|history&activityId=&limit=
 
 ### 階段 3：商家後台與訂單履約改接 Backend
 
+實作狀態：已完成第一版。門市訂單與歷史由 Backend 載入，統計從權威列表計算；標記可取餐與核銷取餐沿用既有 API。
+
 #### 目標
 
 讓商家看到的訂單數、付款數、待取餐數與訂單明細全部來自自己門市的 Backend 資料。
@@ -245,6 +253,8 @@ GET /api/merchant/stores/:storeId/orders?scope=active|history&activityId=&limit=
 - 核銷取貨後，商家列表與顧客列表都能從後端刷新為 `picked_up`。
 
 ### 階段 4：顧客退出團購／取消訂單
+
+實作狀態：已完成第一版。`captured`／`refunded` 仍拒絕顧客自行取消，符合第一階段規則。
 
 #### 為什麼排在列表之後
 
@@ -284,6 +294,8 @@ Body 建議包含：
 
 ### 階段 5：取貨流程與歷史訂單收斂
 
+實作狀態：已完成第一版契約與畫面串接；仍保留短碼方案，QR Code 與補救權限延後。
+
 #### 目標
 
 以現有取貨程式為基礎，統一 route、畫面與文件，而不是重新實作。
@@ -306,6 +318,8 @@ Body 建議包含：
 
 ### 階段 6：付款 reconciliation 與多執行個體安全
 
+實作狀態：尚未完成，為下一個正式環境主線。
+
 #### 目標
 
 處理正式環境中 redirect 遺失、Backend 重啟、provider 狀態不同步及多個 Backend process 同時執行的情況。
@@ -326,9 +340,9 @@ Body 建議包含：
 - 多個 process 不會重複 capture、void、refund 或 settlement。
 - Provider 與本地狀態不一致時有可稽核的修復結果。
 
-### 階段 7：測試與發布驗證（目前延後）
+### 階段 7：測試與發布驗證（部分完成）
 
-目前不執行此階段，但它仍是正式發布前必要檢查點：
+已完成自動 smoke、SQL safety、Expo Doctor 與 Web bundle；以下仍是正式發布前必要檢查點：
 
 - Android 顧客完整流程。
 - Android 商家完整流程。
@@ -381,11 +395,11 @@ Body 建議包含：
 
 ### 高風險
 
-- 取消與 deadline settlement 同時修改同一訂單。
+- 取消與 deadline settlement 的單一 SQLite process 競態已有交易與狀態條件保護；多執行個體仍是高風險。
 - 已授權訂單取消但 LINE Pay void 失敗。
 - 多個 Backend process 重複 capture、void、refund 或 settlement。
-- Mobile local state 覆蓋 Backend 新狀態。
-- 相同顧客重複建立訂單造成杯數或付款重複。
+- 其他尚未改接列表 API 的 Mobile 畫面仍可能以 local state 顯示較舊活動摘要。
+- 建立訂單已用 partial unique index 防止同活動重複有效訂單，但尚缺通用 request idempotency key。
 
 ### 中風險
 
@@ -399,42 +413,39 @@ Body 建議包含：
 
 - 店家、活動與品項顯示名稱仍從 mock 查找。
 - API error code 與 Mobile 中文提示不一致。
-- 文件仍將已存在的取貨 route 標成未完成。
+- 其他較舊的產品文件若新增或調整流程，仍需同步 API 與狀態命名。
 
 ## 六、下一個實際開發切片
 
-建議下一次編程只做以下垂直切片：
+階段 0～5 的第一版已完成，下一個切片直接進入階段 6，建議依序處理：
 
-1. 建立共用的訂單 `lifecycleBucket` 與 `availableActions` 推導。
-2. 新增 `listCustomerOrders` 與 `listMerchantStoreOrders` 資料庫查詢。
-3. 新增兩個訂單列表 API 與角色／門市權限。
-4. 在 `apiClient.js` 新增列表呼叫。
-5. 先將 `CustomerOrdersScreen` 改接顧客列表 API。
-6. 同步 API 與進度文件。
+1. 建立 provider status query 與 reconciliation service，先覆蓋 redirect 遺失的 authorization／capture 狀態恢復。
+2. 將目前 process timer 的重試資訊提升為可在 Backend 重啟後續跑的 persisted jobs。
+3. 為 capture、void、refund、settlement 與 cancel 建立跨執行個體 claim／lock 契約與失敗告警。
+4. 建立 PostgreSQL runtime adapter，讓既有 migration draft 真正成為 runtime schema 來源。
+5. 補建立訂單與付款 request 的通用 idempotency 紀錄。
 
-這個切片暫時不包含：
-
-- 顧客取消／退出訂單。
-- Provider reconciliation。
-- PostgreSQL runtime 切換。
-- 通知系統。
-- 正式退款 UI。
-- 完整 E2E 或付款 sandbox 人工測試。
-
-完成顧客訂單列表後，再以相同 DTO 與分類規則串接商家後台，可降低一次修改過多畫面與狀態流程的風險。
+這個切片仍不包含通知系統、正式退款 UI、QR Code，且依目前決策不執行完整 E2E 或 LINE Pay sandbox 人工測試。開始 provider reconciliation 前，需以 LINE Pay 當時的官方文件確認查詢端點、狀態語意與 sandbox 行為，不應只靠既有 mock 推測。
 
 ## 七、預計主要修改檔案
 
-第一個開發切片預計會修改：
+本次階段 0～5 第一版實際修改：
 
 - `backend/db.js`
 - `backend/server.js`
 - `mobile/src/utils/apiClient.js`
 - `mobile/src/navigation/AppNavigator.js`
 - `mobile/src/screens/CustomerOrdersScreen.jsx`
+- `mobile/src/screens/MerchantDashboardScreen.jsx`
+- `database/schema.sql`
+- `database/migrations/001_initial_postgres.sql`
 - `docs/api-candidates.md`
 - `docs/current-progress.md`
 - `docs/mobile-screen-data-requirements.md`
+- `docs/open-questions.md`
+- `docs/order-flow-development-plan.md`
+- `docs/database-candidates.md`
+- `docs/database-field-spec.md`
 
 預計不修改：
 
@@ -447,6 +458,6 @@ Body 建議包含：
 
 ## 最終建議
 
-目前最需要解決的不是新增更多訂單動作，而是消除「Backend 有訂單，但 Mobile 只能靠本機狀態找到它」的落差。
+訂單查詢、取消與取貨的第一版主線已接到相同 Backend 狀態。後續不再擴張一般訂單 UI，而應先處理付款對帳、重啟恢復、多執行個體鎖定與正式資料庫，否則部署規模增加後仍可能發生重複請款或狀態分裂。
 
-因此，開發順序應固定為：權威列表契約 → 顧客訂單同步 → 商家訂單同步 → 取消／退出 → 取貨收斂 → 付款與正式環境可靠性。未知問題中，U-01 至 U-05 應在第一個開發切片開始前採用暫定答案或由產品決策確認；其餘問題可以等到對應階段再決定，不需要現在一次回答完。
+開發順序現已推進到：付款 reconciliation → persisted jobs → 跨執行個體鎖定 → PostgreSQL runtime → 延後的完整測試與發布驗證。U-01 至 U-12 已採用本文件答案作為第一版實作基準；U-13 至 U-18 維持後續階段再決定。

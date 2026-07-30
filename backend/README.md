@@ -195,6 +195,13 @@ npm run db:migrate:menu-customizations
 npm run menu-order:smoke
 ```
 
+訂單列表、cursor、重複下單、取消鎖定與冪等可使用隔離資料庫驗證；HTTP route 與跨店權限可用開發資料庫的臨時副本驗證：
+
+```powershell
+npm run order-flow:smoke
+npm run order-api:smoke
+```
+
 ## 目前限制
 
 - 管理員登入尚未設定。
@@ -204,4 +211,4 @@ npm run menu-order:smoke
 - deadline 自動結算已先以單一 backend process interval 實作；失敗處理規則已決定以自動重試為主，不做人工處理介面；跨執行個體 locking、重試佇列與告警尚未完成。
 - 目前仍是開發資料庫，不是 production migration。
 - 顧客與商家菜單 API、商家菜單管理 mobile 第一版、明確客製化選擇上限及訂單後端價格重算已完成；仍需完整 Android 裝置 E2E 與更細的菜單異動衝突修正 UX。
-- 取貨逾期排程與 SQLite 交易已完成；仍缺建立／驗證取貨憑證 API，以及顧客與商家 App 的歷史訂單串接。
+- 取貨逾期排程、取貨憑證建立／驗證 API 與顧客／商家第一版串接已完成；仍需完整 Android E2E 與補救權限流程。

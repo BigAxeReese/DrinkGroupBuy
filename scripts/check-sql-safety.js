@@ -28,7 +28,9 @@ const reviewedExecSources = [
   { file: "scripts/pickup-expiration-smoke.js", expression: "schema" },
   { file: "scripts/pickup-credential-smoke.js", expression: "schema" },
   { file: "scripts/menu-order-smoke.js", expression: "schema" },
-  { file: "scripts/menu-order-smoke.js", expression: "seed" }
+  { file: "scripts/menu-order-smoke.js", expression: "seed" },
+  { file: "scripts/order-flow-smoke.js", expression: "schema" },
+  { file: "scripts/order-flow-smoke.js", expression: "seed" }
 ];
 
 const findings = [];

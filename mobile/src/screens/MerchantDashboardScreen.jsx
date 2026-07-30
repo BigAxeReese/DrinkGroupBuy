@@ -1,9 +1,10 @@
-import { useEffect, useState } from "react";
+import { useState } from "react";
 import { Pressable, StyleSheet, Text, TextInput, View } from "react-native";
 import { MobileScreen, Section } from "../components/MobileScreen";
 import { PrimaryButton } from "../components/PrimaryButton";
 import { ProgressSummary } from "../components/ProgressSummary";
 import { StatusBadge } from "../components/StatusBadge";
+import { useOrderListSync } from "../hooks/useOrderListSync";
 import { stores } from "../mock/stores";
 import { formatCurrency, getStoreById } from "../utils/calculations";
 
@@ -14,6 +15,11 @@ export function MerchantDashboardScreen({ navigation, appState, actions, memberA
   const [pickupBusy, setPickupBusy] = useState(false);
   const [readyAction, setReadyAction] = useState(null);
   const [tab, setTab] = useState("active");
+  const { syncStatus, refreshOrders } = useOrderListSync(
+    actions.syncMerchantOrderList,
+    tab,
+    selectedMerchantStoreId
+  );
   const merchantStore = stores.find((store) => store.id === selectedMerchantStoreId) ?? stores[0];
   const merchantGroupBuyActivities = appState.groupBuyActivities.filter((groupBuyActivity) => groupBuyActivity.storeId === merchantStore.id);
   const activeGroupBuyActivities = merchantGroupBuyActivities.filter((groupBuyActivity) => (
@@ -21,33 +27,18 @@ export function MerchantDashboardScreen({ navigation, appState, actions, memberA
   ));
   const activeGroupBuyActivityIds = new Set(activeGroupBuyActivities.map((groupBuyActivity) => groupBuyActivity.id));
   const merchantGroupBuyActivityIds = new Set(merchantGroupBuyActivities.map((groupBuyActivity) => groupBuyActivity.id));
-  const merchantOrderIds = appState.orders
-    .filter((order) => merchantGroupBuyActivityIds.has(order.groupBuyActivityId))
-    .map((order) => order.id)
-    .sort()
-    .join("|");
-  const activeOrders = appState.orders.filter((order) => (
-    activeGroupBuyActivityIds.has(order.groupBuyActivityId)
-    && order.status !== "cancelled"
-  ));
+  const activeOrders = appState.orders.filter((order) => activeGroupBuyActivityIds.has(order.groupBuyActivityId)
+    && (order.lifecycleBucket ? order.lifecycleBucket === "active" : order.status !== "cancelled"));
   const historyOrders = appState.orders.filter((order) => {
     const groupBuyActivity = appState.groupBuyActivities.find((item) => item.id === order.groupBuyActivityId);
-    return merchantGroupBuyActivityIds.has(order.groupBuyActivityId) && (
-      ["completed", "cancelled"].includes(order.status)
-      || ["picked_up", "cancelled", "expired"].includes(order.pickupStatus)
-      || ["cancelled", "failed", "completed"].includes(groupBuyActivity?.status)
-    );
+    return merchantGroupBuyActivityIds.has(order.groupBuyActivityId) && (order.lifecycleBucket
+      ? order.lifecycleBucket === "history"
+      : ["completed", "cancelled"].includes(order.status)
+        || ["picked_up", "cancelled", "expired"].includes(order.pickupStatus)
+        || ["cancelled", "failed", "completed"].includes(groupBuyActivity?.status));
   });
   const pendingPaymentCount = activeOrders.filter((order) => ["pending", "failed"].includes(order.paymentStatus)).length;
   const paidOrderCount = activeOrders.filter((order) => ["authorized", "captured"].includes(order.paymentStatus)).length;
-
-  useEffect(() => {
-    if (!merchantOrderIds) return;
-
-    Promise.allSettled(
-      merchantOrderIds.split("|").map((orderId) => actions.syncOrderFromBackend(orderId))
-    );
-  }, [merchantOrderIds]);
 
   function handlePickupCodeChange(value) {
     setPickupCode(value.replace(/[^0-9]/g, "").slice(0, 6));
@@ -167,6 +158,14 @@ export function MerchantDashboardScreen({ navigation, appState, actions, memberA
           <Text style={[styles.tabText, tab === "history" && styles.activeTabText]}>歷史訂單</Text>
         </Pressable>
       </View>
+
+      {syncStatus === "loading" ? <Text style={styles.syncText}>正在更新後端訂單…</Text> : null}
+      {syncStatus === "error" ? (
+        <View style={styles.syncError}>
+          <Text style={styles.errorText}>訂單同步失敗，目前顯示上次成功載入的資料。</Text>
+          <PrimaryButton label="重新整理" variant="secondary" onPress={refreshOrders} />
+        </View>
+      ) : null}
 
       {tab === "active" ? (
         <>
@@ -570,6 +569,20 @@ const styles = StyleSheet.create({
     color: "#64748b",
     fontSize: 13,
     lineHeight: 19
+  },
+  syncText: {
+    color: "#64748b",
+    fontSize: 12,
+    paddingHorizontal: 16
+  },
+  syncError: {
+    gap: 8,
+    marginHorizontal: 16,
+    borderRadius: 12,
+    borderWidth: 1,
+    borderColor: "#fecaca",
+    backgroundColor: "#fef2f2",
+    padding: 12
   },
   historyCard: {
     gap: 10,

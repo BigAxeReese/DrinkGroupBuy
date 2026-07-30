@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from "react";
-import { Linking, View, StyleSheet } from "react-native";
+import { AppState, Linking, View, StyleSheet } from "react-native";
 import { BottomNav } from "../components/BottomNav";
 import { groupBuyActivities as initialGroupBuyActivities } from "../mock/groupBuyActivities";
 import { orders as initialOrders } from "../mock/orders";
@@ -26,11 +26,14 @@ import { normalizeOrderItem } from "../utils/orderItems";
 import { buildOrderItemsChange, rollbackAuthorizedCups } from "../utils/orderState";
 import { clearPrototypeStateOnce, loadPrototypeState, savePrototypeState } from "../utils/prototypeStorage";
 import {
+  cancelOrder as cancelOrderApi,
   createOrder,
   createOrderRevision,
   getOrder,
   getPickupCredential as fetchPickupCredential,
+  listCustomerOrders as fetchCustomerOrders,
   listGroupBuyActivities,
+  listMerchantStoreOrders as fetchMerchantStoreOrders,
   lookupPickupCredential as lookupPickupCredentialApi,
   markGroupBuyActivityReadyForPickup,
   redeemPickupCredential as redeemPickupCredentialApi,
@@ -44,6 +47,9 @@ const backendCustomerUserIds = {
   "customer-lixuan": "user-customer-lixuan",
   "customer-jingwei": "user-customer-jingwei"
 };
+const localCustomerIdsByBackendId = Object.fromEntries(
+  Object.entries(backendCustomerUserIds).map(([localId, backendId]) => [backendId, localId])
+);
 
 function toBackendOrderItems(orderItems) {
   return orderItems.map((item) => ({
@@ -174,6 +180,58 @@ function buildLocalPaymentFromBackend({
     revisionItems: pendingRevisionItems,
     note: "Synced from backend order state."
   };
+}
+
+function mergeBackendOrderList(
+  backendOrders,
+  customerId,
+  setOrders,
+  setPayments,
+  setActivities,
+  replaceOrderIds = new Set()
+) {
+  const mappedOrders = backendOrders.map((order) => ({
+    ...buildLocalOrderFromBackend({
+      backendOrder: order,
+      selectedCustomerId: customerId
+        || localCustomerIdsByBackendId[order.customerUserId]
+        || order.customerUserId,
+      authorizedAmount: order.latestLinePayAuthorization?.authorizedAmount ?? order.originalAmount,
+      pendingRevision: order.pendingRevision,
+      pendingRevisionItems: order.pendingRevision?.items?.map(toLocalOrderItem) ?? null
+    }),
+    lifecycleBucket: order.lifecycleBucket,
+    availableActions: order.availableActions,
+    backendStore: order.store,
+    pickupCredential: order.pickupCredential
+  }));
+  const orderIds = new Set(mappedOrders.map((order) => order.id));
+  setOrders((current) => [...current.filter((order) => (
+    !orderIds.has(order.id) && !replaceOrderIds.has(order.id)
+  )), ...mappedOrders]);
+  const mappedPayments = backendOrders.map((order) => buildLocalPaymentFromBackend({
+    backendOrder: order,
+    backendActivity: order.activity,
+    authorization: order.latestLinePayAuthorization,
+    capture: order.latestPaymentCapture,
+    authorizedAmount: order.latestLinePayAuthorization?.authorizedAmount ?? order.originalAmount,
+    pendingRevision: order.pendingRevision,
+    pendingRevisionItems: order.pendingRevision?.items?.map(toLocalOrderItem) ?? null
+  }));
+  const paymentOrderIds = new Set(mappedPayments.map((payment) => payment.orderId));
+  setPayments((current) => [...current.filter((payment) => (
+    !paymentOrderIds.has(payment.orderId) && !replaceOrderIds.has(payment.orderId)
+  )), ...mappedPayments]);
+  setActivities((current) => {
+    const next = [...current];
+    for (const order of backendOrders) {
+      const activity = { ...order.activity, storeId: order.store.id };
+      const index = next.findIndex((item) => item.id === activity.id);
+      if (index >= 0) next[index] = { ...next[index], ...activity };
+      else next.push(activity);
+    }
+    return next;
+  });
 }
 
 function parseLinePayResultDeepLink(rawUrl) {
@@ -841,6 +899,51 @@ export function AppNavigator() {
 
       return { order: backendOrder, activity: backendActivity };
     },
+    async syncCustomerOrderList(scope = "active") {
+      const result = await fetchCustomerOrders({ scope, limit: 100 });
+      const replacedOrderIds = new Set(orders
+        .filter((order) => order.customerId === selectedCustomerId
+          && (!order.lifecycleBucket || order.lifecycleBucket === scope))
+        .map((order) => order.id));
+      mergeBackendOrderList(
+        result.orders,
+        selectedCustomerId,
+        setOrders,
+        setPaymentAuthorizations,
+        setGroupBuyActivities,
+        replacedOrderIds
+      );
+      return result;
+    },
+    async syncMerchantOrderList(scope = "active") {
+      const result = await fetchMerchantStoreOrders(selectedMerchantStoreId, { scope, limit: 100 });
+      const storeActivityIds = new Set(groupBuyActivities
+        .filter((activity) => activity.storeId === selectedMerchantStoreId)
+        .map((activity) => activity.id));
+      const replacedOrderIds = new Set(orders
+        .filter((order) => storeActivityIds.has(order.groupBuyActivityId)
+          && (!order.lifecycleBucket || order.lifecycleBucket === scope))
+        .map((order) => order.id));
+      mergeBackendOrderList(
+        result.orders,
+        null,
+        setOrders,
+        setPaymentAuthorizations,
+        setGroupBuyActivities,
+        replacedOrderIds
+      );
+      return result;
+    },
+    async cancelOrder(orderId) {
+      const order = await cancelOrderApi(orderId, {
+        reason: "customer_withdrawal",
+        idempotencyKey: `customer-cancel-${orderId}`
+      });
+      setOrders((current) => current.map((item) => item.id === orderId
+        ? { ...item, status: "cancelled", pickupStatus: "cancelled", lifecycleBucket: "history", availableActions: [] }
+        : item));
+      return order;
+    },
     async markOrdersReadyForPickupForGroupBuyActivity(groupBuyActivityId) {
       const result = await markGroupBuyActivityReadyForPickup(groupBuyActivityId);
       const credentialByOrderId = new Map(
@@ -999,7 +1102,24 @@ export function AppNavigator() {
           : order
       )));
     }
-  }), [cartItems, groupBuyActivities, orders, selectedCustomerId]);
+  }), [cartItems, groupBuyActivities, orders, selectedCustomerId, selectedMerchantStoreId]);
+  const actionsRef = useRef(actions);
+  actionsRef.current = actions;
+
+  useEffect(() => {
+    if (!storageLoaded || !currentRole) return undefined;
+
+    function syncActiveOrders() {
+      if (currentRole === "customer") actionsRef.current.syncCustomerOrderList("active").catch(() => {});
+      if (currentRole === "merchant") actionsRef.current.syncMerchantOrderList("active").catch(() => {});
+    }
+
+    syncActiveOrders();
+    const subscription = AppState.addEventListener("change", (state) => {
+      if (state === "active") syncActiveOrders();
+    });
+    return () => subscription.remove();
+  }, [currentRole, selectedCustomerId, selectedMerchantStoreId, storageLoaded]);
 
   useEffect(() => {
     function handleIncomingUrl(rawUrl) {

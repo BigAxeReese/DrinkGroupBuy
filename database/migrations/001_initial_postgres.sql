@@ -230,6 +230,18 @@ CREATE TABLE orders (
 CREATE INDEX idx_orders_activity ON orders(activity_id);
 CREATE INDEX idx_orders_customer ON orders(customer_user_id);
 CREATE INDEX idx_orders_payment_status ON orders(payment_status);
+CREATE UNIQUE INDEX idx_orders_one_active_per_customer_activity
+ON orders(activity_id, customer_user_id)
+WHERE status != 'cancelled';
+
+CREATE TABLE order_action_idempotency (
+  idempotency_key text PRIMARY KEY,
+  order_id text NOT NULL REFERENCES orders(id) ON DELETE CASCADE,
+  action_type text NOT NULL,
+  actor_user_id text NOT NULL REFERENCES users(id),
+  result_json jsonb NOT NULL,
+  created_at timestamptz NOT NULL
+);
 
 CREATE TABLE order_items (
   id text PRIMARY KEY,

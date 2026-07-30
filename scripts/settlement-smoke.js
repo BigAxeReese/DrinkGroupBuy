@@ -255,6 +255,13 @@ function insertScenario(database, scenario) {
     );
 
     database.prepare(`
+      INSERT INTO menu_items (
+        id, store_id, name, category, description, base_price,
+        is_available, created_at, updated_at
+      ) VALUES (?, ?, '青山烏龍拿鐵', '奶茶', '結算 smoke 權威菜單品項', 65, 1, ?, ?)
+    `).run(scenario.menuItemId, scenario.storeId, now, now);
+
+    database.prepare(`
       INSERT INTO promotion_tiers (
         id,
         activity_id,
@@ -308,6 +315,7 @@ function buildScenario(name, targetCups, orders, options = {}) {
     merchantId: `merchant-${id}`,
     storeId: `store-${id}`,
     activityId: `activity-${id}`,
+    menuItemId: `menu-item-${id}`,
     tierId: `tier-${id}`,
     targetCups,
     discountAmount: options.discountAmount ?? 30,
@@ -626,13 +634,11 @@ async function main() {
       fallbackPurchasePreference: "accept_original_price",
       items: [
         {
+          menuItemId: revisionScenario.menuItemId,
           itemName: "青山烏龍拿鐵",
           quantity: 2,
           unitPrice: 65,
-          subtotal: 130,
-          sweetness: "半糖",
-          ice: "少冰",
-          toppings: []
+          subtotal: 130
         }
       ]
     });

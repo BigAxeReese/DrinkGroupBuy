@@ -15,6 +15,21 @@ function openDatabase() {
 
 function ensureRuntimeSchema(database) {
   database.exec(`
+    CREATE TABLE IF NOT EXISTS order_action_idempotency (
+      idempotency_key TEXT PRIMARY KEY,
+      order_id TEXT NOT NULL REFERENCES orders(id) ON DELETE CASCADE,
+      action_type TEXT NOT NULL,
+      actor_user_id TEXT NOT NULL REFERENCES users(id),
+      result_json TEXT NOT NULL,
+      created_at TEXT NOT NULL
+    );
+  `);
+  database.exec(`
+    CREATE UNIQUE INDEX IF NOT EXISTS idx_orders_one_active_per_customer_activity
+    ON orders(activity_id, customer_user_id)
+    WHERE status != 'cancelled';
+  `);
+  database.exec(`
     CREATE TABLE IF NOT EXISTS menu_item_customization_rules (
       menu_item_id TEXT NOT NULL REFERENCES menu_items(id) ON DELETE CASCADE,
       option_type TEXT NOT NULL CHECK (option_type IN ('sweetness', 'ice', 'topping', 'size')),
@@ -1375,6 +1390,24 @@ function createOrder(input) {
       return { error: "customer_not_found" };
     }
 
+    database.exec("BEGIN IMMEDIATE;");
+    transactionStarted = true;
+
+    const existingOrder = database.prepare(`
+      SELECT id
+      FROM orders
+      WHERE activity_id = ?
+        AND customer_user_id = ?
+        AND status != 'cancelled'
+      ORDER BY submitted_at DESC
+      LIMIT 1
+    `).get(input.activityId, input.customerUserId);
+    if (existingOrder) {
+      database.exec("ROLLBACK;");
+      transactionStarted = false;
+      return { error: "order_already_exists", orderId: existingOrder.id };
+    }
+
     const authorizedCups = database.prepare(`
       SELECT COALESCE(SUM(total_cups), 0) AS cups
       FROM orders
@@ -1384,6 +1417,8 @@ function createOrder(input) {
     `).get(input.activityId).cups;
 
     if (activity.maximum_cups && authorizedCups + totalCups > activity.maximum_cups) {
+      database.exec("ROLLBACK;");
+      transactionStarted = false;
       return {
         error: "capacity_exceeded",
         maximumCups: activity.maximum_cups,
@@ -1391,9 +1426,6 @@ function createOrder(input) {
         requestedCups: totalCups
       };
     }
-
-    database.exec("BEGIN;");
-    transactionStarted = true;
 
     database.prepare(`
       INSERT INTO orders (
@@ -2385,6 +2417,277 @@ function getOrderDetail(orderId) {
     pendingRevision: getPendingOrderRevisionByOrderId(orderId),
     manualRepayment: getManualLinePayRepaymentContext(orderId)
   };
+}
+
+function cancelCustomerOrderInDatabase(input) {
+  const database = openDatabase();
+  const now = input.now || new Date().toISOString();
+  let transactionStarted = false;
+  let result;
+  try {
+    const existingAction = input.idempotencyKey ? database.prepare(`
+      SELECT order_id, actor_user_id, action_type, result_json
+      FROM order_action_idempotency
+      WHERE idempotency_key = ?
+    `).get(input.idempotencyKey) : null;
+    if (existingAction) {
+      if (existingAction.order_id !== input.orderId
+        || existingAction.actor_user_id !== input.customerUserId
+        || existingAction.action_type !== "customer_cancel_order") {
+        return { error: "idempotency_key_conflict" };
+      }
+      const storedResult = JSON.parse(existingAction.result_json);
+      return { ...storedResult, order: getOrderDetail(storedResult.orderId), idempotent: true };
+    }
+
+    const eligibility = evaluateCustomerOrderCancellation(database, input, now);
+    if (eligibility.error) return eligibility;
+    const order = eligibility.order;
+    if (eligibility.alreadyCancelled) return { order: getOrderDetail(order.id), idempotent: true };
+
+    database.exec("BEGIN IMMEDIATE;");
+    transactionStarted = true;
+    const updateResult = database.prepare(`
+      UPDATE orders SET status = 'cancelled', pickup_status = 'cancelled',
+        merchant_acceptance_status = 'cancelled', updated_at = ?
+      WHERE id = ?
+        AND status != 'cancelled'
+        AND payment_status NOT IN ('captured', 'refunded')
+    `).run(now, order.id);
+    if (updateResult.changes !== 1) {
+      const currentOrder = database.prepare("SELECT status, payment_status FROM orders WHERE id = ?").get(order.id);
+      database.exec("ROLLBACK;");
+      transactionStarted = false;
+      if (currentOrder?.status === "cancelled") {
+        return { order: getOrderDetail(order.id), idempotent: true };
+      }
+      if (["captured", "refunded"].includes(currentOrder?.payment_status)) {
+        return { error: "captured_order_cannot_be_cancelled" };
+      }
+      return { error: "order_state_changed", status: currentOrder?.status, paymentStatus: currentOrder?.payment_status };
+    }
+    database.prepare(`
+      UPDATE payment_authorizations SET status = 'failed', failure_reason = 'customer_cancelled_order', updated_at = ?
+      WHERE order_id = ? AND status = 'pending'
+    `).run(now, order.id);
+    database.prepare(`
+      UPDATE order_revisions SET status = 'cancelled', failure_reason = 'customer_cancelled_order',
+        cancelled_at = ?, updated_at = ?
+      WHERE order_id = ? AND status = 'pending_authorization'
+    `).run(now, now, order.id);
+    database.prepare(`
+      INSERT INTO status_history (id, resource_type, resource_id, from_status, to_status, reason, actor_user_id, created_at)
+      VALUES (?, 'order', ?, ?, 'cancelled', ?, ?, ?)
+    `).run(`status-history-${randomUUID()}`, order.id, order.status, input.reason || "customer_withdrawal", input.customerUserId, now);
+    database.prepare(`
+      INSERT INTO audit_logs (id, actor_user_id, action_type, resource_type, resource_id, metadata_json, created_at)
+      VALUES (?, ?, 'customer_cancel_order', 'order', ?, ?, ?)
+    `).run(`audit-log-${randomUUID()}`, input.customerUserId, order.id, JSON.stringify({ reason: input.reason || "customer_withdrawal" }), now);
+    result = { orderId: order.id, status: "cancelled", idempotent: false };
+    if (input.idempotencyKey) database.prepare(`
+      INSERT INTO order_action_idempotency (idempotency_key, order_id, action_type, actor_user_id, result_json, created_at)
+      VALUES (?, ?, 'customer_cancel_order', ?, ?, ?)
+    `).run(input.idempotencyKey, order.id, input.customerUserId, JSON.stringify(result), now);
+    database.exec("COMMIT;");
+    transactionStarted = false;
+  } catch (error) {
+    if (transactionStarted) database.exec("ROLLBACK;");
+    throw error;
+  } finally {
+    database.close();
+  }
+  return { ...result, order: getOrderDetail(input.orderId) };
+}
+
+function getCustomerOrderCancellationEligibility(input) {
+  const database = openDatabase();
+  const now = input.now || new Date().toISOString();
+  try {
+    const { order, ...eligibility } = evaluateCustomerOrderCancellation(database, input, now);
+    return eligibility;
+  } finally {
+    database.close();
+  }
+}
+
+function evaluateCustomerOrderCancellation(database, input, now) {
+  const order = database.prepare(`
+    SELECT orders.*, activity.deadline_at, activity.withdrawal_lock_minutes
+    FROM orders
+    JOIN group_buy_activities activity ON activity.id = orders.activity_id
+    WHERE orders.id = ?
+  `).get(input.orderId);
+  if (!order) return { error: "order_not_found" };
+  if (order.customer_user_id !== input.customerUserId) return { error: "order_access_denied" };
+  if (order.status === "cancelled") return { eligible: true, alreadyCancelled: true, order };
+  if (["captured", "refunded"].includes(order.payment_status)) {
+    return { error: "captured_order_cannot_be_cancelled" };
+  }
+  if (!["pending", "authorized", "authorization_voided", "failed"].includes(order.payment_status)) {
+    return { error: "order_not_cancellable", paymentStatus: order.payment_status };
+  }
+  const deadline = Date.parse(order.deadline_at);
+  const lockMinutes = Number(order.withdrawal_lock_minutes || 30);
+  if (!Number.isNaN(deadline) && deadline - Date.parse(now) <= lockMinutes * 60 * 1000) {
+    return { error: "order_locked_by_deadline", deadlineAt: order.deadline_at, lockMinutes };
+  }
+  return { eligible: true, paymentStatus: order.payment_status, order };
+}
+
+function listCustomerOrders(customerUserId, input = {}) {
+  return listOrdersWithContext({ ...input, customerUserId, role: "customer" });
+}
+
+function listMerchantStoreOrders(storeId, input = {}) {
+  return listOrdersWithContext({ ...input, storeId, role: "merchant" });
+}
+
+function listOrdersWithContext(input = {}) {
+  const activityById = new Map(listGroupBuyActivities().map((activity) => [activity.id, activity]));
+  const database = openDatabase();
+  const scope = input.scope === "history" ? "history" : "active";
+  const limit = Math.min(Math.max(Number(input.limit) || 20, 1), 100);
+  const cursor = decodeOrderListCursor(input.cursor);
+  const now = input.now || new Date().toISOString();
+  try {
+    const rows = database.prepare(`
+      SELECT orders.id,
+             orders.submitted_at,
+             activity.id AS activity_id,
+             activity.title AS activity_title,
+             activity.status AS activity_status,
+             activity.deadline_at,
+             activity.pickup_start_at,
+             activity.pickup_end_at,
+             activity.withdrawal_lock_minutes,
+             store.id AS store_id,
+             store.name AS store_name,
+             store.address AS store_address,
+             '匿名顧客' AS customer_alias,
+             credential.id AS pickup_credential_id,
+             CASE
+               WHEN credential.redeemed_at IS NOT NULL THEN 'redeemed'
+               WHEN credential.expired_at IS NOT NULL THEN 'expired'
+               WHEN credential.id IS NOT NULL THEN 'active'
+               ELSE NULL
+             END AS pickup_credential_status,
+             credential.expires_at AS pickup_credential_expires_at
+      FROM orders
+      JOIN group_buy_activities activity ON activity.id = orders.activity_id
+      JOIN stores store ON store.id = activity.store_id
+      LEFT JOIN pickup_credentials credential ON credential.order_id = orders.id
+      WHERE (? IS NULL OR orders.customer_user_id = ?)
+        AND (? IS NULL OR activity.store_id = ?)
+        AND (? IS NULL OR orders.activity_id = ?)
+        AND (
+          ? IS NULL
+          OR orders.submitted_at < ?
+          OR (orders.submitted_at = ? AND orders.id < ?)
+        )
+      ORDER BY orders.submitted_at DESC, orders.id DESC
+    `).all(
+      input.customerUserId || null,
+      input.customerUserId || null,
+      input.storeId || null,
+      input.storeId || null,
+      input.activityId || null,
+      input.activityId || null,
+      cursor?.submittedAt || null,
+      cursor?.submittedAt || null,
+      cursor?.submittedAt || null,
+      cursor?.id || null
+    );
+
+    const matching = rows.map((row) => {
+      const order = getOrderDetail(row.id);
+      const activitySummary = activityById.get(row.activity_id);
+      const context = {
+        activity: activitySummary ?? {
+          id: row.activity_id,
+          title: row.activity_title,
+          status: row.activity_status,
+          deadlineAt: row.deadline_at,
+          pickupStartAt: row.pickup_start_at,
+          pickupEndAt: row.pickup_end_at,
+          withdrawalLockMinutes: row.withdrawal_lock_minutes,
+          storeId: row.store_id
+        },
+        store: { id: row.store_id, name: row.store_name, address: row.store_address },
+        customer: input.role === "merchant" ? { alias: row.customer_alias || "匿名顧客" } : undefined,
+        pickupCredential: row.pickup_credential_id ? {
+          exists: true,
+          status: row.pickup_credential_status,
+          expiresAt: row.pickup_credential_expires_at
+        } : { exists: false, status: null, expiresAt: null }
+      };
+      const lifecycleBucket = getOrderLifecycleBucket(order, context, now);
+      return {
+        ...order,
+        ...context,
+        lifecycleBucket,
+        availableActions: getOrderAvailableActions(order, context, input.role, lifecycleBucket, now)
+      };
+    }).filter((order) => order.lifecycleBucket === scope);
+
+    const page = matching.slice(0, limit);
+    return {
+      orders: page,
+      nextCursor: matching.length > limit && page.length
+        ? encodeOrderListCursor(page[page.length - 1])
+        : null
+    };
+  } finally {
+    database.close();
+  }
+}
+
+function getOrderLifecycleBucket(order, context, now) {
+  if (["cancelled", "completed"].includes(order.status)) return "history";
+  if (["picked_up", "cancelled", "expired"].includes(order.pickupStatus)) return "history";
+  if (order.paymentStatus === "failed") {
+    const cutoff = Date.parse(context.activity.pickupStartAt) - 15 * 60 * 1000;
+    if (!Number.isNaN(cutoff) && Date.parse(now) >= cutoff) return "history";
+  }
+  return "active";
+}
+
+function getOrderAvailableActions(order, context, role, lifecycleBucket, now) {
+  if (lifecycleBucket === "history") return [];
+  const actions = [];
+  const deadline = Date.parse(context.activity.deadlineAt);
+  const lockMinutes = Number(context.activity.withdrawalLockMinutes || 30);
+  const locked = !Number.isNaN(deadline) && deadline - Date.parse(now) <= lockMinutes * 60 * 1000;
+  if (role === "customer") {
+    if (order.pendingRevision || (order.status === "submitted" && order.paymentStatus === "pending")) {
+      actions.push("pay");
+    }
+    if (order.status === "submitted" && !locked && ["pending", "authorized"].includes(order.paymentStatus)) {
+      if (!order.pendingRevision) actions.push("edit");
+      actions.push("cancel");
+    }
+    if (order.manualRepayment?.eligible) actions.push("repay");
+    if (["ready", "picked_up"].includes(order.pickupStatus) && context.pickupCredential.exists) {
+      actions.push("viewPickupCredential");
+    }
+  } else if (role === "merchant") {
+    if (context.activity.status === "ordering" && order.paymentStatus === "captured") actions.push("markReadyForPickup");
+    if (order.pickupStatus === "ready" && context.pickupCredential.status === "active") actions.push("redeemPickup");
+  }
+  return [...new Set(actions)];
+}
+
+function encodeOrderListCursor(order) {
+  return Buffer.from(JSON.stringify({ submittedAt: order.submittedAt, id: order.id })).toString("base64url");
+}
+
+function decodeOrderListCursor(value) {
+  if (!value) return null;
+  try {
+    const parsed = JSON.parse(Buffer.from(String(value), "base64url").toString("utf8"));
+    return parsed?.submittedAt && parsed?.id ? parsed : null;
+  } catch {
+    return null;
+  }
 }
 
 function getPendingOrderRevisionByOrderId(orderId) {
@@ -5385,6 +5688,7 @@ module.exports = {
   calculatePickupExpirationAt,
   cancelPendingLinePayAuthorizationInDatabase,
   cancelGroupBuyActivity,
+  cancelCustomerOrderInDatabase,
   captureLinePayAuthorizationInDatabase,
   completeManualLinePayRepaymentInDatabase,
   completeLinePayRefundInDatabase,
@@ -5399,6 +5703,7 @@ module.exports = {
   failLinePayRefundInDatabase,
   getLinePayAuthorizationContext,
   getOrderDetail,
+  getCustomerOrderCancellationEligibility,
   getLatestLinePayAuthorizationForOrder,
   getLatestLinePayAuthorizationForOrderRevision,
   getLinePayCaptureRetryState,
@@ -5413,6 +5718,8 @@ module.exports = {
   listDueGroupBuyActivitiesForSettlement,
   listDueGroupBuyActivitiesForPickupExpiration,
   listGroupBuyActivities,
+  listCustomerOrders,
+  listMerchantStoreOrders,
   listStoreMenu,
   openDatabase,
   recordLinePayCaptureFailureInDatabase,

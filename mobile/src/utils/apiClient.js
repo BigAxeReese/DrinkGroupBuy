@@ -134,6 +134,31 @@ export async function getStoreMenu(storeId) {
   return getMenuRequest(`/api/stores/${encodeURIComponent(storeId)}/menu`, false);
 }
 
+export async function listCustomerOrders(input = {}) {
+  return getOrderListRequest("/api/customers/me/orders", input);
+}
+
+export async function listMerchantStoreOrders(storeId, input = {}) {
+  return getOrderListRequest(`/api/merchant/stores/${encodeURIComponent(storeId)}/orders`, input);
+}
+
+async function getOrderListRequest(path, input) {
+  const query = new URLSearchParams();
+  query.set("scope", input.scope === "history" ? "history" : "active");
+  if (input.activityId) query.set("activityId", input.activityId);
+  if (input.cursor) query.set("cursor", input.cursor);
+  query.set("limit", String(input.limit || 20));
+  const response = await fetch(`${backendBaseUrl}${path}?${query}`, { headers: withAuthHeaders() });
+  const payload = await response.json();
+  if (!response.ok) {
+    const error = new Error(payload.error ?? "Get order list failed");
+    error.status = response.status;
+    error.payload = payload;
+    throw error;
+  }
+  return payload;
+}
+
 export async function getMerchantStoreMenu(storeId) {
   return getMenuRequest(`/api/merchant/stores/${encodeURIComponent(storeId)}/menu`, true);
 }
@@ -283,6 +308,22 @@ export async function createOrderRevision(orderId, input) {
 
     return payload.revision;
   });
+}
+
+export async function cancelOrder(orderId, input) {
+  const response = await fetch(`${backendBaseUrl}/api/orders/${encodeURIComponent(orderId)}/cancel`, {
+    method: "POST",
+    headers: withAuthHeaders({ "Content-Type": "application/json" }),
+    body: JSON.stringify(input)
+  });
+  const payload = await response.json();
+  if (!response.ok) {
+    const error = new Error(payload.error ?? "Cancel order failed");
+    error.status = response.status;
+    error.payload = payload;
+    throw error;
+  }
+  return payload.order;
 }
 
 export async function requestLinePayAuthorization(input) {

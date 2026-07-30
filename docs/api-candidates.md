@@ -225,10 +225,19 @@ API JSON 使用 `camelCase`。已實作 routes 只對目前開發 prototype 具�
 | Method / path candidate                             | 用途                             | 主要不確定點                                                      |
 | --------------------------------------------------- | -------------------------------- | ----------------------------------------------------------------- |
 | `POST /api/group-buy-activities/:activityId/orders` | 訂單建立的替代 nested route      | 目前已實作 route 是 `POST /api/orders`；最終 route shape 尚未決定 |
-| `GET /api/customers/me/orders`                      | 顧客進行中與歷史訂單             | Authentication 與 pagination                                      |
+| `GET /api/customers/me/orders`                      | 顧客進行中與歷史訂單             | 已實作 bearer ownership、scope、cursor、limit、lifecycleBucket 與 availableActions |
 | `GET /api/orders/:orderId/history`                  | 訂單與付款狀態歷史               | Owner/merchant visibility；dev/admin 補救權限另定                 |
 | `PATCH /api/orders/:orderId/items`                  | 若未來需要，更細的品項修改 route | 目前已有 `POST /api/orders/:orderId/revisions` 作為已授權修改入口 |
-| `POST /api/orders/:orderId/cancel`                  | 鎖定前退出團購                   | Deadline race 與 authorized-cup rollback                          |
+| `POST /api/orders/:orderId/cancel`                  | 鎖定前退出團購                   | 已實作第一版；idempotency、pending 授權失效、authorized 先 void、revision 取消與 audit |
+
+訂單列表 query 契約：
+
+- `scope=active|history`，預設 `active`。
+- `limit` 預設 20、上限 100。
+- `cursor` 使用 Backend 產生的不透明字串；回應以 `nextCursor` 提供下一頁位置。
+- 商家列表可另傳 `activityId`，但 `storeId` 仍是權限邊界。
+- 每筆訂單包含活動、店家、品項快照、付款／revision 摘要、取貨憑證摘要、`lifecycleBucket` 與角色專屬 `availableActions`；列表不回傳完整取貨碼。
+- 同一顧客在同一活動只允許一張非取消訂單；重複 `POST /api/orders` 回 `409` 及既有 `orderId`。
 
 ### 付款
 
@@ -244,10 +253,10 @@ API JSON 使用 `camelCase`。已實作 routes 只對目前開發 prototype 具�
 
 | Method / path candidate                                             | 用途                         | 主要不確定點                     |
 | ------------------------------------------------------------------- | ---------------------------- | -------------------------------- |
-| `GET /api/merchant/group-buy-activities/:activityId/orders`         | 商家訂單佇列與歷史           | 可曝光的 customer fields         |
+| `GET /api/merchant/stores/:storeId/orders?activityId=`              | 商家訂單佇列與歷史           | 已實作門市權限、活動篩選、匿名顧客及履約摘要 |
 | `POST /api/merchant/orders/:orderId/ready`                          | 標記製作完成並顯示取貨碼     | 目前 UI 將此動作標為「完成訂單」 |
 | `POST /api/merchant/orders/:orderId/pickup`                         | 驗證取貨並完成訂單           | 需拒絕已過期憑證；Code/QR verification method |
-| Internal pickup expiration job                                      | 將逾期未取訂單移至歷史訂單   | Backend interval 已實作；期限取 `pickupStartAt + 3 小時` 與 `pickupEndAt` 較早者，仍缺取貨 API 與 App 串接 |
+| Internal pickup expiration job                                      | 將逾期未取訂單移至歷史訂單   | Backend interval 已實作；期限取 `pickupStartAt + 3 小時` 與 `pickupEndAt` 較早者，取貨 API 與第一版 App 串接已完成 |
 
 備註：最新產品規則不需要店家逐筆接受訂單，因此不再規劃店家接單 API。商家端應改以「標記可取餐」與「核銷取貨」作為履約操作。
 
