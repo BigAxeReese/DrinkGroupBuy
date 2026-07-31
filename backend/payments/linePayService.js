@@ -580,15 +580,38 @@ async function withLinePayOperationLock(input, operation) {
 }
 
 async function confirmLinePayAuthorization(input) {
-  return withLinePayOperationLock(input, () => confirmLinePayAuthorizationUnlocked(input));
+  const repository = input.authorizationConfirmRepository;
+  const operation = () => confirmLinePayAuthorizationUnlocked(input);
+  if (repository?.kind !== "postgres") {
+    return withLinePayOperationLock(input, operation);
+  }
+  try {
+    return await repository.withConfirmLock(input, operation);
+  } catch (error) {
+    if (error?.code === "operation_locked") {
+      throw new PaymentServiceError(409, {
+        error: "payment_operation_locked",
+        status: "retry_later",
+        lockKey: error.lock?.lockKey || null,
+        lockedUntil: error.lock?.lockedUntil || null
+      });
+    }
+    throw error;
+  }
 }
 
-async function confirmLinePayAuthorizationUnlocked({ transactionId, orderId }) {
+async function confirmLinePayAuthorizationUnlocked({
+  transactionId,
+  orderId,
+  authorizationConfirmRepository,
+  providerConfirmer,
+  providerVoider
+}) {
   const pendingPayment = findPendingLinePayPayment({ orderId, transactionId });
-  const context = getLinePayAuthorizationContext({
-    orderId,
-    providerTransactionId: transactionId
-  });
+  const contextQuery = { orderId, providerTransactionId: transactionId };
+  const context = authorizationConfirmRepository
+    ? await authorizationConfirmRepository.getAuthorizationContext(contextQuery)
+    : getLinePayAuthorizationContext(contextQuery);
 
   if (!transactionId || (!pendingPayment && !context)) {
     return null;
@@ -686,17 +709,21 @@ async function confirmLinePayAuthorizationUnlocked({ transactionId, orderId }) {
     };
   }
 
-  const payload = await confirmLinePayPayment(transactionId, {
+  const confirmProviderPayment = providerConfirmer || confirmLinePayPayment;
+  const payload = await confirmProviderPayment(transactionId, {
     amount,
     currency
   });
-  const authorizationResult = authorizeLinePayPaymentInDatabase({
+  const confirmationInput = {
     orderId: resolvedOrderId,
     orderRevisionId: resolvedOrderRevisionId,
     providerTransactionId: transactionId,
     amount,
     providerPayload: payload
-  });
+  };
+  const authorizationResult = authorizationConfirmRepository
+    ? await authorizationConfirmRepository.confirmAuthorization(confirmationInput)
+    : authorizeLinePayPaymentInDatabase(confirmationInput);
   deletePendingLinePayPayment({
     orderId: resolvedOrderId,
     transactionId
@@ -722,19 +749,32 @@ async function confirmLinePayAuthorizationUnlocked({ transactionId, orderId }) {
       "authorization_expiry_too_short"
     ].includes(authorizationResult.error)) {
       try {
-        voidResult = await voidLinePayAuthorization({
-          orderId: resolvedOrderId,
-          transactionId,
-          reason: `${authorizationResult.error}_at_confirm`
-        });
+        voidResult = authorizationConfirmRepository?.kind === "postgres"
+          ? await compensateRejectedPostgresAuthorization({
+              repository: authorizationConfirmRepository,
+              orderId: resolvedOrderId,
+              transactionId,
+              reason: `${authorizationResult.error}_at_confirm`,
+              providerVoider
+            })
+          : await voidLinePayAuthorization({
+              orderId: resolvedOrderId,
+              transactionId,
+              reason: `${authorizationResult.error}_at_confirm`
+            });
       } catch (error) {
         try {
-          recordLinePayVoidFailureInDatabase({
+          const failureInput = {
             orderId: resolvedOrderId,
             providerTransactionId: transactionId,
             reason: `${authorizationResult.error}_at_confirm_void_failed`,
             providerPayload: error.linePayPayload || { message: error.message }
-          });
+          };
+          if (authorizationConfirmRepository?.kind === "postgres") {
+            await authorizationConfirmRepository.recordCompensatingVoidFailure(failureInput);
+          } else {
+            recordLinePayVoidFailureInDatabase(failureInput);
+          }
         } catch {
           // Keep the original LINE Pay void error visible to the caller.
         }
@@ -774,6 +814,24 @@ async function confirmLinePayAuthorizationUnlocked({ transactionId, orderId }) {
     payload,
     pendingPayment: resolvedPendingPayment
   };
+}
+
+async function compensateRejectedPostgresAuthorization({
+  repository,
+  orderId,
+  transactionId,
+  reason,
+  providerVoider
+}) {
+  const voidProviderPayment = providerVoider || voidLinePayPaymentAuthorization;
+  const payload = await voidProviderPayment(transactionId);
+  const authorization = await repository.recordCompensatingVoidSuccess({
+    orderId,
+    providerTransactionId: transactionId,
+    reason,
+    providerPayload: payload
+  });
+  return { authorization, payload, status: "authorization_voided" };
 }
 
 async function voidReplacedAuthorizationIfNeeded({ authorizationResult, orderId }) {

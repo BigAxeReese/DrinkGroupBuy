@@ -23,7 +23,7 @@ project-root/
 
 - Mobile app：React Native + Expo。
 - Backend：Node.js built-in HTTP server。
-- 目前開發資料庫預設為 SQLite；auth、公開菜單、活動讀寫、商家菜單與顧客首次建單已有受控 PostgreSQL repositories，三個寫入切片必須一起切換且不雙寫。
+- 目前開發資料庫預設為 SQLite；auth、公開菜單、活動讀寫、商家菜單、顧客首次建單、訂單讀取、付款 request 與 confirm 已有受控 PostgreSQL repositories，相關 runtime 必須一起切換且不雙寫。
 - 未來正式資料庫目標：PostgreSQL。
 - Firebase 不作為主要資料庫方向。
 - Firebase 目前只規劃用於 Auth / Google Login。
@@ -85,7 +85,7 @@ backend/.env
 
 - 顧客與商家訂單列表已在登入、切換頁籤及 App 回到前景時向 Backend 同步；local state 僅作畫面 cache。
 - 團購活動首頁、地圖及部分店家摘要仍混用 local state 或 mock，尚未完全由 Backend 權威資料驅動。
-- LINE Pay reliability 核心已完成；三個 PostgreSQL 唯讀切片與建團／商家菜單／顧客建單三個寫入切片皆已通過真實 runtime 與 HTTP proof，尚缺訂單後續／付款 PostgreSQL migration 與 Sandbox 人工 E2E。
+- LINE Pay reliability 核心已完成；PostgreSQL 建團、商家菜單、顧客建單、訂單讀取、付款 request 與 authorization confirm 已通過真實 runtime／row-lock proof。一般 cancel／void、capture、改單／取消、pickup／settlement migration 與 Sandbox 人工 E2E 尚未完成。
 
 ## 目前 Backend 狀態
 
@@ -338,7 +338,7 @@ PostgreSQL v1 決策：
 1. 讓 Mobile 啟動時從 Backend 載入 activities，逐步移除活動、地圖與店家摘要 mock。
 2. LINE Pay 回覆開通後，依 `docs/line-pay-separated-capture-sandbox-checklist.md` 執行人工 E2E。
 3. 將 terminal job 的 `alert_required` 接到正式告警通知管道。
-4. 搬移 PostgreSQL authorization confirm，以 activity row lock 重驗容量並更新 authorized cups；再處理 cancel／void。
+4. 搬移 PostgreSQL authorization cancel／一般 void 與顧客取消，再處理 capture／settlement。
 5. 細化 revision、容量不足、void 失敗與重新付款的 Mobile 錯誤提示及重試入口。
 6. 補完整 order revision 歷史查詢與 UI 呈現。
 7. 規劃 Expo SDK／React Native 升級，處理目前無法非破壞性修正的依賴警告。
@@ -346,7 +346,7 @@ PostgreSQL v1 決策：
 
 ## 建議下一步
 
-PostgreSQL 訂單建立、列表、明細與首次 authorization request context 已完成，SQLite 仍是預設。下一步搬移 confirm，以 activity row lock 重驗容量並更新 authorized cups；受控 PostgreSQL 訂單模式目前仍不是付款 E2E runtime。
+PostgreSQL 訂單建立、列表、明細、首次 authorization request context 與 confirm 已完成，SQLite 仍是預設。下一步搬移 cancel／一般 void 與顧客取消；受控 PostgreSQL 訂單模式目前仍不是付款 E2E runtime。
 
 ## 換電腦後怎麼接
 

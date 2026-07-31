@@ -28,6 +28,8 @@
     "customer-order-write:smoke": "node scripts/customer-order-write-repository-smoke.js",
     "customer-order-read:smoke": "node scripts/customer-order-read-repository-smoke.js",
     "payment-authorization-request:smoke": "node scripts/payment-authorization-request-repository-smoke.js",
+    "payment-authorization-confirm:smoke": "node scripts/payment-authorization-confirm-repository-smoke.js",
+    "line-pay-confirm-service:smoke": "node scripts/line-pay-confirm-service-smoke.js",
     "customer-order-postgres-http:smoke": "node scripts/customer-order-postgres-http-smoke.js",
     "auth-profile-read:smoke": "node scripts/auth-profile-read-repository-smoke.js",
     "auth-profile-postgres-http:smoke": "node scripts/auth-profile-postgres-http-smoke.js",

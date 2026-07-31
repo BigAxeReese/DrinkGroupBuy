@@ -225,7 +225,7 @@
 
 目前重要限制：
 
-- 訂單相關 runtime 預設仍是 SQLite；受控 PostgreSQL 模式已涵蓋首次建單、顧客／商家列表、訂單明細與首次 authorization request context；request 以 `operation_locks` 防止跨執行個體重複建付款頁，且不雙寫。改單、取消、revision payment、confirm、capture、void、refund、pickup 與 settlement 仍回 `503 customer_order_runtime_mismatch`。受控 PostgreSQL 訂單模式會自動停用仍讀 SQLite 的 reconciliation／settlement／pickup scheduler，目前不可視為付款 E2E runtime。
+- 訂單相關 runtime 預設仍是 SQLite；受控 PostgreSQL 模式已涵蓋首次建單、顧客／商家列表、訂單明細、首次 authorization request context 與 confirm；request／confirm 均有跨執行個體 lease，confirm 以 activity-first row lock 重驗截止、授權期限與容量，且不雙寫。改單、取消、revision payment、一般 capture／void、refund、pickup 與 settlement 仍回 `503 customer_order_runtime_mismatch`。受控 PostgreSQL 訂單模式會自動停用仍讀 SQLite 的 reconciliation／settlement／pickup scheduler，目前不可視為付款 E2E runtime。
 - 如果 mobile local activity 已過期或不存在於後端，送單會失敗。
 
 ## Database / 資料庫
@@ -292,10 +292,10 @@ PostgreSQL 方向：
 
 目前 PostgreSQL 狀態：
 
-- 三個 PostgreSQL 唯讀 slices 與三個受控寫入 slices 已完成：商家建團、商家菜單管理及顧客首次建單。
-- 所有開關預設仍是 `sqlite`，沒有雙寫。顧客建單切成 PostgreSQL 時會鎖 activity row 並使用 PostgreSQL 權威菜單；訂單後續操作與付款尚未遷移。
+- PostgreSQL 已完成 auth／公開菜單／活動／訂單讀取，以及商家建團、商家菜單、顧客首次建單、首次付款 request 與 authorization confirm 受控切片。
+- 所有開關預設仍是 `sqlite`，沒有雙寫。建單與 confirm 都採 activity-first lock；一般 cancel／void、capture、改單／取消、pickup／settlement 尚未遷移。
 - 本機 PostgreSQL 16 已套用 `001_initial_postgres.sql` 與 `002_seed_dev_postgres.sql`；服務只監聽 `localhost`，`postgres-runtime:smoke` 已驗證連線、可靠性表、seed 公開菜單、活動列表與商家角色／門市綁定契約。
-- 公開菜單、活動、auth、建團、商家菜單與顧客建單均已完成真實 PostgreSQL HTTP proof；建單 proof 驗證跨連線 activity lock、權威價格、容量、快照與清理為 0。
+- 公開菜單、活動、auth、建團、商家菜單、顧客建單、訂單讀取、付款 request context 與 confirm 均已完成真實 PostgreSQL proof；confirm proof 驗證跨連線 activity lock、容量重驗與付款稽核清理為 0。
 - PostgreSQL draft 已拆分 `users`、`user_private_profiles`、`user_public_profiles`。
 - PostgreSQL draft 中每個商家帳號透過 `merchant_users.store_id` 對應一間店；不分 owner／manager／staff，API 相容欄位 `permissionLevel` 在 PostgreSQL 回傳 `null`。
 - PostgreSQL seed draft 有 4 個顧客、7 個商家、1 個 dev/admin 補救帳號、7 間店、8 個菜單項目與 96 個客製化選項。
@@ -326,8 +326,8 @@ database/test/drink-group-buy-test.sqlite
 
 建議下一步：
 
-1. 搬移 PostgreSQL authorization confirm，以 activity row lock 更新 authorized cups、重驗容量並交易式寫入 authorization／order／history／audit；仍禁止 SQLite／PostgreSQL 雙寫。
-2. 接著搬移 authorization cancel/void 與顧客取消，保持 provider 結果與 PostgreSQL 狀態可恢復。
+1. 搬移 PostgreSQL authorization cancel／一般 void 與顧客取消，保持 provider 結果、order、history／audit 可恢復；仍禁止 SQLite／PostgreSQL 雙寫。
+2. 接著搬移 capture 與 settlement 所需 authorization context、retry job claim 及 activity/order locks。
 3. LINE Pay 核准分離式請款後，執行 sandbox reconciliation、capture、void 與 lease takeover 人工端對端驗證。
 4. PostgreSQL settlement 寫入 vertical slice 時必須顯式寫入 `003` 的五個快照欄位；在此之前維持 SQLite runtime 與無雙寫。
 5. 建立站內通知／delivery schema 與正式告警管道，並細化 revision、容量不足及 void 失敗提示。

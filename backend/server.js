@@ -10,6 +10,8 @@ const {
   getOrderPaymentContext,
   getLatestLinePayAuthorizationForOrder,
   createPendingLinePayAuthorization,
+  getLinePayAuthorizationContext,
+  authorizeLinePayPaymentInDatabase,
   getUserAuthProfileByFirebaseUid: getSqliteUserAuthProfileByFirebaseUid,
   getUserAuthProfileByLoginIdentifier: getSqliteUserAuthProfileByLoginIdentifier,
   getUserAuthProfileById: getSqliteUserAuthProfileById,
@@ -76,6 +78,9 @@ const {
 const {
   createPaymentAuthorizationRequestRepository
 } = require("./database/repositories/paymentAuthorizationRequestRepository");
+const {
+  createPaymentAuthorizationConfirmRepository
+} = require("./database/repositories/paymentAuthorizationConfirmRepository");
 
 const port = Number(process.env.PORT ?? 3000);
 const storeMenuReadRepository = createStoreMenuReadRepository({ sqliteReader: listStoreMenu });
@@ -115,12 +120,19 @@ const paymentAuthorizationRequestRepository = createPaymentAuthorizationRequestR
     createPendingAuthorization: createPendingLinePayAuthorization,
   },
 });
+const paymentAuthorizationConfirmRepository = createPaymentAuthorizationConfirmRepository({
+  sqliteGateway: {
+    getAuthorizationContext: getLinePayAuthorizationContext,
+    confirmAuthorization: authorizeLinePayPaymentInDatabase,
+  },
+});
 if (
   groupBuyActivityWriteRepository.kind === "postgres"
   || merchantMenuRepository.kind === "postgres"
   || customerOrderWriteRepository.kind === "postgres"
   || customerOrderReadRepository.kind === "postgres"
   || paymentAuthorizationRequestRepository.kind === "postgres"
+  || paymentAuthorizationConfirmRepository.kind === "postgres"
 ) {
   const requiredPostgresRepositories = [
     authProfileReadRepository,
@@ -131,6 +143,7 @@ if (
     customerOrderWriteRepository,
     customerOrderReadRepository,
     paymentAuthorizationRequestRepository,
+    paymentAuthorizationConfirmRepository,
   ];
   if (requiredPostgresRepositories.some((repository) => repository.kind !== "postgres")) {
     throw new Error(
@@ -138,7 +151,8 @@ if (
       + "STORE_MENU_READ_RUNTIME, GROUP_BUY_ACTIVITY_READ_RUNTIME, "
       + "GROUP_BUY_ACTIVITY_WRITE_RUNTIME, MERCHANT_MENU_RUNTIME, "
       + "CUSTOMER_ORDER_WRITE_RUNTIME, CUSTOMER_ORDER_READ_RUNTIME, "
-      + "and PAYMENT_AUTHORIZATION_REQUEST_RUNTIME to be postgres"
+      + "PAYMENT_AUTHORIZATION_REQUEST_RUNTIME, and "
+      + "PAYMENT_AUTHORIZATION_CONFIRM_RUNTIME to be postgres"
     );
   }
 }
@@ -895,7 +909,11 @@ const server = http.createServer(async (request, response) => {
     if (request.method === "GET" && url.pathname === "/api/payments/line-pay/confirm") {
       const transactionId = url.searchParams.get("transactionId");
       const orderId = url.searchParams.get("orderId");
-      const result = await confirmLinePayAuthorization({ transactionId, orderId });
+      const result = await confirmLinePayAuthorization({
+        transactionId,
+        orderId,
+        authorizationConfirmRepository: paymentAuthorizationConfirmRepository
+      });
 
       if (result?.error === "capacity_exceeded") {
         const voidStatus = result.voidResult?.status
@@ -1374,6 +1392,7 @@ function isSqliteOrderDependentRoute(method, pathname) {
   if (method === "GET" && /^\/api\/merchant\/stores\/[^/]+\/orders$/.test(pathname)) return false;
   if (method === "GET" && /^\/api\/orders\/[^/]+$/.test(pathname)) return false;
   if (method === "POST" && pathname === "/api/payments/line-pay/request") return false;
+  if (method === "GET" && pathname === "/api/payments/line-pay/confirm") return false;
   return pathname.startsWith("/api/orders/")
     || pathname.startsWith("/api/payments/")
     || pathname.startsWith("/api/pickup-credentials/")

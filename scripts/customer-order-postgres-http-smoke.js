@@ -9,6 +9,9 @@ const { createRuntimeDatabaseAdapter } = require("../backend/database");
 const {
   createPaymentAuthorizationRequestRepository,
 } = require("../backend/database/repositories/paymentAuthorizationRequestRepository");
+const {
+  createPaymentAuthorizationConfirmRepository,
+} = require("../backend/database/repositories/paymentAuthorizationConfirmRepository");
 
 const repoRoot = path.join(__dirname, "..");
 const port = 39950 + (process.pid % 100);
@@ -45,6 +48,7 @@ async function main() {
         CUSTOMER_ORDER_WRITE_RUNTIME: "postgres",
         CUSTOMER_ORDER_READ_RUNTIME: "postgres",
         PAYMENT_AUTHORIZATION_REQUEST_RUNTIME: "postgres",
+        PAYMENT_AUTHORIZATION_CONFIRM_RUNTIME: "postgres",
         LINE_PAY_CAPTURE_SEPARATED: "false",
         AUTH_SESSION_SECRET: "postgres-customer-order-http-smoke-secret",
         PAYMENT_RECONCILIATION_ENABLED: "false",
@@ -170,6 +174,63 @@ async function main() {
       job_count: 1,
     });
 
+    const confirmRepository = createPaymentAuthorizationConfirmRepository({
+      runtime: "postgres",
+      database,
+      env: { LINE_PAY_CAPTURE_SEPARATED: "false", LINE_PAY_CURRENCY: "TWD" },
+    });
+    await lockClient.query("BEGIN");
+    lockTransactionOpen = true;
+    await lockClient.query(
+      "SELECT id FROM group_buy_activities WHERE id = $1 FOR UPDATE",
+      [activityId]
+    );
+    let confirmSettled = false;
+    const confirmPromise = confirmRepository.confirmAuthorization({
+      orderId: createdOrder.id,
+      providerTransactionId: pendingAuthorization.providerAuthorizationId,
+      amount: createdOrder.originalAmount,
+      providerPayload: { returnCode: "0000" },
+      now: new Date().toISOString(),
+    }).finally(() => { confirmSettled = true; });
+    await delay(300);
+    assert.equal(confirmSettled, false, "Authorization confirm did not wait for activity row lock");
+    await lockClient.query("COMMIT");
+    lockTransactionOpen = false;
+    const confirmedAuthorization = await confirmPromise;
+    assert.equal(confirmedAuthorization.status, "authorized");
+    assert.equal(confirmedAuthorization.authorizedAmount, createdOrder.originalAmount);
+
+    const confirmedPersistence = await database.query(`
+      SELECT
+        payment_auth.status,
+        order_record.payment_status,
+        order_record.authorization_status,
+        order_record.merchant_acceptance_status,
+        (SELECT COUNT(*)::integer FROM payment_provider_events
+         WHERE resource_type = 'authorization' AND resource_id = payment_auth.id) AS event_count,
+        (SELECT COUNT(*)::integer FROM status_history
+         WHERE resource_type = 'payment_authorization' AND resource_id = payment_auth.id) AS history_count,
+        (SELECT COUNT(*)::integer FROM audit_logs
+         WHERE resource_type = 'payment_authorization' AND resource_id = payment_auth.id) AS audit_count,
+        (SELECT status FROM payment_reliability_jobs
+         WHERE resource_type = 'payment_authorization' AND resource_id = payment_auth.id
+         LIMIT 1) AS job_status
+      FROM payment_authorizations payment_auth
+      JOIN orders order_record ON order_record.id = payment_auth.order_id
+      WHERE payment_auth.id = $1
+    `, [pendingAuthorization.id]);
+    assert.deepEqual(confirmedPersistence.rows[0], {
+      status: "authorized",
+      payment_status: "authorized",
+      authorization_status: "authorized",
+      merchant_acceptance_status: "accepted",
+      event_count: 1,
+      history_count: 2,
+      audit_count: 2,
+      job_status: "succeeded",
+    });
+
     const duplicate = await postOrder(firstToken, fixture.orderBody);
     assert.equal(duplicate.response.status, 409, duplicate.text);
     assert.equal(JSON.parse(duplicate.text).orderId, createdOrder.id);
@@ -181,12 +242,6 @@ async function main() {
     assert.equal(stale.response.status, 409, stale.text);
     assert.equal(JSON.parse(stale.text).error, "order_price_changed");
 
-    await database.query(`
-      UPDATE orders
-      SET payment_status = 'authorized',
-          authorization_status = 'authorized'
-      WHERE id = $1
-    `, [createdOrder.id]);
     const capacityBody = structuredClone(fixture.orderBody);
     capacityBody.items[0].quantity = 2;
     capacityBody.items[0].subtotal = fixture.unitPrice * 2;
@@ -222,7 +277,7 @@ async function main() {
       history_count: 1,
       audit_count: 1,
     });
-    console.log("PostgreSQL customer order write/read and payment-context HTTP proof passed.");
+    console.log("PostgreSQL order write/read, payment request, and authorization confirm proof passed.");
   } finally {
     if (lockTransactionOpen && lockClient) await lockClient.query("ROLLBACK");
     if (lockClient) lockClient.release();
@@ -389,6 +444,11 @@ async function cleanupProofData(database) {
           AND resource_id = ANY($1::text[])
       `, [authorizationIds]);
       await database.query(`
+        DELETE FROM payment_provider_events
+        WHERE resource_type = 'authorization'
+          AND resource_id = ANY($1::text[])
+      `, [authorizationIds]);
+      await database.query(`
         DELETE FROM status_history
         WHERE resource_type = 'payment_authorization'
           AND resource_id = ANY($1::text[])
@@ -426,7 +486,10 @@ async function cleanupProofData(database) {
        WHERE order_id = ANY($2::text[])) AS authorization_count,
       (SELECT COUNT(*)::integer FROM payment_reliability_jobs
        WHERE resource_type = 'payment_authorization'
-         AND resource_id = ANY($3::text[])) AS proof_job_count
+         AND resource_id = ANY($3::text[])) AS proof_job_count,
+      (SELECT COUNT(*)::integer FROM payment_provider_events
+       WHERE resource_type = 'authorization'
+         AND resource_id = ANY($3::text[])) AS provider_event_count
   `, [activityId, orderIds, authorizationIds]);
   assert.deepEqual(cleanup.rows[0], {
     order_count: 0,
@@ -434,6 +497,7 @@ async function cleanupProofData(database) {
     audit_count: 0,
     authorization_count: 0,
     proof_job_count: 0,
+    provider_event_count: 0,
   });
 }
 
