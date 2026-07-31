@@ -7,7 +7,7 @@
 DrinkGroupBuy 是一個全端開發的 Android-first 手搖飲團購 App。
 
 - `mobile/`：React Native + Expo App，目前使用 Expo Web 作為開發預覽。
-- `backend/`：Node.js HTTP API，預設使用 SQLite；三個唯讀切片、商家建立團購與商家菜單管理已有可切換 PostgreSQL 的 repository。
+- `backend/`：Node.js HTTP API，預設使用 SQLite；三個唯讀切片、商家建團、商家菜單與顧客首次建單已有可切換 PostgreSQL 的 repository。
 - `database/`：包含 SQLite 開發 schema、seed data、測試資料庫，以及 PostgreSQL migrations／seed 草稿。
 - `docs/`：記錄專案方向、需求、API、資料庫、狀態、未決問題與交接資訊。
 
@@ -57,7 +57,7 @@ API：groupBuyActivity
 已完成第一版串接：
 
 - 商家建立團購活動：Mobile -> API -> SQLite。
-- 公開菜單、團購活動列表與商家菜單管理：Mobile／API 預設使用 SQLite；受控 PostgreSQL 模式下，auth、菜單、活動讀寫會一起切換。Mobile 首頁仍待完整串接活動 API。
+- 公開菜單、活動、商家菜單與首次建單：Mobile／API 預設使用 SQLite；受控 PostgreSQL 模式下，auth、菜單、活動讀寫與建單會一起切換。Mobile 首頁仍待完整串接活動 API。
 - 顧客建立、修改、revision、列表與取消訂單：Mobile -> API -> SQLite。
 - 商家查看門市訂單、標記可取餐、查碼與核銷取貨：Mobile -> API -> SQLite。
 - LINE Pay request、confirm、cancel、capture、void、重新付款與開發／補救用 refund。
@@ -68,7 +68,7 @@ API：groupBuyActivity
 - 團購活動首頁、地圖與部分店家摘要仍使用 mobile local state 或 mock。
 - 購物車仍是 Mobile local state；送單、改單與重新授權前由 Backend 重新驗證。
 - LINE Pay reconciliation、持久化 retry、admin 警示查詢及 payment／settlement／cancel／repay／pickup DB lease 已完成；兩程序 lease 測試已通過，尚缺正式通知與核准後的 Sandbox 人工驗證。
-- PostgreSQL reliability schema parity、`pg`、adapter、三個唯讀 repositories、商家建立團購與商家菜單管理已完成；真實 PostgreSQL 16 transaction／HTTP proofs 已通過，訂單與付款 route 仍使用 SQLite。
+- PostgreSQL reliability schema parity、adapter、三個唯讀與三個受控寫入 repositories 已完成；真實 PostgreSQL 16 transaction／HTTP proofs 已通過，訂單後續與付款 route 仍使用 SQLite。
 - Android、Firebase 正式設定與 LINE Pay sandbox 人工 E2E 尚未完成。
 
 ## 架構原則

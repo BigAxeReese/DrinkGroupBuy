@@ -23,7 +23,7 @@ project-root/
 
 - Mobile app：React Native + Expo。
 - Backend：Node.js built-in HTTP server。
-- 目前開發資料庫預設為 SQLite；auth、公開菜單、活動讀取／建立與商家菜單管理已有受控 PostgreSQL repositories，兩個寫入切片必須一起切換且不雙寫。
+- 目前開發資料庫預設為 SQLite；auth、公開菜單、活動讀寫、商家菜單與顧客首次建單已有受控 PostgreSQL repositories，三個寫入切片必須一起切換且不雙寫。
 - 未來正式資料庫目標：PostgreSQL。
 - Firebase 不作為主要資料庫方向。
 - Firebase 目前只規劃用於 Auth / Google Login。
@@ -85,7 +85,7 @@ backend/.env
 
 - 顧客與商家訂單列表已在登入、切換頁籤及 App 回到前景時向 Backend 同步；local state 僅作畫面 cache。
 - 團購活動首頁、地圖及部分店家摘要仍混用 local state 或 mock，尚未完全由 Backend 權威資料驅動。
-- LINE Pay reconciliation、持久化 retry、admin 警示查詢及 payment／settlement／cancel／repay／pickup DB lease 已完成；三個 PostgreSQL 唯讀切片與建團／商家菜單兩個寫入切片皆已通過真實 runtime 與 HTTP proof，尚缺 LINE Pay 核准後的 Sandbox 人工 E2E。
+- LINE Pay reliability 核心已完成；三個 PostgreSQL 唯讀切片與建團／商家菜單／顧客建單三個寫入切片皆已通過真實 runtime 與 HTTP proof，尚缺訂單後續／付款 PostgreSQL migration 與 Sandbox 人工 E2E。
 
 ## 目前 Backend 狀態
 
@@ -109,7 +109,7 @@ backend/
 | `backend/linePayClient.js`                | payment client 相容匯出                       |
 | `backend/payments/reliabilityService.js` | Provider reconciliation、持久化工作 worker 與結構化警示 |
 | `backend/reliability/operationLease.js`   | 跨程序敏感狀態變更 lease 共用封裝             |
-| `backend/database/`                       | SQLite/PostgreSQL adapter 與 auth、菜單、活動讀寫 repositories |
+| `backend/database/`                       | SQLite/PostgreSQL adapter 與 auth、菜單、活動、顧客建單 repositories |
 | `backend/README.md`                       | 後端啟動說明                                  |
 
 目前 API：
@@ -157,14 +157,14 @@ backend/
 - 已實作開發 / 補救用手動觸發單一團購結算，也已接上後端啟動時的 deadline settlement scheduler。
 - Scheduler 預設每 30 秒掃描已截止、尚未結算的團購；若 `LINE_PAY_ENV=production`，必須設定 `SETTLEMENT_SCHEDULER_ALLOW_PRODUCTION=true` 才會啟動。
 - 自動檢查包含 `check:sql-safety`、`database-adapter:smoke`、`store-menu-read:smoke`、`payment-reliability:smoke`、`payment-reliability:multiprocess`、`settlement:smoke`、`pickup-expiration:smoke`、`pickup-credential:smoke`、`menu-order:smoke`、`order-flow:smoke`、`order-api:smoke` 與 `postgres-runtime:smoke`；會碰觸 SQLite 的 smoke scripts 完成後會還原開發資料庫。
-- 後端預設與大多數 route 仍使用 SQLite；auth、公開菜單、活動讀取／建立與商家菜單管理可受控切換 PostgreSQL，沒有雙寫；訂單與付款仍是 SQLite。
+- 後端預設與大多數 route 仍使用 SQLite；auth、公開菜單、活動讀寫、商家菜單與首次建單可受控切換 PostgreSQL，沒有雙寫；訂單後續與付款仍是 SQLite。
 
 ## 2026-07-30～2026-07-31 驗證基準
 
 - SQL safety 與上述可在本機執行的 smoke 全數通過；`order-api:smoke` 已實際覆蓋公開菜單 route。
 - Backend／scripts／database 共 41 個 JavaScript 檔語法通過；先前 Mobile JSX parse、Expo Doctor `17/17` 與 Web production export 亦通過。
 - SQLite `integrity_check = ok`、`foreign_key_check = 0`。
-- 本機 PostgreSQL 16 已套用 migrations／seed，並限制只監聽 `localhost`；runtime、auth、公開菜單、活動讀寫與商家菜單 PostgreSQL HTTP proofs 均通過，臨時 proof 資料已清除。
+- 本機 PostgreSQL 16 已套用 migrations／seed，並限制只監聽 `localhost`；auth、菜單、活動讀寫、商家菜單與顧客建單 HTTP proofs 均通過，臨時 proof 資料已清除。
 - 尚未完成 Android 實機、Firebase 正式設定與 LINE Pay sandbox 人工端對端驗證。
 
 ## 測試登入帳號
@@ -288,7 +288,7 @@ PostgreSQL v1 決策：
 - 公開菜單仍可由 `STORE_MENU_READ_RUNTIME` 獨立切換；啟用 PostgreSQL 寫入時，auth、公開菜單、活動讀寫與 `MERCHANT_MENU_RUNTIME` 必須一起切換。
 - PostgreSQL migration／seed 草稿與 reliability schema parity 已完成。
 - `database-adapter:smoke` 與 `store-menu-read:smoke` 已通過。
-- 本機實際 PostgreSQL auth、公開菜單、活動讀寫與商家菜單 HTTP routes 已驗證通過；訂單與付款尚未搬移，沒有雙寫。
+- 本機實際 PostgreSQL auth、公開菜單、活動讀寫、商家菜單與首次建單 HTTP routes 已驗證通過；訂單後續與付款尚未搬移，沒有雙寫。
 - PostgreSQL draft 拆分 `users`、`user_private_profiles`、`user_public_profiles`，避免商家看到顧客私人資料。
 - PostgreSQL draft 透過 `merchant_users.store_id` 讓每個商家帳號對應一間店。
 - PostgreSQL seed draft 替每個菜單品項建立甜度、冰塊、尺寸、加料選項。
@@ -338,7 +338,7 @@ PostgreSQL v1 決策：
 1. 讓 Mobile 啟動時從 Backend 載入 activities，逐步移除活動、地圖與店家摘要 mock。
 2. LINE Pay 回覆開通後，依 `docs/line-pay-separated-capture-sandbox-checklist.md` 執行人工 E2E。
 3. 將 terminal job 的 `alert_required` 接到正式告警通知管道。
-4. 搬移顧客建立訂單到 PostgreSQL transaction，加入 activity capacity row lock 與同 transaction 菜單價格驗證。
+4. 搬移 PostgreSQL order read／payment authorization request context，再處理 confirm 的 activity capacity row lock。
 5. 細化 revision、容量不足、void 失敗與重新付款的 Mobile 錯誤提示及重試入口。
 6. 補完整 order revision 歷史查詢與 UI 呈現。
 7. 規劃 Expo SDK／React Native 升級，處理目前無法非破壞性修正的依賴警告。
@@ -346,7 +346,7 @@ PostgreSQL v1 決策：
 
 ## 建議下一步
 
-可靠性核心、三個唯讀切片，以及 PostgreSQL 建團／商家菜單 transaction 與 HTTP 驗證已完成。下一步是顧客建單 transaction 與 activity capacity row lock；SQLite 仍是預設，訂單與付款尚未切換。
+可靠性核心、三個唯讀與三個受控寫入切片已完成。下一步是 PostgreSQL order read／payment request context，之後再搬移 confirm 與 authorized cups；SQLite 仍是預設。
 
 ## 換電腦後怎麼接
 

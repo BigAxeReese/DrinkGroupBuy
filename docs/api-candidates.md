@@ -112,8 +112,10 @@ API JSON 使用 `camelCase`。已實作 routes 只對目前開發 prototype 具�
 | 相關畫面      | `CartScreen`                                                                                                                                                                                                                                                                                            |
 | Request       | 需要 bearer token。Body: `{ activityId, fallbackPurchasePreference, items: [{ menuItemId, quantity, unitPrice, subtotal, customizationOptionIds[] }] }`；品名與金額只作 client 顯示／衝突偵測，不作權威來源 |
 | Response      | `{ order }`                                                                                                                                                                                                                                                                                             |
-| 已實作規則    | 需要 customer role、從登入使用者推導 `customerUserId`、驗證活動與 active customer、驗證飲品屬於活動店家且已上架、驗證客製化 option ID 與 min/max 選擇數、由後端重算價格、保存 option ID／label／價差快照、以 transaction 寫入訂單與稽核資料、檢查容量 |
-| 尚缺規則      | 建立訂單 idempotency key、同一顧客同活動重複 POST 的明確 conflict response，以及正式多人同時加入時的 PostgreSQL row locking |
+| 已實作規則    | 需要 customer role、從登入使用者推導 `customerUserId`、驗證活動／截止時間／active customer、驗證飲品屬於活動店家且已上架、驗證 option ID 與 min/max、後端重算價格、保存快照、寫入 status history／audit、檢查重複訂單與容量；PostgreSQL 會先 `FOR UPDATE` 鎖 activity |
+| 可切換資料來源 | `CUSTOMER_ORDER_WRITE_RUNTIME=sqlite|postgres`；預設 `sqlite`，不雙寫 |
+| PostgreSQL 限制 | 首次建單已完成；訂單列表／明細、改單、取消與付款仍依賴 SQLite，受控 PostgreSQL 模式回 `503 customer_order_runtime_mismatch` |
+| 尚缺規則      | 建立訂單通用 idempotency key；目前重複 POST 以同顧客／活動 active-order conflict 與既有 `orderId` 回應 |
 
 ### 更新尚未預授權成功的顧客訂單
 

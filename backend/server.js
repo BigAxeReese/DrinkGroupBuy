@@ -64,6 +64,9 @@ const {
 const {
   createMerchantMenuRepository
 } = require("./database/repositories/merchantMenuRepository");
+const {
+  createCustomerOrderWriteRepository
+} = require("./database/repositories/customerOrderWriteRepository");
 
 const port = Number(process.env.PORT ?? 3000);
 const storeMenuReadRepository = createStoreMenuReadRepository({ sqliteReader: listStoreMenu });
@@ -85,9 +88,13 @@ const merchantMenuRepository = createMerchantMenuRepository({
   sqliteReader: listStoreMenu,
   sqliteWriter: saveMerchantMenuItem,
 });
+const customerOrderWriteRepository = createCustomerOrderWriteRepository({
+  sqliteWriter: createOrder,
+});
 if (
   groupBuyActivityWriteRepository.kind === "postgres"
   || merchantMenuRepository.kind === "postgres"
+  || customerOrderWriteRepository.kind === "postgres"
 ) {
   const requiredPostgresRepositories = [
     authProfileReadRepository,
@@ -95,12 +102,14 @@ if (
     groupBuyActivityReadRepository,
     groupBuyActivityWriteRepository,
     merchantMenuRepository,
+    customerOrderWriteRepository,
   ];
   if (requiredPostgresRepositories.some((repository) => repository.kind !== "postgres")) {
     throw new Error(
-      "PostgreSQL activity/menu writes require AUTH_PROFILE_READ_RUNTIME, "
+      "PostgreSQL write slices require AUTH_PROFILE_READ_RUNTIME, "
       + "STORE_MENU_READ_RUNTIME, GROUP_BUY_ACTIVITY_READ_RUNTIME, "
-      + "GROUP_BUY_ACTIVITY_WRITE_RUNTIME, and MERCHANT_MENU_RUNTIME to be postgres"
+      + "GROUP_BUY_ACTIVITY_WRITE_RUNTIME, MERCHANT_MENU_RUNTIME, "
+      + "and CUSTOMER_ORDER_WRITE_RUNTIME to be postgres"
     );
   }
 }
@@ -113,6 +122,17 @@ const server = http.createServer(async (request, response) => {
     }
 
     const url = new URL(request.url, `http://${request.headers.host}`);
+
+    if (
+      customerOrderWriteRepository.kind === "postgres"
+      && isSqliteOrderDependentRoute(request.method, url.pathname)
+    ) {
+      sendJson(response, 503, {
+        error: "customer_order_runtime_mismatch",
+        message: "This order follow-up route still requires the SQLite order runtime."
+      });
+      return;
+    }
 
     if (request.method === "GET" && url.pathname === "/health") {
       sendJson(response, 200, { ok: true, service: "drink-group-buy-backend" });
@@ -492,7 +512,7 @@ const server = http.createServer(async (request, response) => {
         return;
       }
 
-      const result = createOrder({
+      const result = await customerOrderWriteRepository.createOrder({
         ...body,
         customerUserId: authUser.id
       });
@@ -1286,6 +1306,18 @@ function canManageStore(user, storeId) {
   return user.merchantStores.some((store) => store.id === storeId);
 }
 
+
+function isSqliteOrderDependentRoute(method, pathname) {
+  if (method === "POST" && pathname === "/api/orders") return false;
+  return pathname === "/api/customers/me/orders"
+    || /^\/api\/merchant\/stores\/[^/]+\/orders$/.test(pathname)
+    || pathname.startsWith("/api/orders/")
+    || pathname.startsWith("/api/payments/")
+    || pathname.startsWith("/api/pickup-credentials/")
+    || pathname.startsWith("/api/merchant/pickup-credentials/")
+    || /^\/api\/merchant\/group-buy-activities\/[^/]+\/ready-for-pickup$/.test(pathname)
+    || /^\/api\/admin\/group-buy-activities\/[^/]+\/settle$/.test(pathname);
+}
 
 function isDevAuthModeEnabled() {
   if (process.env.NODE_ENV === "production") return false;

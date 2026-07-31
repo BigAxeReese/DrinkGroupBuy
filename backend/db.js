@@ -1471,7 +1471,7 @@ function createOrder(input) {
 
   try {
     const activity = database.prepare(`
-      SELECT id, store_id, status, maximum_cups
+      SELECT id, store_id, status, deadline_at, maximum_cups
       FROM group_buy_activities
       WHERE id = ?
     `).get(input.activityId);
@@ -1480,6 +1480,13 @@ function createOrder(input) {
     }
     if (!["recruiting", "confirmed"].includes(activity.status)) {
       return { error: "activity_not_joinable", status: activity.status };
+    }
+    if (Date.parse(now) >= Date.parse(activity.deadline_at)) {
+      return {
+        error: "activity_not_joinable",
+        status: activity.status,
+        reason: "deadline_passed"
+      };
     }
 
     const pricedItems = priceOrderItems(database, activity.store_id, input.items);

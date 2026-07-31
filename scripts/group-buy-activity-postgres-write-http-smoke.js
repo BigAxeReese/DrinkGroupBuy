@@ -49,6 +49,7 @@ async function main() {
         GROUP_BUY_ACTIVITY_READ_RUNTIME: "postgres",
         GROUP_BUY_ACTIVITY_WRITE_RUNTIME: "postgres",
         MERCHANT_MENU_RUNTIME: "postgres",
+        CUSTOMER_ORDER_WRITE_RUNTIME: "postgres",
         AUTH_SESSION_SECRET: "postgres-activity-write-http-smoke-secret",
         PAYMENT_RECONCILIATION_ENABLED: "false",
         SETTLEMENT_SCHEDULER_ENABLED: "false",

@@ -425,11 +425,11 @@ Body 建議包含：
 
 ## 六、下一個實際開發切片
 
-階段 0～5 與階段 6 的可靠性核心已完成第一版；PostgreSQL 公開菜單與團購活動列表唯讀切片也已完成真實 runtime 與 HTTP source proof，接下來依序處理：
+階段 0～5 與可靠性核心已完成第一版；PostgreSQL 三個唯讀與建團／菜單／首次建單三個寫入切片也已完成真實 runtime 與 HTTP proof，接下來依序處理：
 
 
-1. 用真實 PostgreSQL 驗證公開菜單 repository、seed 與 HTTP route。
-2. 搬移下一個唯讀切片，再逐步處理寫入 transaction 與 row lock。
+1. 搬移 PostgreSQL order detail／list 與 payment authorization request context。
+2. 搬移 authorization confirm，使用 activity row lock 重驗容量並更新 authorized cups。
 3. LINE Pay 核准後，以 sandbox 驗證 request reconciliation、capture／void 與 lease takeover。
 4. 將 terminal job 的 `alert_required` 接到正式告警通知管道。
 5. 補建立訂單與付款 request 的通用 idempotency 紀錄。

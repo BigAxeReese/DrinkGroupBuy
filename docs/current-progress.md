@@ -10,7 +10,7 @@
 
 - Firebase Auth + Google Login 已實作，backend 會驗證 Firebase ID token，再依開發資料庫的 `users.firebase_uid`、`user_roles` 與 `merchant_users` 判斷身份。
 - 本機開發已新增 dev-only 身份切換器；只有 backend `AUTH_DEV_MODE=true` 且 mobile `EXPO_PUBLIC_AUTH_MODE=dev` 時才會顯示，可用下拉選單切換 SQLite 內所有有效顧客、商家與開發補救身份。
-- 開發 runtime 預設仍使用 SQLite；三個唯讀切片、商家建立團購與商家菜單管理已可切換 PostgreSQL。兩個寫入切片必須與 auth／公開菜單／活動讀取一起切換，沒有雙寫；訂單與付款仍使用 SQLite。
+- 開發 runtime 預設仍使用 SQLite；三個唯讀切片、商家建立團購、商家菜單管理與顧客首次建單已可切換 PostgreSQL。三個寫入切片必須一起切換且不雙寫；訂單後續操作與付款仍使用 SQLite。
 - LINE Pay 付款主幹已拆成獨立模組，已有 request、confirm、cancel、capture、void、refund、訂單修改後重新預授權與截止結算排程。
 - 付款結算 smoke test 已於 2026-07-19 通過，包含達標請款、未達標原價請款／取消授權、排程結算、修改訂單替換授權、截止後拒絕預授權、三次自動請款上限、取餐前 15 分鐘以前的手動重新付款，以及退款 idempotency。
 - 開發資料庫曾暴露同一筆 LINE Pay 失敗請款被無限重試的問題；目前已改為截止時第一次請款，暫時性失敗後每 30 秒重試，總計最多三次，並在重試前查詢 provider 狀態。
@@ -23,6 +23,7 @@
 - 已新增 `npm run check:sql-safety`，用來檢查 backend、database 與 scripts 內是否出現未審核的動態 SQL、SQL 字串插值或字串相加，降低後續開發時引入 SQL 注入風險。
 - 2026-07-30 已完成 SQL safety、database adapter、真實 PostgreSQL runtime、SQLite／PostgreSQL 公開菜單與團購活動列表 repositories／HTTP source proofs、付款可靠性／雙程序 lease、付款結算、取貨碼、菜單／訂單權威與訂單列表／取消 smoke 回歸；41 個 Backend／script／database JavaScript 檔語法通過，SQLite `integrity_check = ok`、`foreign_key_check = 0`。
 - 2026-07-31 已完成 PostgreSQL 商家完整菜單查詢、建立、修改與停售 transaction；跨連線 HTTP proof 驗證 store-first row lock、公開菜單過濾、選項軟停用、稽核紀錄與測試資料歸零。
+- 2026-07-31 已完成 PostgreSQL 顧客首次建單 transaction；HTTP proof 驗證 activity row lock、截止／容量／重複／改價防護、品項與選項快照、history／audit 與清理歸零。
 - 訂單流程新增 `npm run order-flow:smoke` 與 `npm run order-api:smoke`，覆蓋 cursor、門市／活動篩選、匿名顧客、重複下單、取消鎖定、取消冪等、idempotency key 衝突及跨店 403。
 - 已執行非強制 `npm audit fix`；最近一次結果為 Root `11` 項（`6 moderate`、`5 high`、`0 critical`），Mobile `46` 項（`1 low`、`11 moderate`、`33 high`、`1 critical`）。剩餘項目需要 Expo／React Native 或相關傳遞依賴的主版本升級，因此未使用 `--force` 破壞目前 Expo SDK 51 相容性。
 - 系統分析書已整理為五大功能，五組描述性綱目已更新，並已抽出 `docs/system-analysis-extracted.md`；各小節使用個案描述與活動圖仍待更新。
@@ -224,7 +225,7 @@
 
 目前重要限制：
 
-- `POST /api/orders` 只適用於已存在於後端 SQLite 的活動。
+- `POST /api/orders` 預設使用 SQLite；受控 PostgreSQL 模式會使用同一 PostgreSQL activity／menu source。此模式下訂單列表、明細、改單、取消與付款 route 暫回 `503 customer_order_runtime_mismatch`。
 - 如果 mobile local activity 已過期或不存在於後端，送單會失敗。
 
 ## Database / 資料庫
@@ -291,10 +292,10 @@ PostgreSQL 方向：
 
 目前 PostgreSQL 狀態：
 
-- 三個 PostgreSQL 唯讀 runtime vertical slices 已完成：公開菜單、團購活動列表，以及登入／角色／門市權限解析可由各自環境變數獨立切換。第一個受控寫入切片「商家建立團購」也已完成。
-- 所有開關預設仍是 `sqlite`，沒有雙寫。活動寫入切成 PostgreSQL 時，repository 會再次驗證 PostgreSQL merchant/store 綁定；商家菜單修改、訂單與付款尚未遷移。
+- 三個 PostgreSQL 唯讀 slices 與三個受控寫入 slices 已完成：商家建團、商家菜單管理及顧客首次建單。
+- 所有開關預設仍是 `sqlite`，沒有雙寫。顧客建單切成 PostgreSQL 時會鎖 activity row 並使用 PostgreSQL 權威菜單；訂單後續操作與付款尚未遷移。
 - 本機 PostgreSQL 16 已套用 `001_initial_postgres.sql` 與 `002_seed_dev_postgres.sql`；服務只監聽 `localhost`，`postgres-runtime:smoke` 已驗證連線、可靠性表、seed 公開菜單、活動列表與商家角色／門市綁定契約。
-- 公開菜單、團購活動列表、dev session／bearer token 解析及商家建立團購，均已完成真實 PostgreSQL HTTP source proof；寫入 proof 驗證跨連線 row-lock 等待、完整 transaction、idempotency 與清理為 0。
+- 公開菜單、活動、auth、建團、商家菜單與顧客建單均已完成真實 PostgreSQL HTTP proof；建單 proof 驗證跨連線 activity lock、權威價格、容量、快照與清理為 0。
 - PostgreSQL draft 已拆分 `users`、`user_private_profiles`、`user_public_profiles`。
 - PostgreSQL draft 中每個商家帳號透過 `merchant_users.store_id` 對應一間店；不分 owner／manager／staff，API 相容欄位 `permissionLevel` 在 PostgreSQL 回傳 `null`。
 - PostgreSQL seed draft 有 4 個顧客、7 個商家、1 個 dev/admin 補救帳號、7 間店、8 個菜單項目與 96 個客製化選項。
@@ -325,8 +326,8 @@ database/test/drink-group-buy-test.sqlite
 
 建議下一步：
 
-1. 規劃顧客建立訂單的 PostgreSQL transaction，以 activity capacity row lock 同步驗證截止時間、剩餘杯數、菜單價格與客製化選項。
-2. 訂單 transaction 穩定後，再搬移 payment authorization confirm 與 authorized cups 更新；仍禁止 SQLite／PostgreSQL 雙寫。
+1. 搬移 PostgreSQL 訂單明細／列表與 payment authorization request 所需的 order context，解除受控建單後的 `customer_order_runtime_mismatch`。
+2. 接著搬移 authorization confirm，以 activity row lock 更新 authorized cups 並重驗容量；仍禁止 SQLite／PostgreSQL 雙寫。
 3. LINE Pay 核准分離式請款後，執行 sandbox reconciliation、capture、void 與 lease takeover 人工端對端驗證。
 4. PostgreSQL settlement 寫入 vertical slice 時必須顯式寫入 `003` 的五個快照欄位；在此之前維持 SQLite runtime 與無雙寫。
 5. 建立站內通知／delivery schema 與正式告警管道，並細化 revision、容量不足及 void 失敗提示。

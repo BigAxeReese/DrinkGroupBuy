@@ -196,7 +196,7 @@ npm run payment-reliability:multiprocess
 
 ## PostgreSQL runtime 垂直切片
 
-大部分業務資料仍使用 SQLite；公開菜單、團購活動列表、登入／bearer token 權限解析、商家建立團購，以及商家完整菜單查詢／修改，已可透過 repository 切換 SQLite 或 PostgreSQL，不會雙寫。前三項是唯讀切片；後兩項是受控 PostgreSQL 寫入切片。訂單與付款仍固定使用 SQLite。
+大部分業務資料仍使用 SQLite；公開菜單、團購活動列表、登入／bearer token 權限解析、商家建立團購、商家完整菜單查詢／修改，以及顧客首次建單，已可透過 repository 切換 SQLite 或 PostgreSQL，不會雙寫。前三項是唯讀切片；後三項是受控 PostgreSQL 寫入切片。訂單後續操作與付款仍固定使用 SQLite。
 
 - `backend/database/sqliteAdapter.js`
 - `backend/database/postgresAdapter.js`
@@ -206,6 +206,7 @@ npm run payment-reliability:multiprocess
 - `backend/database/repositories/authProfileReadRepository.js`
 - `backend/database/repositories/groupBuyActivityWriteRepository.js`
 - `backend/database/repositories/merchantMenuRepository.js`
+- `backend/database/repositories/customerOrderWriteRepository.js`
 
 預設不改變目前行為：
 
@@ -214,6 +215,7 @@ STORE_MENU_READ_RUNTIME=sqlite
 GROUP_BUY_ACTIVITY_READ_RUNTIME=sqlite
 GROUP_BUY_ACTIVITY_WRITE_RUNTIME=sqlite
 MERCHANT_MENU_RUNTIME=sqlite
+CUSTOMER_ORDER_WRITE_RUNTIME=sqlite
 AUTH_PROFILE_READ_RUNTIME=sqlite
 ```
 
@@ -224,10 +226,11 @@ STORE_MENU_READ_RUNTIME=postgres
 GROUP_BUY_ACTIVITY_READ_RUNTIME=postgres
 GROUP_BUY_ACTIVITY_WRITE_RUNTIME=postgres
 MERCHANT_MENU_RUNTIME=postgres
+CUSTOMER_ORDER_WRITE_RUNTIME=postgres
 AUTH_PROFILE_READ_RUNTIME=postgres
 ```
 
-啟用 PostgreSQL 寫入時，Backend 會要求 auth、公開菜單、活動讀取／寫入與商家菜單管理全部使用 PostgreSQL。商家菜單與建立團購都先鎖定同一筆 store row，再進行權限、菜單價格與折扣驗證，因此不再有 `merchant_menu_runtime_mismatch`；訂單與付款尚未遷移，這仍是受控切片而非完整 PostgreSQL runtime。
+啟用 PostgreSQL 寫入時，Backend 會要求 auth、公開菜單、活動讀取／寫入、商家菜單與顧客建單全部使用 PostgreSQL。顧客建單會先鎖 activity row，再驗證截止時間、權威菜單、折扣與已授權杯數；訂單列表／明細、改單、取消與付款仍未遷移，這些 route 會回 `503 customer_order_runtime_mismatch`，因此仍是受控切片。
 
 本機契約測試會驗證 SQLite 委派、adapter 與 PostgreSQL API 格式：
 
@@ -238,6 +241,7 @@ npm run group-buy-activity-read:smoke
 npm run auth-profile-read:smoke
 npm run group-buy-activity-write:smoke
 npm run merchant-menu-write:smoke
+npm run customer-order-write:smoke
 ```
 
 設定本機 `DATABASE_URL` 並套用 PostgreSQL migrations 後，可執行：
@@ -248,10 +252,11 @@ npm run group-buy-activity-postgres-http:smoke
 npm run auth-profile-postgres-http:smoke
 npm run group-buy-activity-postgres-write-http:smoke
 npm run merchant-menu-postgres-http:smoke
+npm run customer-order-postgres-http:smoke
 ```
-三個 PostgreSQL HTTP proof 會建立臨時資料並自動清除；活動寫入 proof 額外以第二條連線持有 merchant/store row lock，確認建立請求會等待鎖、釋放後整筆 transaction 成功，且相同 idempotency key 只產生一個活動。
+PostgreSQL HTTP proofs 會建立臨時資料並自動清除；活動、菜單與顧客建單寫入 proof 都使用第二條連線持有對應 row lock，確認請求等待、釋放後整筆 transaction 成功。建單 proof 另驗證重複訂單、即時改價、容量拒絕、item／option snapshots、history 與 audit。
 
-2026-07-31 已在本機 PostgreSQL 16 驗證三個唯讀切片與第一個受控寫入切片。商家建立團購會在同一 transaction 鎖定 merchant/store 與菜單資料，寫入 activity、tiers、notice、status history、audit log，並處理同店家 idempotency。所有 runtime 開關預設仍是 SQLite，沒有雙寫；訂單與付款尚未遷移。PostgreSQL v1 不分店家內部權限等級，因此相容欄位 `permissionLevel` 回傳 `null`。
+2026-07-31 已在本機 PostgreSQL 16 驗證三個唯讀切片與三個受控寫入切片。顧客建單 transaction 會鎖定 activity、拒絕截止／超量／重複／改價要求，並保存 order、items、customizations、status history 與 audit log。所有開關預設仍是 SQLite，沒有雙寫；訂單後續與付款尚未遷移。
 
 
 

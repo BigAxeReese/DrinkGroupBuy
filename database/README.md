@@ -4,7 +4,7 @@
 
 目前 backend runtime 預設與多數流程使用 SQLite，主要目的是讓開發階段可以先把資料流程跑起來。
 
-PostgreSQL 是未來正式資料庫方向。`database/migrations/` 保存 schema/seed draft，`backend/database/` 已有隔離 adapter；三個唯讀切片、商家建立團購與商家菜單管理已可受控切換，`backend/db.js` 尚未整體切換。
+PostgreSQL 是未來正式資料庫方向。`database/migrations/` 保存 schema/seed draft，`backend/database/` 已有隔離 adapter；三個唯讀切片、商家建團、商家菜單與顧客首次建單已可受控切換，`backend/db.js` 尚未整體切換。
 
 ## 目前用途
 
@@ -46,7 +46,7 @@ database/drink-group-buy-dev.sqlite
 
 ## PostgreSQL draft 驗證方式
 
-目前 PostgreSQL 已用於 schema／seed、adapter、auth／公開菜單／活動列表唯讀切片，以及商家建團與菜單管理寫入驗證；訂單與付款 HTTP route 仍使用 SQLite。
+目前 PostgreSQL 已用於 schema／seed、adapter、三個唯讀切片，以及商家建團、菜單管理與顧客首次建單驗證；訂單後續與付款 HTTP route 仍使用 SQLite。
 
 本機沒有安裝 `psql` 也可以用 Docker container 內的 `psql` 驗證：
 
@@ -84,6 +84,7 @@ postgres://drink_group_buy:drink_group_buy_dev_password@localhost:5432/drink_gro
 - 2026-07-30：公開菜單 HTTP route 已用 PostgreSQL 專用臨時品項證明資料來源，驗證後臨時品項已清除。
 - 2026-07-30：團購活動列表 HTTP route 已用 PostgreSQL 專用臨時活動證明資料來源，驗證後活動與級距均已清除。
 - 2026-07-31：商家菜單建立／修改／停售已通過 PostgreSQL transaction、store row lock 與 HTTP proof；臨時品項、選項與 audit log 均已清除。
+- 2026-07-31：顧客首次建單已通過 PostgreSQL activity row lock、容量／價格／重複防護與 HTTP proof；臨時訂單、活動、history 與 audit 均已清除。
 - 驗證後 runtime 資料仍為 0 group_buy_activities、0 promotion_tiers、0 orders、0 payment_authorizations、0 payment_captures、0 pickup_credentials。
 
 ## 目前主要資料表
@@ -114,7 +115,7 @@ postgres://drink_group_buy:drink_group_buy_dev_password@localhost:5432/drink_gro
 
 ## 目前與後端的關係
 
-後端預設與多數流程仍讀寫 SQLite；auth、公開菜單、團購活動讀取／建立與商家菜單管理已有 PostgreSQL repositories。兩個寫入切片需一起切換且不雙寫；訂單、付款與 `backend/db.js` 其餘流程尚未整體搬移。
+後端預設與多數流程仍讀寫 SQLite；auth、公開菜單、活動讀寫、商家菜單與顧客首次建單已有 PostgreSQL repositories。三個寫入切片需一起切換且不雙寫；訂單後續、付款與 `backend/db.js` 其餘流程尚未整體搬移。
 
 目前已接上的資料流程：
 

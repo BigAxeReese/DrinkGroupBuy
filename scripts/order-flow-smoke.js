@@ -111,6 +111,14 @@ function main() {
   insertActivity("order-flow-active-a", 120);
   insertActivity("order-flow-active-b", 180);
   insertActivity("order-flow-locked", 20);
+  insertActivity("order-flow-expired", -1);
+
+  const expired = createOrder(buildOrderInput("order-flow-expired", "user-customer-lixuan"));
+  assert(
+    expired.error === "activity_not_joinable" && expired.reason === "deadline_passed",
+    "expired activity should reject order creation",
+    expired
+  );
 
   const first = createOrder(buildOrderInput("order-flow-active-a", "user-customer-yinji"));
   assert(first.order, "first order should be created", first);
@@ -187,7 +195,7 @@ function main() {
 
   console.log("Order flow smoke passed");
   console.log("lists: customer_cursor=1, merchant_activity_filter=1, anonymous_alias=1");
-  console.log("orders: duplicate_active_rejected=1, locked_cancel_rejected=1");
+  console.log("orders: deadline_rejected=1, duplicate_active_rejected=1, locked_cancel_rejected=1");
   console.log("cancel: history=1, idempotent_retry=1, key_conflict_rejected=1");
   console.log("database: integrity=ok, foreign_key_errors=0");
 }

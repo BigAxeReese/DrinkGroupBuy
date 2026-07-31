@@ -25,6 +25,8 @@
     "group-buy-activity-postgres-write-http:smoke": "node scripts/group-buy-activity-postgres-write-http-smoke.js",
     "merchant-menu-write:smoke": "node scripts/merchant-menu-write-repository-smoke.js",
     "merchant-menu-postgres-http:smoke": "node scripts/merchant-menu-postgres-http-smoke.js",
+    "customer-order-write:smoke": "node scripts/customer-order-write-repository-smoke.js",
+    "customer-order-postgres-http:smoke": "node scripts/customer-order-postgres-http-smoke.js",
     "auth-profile-read:smoke": "node scripts/auth-profile-read-repository-smoke.js",
     "auth-profile-postgres-http:smoke": "node scripts/auth-profile-postgres-http-smoke.js",
     "pickup-expiration:smoke": "node scripts/pickup-expiration-smoke.js",
