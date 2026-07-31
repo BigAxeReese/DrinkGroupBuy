@@ -295,7 +295,8 @@ PostgreSQL 方向：
 - PostgreSQL 已完成 auth／公開菜單／活動／訂單讀取，以及商家建團、商家菜單、顧客首次建單、付款 request／confirm／cancel、一般 authorization void 與顧客取消受控切片。
 - 所有開關預設仍是 `sqlite`，沒有雙寫。建單、confirm、cancel／void 與顧客取消都採 activity-first lock；capture、改單／revision、refund、pickup／settlement 尚未遷移。
 - 本機 PostgreSQL 16 已套用 `001_initial_postgres.sql` 與 `002_seed_dev_postgres.sql`；服務只監聽 `localhost`，`postgres-runtime:smoke` 已驗證連線、可靠性表、seed 公開菜單、活動列表與商家角色／門市綁定契約。
-- 新增 `payment-authorization-cancel:smoke`、`customer-order-cancel:smoke` 與 `line-pay-cancel-service:smoke` 並通過；原有 request／confirm 真實 PostgreSQL proof 已通過。新增取消 HTTP proof 已寫入，但本次因未設定 `DATABASE_URL` 而跳過，尚不能標示為真實 runtime 已驗證。
+- PostgreSQL cancel redirect、mock void、顧客取消、跨連線 activity lock、idempotency 與清理歸零 HTTP proof 已正式通過。
+- 新增單筆 capture repository／service building block；`payment-capture:smoke`、`line-pay-capture-service:smoke` 與真實 PostgreSQL `payment-capture-postgres:smoke` 已通過，覆蓋 mock capture 成功、provider 暫時失敗、retry attempt、activity lock 與清理歸零。此 building block 尚未接入 server／settlement scheduler，不是可直接請款的新入口。
 - PostgreSQL draft 已拆分 `users`、`user_private_profiles`、`user_public_profiles`。
 - PostgreSQL draft 中每個商家帳號透過 `merchant_users.store_id` 對應一間店；不分 owner／manager／staff，API 相容欄位 `permissionLevel` 在 PostgreSQL 回傳 `null`。
 - PostgreSQL seed draft 有 4 個顧客、7 個商家、1 個 dev/admin 補救帳號、7 間店、8 個菜單項目與 96 個客製化選項。
@@ -326,8 +327,8 @@ database/test/drink-group-buy-test.sqlite
 
 建議下一步：
 
-1. 重新設定本機 `DATABASE_URL`，執行 `npm run customer-order-postgres-http:smoke`，完成 cancel redirect、mock void、顧客取消、row lock 與清理歸零的真實 runtime 證明。
-2. 接著搬移 capture 與 settlement 所需 authorization context、retry job claim 及 activity/order locks；仍禁止 SQLite／PostgreSQL 雙寫。
+1. 建立 PostgreSQL settlement repository，搬移 settlement plan、capture retry state、完成交易與 `003` 五個折扣快照欄位。
+2. 將既有持久化 settlement job claim／scheduler 注入 PostgreSQL repository，完成後才允許 Backend 的 PostgreSQL settlement route；仍禁止 SQLite／PostgreSQL 雙寫。
 3. LINE Pay 核准分離式請款後，執行 sandbox reconciliation、capture、void 與 lease takeover 人工端對端驗證。
 4. PostgreSQL settlement 寫入 vertical slice 時必須顯式寫入 `003` 的五個快照欄位；在此之前維持 SQLite runtime 與無雙寫。
 5. 建立站內通知／delivery schema 與正式告警管道，並細化 revision、容量不足及 void 失敗提示。

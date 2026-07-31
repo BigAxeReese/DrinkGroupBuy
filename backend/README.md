@@ -262,6 +262,8 @@ npm run payment-authorization-cancel:smoke
 npm run customer-order-cancel:smoke
 npm run line-pay-confirm-service:smoke
 npm run line-pay-cancel-service:smoke
+npm run payment-capture:smoke
+npm run line-pay-capture-service:smoke
 ```
 
 設定本機 `DATABASE_URL` 並套用 PostgreSQL migrations 後，可執行：
@@ -273,10 +275,11 @@ npm run auth-profile-postgres-http:smoke
 npm run group-buy-activity-postgres-write-http:smoke
 npm run merchant-menu-postgres-http:smoke
 npm run customer-order-postgres-http:smoke
+npm run payment-capture-postgres:smoke
 ```
 PostgreSQL HTTP proofs 會建立臨時資料並自動清除；活動、菜單與顧客建單寫入 proof 都使用第二條連線持有對應 row lock，確認請求等待、釋放後整筆 transaction 成功。建單 proof 另驗證重複訂單、即時改價、容量拒絕、item／option snapshots、history 與 audit。
 
-2026-07-31 已在本機 PostgreSQL 16 驗證訂單建立、列表、明細、首次付款 request context 與 authorization confirm。authorization cancel／一般 void 與顧客取消 repository、service、route 及隔離 HTTP proof 已完成，contract smoke 已通過；本次環境未設定 `DATABASE_URL`，因此新增的取消 HTTP proof 尚待重新執行。所有開關預設仍是 SQLite，沒有雙寫；capture、改單／revision、refund、pickup／settlement 尚未遷移。
+2026-07-31 已在本機 PostgreSQL 16 驗證訂單建立、列表、明細、authorization request／confirm／cancel、一般 void 與顧客取消，包含跨連線 activity lock、idempotency 與清理歸零。單筆 capture repository／service building block 也已完成真實 PostgreSQL mock-capture 成功、provider 暫時失敗、retry attempt、row lock 與清理歸零 proof；目前尚未接入 server 或 settlement scheduler，因此不構成可直接請款的新 API。所有開關預設仍是 SQLite，沒有雙寫；settlement orchestration、改單／revision、refund 與 pickup 尚未遷移。
 
 
 

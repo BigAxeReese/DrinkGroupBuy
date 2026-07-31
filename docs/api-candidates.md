@@ -114,7 +114,7 @@ API JSON 使用 `camelCase`。已實作 routes 只對目前開發 prototype 具�
 | Response      | `{ order }`                                                                                                                                                                                                                                                                                             |
 | 已實作規則    | 需要 customer role、從登入使用者推導 `customerUserId`、驗證活動／截止時間／active customer、驗證飲品屬於活動店家且已上架、驗證 option ID 與 min/max、後端重算價格、保存快照、寫入 status history／audit、檢查重複訂單與容量；PostgreSQL 會先 `FOR UPDATE` 鎖 activity |
 | 可切換資料來源 | `CUSTOMER_ORDER_WRITE_RUNTIME=sqlite|postgres`；預設 `sqlite`，不雙寫 |
-| PostgreSQL 狀態 | 首次建單、顧客／商家列表、訂單明細、authorization request／confirm／cancel、一般 authorization void 與顧客取消已完成受控切片。取消流程會使用跨執行個體 lease 與 activity-first lock，持久化 provider event、history、audit、job 終止與 idempotency；provider void 失敗不取消訂單。改單／revision payment、capture、refund、pickup 與 settlement 仍回 `503 customer_order_runtime_mismatch`；新增取消 HTTP proof 因本次未設定 `DATABASE_URL` 尚待執行 |
+| PostgreSQL 狀態 | 首次建單、顧客／商家列表、訂單明細、authorization request／confirm／cancel、一般 authorization void 與顧客取消已完成受控切片且真實 HTTP proof 通過。單筆 capture repository／service building block 已通過 PostgreSQL mock-capture 成功／失敗與 row-lock proof，但尚未接入 server 或 settlement scheduler。改單／revision payment、refund、pickup 與 settlement route 仍回 `503 customer_order_runtime_mismatch` |
 | 尚缺規則      | 建立訂單通用 idempotency key；目前重複 POST 以同顧客／活動 active-order conflict 與既有 `orderId` 回應 |
 
 ### 更新尚未預授權成功的顧客訂單

@@ -351,7 +351,7 @@ PostgreSQL 遷移後，以下流程需要 transaction：
 
 ## 下一步
 
-下一步先補跑已完成的 cancel redirect／一般 void／顧客取消真實 PostgreSQL HTTP proof；本次因未設定 `DATABASE_URL` 而跳過。proof 通過後搬移 capture／settlement runtime，仍禁止 SQLite／PostgreSQL 雙寫。
+取消 HTTP proof 已通過；單筆 capture persistence／service building block 亦已完成真實 PostgreSQL mock-capture 成功／失敗、retry attempt、activity lock 與清理歸零 proof。下一步搬移 settlement plan、capture retry state、完成交易與持久化 job scheduler；在整組完成前不接入 server，仍禁止 SQLite／PostgreSQL 雙寫。
 
 ## 2026-07-30～2026-07-31 驗證進度
 
@@ -370,7 +370,7 @@ PostgreSQL 遷移後，以下流程需要 transaction：
 - 跨連線 HTTP proof 已確認鎖定期間請求等待、釋放後成功、重複 idempotency key 只建立一次，測試資料最後清除為 0。
 - 商家完整菜單查詢／建立／修改／停售已完成 PostgreSQL repository 與跨連線 HTTP proof；公開菜單會排除停售項目，商家完整菜單仍可讀取，測試資料與 audit log 均已清除。
 - PostgreSQL 顧客首次建單已完成：跨連線 proof 確認 activity lock 等待、截止／容量／重複／改價防護、快照、history／audit 與清理為 0。
-- PostgreSQL 訂單列表／明細與 authorization request／confirm／cancel、一般 authorization void、顧客取消已完成受控切片。取消會持久化 provider event、history、audit、job 終止與 idempotency；provider void 失敗不取消訂單。capture、改單／revision、refund、pickup／settlement 仍待搬移；受控 PostgreSQL 訂單模式會先停用仍讀 SQLite 的背景 scheduler，避免跨 runtime。新增取消 HTTP proof 尚待具備 `DATABASE_URL` 的環境執行。
+- PostgreSQL 訂單列表／明細與 authorization request／confirm／cancel、一般 authorization void、顧客取消已完成受控切片，取消 HTTP proof 已通過。單筆 capture repository／service building block 已通過真實 PostgreSQL proof，但尚未接入 server；settlement plan、retry state、完成交易、job scheduler、改單／revision、refund 與 pickup 仍待搬移。受控 PostgreSQL 訂單模式繼續停用仍讀 SQLite 的背景 scheduler，避免跨 runtime。
 
 ## 2026-07-31 結算快照 migration 驗證
 

@@ -869,7 +869,25 @@ async function voidReplacedAuthorizationIfNeeded({ authorizationResult, orderId 
 }
 
 async function captureLinePayAuthorization(input) {
-  return withLinePayOperationLock(input, () => captureLinePayAuthorizationUnlocked(input));
+  const repository = input.paymentCaptureRepository;
+  const operation = () => captureLinePayAuthorizationUnlocked(input);
+  if (input.operationLockHeld) return operation();
+  if (repository?.kind === "postgres") {
+    try {
+      return await repository.withOperationLock(input, operation);
+    } catch (error) {
+      if (error?.code === "operation_locked") {
+        throw new PaymentServiceError(409, {
+          error: "payment_operation_locked",
+          status: "retry_later",
+          lockKey: error.lock?.lockKey || null,
+          lockedUntil: error.lock?.lockedUntil || null
+        });
+      }
+      throw error;
+    }
+  }
+  return withLinePayOperationLock(input, operation);
 }
 
 async function captureLinePayAuthorizationUnlocked({
@@ -879,13 +897,18 @@ async function captureLinePayAuthorizationUnlocked({
   amount,
   finalAmount,
   currency,
-  reason = "line_pay_capture"
+  reason = "line_pay_capture",
+  paymentCaptureRepository,
+  providerCapturer
 }) {
-  const context = getLinePayAuthorizationContext({
+  const contextInput = {
     orderId,
     providerTransactionId: transactionId,
     provider
-  });
+  };
+  const context = paymentCaptureRepository
+    ? await paymentCaptureRepository.getAuthorizationContext(contextInput)
+    : getLinePayAuthorizationContext(contextInput);
 
   if (!context) {
     return null;
@@ -941,9 +964,10 @@ async function captureLinePayAuthorizationUnlocked({
 
   let payload;
   try {
+    const captureProviderPayment = providerCapturer || captureLinePayPaymentAuthorization;
     payload = provider === "mock_line_pay"
       ? createMockLinePayPayload("mock_capture", resolvedTransactionId, authorization.orderId)
-      : await captureLinePayPaymentAuthorization(resolvedTransactionId, {
+      : await captureProviderPayment(resolvedTransactionId, {
           amount: captureAmount,
           currency: resolvedCurrency
         });
@@ -951,16 +975,19 @@ async function captureLinePayAuthorizationUnlocked({
     const classification = classifyLinePayCaptureError(error);
     let captureFailure = null;
     try {
-      captureFailure = recordLinePayCaptureFailureInDatabase({
+      const failureInput = {
         orderId: authorization.orderId,
         providerTransactionId: resolvedTransactionId,
         provider,
         amount: captureAmount,
         finalAmount: resolvedFinalAmount,
-        reason: `${reason}_failed`,
+        reason: reason + "_failed",
         retryable: classification.retryable,
         providerPayload: error.linePayPayload || { message: error.message }
-      });
+      };
+      captureFailure = paymentCaptureRepository
+        ? await paymentCaptureRepository.recordCaptureFailure(failureInput)
+        : recordLinePayCaptureFailureInDatabase(failureInput);
     } catch {
       // Keep the original LINE Pay capture error visible to the caller.
     }
@@ -969,7 +996,7 @@ async function captureLinePayAuthorizationUnlocked({
     throw error;
   }
 
-  const captureResult = captureLinePayAuthorizationInDatabase({
+  const captureInput = {
     orderId: authorization.orderId,
     providerTransactionId: resolvedTransactionId,
     provider,
@@ -978,7 +1005,10 @@ async function captureLinePayAuthorizationUnlocked({
     finalAmount: resolvedFinalAmount,
     reason,
     providerPayload: payload
-  });
+  };
+  const captureResult = paymentCaptureRepository
+    ? await paymentCaptureRepository.captureAuthorization(captureInput)
+    : captureLinePayAuthorizationInDatabase(captureInput);
 
   if (captureResult?.error) {
     throw new PaymentServiceError(409, captureResult);
