@@ -259,7 +259,7 @@ payment_status text not null check (payment_status in ('pending', 'authorized', 
 7. Customer order read／payment request context（已完成；列表、明細、request lease、pending authorization、history、audit、retry job 與 HTTP proof 均通過）。
 8. LINE Pay authorization confirm（已完成；activity-first row lock、截止／期限／容量重驗、狀態／provider event／history／audit、retry job 完成與拒絕補償 void proof 均通過）。
 
-商家菜單、建立團購、顧客首次建單、訂單讀取與首次 authorization request context 已使用同一 PostgreSQL 資料來源；建單採 activity-first lock，付款 request 與 confirm 採 operation lease，confirm 另採 activity-first row lock。改單／取消、一般 void／capture、pickup 與結算仍未搬移，因此尚未完成整體 runtime 切換。
+商家菜單、建立團購、顧客首次建單、訂單讀取與 authorization request／confirm／cancel 已使用同一 PostgreSQL 資料來源；建單、confirm、cancel／void 與顧客取消採 activity-first row lock，付款生命週期另有跨執行個體 operation lease。改單／revision、capture、refund、pickup 與結算仍未搬移，因此尚未完成整體 runtime 切換。
 
 要求：
 
@@ -299,6 +299,8 @@ CUSTOMER_ORDER_WRITE_RUNTIME=sqlite
 CUSTOMER_ORDER_READ_RUNTIME=sqlite
 PAYMENT_AUTHORIZATION_REQUEST_RUNTIME=sqlite
 PAYMENT_AUTHORIZATION_CONFIRM_RUNTIME=sqlite
+PAYMENT_AUTHORIZATION_CANCEL_RUNTIME=sqlite
+CUSTOMER_ORDER_CANCEL_RUNTIME=sqlite
 AUTH_PROFILE_READ_RUNTIME=sqlite
 AUTH_SESSION_SECRET=...
 LINE_PAY_CHANNEL_ID=...
@@ -349,7 +351,7 @@ PostgreSQL 遷移後，以下流程需要 transaction：
 
 ## 下一步
 
-下一步搬移 PostgreSQL authorization cancel／一般 void 與顧客取消；之後再搬移 capture／settlement runtime。仍禁止 SQLite／PostgreSQL 雙寫。
+下一步先補跑已完成的 cancel redirect／一般 void／顧客取消真實 PostgreSQL HTTP proof；本次因未設定 `DATABASE_URL` 而跳過。proof 通過後搬移 capture／settlement runtime，仍禁止 SQLite／PostgreSQL 雙寫。
 
 ## 2026-07-30～2026-07-31 驗證進度
 
@@ -368,7 +370,7 @@ PostgreSQL 遷移後，以下流程需要 transaction：
 - 跨連線 HTTP proof 已確認鎖定期間請求等待、釋放後成功、重複 idempotency key 只建立一次，測試資料最後清除為 0。
 - 商家完整菜單查詢／建立／修改／停售已完成 PostgreSQL repository 與跨連線 HTTP proof；公開菜單會排除停售項目，商家完整菜單仍可讀取，測試資料與 audit log 均已清除。
 - PostgreSQL 顧客首次建單已完成：跨連線 proof 確認 activity lock 等待、截止／容量／重複／改價防護、快照、history／audit 與清理為 0。
-- PostgreSQL 訂單列表／明細與首次 authorization request context 已完成；request 會先取得 `operation_locks` lease，再由 transaction 寫 pending authorization、status history、audit 與 reconciliation job。confirm 已完成 activity-first lock、容量重驗、狀態與稽核；一般 void／capture、改單／取消／pickup／settlement 仍待搬移；受控 PostgreSQL 訂單模式會先停用仍讀 SQLite 的背景 scheduler，避免跨 runtime。
+- PostgreSQL 訂單列表／明細與 authorization request／confirm／cancel、一般 authorization void、顧客取消已完成受控切片。取消會持久化 provider event、history、audit、job 終止與 idempotency；provider void 失敗不取消訂單。capture、改單／revision、refund、pickup／settlement 仍待搬移；受控 PostgreSQL 訂單模式會先停用仍讀 SQLite 的背景 scheduler，避免跨 runtime。新增取消 HTTP proof 尚待具備 `DATABASE_URL` 的環境執行。
 
 ## 2026-07-31 結算快照 migration 驗證
 

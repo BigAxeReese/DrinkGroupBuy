@@ -49,6 +49,8 @@ async function main() {
         CUSTOMER_ORDER_READ_RUNTIME: "postgres",
         PAYMENT_AUTHORIZATION_REQUEST_RUNTIME: "postgres",
         PAYMENT_AUTHORIZATION_CONFIRM_RUNTIME: "postgres",
+        PAYMENT_AUTHORIZATION_CANCEL_RUNTIME: "postgres",
+        CUSTOMER_ORDER_CANCEL_RUNTIME: "postgres",
         LINE_PAY_CAPTURE_SEPARATED: "false",
         AUTH_SESSION_SECRET: "postgres-customer-order-http-smoke-secret",
         PAYMENT_RECONCILIATION_ENABLED: "false",
@@ -277,7 +279,132 @@ async function main() {
       history_count: 1,
       audit_count: 1,
     });
-    console.log("PostgreSQL order write/read, payment request, and authorization confirm proof passed.");
+
+    const pendingCancelOrderResult = await postOrder(secondToken, fixture.orderBody);
+    assert.equal(pendingCancelOrderResult.response.status, 201, pendingCancelOrderResult.text);
+    const pendingCancelOrder = JSON.parse(pendingCancelOrderResult.text).order;
+    const pendingCancelAuthorization = await authorizationRepository.createPendingAuthorization({
+      orderId: pendingCancelOrder.id,
+      amount: pendingCancelOrder.originalAmount,
+      providerTransactionId: `transaction-cancel-proof-${proofId}`,
+      now: new Date().toISOString(),
+    });
+    const cancelRedirectResponse = await fetch(
+      `${baseUrl}/api/payments/line-pay/cancel?transactionId=${encodeURIComponent(
+        pendingCancelAuthorization.providerAuthorizationId
+      )}&orderId=${encodeURIComponent(pendingCancelOrder.id)}`
+    );
+    assert.equal(cancelRedirectResponse.status, 200, await cancelRedirectResponse.text());
+    const cancelRedirectPersistence = await database.query(`
+      SELECT
+        payment_auth.status,
+        payment_auth.failure_reason,
+        (SELECT COUNT(*)::integer FROM payment_provider_events
+         WHERE resource_type = 'authorization' AND resource_id = payment_auth.id) AS event_count,
+        (SELECT COUNT(*)::integer FROM status_history
+         WHERE resource_type = 'payment_authorization' AND resource_id = payment_auth.id) AS history_count,
+        (SELECT COUNT(*)::integer FROM audit_logs
+         WHERE resource_type = 'payment_authorization' AND resource_id = payment_auth.id) AS audit_count,
+        (SELECT status FROM payment_reliability_jobs
+         WHERE resource_type = 'payment_authorization' AND resource_id = payment_auth.id
+         LIMIT 1) AS job_status
+      FROM payment_authorizations payment_auth
+      WHERE payment_auth.id = $1
+    `, [pendingCancelAuthorization.id]);
+    assert.deepEqual(cancelRedirectPersistence.rows[0], {
+      status: "failed",
+      failure_reason: "line_pay_cancel_redirect",
+      event_count: 1,
+      history_count: 2,
+      audit_count: 2,
+      job_status: "cancelled",
+    });
+
+    await database.query(
+      "UPDATE payment_authorizations SET provider = 'mock_line_pay' WHERE id = $1",
+      [pendingAuthorization.id]
+    );
+    await lockClient.query("BEGIN");
+    lockTransactionOpen = true;
+    await lockClient.query(
+      "SELECT id FROM group_buy_activities WHERE id = $1 FOR UPDATE",
+      [activityId]
+    );
+    let cancelSettled = false;
+    const customerCancelPromise = fetch(`${baseUrl}/api/orders/${createdOrder.id}/cancel`, {
+      method: "POST",
+      headers: {
+        Authorization: `Bearer ${firstToken}`,
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify({
+        idempotencyKey: `cancel-order-proof-${proofId}`,
+        reason: "customer_withdrawal",
+      }),
+    }).then(async (response) => ({ response, text: await response.text() }))
+      .finally(() => { cancelSettled = true; });
+    await delay(300);
+    assert.equal(cancelSettled, false, "Customer cancel did not wait for activity row lock");
+    await lockClient.query("COMMIT");
+    lockTransactionOpen = false;
+    const customerCancel = await customerCancelPromise;
+    assert.equal(customerCancel.response.status, 200, customerCancel.text);
+    const cancelledOrder = JSON.parse(customerCancel.text).order;
+    assert.equal(cancelledOrder.status, "cancelled");
+    assert.equal(cancelledOrder.paymentStatus, "authorization_voided");
+
+    const repeatedCancelResponse = await fetch(
+      `${baseUrl}/api/orders/${createdOrder.id}/cancel`,
+      {
+        method: "POST",
+        headers: {
+          Authorization: `Bearer ${firstToken}`,
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({
+          idempotencyKey: `cancel-order-proof-${proofId}`,
+          reason: "customer_withdrawal",
+        }),
+      }
+    );
+    const repeatedCancelText = await repeatedCancelResponse.text();
+    assert.equal(repeatedCancelResponse.status, 200, repeatedCancelText);
+    assert.equal(JSON.parse(repeatedCancelText).idempotent, true);
+
+    const customerCancelPersistence = await database.query(`
+      SELECT
+        order_record.status AS order_status,
+        order_record.payment_status,
+        order_record.pickup_status,
+        payment_auth.status AS authorization_status,
+        (SELECT COUNT(*)::integer FROM payment_provider_events
+         WHERE resource_type = 'authorization' AND resource_id = payment_auth.id) AS event_count,
+        (SELECT COUNT(*)::integer FROM status_history
+         WHERE resource_type = 'payment_authorization' AND resource_id = payment_auth.id) AS authorization_history_count,
+        (SELECT COUNT(*)::integer FROM status_history
+         WHERE resource_type = 'order' AND resource_id = order_record.id) AS order_history_count,
+        (SELECT COUNT(*)::integer FROM audit_logs
+         WHERE resource_type = 'order' AND resource_id = order_record.id) AS order_audit_count,
+        (SELECT COUNT(*)::integer FROM order_action_idempotency
+         WHERE order_id = order_record.id AND action_type = 'customer_cancel_order') AS idempotency_count
+      FROM orders order_record
+      JOIN payment_authorizations payment_auth ON payment_auth.id = $1
+      WHERE order_record.id = $2
+    `, [pendingAuthorization.id, createdOrder.id]);
+    assert.deepEqual(customerCancelPersistence.rows[0], {
+      order_status: "cancelled",
+      payment_status: "authorization_voided",
+      pickup_status: "cancelled",
+      authorization_status: "authorization_voided",
+      event_count: 2,
+      authorization_history_count: 3,
+      order_history_count: 2,
+      order_audit_count: 2,
+      idempotency_count: 1,
+    });
+    console.log(
+      "PostgreSQL order, payment request/confirm, cancel redirect, and customer cancel proof passed."
+    );
   } finally {
     if (lockTransactionOpen && lockClient) await lockClient.query("ROLLBACK");
     if (lockClient) lockClient.release();

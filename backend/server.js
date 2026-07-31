@@ -2,6 +2,7 @@ const http = require("node:http");
 const {
   cancelGroupBuyActivity,
   cancelCustomerOrderInDatabase,
+  cancelPendingLinePayAuthorizationInDatabase,
   createGroupBuyActivity,
   createOrder,
   createOrderRevision,
@@ -21,8 +22,10 @@ const {
   listPaymentReliabilityAlerts,
   listMerchantStoreOrders,
   listStoreMenu,
+  recordLinePayVoidFailureInDatabase,
   saveMerchantMenuItem,
-  updatePendingOrder
+  updatePendingOrder,
+  voidLinePayAuthorizationInDatabase
 } = require("./db");
 const { createAuthToken, getBearerToken, verifyAuthToken, verifyPassword } = require("./auth");
 const { verifyFirebaseIdToken } = require("./firebaseAuth");
@@ -81,6 +84,12 @@ const {
 const {
   createPaymentAuthorizationConfirmRepository
 } = require("./database/repositories/paymentAuthorizationConfirmRepository");
+const {
+  createPaymentAuthorizationCancelRepository
+} = require("./database/repositories/paymentAuthorizationCancelRepository");
+const {
+  createCustomerOrderCancelRepository
+} = require("./database/repositories/customerOrderCancelRepository");
 
 const port = Number(process.env.PORT ?? 3000);
 const storeMenuReadRepository = createStoreMenuReadRepository({ sqliteReader: listStoreMenu });
@@ -126,6 +135,20 @@ const paymentAuthorizationConfirmRepository = createPaymentAuthorizationConfirmR
     confirmAuthorization: authorizeLinePayPaymentInDatabase,
   },
 });
+const paymentAuthorizationCancelRepository = createPaymentAuthorizationCancelRepository({
+  sqliteGateway: {
+    getAuthorizationContext: getLinePayAuthorizationContext,
+    cancelPendingAuthorization: cancelPendingLinePayAuthorizationInDatabase,
+    voidAuthorization: voidLinePayAuthorizationInDatabase,
+    recordVoidFailure: recordLinePayVoidFailureInDatabase,
+  },
+});
+const customerOrderCancelRepository = createCustomerOrderCancelRepository({
+  sqliteGateway: {
+    getEligibility: getCustomerOrderCancellationEligibility,
+    cancelOrder: cancelCustomerOrderInDatabase,
+  },
+});
 if (
   groupBuyActivityWriteRepository.kind === "postgres"
   || merchantMenuRepository.kind === "postgres"
@@ -133,6 +156,8 @@ if (
   || customerOrderReadRepository.kind === "postgres"
   || paymentAuthorizationRequestRepository.kind === "postgres"
   || paymentAuthorizationConfirmRepository.kind === "postgres"
+  || paymentAuthorizationCancelRepository.kind === "postgres"
+  || customerOrderCancelRepository.kind === "postgres"
 ) {
   const requiredPostgresRepositories = [
     authProfileReadRepository,
@@ -144,6 +169,8 @@ if (
     customerOrderReadRepository,
     paymentAuthorizationRequestRepository,
     paymentAuthorizationConfirmRepository,
+    paymentAuthorizationCancelRepository,
+    customerOrderCancelRepository,
   ];
   if (requiredPostgresRepositories.some((repository) => repository.kind !== "postgres")) {
     throw new Error(
@@ -151,8 +178,8 @@ if (
       + "STORE_MENU_READ_RUNTIME, GROUP_BUY_ACTIVITY_READ_RUNTIME, "
       + "GROUP_BUY_ACTIVITY_WRITE_RUNTIME, MERCHANT_MENU_RUNTIME, "
       + "CUSTOMER_ORDER_WRITE_RUNTIME, CUSTOMER_ORDER_READ_RUNTIME, "
-      + "PAYMENT_AUTHORIZATION_REQUEST_RUNTIME, and "
-      + "PAYMENT_AUTHORIZATION_CONFIRM_RUNTIME to be postgres"
+      + "PAYMENT_AUTHORIZATION_REQUEST_RUNTIME, PAYMENT_AUTHORIZATION_CONFIRM_RUNTIME, "
+      + "PAYMENT_AUTHORIZATION_CANCEL_RUNTIME, and CUSTOMER_ORDER_CANCEL_RUNTIME to be postgres"
     );
   }
 }
@@ -695,48 +722,61 @@ const server = http.createServer(async (request, response) => {
       if (!String(body.idempotencyKey || "").trim()) {
         return sendJson(response, 400, { error: "idempotencyKey is required" });
       }
-      const order = getOrderDetail(orderCancelMatch[1]);
+      const order = await customerOrderReadRepository.getOrderDetail(orderCancelMatch[1]);
       if (!order) return sendJson(response, 404, { error: "Order not found" });
       if (!canAccessOrder(authUser, order)) return sendJson(response, 403, { error: "Order access denied" });
       const requestedAt = new Date().toISOString();
-      try {
-        await withOperationLease({
-          lockKey: `order:${order.id}:payment-lifecycle`,
-          leaseMs: 300_000
-        }, async () => {
-          const lockedOrder = getOrderDetail(order.id);
-          if (!lockedOrder) return sendJson(response, 404, { error: "Order not found" });
-      const eligibility = getCustomerOrderCancellationEligibility({
-        orderId: lockedOrder.id,
-        customerUserId: authUser.id,
-        now: requestedAt
-      });
-      if (eligibility.error) return sendJson(response, eligibility.error === "order_not_found" ? 404 : 409, eligibility);
-      if (lockedOrder.paymentStatus === "authorized") {
-        try {
-          await voidLinePayAuthorization({
-            orderId: lockedOrder.id,
-            provider: lockedOrder.latestLinePayAuthorization?.provider || "line_pay",
-            reason: "customer_cancelled_order"
-          });
-        } catch (error) {
-          if (error instanceof PaymentServiceError) return sendJson(response, error.statusCode, error.payload);
-          throw error;
-        }
-      }
-      const result = cancelCustomerOrderInDatabase({
-        orderId: lockedOrder.id,
-        customerUserId: authUser.id,
-        idempotencyKey: String(body.idempotencyKey),
-        reason: body.reason || "customer_withdrawal",
-        now: requestedAt
-      });
-      if (result.error) return sendJson(response, result.error === "order_not_found" ? 404 : 409, result);
-      sendJson(response, 200, result);
-      return;
+      const cancelOperation = async () => {
+        const lockedOrder = await customerOrderReadRepository.getOrderDetail(order.id);
+        if (!lockedOrder) return sendJson(response, 404, { error: "Order not found" });
+        const eligibility = await customerOrderCancelRepository.getEligibility({
+          orderId: lockedOrder.id,
+          customerUserId: authUser.id,
+          now: requestedAt
         });
+        if (eligibility.error) {
+          return sendJson(response, eligibility.error === "order_not_found" ? 404 : 409, eligibility);
+        }
+        if (lockedOrder.paymentStatus === "authorized") {
+          try {
+            await voidLinePayAuthorization({
+              orderId: lockedOrder.id,
+              provider: lockedOrder.latestLinePayAuthorization?.provider || "line_pay",
+              reason: "customer_cancelled_order",
+              authorizationCancelRepository: paymentAuthorizationCancelRepository,
+              operationLockHeld: paymentAuthorizationCancelRepository.kind === "postgres"
+            });
+          } catch (error) {
+            if (error instanceof PaymentServiceError) return sendJson(response, error.statusCode, error.payload);
+            throw error;
+          }
+        }
+        const result = await customerOrderCancelRepository.cancelOrder({
+          orderId: lockedOrder.id,
+          customerUserId: authUser.id,
+          idempotencyKey: String(body.idempotencyKey),
+          reason: body.reason || "customer_withdrawal",
+          now: requestedAt
+        });
+        if (result.error) return sendJson(response, result.error === "order_not_found" ? 404 : 409, result);
+        result.order = await customerOrderReadRepository.getOrderDetail(lockedOrder.id);
+        sendJson(response, 200, result);
+      };
+      try {
+        if (paymentAuthorizationCancelRepository.kind === "postgres") {
+          await paymentAuthorizationCancelRepository.withOperationLock({
+            orderId: order.id,
+            leaseMs: 300_000,
+            now: requestedAt
+          }, cancelOperation);
+        } else {
+          await withOperationLease({
+            lockKey: `order:${order.id}:payment-lifecycle`,
+            leaseMs: 300_000
+          }, cancelOperation);
+        }
       } catch (error) {
-        if (error instanceof OperationLeaseError) {
+        if (error instanceof OperationLeaseError || error?.code === "operation_locked") {
           sendJson(response, 409, {
             error: "operation_locked",
             status: "retry_later",
@@ -987,7 +1027,11 @@ const server = http.createServer(async (request, response) => {
     if (request.method === "GET" && url.pathname === "/api/payments/line-pay/cancel") {
       const transactionId = url.searchParams.get("transactionId");
       const orderId = url.searchParams.get("orderId");
-      const cancelled = await cancelLinePayAuthorization({ transactionId, orderId });
+      const cancelled = await cancelLinePayAuthorization({
+        transactionId,
+        orderId,
+        authorizationCancelRepository: paymentAuthorizationCancelRepository
+      });
       const directRepayment = cancelled.authorization?.paymentFlow === "direct_repayment"
         || cancelled.pendingPayment?.paymentFlow === "direct_repayment";
 
@@ -1393,6 +1437,8 @@ function isSqliteOrderDependentRoute(method, pathname) {
   if (method === "GET" && /^\/api\/orders\/[^/]+$/.test(pathname)) return false;
   if (method === "POST" && pathname === "/api/payments/line-pay/request") return false;
   if (method === "GET" && pathname === "/api/payments/line-pay/confirm") return false;
+  if (method === "GET" && pathname === "/api/payments/line-pay/cancel") return false;
+  if (method === "POST" && /^\/api\/orders\/[^/]+\/cancel$/.test(pathname)) return false;
   return pathname.startsWith("/api/orders/")
     || pathname.startsWith("/api/payments/")
     || pathname.startsWith("/api/pickup-credentials/")

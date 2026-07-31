@@ -222,6 +222,8 @@ CUSTOMER_ORDER_WRITE_RUNTIME=sqlite
 CUSTOMER_ORDER_READ_RUNTIME=sqlite
 PAYMENT_AUTHORIZATION_REQUEST_RUNTIME=sqlite
 PAYMENT_AUTHORIZATION_CONFIRM_RUNTIME=sqlite
+PAYMENT_AUTHORIZATION_CANCEL_RUNTIME=sqlite
+CUSTOMER_ORDER_CANCEL_RUNTIME=sqlite
 AUTH_PROFILE_READ_RUNTIME=sqlite
 ```
 
@@ -236,10 +238,12 @@ CUSTOMER_ORDER_WRITE_RUNTIME=postgres
 CUSTOMER_ORDER_READ_RUNTIME=postgres
 PAYMENT_AUTHORIZATION_REQUEST_RUNTIME=postgres
 PAYMENT_AUTHORIZATION_CONFIRM_RUNTIME=postgres
+PAYMENT_AUTHORIZATION_CANCEL_RUNTIME=postgres
+CUSTOMER_ORDER_CANCEL_RUNTIME=postgres
 AUTH_PROFILE_READ_RUNTIME=postgres
 ```
 
-啟用 PostgreSQL 訂單切片時，Backend 會要求 auth、公開菜單、活動讀取／寫入、商家菜單、顧客建單、訂單讀取與首次 authorization request 全部使用 PostgreSQL。顧客建單會鎖 activity row；列表／明細已讀 PostgreSQL，首次付款 request 會先以 `operation_locks` 防止跨執行個體重複建付款頁，再在同一 transaction 寫 pending authorization、status history、audit 與 reconciliation job。confirm 已使用 activity-first row lock 重驗截止、期限與容量，成功時同步 authorization／order／provider event／history／audit，失敗時執行專用補償 void。改單、取消、revision payment、一般 capture／void、refund、pickup 與 settlement 仍回 `503 customer_order_runtime_mismatch`。受控 PostgreSQL 訂單模式會自動停用仍依賴 SQLite 的 reconciliation／settlement／pickup scheduler；因此目前不是付款 E2E runtime。
+啟用 PostgreSQL 訂單切片時，Backend 會要求 auth、公開菜單、活動讀取／寫入、商家菜單、顧客建單、訂單讀取、authorization request／confirm／cancel 與顧客取消全部使用 PostgreSQL。顧客建單、confirm、cancel redirect、一般 void 與顧客取消交易皆採 activity-first row lock；付款生命週期以 `operation_locks` 防止跨執行個體重複執行。cancel redirect 會交易式寫入失敗狀態、provider event、history、audit 並取消 reconciliation job；已授權訂單取消必須先 void 成功才會取消訂單，provider void 失敗會保留原訂單並留下 event／audit。改單、revision payment、capture、refund、pickup 與 settlement 仍回 `503 customer_order_runtime_mismatch`。受控 PostgreSQL 訂單模式會自動停用仍依賴 SQLite 的 reconciliation／settlement／pickup scheduler；因此目前不是付款 E2E runtime。
 
 本機契約測試會驗證 SQLite 委派、adapter 與 PostgreSQL API 格式：
 
@@ -254,7 +258,10 @@ npm run customer-order-write:smoke
 npm run customer-order-read:smoke
 npm run payment-authorization-request:smoke
 npm run payment-authorization-confirm:smoke
+npm run payment-authorization-cancel:smoke
+npm run customer-order-cancel:smoke
 npm run line-pay-confirm-service:smoke
+npm run line-pay-cancel-service:smoke
 ```
 
 設定本機 `DATABASE_URL` 並套用 PostgreSQL migrations 後，可執行：
@@ -269,7 +276,7 @@ npm run customer-order-postgres-http:smoke
 ```
 PostgreSQL HTTP proofs 會建立臨時資料並自動清除；活動、菜單與顧客建單寫入 proof 都使用第二條連線持有對應 row lock，確認請求等待、釋放後整筆 transaction 成功。建單 proof 另驗證重複訂單、即時改價、容量拒絕、item／option snapshots、history 與 audit。
 
-2026-07-31 已在本機 PostgreSQL 16 驗證訂單建立、列表、明細、首次付款 request context 與 authorization confirm。confirm proof 已驗證跨連線 activity row lock、authorized cups 容量重驗、authorization／order 狀態、provider event、history、audit、retry job 完成與清理為 0；所有開關預設仍是 SQLite，沒有雙寫。一般 cancel／void、capture、改單／取消、pickup／settlement 尚未遷移。
+2026-07-31 已在本機 PostgreSQL 16 驗證訂單建立、列表、明細、首次付款 request context 與 authorization confirm。authorization cancel／一般 void 與顧客取消 repository、service、route 及隔離 HTTP proof 已完成，contract smoke 已通過；本次環境未設定 `DATABASE_URL`，因此新增的取消 HTTP proof 尚待重新執行。所有開關預設仍是 SQLite，沒有雙寫；capture、改單／revision、refund、pickup／settlement 尚未遷移。
 
 
 

@@ -1132,20 +1132,43 @@ function refundErrorMessage(error) {
 }
 
 async function voidLinePayAuthorization(input) {
-  return withLinePayOperationLock(input, () => voidLinePayAuthorizationUnlocked(input));
+  const repository = input.authorizationCancelRepository;
+  const operation = () => voidLinePayAuthorizationUnlocked(input);
+  if (input.operationLockHeld) return operation();
+  if (repository?.kind === "postgres") {
+    try {
+      return await repository.withOperationLock(input, operation);
+    } catch (error) {
+      if (error?.code === "operation_locked") {
+        throw new PaymentServiceError(409, {
+          error: "payment_operation_locked",
+          status: "retry_later",
+          lockKey: error.lock?.lockKey || null,
+          lockedUntil: error.lock?.lockedUntil || null
+        });
+      }
+      throw error;
+    }
+  }
+  return withLinePayOperationLock(input, operation);
 }
 
 async function voidLinePayAuthorizationUnlocked({
   transactionId,
   orderId,
   provider = "line_pay",
-  reason = "line_pay_void_authorization"
+  reason = "line_pay_void_authorization",
+  authorizationCancelRepository,
+  providerVoider
 }) {
-  const context = getLinePayAuthorizationContext({
+  const contextInput = {
     orderId,
     providerTransactionId: transactionId,
     provider
-  });
+  };
+  const context = authorizationCancelRepository
+    ? await authorizationCancelRepository.getAuthorizationContext(contextInput)
+    : getLinePayAuthorizationContext(contextInput);
 
   if (!context) {
     return null;
@@ -1183,16 +1206,41 @@ async function voidLinePayAuthorizationUnlocked({
     });
   }
 
-  const payload = provider === "mock_line_pay"
-    ? createMockLinePayPayload("mock_void", resolvedTransactionId, authorization.orderId)
-    : await voidLinePayPaymentAuthorization(resolvedTransactionId);
-  const voidedAuthorization = voidLinePayAuthorizationInDatabase({
+  let payload;
+  try {
+    const voidProviderPayment = providerVoider || voidLinePayPaymentAuthorization;
+    payload = provider === "mock_line_pay"
+      ? createMockLinePayPayload("mock_void", resolvedTransactionId, authorization.orderId)
+      : await voidProviderPayment(resolvedTransactionId);
+  } catch (error) {
+    const failureInput = {
+      orderId: authorization.orderId,
+      providerTransactionId: resolvedTransactionId,
+      provider,
+      reason: reason + "_void_failed",
+      providerPayload: error.linePayPayload || { message: error.message }
+    };
+    try {
+      if (authorizationCancelRepository) {
+        await authorizationCancelRepository.recordVoidFailure(failureInput);
+      } else {
+        recordLinePayVoidFailureInDatabase(failureInput);
+      }
+    } catch {
+      // Keep the provider error visible to the caller.
+    }
+    throw error;
+  }
+  const persistenceInput = {
     orderId: authorization.orderId,
     providerTransactionId: resolvedTransactionId,
     provider,
     reason,
     providerPayload: payload
-  });
+  };
+  const voidedAuthorization = authorizationCancelRepository
+    ? await authorizationCancelRepository.voidAuthorization(persistenceInput)
+    : voidLinePayAuthorizationInDatabase(persistenceInput);
 
   if (voidedAuthorization?.error) {
     throw new PaymentServiceError(409, voidedAuthorization);
@@ -1206,16 +1254,25 @@ async function voidLinePayAuthorizationUnlocked({
 }
 
 async function cancelLinePayAuthorization(input = {}) {
+  const repository = input.authorizationCancelRepository;
   const lockResourceId = input.orderId || input.transactionId;
   if (!lockResourceId) return cancelLinePayAuthorizationUnlocked(input);
   try {
+    if (repository?.kind === "postgres") {
+      return await repository.withOperationLock({
+        orderId: input.orderId,
+        transactionId: input.transactionId,
+        leaseMs: 120_000,
+        now: input.now
+      }, () => cancelLinePayAuthorizationUnlocked(input));
+    }
     return await withOperationLease({
       lockKey: `order:${lockResourceId}:payment-lifecycle`,
       leaseMs: 120_000,
       now: input.now
     }, () => cancelLinePayAuthorizationUnlocked(input));
   } catch (error) {
-    if (error instanceof OperationLeaseError) {
+    if (error instanceof OperationLeaseError || error?.code === "operation_locked") {
       throw new PaymentServiceError(409, {
         error: "payment_operation_locked",
         status: "retry_later",
@@ -1227,23 +1284,35 @@ async function cancelLinePayAuthorization(input = {}) {
   }
 }
 
-function cancelLinePayAuthorizationUnlocked({ transactionId, orderId }) {
+async function cancelLinePayAuthorizationUnlocked({
+  transactionId,
+  orderId,
+  authorizationCancelRepository
+}) {
   const pendingPayment = findPendingLinePayPayment({ orderId, transactionId });
   const context = pendingPayment
     ? null
-    : getLinePayAuthorizationContext({
-        orderId,
-        providerTransactionId: transactionId
-      });
+    : await (authorizationCancelRepository
+        ? authorizationCancelRepository.getAuthorizationContext({
+            orderId,
+            providerTransactionId: transactionId
+          })
+        : getLinePayAuthorizationContext({
+            orderId,
+            providerTransactionId: transactionId
+          }));
   const resolvedOrderId = pendingPayment?.orderId || context?.authorization?.orderId || orderId;
   const resolvedTransactionId = pendingPayment?.transactionId
     || context?.authorization?.providerAuthorizationId
     || transactionId;
-  const authorization = cancelPendingLinePayAuthorizationInDatabase({
+  const cancellationInput = {
     orderId: resolvedOrderId,
     providerTransactionId: resolvedTransactionId,
     reason: "line_pay_cancel_redirect"
-  });
+  };
+  const authorization = authorizationCancelRepository
+    ? await authorizationCancelRepository.cancelPendingAuthorization(cancellationInput)
+    : cancelPendingLinePayAuthorizationInDatabase(cancellationInput);
 
   deletePendingLinePayPayment({
     orderId: resolvedOrderId,

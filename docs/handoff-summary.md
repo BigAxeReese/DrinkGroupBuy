@@ -23,7 +23,7 @@ project-root/
 
 - Mobile app：React Native + Expo。
 - Backend：Node.js built-in HTTP server。
-- 目前開發資料庫預設為 SQLite；auth、公開菜單、活動讀寫、商家菜單、顧客首次建單、訂單讀取、付款 request 與 confirm 已有受控 PostgreSQL repositories，相關 runtime 必須一起切換且不雙寫。
+- 目前開發資料庫預設為 SQLite；auth、公開菜單、活動讀寫、商家菜單、顧客首次建單、訂單讀取、付款 request／confirm／cancel、一般 authorization void 與顧客取消已有受控 PostgreSQL repositories，相關 runtime 必須一起切換且不雙寫。
 - 未來正式資料庫目標：PostgreSQL。
 - Firebase 不作為主要資料庫方向。
 - Firebase 目前只規劃用於 Auth / Google Login。
@@ -85,7 +85,7 @@ backend/.env
 
 - 顧客與商家訂單列表已在登入、切換頁籤及 App 回到前景時向 Backend 同步；local state 僅作畫面 cache。
 - 團購活動首頁、地圖及部分店家摘要仍混用 local state 或 mock，尚未完全由 Backend 權威資料驅動。
-- LINE Pay reliability 核心已完成；PostgreSQL 建團、商家菜單、顧客建單、訂單讀取、付款 request 與 authorization confirm 已通過真實 runtime／row-lock proof。一般 cancel／void、capture、改單／取消、pickup／settlement migration 與 Sandbox 人工 E2E 尚未完成。
+- LINE Pay reliability 核心已完成；PostgreSQL authorization cancel／一般 void 與顧客取消 code slice、contract smoke、row-lock proof 腳本已完成。本次因沒有 `DATABASE_URL`，新增 HTTP proof 尚未實跑；capture、改單／revision、refund、pickup／settlement migration 與 Sandbox 人工 E2E 尚未完成。
 
 ## 目前 Backend 狀態
 
@@ -157,7 +157,7 @@ backend/
 - 已實作開發 / 補救用手動觸發單一團購結算，也已接上後端啟動時的 deadline settlement scheduler。
 - Scheduler 預設每 30 秒掃描已截止、尚未結算的團購；若 `LINE_PAY_ENV=production`，必須設定 `SETTLEMENT_SCHEDULER_ALLOW_PRODUCTION=true` 才會啟動。
 - 自動檢查包含 `check:sql-safety`、`database-adapter:smoke`、`store-menu-read:smoke`、`payment-reliability:smoke`、`payment-reliability:multiprocess`、`settlement:smoke`、`pickup-expiration:smoke`、`pickup-credential:smoke`、`menu-order:smoke`、`order-flow:smoke`、`order-api:smoke` 與 `postgres-runtime:smoke`；會碰觸 SQLite 的 smoke scripts 完成後會還原開發資料庫。
-- 後端預設與大多數 route 仍使用 SQLite；auth、公開菜單、活動讀寫、商家菜單與首次建單可受控切換 PostgreSQL，沒有雙寫；訂單後續與付款仍是 SQLite。
+- 後端預設仍使用 SQLite；auth、公開菜單、活動讀寫、商家菜單、首次建單、訂單讀取、authorization request／confirm／cancel、一般 void 與顧客取消可受控切換 PostgreSQL，沒有雙寫；其餘訂單後續與付款仍是 SQLite。
 
 ## 2026-07-30～2026-07-31 驗證基準
 
@@ -288,7 +288,7 @@ PostgreSQL v1 決策：
 - 公開菜單仍可由 `STORE_MENU_READ_RUNTIME` 獨立切換；啟用 PostgreSQL 寫入時，auth、公開菜單、活動讀寫與 `MERCHANT_MENU_RUNTIME` 必須一起切換。
 - PostgreSQL migration／seed 草稿與 reliability schema parity 已完成。
 - `database-adapter:smoke` 與 `store-menu-read:smoke` 已通過。
-- 本機實際 PostgreSQL auth、公開菜單、活動讀寫、商家菜單與首次建單 HTTP routes 已驗證通過；訂單後續與付款尚未搬移，沒有雙寫。
+- 本機實際 PostgreSQL auth、公開菜單、活動讀寫、商家菜單、首次建單、訂單讀取、付款 request 與 confirm HTTP routes 已驗證通過；cancel／void／顧客取消 proof 已擴充但本次因未設定 `DATABASE_URL` 尚待執行，沒有雙寫。
 - PostgreSQL draft 拆分 `users`、`user_private_profiles`、`user_public_profiles`，避免商家看到顧客私人資料。
 - PostgreSQL draft 透過 `merchant_users.store_id` 讓每個商家帳號對應一間店。
 - PostgreSQL seed draft 替每個菜單品項建立甜度、冰塊、尺寸、加料選項。
@@ -338,7 +338,7 @@ PostgreSQL v1 決策：
 1. 讓 Mobile 啟動時從 Backend 載入 activities，逐步移除活動、地圖與店家摘要 mock。
 2. LINE Pay 回覆開通後，依 `docs/line-pay-separated-capture-sandbox-checklist.md` 執行人工 E2E。
 3. 將 terminal job 的 `alert_required` 接到正式告警通知管道。
-4. 搬移 PostgreSQL authorization cancel／一般 void 與顧客取消，再處理 capture／settlement。
+4. 設定 `DATABASE_URL` 補跑 PostgreSQL cancel／void／顧客取消 HTTP proof，再處理 capture／settlement。
 5. 細化 revision、容量不足、void 失敗與重新付款的 Mobile 錯誤提示及重試入口。
 6. 補完整 order revision 歷史查詢與 UI 呈現。
 7. 規劃 Expo SDK／React Native 升級，處理目前無法非破壞性修正的依賴警告。
@@ -346,7 +346,7 @@ PostgreSQL v1 決策：
 
 ## 建議下一步
 
-PostgreSQL 訂單建立、列表、明細、首次 authorization request context 與 confirm 已完成，SQLite 仍是預設。下一步搬移 cancel／一般 void 與顧客取消；受控 PostgreSQL 訂單模式目前仍不是付款 E2E runtime。
+PostgreSQL authorization cancel／一般 void 與顧客取消 code slice 已完成，SQLite 仍是預設。下一步先在具備 `DATABASE_URL` 的環境補跑新增 HTTP proof，再搬移 capture／settlement；目前仍不是付款 E2E runtime。
 
 ## 換電腦後怎麼接
 

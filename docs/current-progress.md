@@ -10,7 +10,7 @@
 
 - Firebase Auth + Google Login 已實作，backend 會驗證 Firebase ID token，再依開發資料庫的 `users.firebase_uid`、`user_roles` 與 `merchant_users` 判斷身份。
 - 本機開發已新增 dev-only 身份切換器；只有 backend `AUTH_DEV_MODE=true` 且 mobile `EXPO_PUBLIC_AUTH_MODE=dev` 時才會顯示，可用下拉選單切換 SQLite 內所有有效顧客、商家與開發補救身份。
-- 開發 runtime 預設仍使用 SQLite；三個唯讀切片、商家建立團購、商家菜單管理與顧客首次建單已可切換 PostgreSQL。三個寫入切片必須一起切換且不雙寫；訂單後續操作與付款仍使用 SQLite。
+- 開發 runtime 預設仍使用 SQLite；auth、菜單、活動、首次建單、訂單讀取、authorization request／confirm／cancel 與顧客取消已可受控切換 PostgreSQL。相關寫入切片必須一起切換且不雙寫；capture、改單／revision、refund、pickup 與 settlement 仍使用 SQLite。
 - LINE Pay 付款主幹已拆成獨立模組，已有 request、confirm、cancel、capture、void、refund、訂單修改後重新預授權與截止結算排程。
 - 付款結算 smoke test 已於 2026-07-19 通過，包含達標請款、未達標原價請款／取消授權、排程結算、修改訂單替換授權、截止後拒絕預授權、三次自動請款上限、取餐前 15 分鐘以前的手動重新付款，以及退款 idempotency。
 - 開發資料庫曾暴露同一筆 LINE Pay 失敗請款被無限重試的問題；目前已改為截止時第一次請款，暫時性失敗後每 30 秒重試，總計最多三次，並在重試前查詢 provider 狀態。
@@ -225,7 +225,7 @@
 
 目前重要限制：
 
-- 訂單相關 runtime 預設仍是 SQLite；受控 PostgreSQL 模式已涵蓋首次建單、顧客／商家列表、訂單明細、首次 authorization request context 與 confirm；request／confirm 均有跨執行個體 lease，confirm 以 activity-first row lock 重驗截止、授權期限與容量，且不雙寫。改單、取消、revision payment、一般 capture／void、refund、pickup 與 settlement 仍回 `503 customer_order_runtime_mismatch`。受控 PostgreSQL 訂單模式會自動停用仍讀 SQLite 的 reconciliation／settlement／pickup scheduler，目前不可視為付款 E2E runtime。
+- 訂單相關 runtime 預設仍是 SQLite；受控 PostgreSQL 模式已涵蓋首次建單、顧客／商家列表、訂單明細、首次 authorization request／confirm／cancel、一般 authorization void 與顧客取消。取消流程具有跨執行個體 lease、activity-first row lock、provider 失敗 event／audit 與訂單取消 idempotency，且不雙寫。改單／revision payment、capture、refund、pickup 與 settlement 仍回 `503 customer_order_runtime_mismatch`。受控 PostgreSQL 訂單模式會自動停用仍讀 SQLite 的 reconciliation／settlement／pickup scheduler，目前不可視為付款 E2E runtime。
 - 如果 mobile local activity 已過期或不存在於後端，送單會失敗。
 
 ## Database / 資料庫
@@ -292,10 +292,10 @@ PostgreSQL 方向：
 
 目前 PostgreSQL 狀態：
 
-- PostgreSQL 已完成 auth／公開菜單／活動／訂單讀取，以及商家建團、商家菜單、顧客首次建單、首次付款 request 與 authorization confirm 受控切片。
-- 所有開關預設仍是 `sqlite`，沒有雙寫。建單與 confirm 都採 activity-first lock；一般 cancel／void、capture、改單／取消、pickup／settlement 尚未遷移。
+- PostgreSQL 已完成 auth／公開菜單／活動／訂單讀取，以及商家建團、商家菜單、顧客首次建單、付款 request／confirm／cancel、一般 authorization void 與顧客取消受控切片。
+- 所有開關預設仍是 `sqlite`，沒有雙寫。建單、confirm、cancel／void 與顧客取消都採 activity-first lock；capture、改單／revision、refund、pickup／settlement 尚未遷移。
 - 本機 PostgreSQL 16 已套用 `001_initial_postgres.sql` 與 `002_seed_dev_postgres.sql`；服務只監聽 `localhost`，`postgres-runtime:smoke` 已驗證連線、可靠性表、seed 公開菜單、活動列表與商家角色／門市綁定契約。
-- 公開菜單、活動、auth、建團、商家菜單、顧客建單、訂單讀取、付款 request context 與 confirm 均已完成真實 PostgreSQL proof；confirm proof 驗證跨連線 activity lock、容量重驗與付款稽核清理為 0。
+- 新增 `payment-authorization-cancel:smoke`、`customer-order-cancel:smoke` 與 `line-pay-cancel-service:smoke` 並通過；原有 request／confirm 真實 PostgreSQL proof 已通過。新增取消 HTTP proof 已寫入，但本次因未設定 `DATABASE_URL` 而跳過，尚不能標示為真實 runtime 已驗證。
 - PostgreSQL draft 已拆分 `users`、`user_private_profiles`、`user_public_profiles`。
 - PostgreSQL draft 中每個商家帳號透過 `merchant_users.store_id` 對應一間店；不分 owner／manager／staff，API 相容欄位 `permissionLevel` 在 PostgreSQL 回傳 `null`。
 - PostgreSQL seed draft 有 4 個顧客、7 個商家、1 個 dev/admin 補救帳號、7 間店、8 個菜單項目與 96 個客製化選項。
@@ -326,8 +326,8 @@ database/test/drink-group-buy-test.sqlite
 
 建議下一步：
 
-1. 搬移 PostgreSQL authorization cancel／一般 void 與顧客取消，保持 provider 結果、order、history／audit 可恢復；仍禁止 SQLite／PostgreSQL 雙寫。
-2. 接著搬移 capture 與 settlement 所需 authorization context、retry job claim 及 activity/order locks。
+1. 重新設定本機 `DATABASE_URL`，執行 `npm run customer-order-postgres-http:smoke`，完成 cancel redirect、mock void、顧客取消、row lock 與清理歸零的真實 runtime 證明。
+2. 接著搬移 capture 與 settlement 所需 authorization context、retry job claim 及 activity/order locks；仍禁止 SQLite／PostgreSQL 雙寫。
 3. LINE Pay 核准分離式請款後，執行 sandbox reconciliation、capture、void 與 lease takeover 人工端對端驗證。
 4. PostgreSQL settlement 寫入 vertical slice 時必須顯式寫入 `003` 的五個快照欄位；在此之前維持 SQLite runtime 與無雙寫。
 5. 建立站內通知／delivery schema 與正式告警管道，並細化 revision、容量不足及 void 失敗提示。
