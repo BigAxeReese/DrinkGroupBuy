@@ -147,7 +147,10 @@ async function verifyPostgresContract() {
   });
   assert.equal(calls.length, 4);
   for (const call of calls) {
-    assert.deepEqual(call.parameters, ["store-001"]);
+    assert.deepEqual(
+      call.parameters,
+      call.sql.includes("$2") ? ["store-001", false] : ["store-001"]
+    );
     assert.match(call.sql, /\$1/);
     assert.doesNotMatch(call.sql, /\?/);
   }

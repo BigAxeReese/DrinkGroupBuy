@@ -1,6 +1,6 @@
 # API 清單與候選項
 
-最後更新：2026-07-30
+最後更新：2026-07-31
 
 ## 語言規則
 
@@ -77,9 +77,9 @@ API JSON 使用 `camelCase`。已實作 routes 只對目前開發 prototype 具�
 | 最終商業規則  | `deadlineAt` 必須在活動發布或開放招募後 24 小時內；取餐時間由店家開團時設定，顧客加入前可見；取餐開始至少晚於截止時間 30 分鐘，表單預設為截止後 30 分鐘 |
 | 已實作驗證    | SQLite 與 PostgreSQL 都會逐級驗證可達杯數區間；每杯至少折 1 元，且不得高於店內最低可售單杯權威金額 |
 | 可切換資料來源 | `GROUP_BUY_ACTIVITY_WRITE_RUNTIME=sqlite|postgres`；預設 `sqlite`，不雙寫 |
-| PostgreSQL transaction | 先 `FOR UPDATE` 鎖定 merchant/store 授權邊界，再鎖菜單資料；同 transaction 寫入 activity、tiers、notice、初始 status history 與 audit log |
-| PostgreSQL 限制 | Backend 要求 auth、公開菜單、活動讀取同步使用 PostgreSQL；仍依賴 SQLite 的商家菜單管理 API 會回傳 `503 merchant_menu_runtime_mismatch` |
-| 尚缺規則      | PostgreSQL 菜單管理與正式 runtime 切換策略；PostgreSQL v1 已決定不拆 owner／manager／staff                                                                                                    |
+| PostgreSQL transaction | 先 `FOR UPDATE` 鎖定 store row，再驗證 merchant 授權並鎖菜單資料；同 transaction 寫入 activity、tiers、notice、初始 status history 與 audit log |
+| PostgreSQL 限制 | Backend 要求 auth、公開菜單、活動讀取／寫入與 `MERCHANT_MENU_RUNTIME` 同步使用 PostgreSQL；訂單與付款仍是 SQLite，不代表完整 runtime 已切換 |
+| 尚缺規則      | PostgreSQL 顧客建單、付款與正式 runtime 切換策略；PostgreSQL v1 已決定不拆 owner／manager／staff                                                                                              |
 
 ### 開發 / 補救用：後端取消團購活動
 
@@ -230,6 +230,8 @@ API JSON 使用 `camelCase`。已實作 routes 只對目前開發 prototype 具�
 | `GET /api/merchant/stores/:storeId/menu`                     | 店家查看完整菜單             | 已實作；需 merchant-store permission，包含停售品項／選項 |
 | `POST /api/merchant/stores/:storeId/menu-items`              | 店家新增菜單品項             | 已實作；驗證價格、分類、選項、價差及明確選擇上限 |
 | `PATCH /api/merchant/stores/:storeId/menu-items/:menuItemId` | 店家修改品項或上／下架       | 已實作；未提交的舊選項採軟停用，保留歷史訂單 FK 與快照 |
+
+菜單 runtime：`MERCHANT_MENU_RUNTIME=sqlite|postgres`，預設 `sqlite`。PostgreSQL 建立／修改會先鎖 store row、再驗證 merchant-store access，並在同一 transaction 更新品項、規則、選項與 audit log；折扣衝突會 rollback。
 
 菜單查詢規則：活動菜單由 `menu_items.store_id = activity.store_id AND menu_items.is_available = 1` 決定，不需要活動與飲品的多對多關聯。建立訂單、更新 pending 訂單與建立 revision 時，後端均會重新驗證並以資料庫價格重算金額；client 金額不一致時回傳 `order_price_changed`，品項／選項失效或選擇數不符時回傳 `order_items_invalid`。
 

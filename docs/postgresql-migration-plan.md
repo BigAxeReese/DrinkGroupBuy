@@ -248,16 +248,17 @@ payment_status text not null check (payment_status in ('pending', 'authorized', 
 
 ### Phase 5：建立 backend repository layer
 
-以 adapter / repository layer 逐步抽換資料庫存取。目前前三個唯讀切片與第一個受控寫入切片已完成程式、真實 runtime 與 HTTP source proof：
+以 adapter / repository layer 逐步抽換資料庫存取。目前三個唯讀切片與兩個受控寫入切片已完成程式、真實 runtime 與 HTTP source proof：
 
 1. Customer public store menu read（已完成；repository、真實 PostgreSQL runtime 與 HTTP source proof 均通過）。
 2. List activities（已完成；repository、真實 PostgreSQL runtime 與 HTTP source proof 均通過）。
 3. Login／role／merchant-store permission（已完成；repository、真實 PostgreSQL runtime 與 HTTP source proof 均通過）。
 4. Merchant creates activity（已完成；transaction、merchant/store row lock、菜單價格鎖定、idempotency 與 HTTP source proof 均通過）。
-5. Customer creates order。
-6. LINE Pay authorization confirm。
+5. Merchant reads／writes full store menu（已完成；store-first row lock、折扣回歸防護、audit log、HTTP source proof 與清理均通過）。
+6. Customer creates order。
+7. LINE Pay authorization confirm。
 
-商家完整菜單查詢／修改仍使用 SQLite，因此 PostgreSQL 活動寫入目前只供受控驗證。正式啟用前必須先遷移菜單管理，且 PostgreSQL 菜單寫入需先鎖相同 store row，再更新 menu rows。
+商家菜單與建立團購已使用同一 PostgreSQL 資料來源與 store-first lock 順序；訂單、付款與結算仍使用 SQLite，因此尚未完成整體 runtime 切換。
 
 要求：
 
@@ -292,6 +293,7 @@ DATABASE_URL=postgres://user:password@localhost:5432/drink_group_buy
 STORE_MENU_READ_RUNTIME=sqlite
 GROUP_BUY_ACTIVITY_READ_RUNTIME=sqlite
 GROUP_BUY_ACTIVITY_WRITE_RUNTIME=sqlite
+MERCHANT_MENU_RUNTIME=sqlite
 AUTH_PROFILE_READ_RUNTIME=sqlite
 AUTH_SESSION_SECRET=...
 LINE_PAY_CHANNEL_ID=...
@@ -342,9 +344,9 @@ PostgreSQL 遷移後，以下流程需要 transaction：
 
 ## 下一步
 
-下一步搬移商家菜單查詢／修改到 PostgreSQL，沿用 activity write 的 store-first lock 順序，使菜單價格驗證與建團 transaction 使用同一資料來源。完成後再進入顧客建立訂單與 activity capacity row lock；仍禁止 SQLite／PostgreSQL 雙寫。
+下一步搬移顧客建立訂單到 PostgreSQL transaction，以 activity capacity row lock 同步驗證截止時間、剩餘杯數與菜單價格。完成後再處理 payment authorization confirm 與 authorized cups 更新；仍禁止 SQLite／PostgreSQL 雙寫。
 
-## 2026-07-30 驗證進度
+## 2026-07-30～2026-07-31 驗證進度
 
 - `001_initial_postgres.sql` 已補上 `payment_reliability_jobs` 與 `operation_locks`，與目前 SQLite 可靠性核心 schema 對齊。
 - Root 已安裝 `pg`，`backend/database/` 提供 SQLite／PostgreSQL adapter、query、execute、transaction、health check 與 close 邊界。
@@ -357,9 +359,10 @@ PostgreSQL 遷移後，以下流程需要 transaction：
 - PostgreSQL-only 臨時顧客已完成 dev session 與 bearer token HTTP source proof，測試後資料已刪除。
 - PostgreSQL v1 以 `merchant_users.store_id` 授權，不分店家內部權限等級；相容欄位 `permissionLevel` 回傳 `null`。
 - 第一個 PostgreSQL 寫入切片已完成：商家建立團購以 `GROUP_BUY_ACTIVITY_WRITE_RUNTIME` 獨立切換，預設仍是 SQLite 且不雙寫。
-- PostgreSQL transaction 先鎖 merchant/store 授權 row，再鎖菜單 rows，寫入 activity、tiers、notice、初始 status history 與 audit log。
+- PostgreSQL 建團與商家菜單寫入統一先鎖 store row，再驗證 merchant 授權及鎖定所需菜單 rows；建團會寫入 activity、tiers、notice、初始 status history 與 audit log。
 - 跨連線 HTTP proof 已確認鎖定期間請求等待、釋放後成功、重複 idempotency key 只建立一次，測試資料最後清除為 0。
-- 商家菜單修改、訂單與付款仍使用 SQLite；活動寫入目前只供受控驗證，下一步先遷移 PostgreSQL 菜單管理。
+- 商家完整菜單查詢／建立／修改／停售已完成 PostgreSQL repository 與跨連線 HTTP proof；公開菜單會排除停售項目，商家完整菜單仍可讀取，測試資料與 audit log 均已清除。
+- 訂單與付款仍使用 SQLite；下一步是 PostgreSQL 顧客建單 transaction 與 activity capacity row lock。
 
 ## 2026-07-31 結算快照 migration 驗證
 

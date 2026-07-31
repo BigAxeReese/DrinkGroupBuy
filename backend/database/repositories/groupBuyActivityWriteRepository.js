@@ -55,16 +55,20 @@ async function createPostgresGroupBuyActivity(database, input) {
   let tiers = normalizeWriteTiers(input.tiers);
 
   return database.transaction(async (transaction) => {
+    const storeResult = await transaction.query(`
+      SELECT id, merchant_id, name, address, latitude, longitude
+      FROM stores
+      WHERE id = $1
+      FOR UPDATE
+    `, [input.storeId]);
+    const store = storeResult.rows[0];
+    if (!store) {
+      return { error: "store_access_denied", storeId: input.storeId };
+    }
+
     const accessResult = await transaction.query(`
-      SELECT
-        store_record.id,
-        store_record.merchant_id,
-        store_record.name,
-        store_record.address,
-        store_record.latitude,
-        store_record.longitude
+      SELECT merchant_user.id
       FROM merchant_users merchant_user
-      JOIN stores store_record ON store_record.id = merchant_user.store_id
       JOIN users user_account ON user_account.id = merchant_user.user_id
       JOIN user_roles user_role
         ON user_role.user_id = user_account.id
@@ -74,10 +78,9 @@ async function createPostgresGroupBuyActivity(database, input) {
         AND merchant_user.store_id = $2
         AND merchant_user.status = 'active'
         AND user_account.status = 'active'
-      FOR UPDATE OF merchant_user, store_record, user_account, user_role
+      FOR UPDATE OF merchant_user, user_account, user_role
     `, [input.createdByUserId, input.storeId]);
-    const store = accessResult.rows[0];
-    if (!store) {
+    if (!accessResult.rows[0]) {
       return { error: "store_access_denied", storeId: input.storeId };
     }
 

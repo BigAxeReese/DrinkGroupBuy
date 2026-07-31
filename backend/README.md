@@ -196,7 +196,7 @@ npm run payment-reliability:multiprocess
 
 ## PostgreSQL runtime 垂直切片
 
-大部分業務資料仍使用 SQLite；公開菜單、團購活動列表、登入／bearer token 權限解析，以及商家建立團購，已可各自透過 repository 切換 SQLite 或 PostgreSQL，不會雙寫。前三項是唯讀切片；商家建立團購是第一個受控 PostgreSQL 寫入切片。商家菜單修改、訂單與付款仍固定使用 SQLite。
+大部分業務資料仍使用 SQLite；公開菜單、團購活動列表、登入／bearer token 權限解析、商家建立團購，以及商家完整菜單查詢／修改，已可透過 repository 切換 SQLite 或 PostgreSQL，不會雙寫。前三項是唯讀切片；後兩項是受控 PostgreSQL 寫入切片。訂單與付款仍固定使用 SQLite。
 
 - `backend/database/sqliteAdapter.js`
 - `backend/database/postgresAdapter.js`
@@ -205,6 +205,7 @@ npm run payment-reliability:multiprocess
 - `backend/database/repositories/groupBuyActivityReadRepository.js`
 - `backend/database/repositories/authProfileReadRepository.js`
 - `backend/database/repositories/groupBuyActivityWriteRepository.js`
+- `backend/database/repositories/merchantMenuRepository.js`
 
 預設不改變目前行為：
 
@@ -212,6 +213,7 @@ npm run payment-reliability:multiprocess
 STORE_MENU_READ_RUNTIME=sqlite
 GROUP_BUY_ACTIVITY_READ_RUNTIME=sqlite
 GROUP_BUY_ACTIVITY_WRITE_RUNTIME=sqlite
+MERCHANT_MENU_RUNTIME=sqlite
 AUTH_PROFILE_READ_RUNTIME=sqlite
 ```
 
@@ -221,10 +223,11 @@ AUTH_PROFILE_READ_RUNTIME=sqlite
 STORE_MENU_READ_RUNTIME=postgres
 GROUP_BUY_ACTIVITY_READ_RUNTIME=postgres
 GROUP_BUY_ACTIVITY_WRITE_RUNTIME=postgres
+MERCHANT_MENU_RUNTIME=postgres
 AUTH_PROFILE_READ_RUNTIME=postgres
 ```
 
-`GROUP_BUY_ACTIVITY_WRITE_RUNTIME=postgres` 目前只供受控驗證。Backend 會要求 auth、公開菜單與活動讀取也使用 PostgreSQL；仍依賴 SQLite 的商家菜單查詢／修改會回傳 `503 merchant_menu_runtime_mismatch`，避免菜單價格與活動折扣驗證跨資料庫失去一致性。
+啟用 PostgreSQL 寫入時，Backend 會要求 auth、公開菜單、活動讀取／寫入與商家菜單管理全部使用 PostgreSQL。商家菜單與建立團購都先鎖定同一筆 store row，再進行權限、菜單價格與折扣驗證，因此不再有 `merchant_menu_runtime_mismatch`；訂單與付款尚未遷移，這仍是受控切片而非完整 PostgreSQL runtime。
 
 本機契約測試會驗證 SQLite 委派、adapter 與 PostgreSQL API 格式：
 
@@ -234,6 +237,7 @@ npm run store-menu-read:smoke
 npm run group-buy-activity-read:smoke
 npm run auth-profile-read:smoke
 npm run group-buy-activity-write:smoke
+npm run merchant-menu-write:smoke
 ```
 
 設定本機 `DATABASE_URL` 並套用 PostgreSQL migrations 後，可執行：
@@ -243,6 +247,7 @@ npm run postgres-runtime:smoke
 npm run group-buy-activity-postgres-http:smoke
 npm run auth-profile-postgres-http:smoke
 npm run group-buy-activity-postgres-write-http:smoke
+npm run merchant-menu-postgres-http:smoke
 ```
 三個 PostgreSQL HTTP proof 會建立臨時資料並自動清除；活動寫入 proof 額外以第二條連線持有 merchant/store row lock，確認建立請求會等待鎖、釋放後整筆 transaction 成功，且相同 idempotency key 只產生一個活動。
 

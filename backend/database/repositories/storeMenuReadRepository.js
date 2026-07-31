@@ -37,7 +37,7 @@ function createStoreMenuReadRepository(input = {}) {
   });
   return {
     kind: "postgres",
-    getPublicStoreMenu: (storeId) => getPostgresPublicStoreMenu(database, storeId),
+    getPublicStoreMenu: (storeId) => getPostgresStoreMenu(database, storeId),
     close: async () => {
       if (ownsDatabase) await database.close();
     },
@@ -45,6 +45,11 @@ function createStoreMenuReadRepository(input = {}) {
 }
 
 async function getPostgresPublicStoreMenu(database, storeId) {
+  return getPostgresStoreMenu(database, storeId);
+}
+
+async function getPostgresStoreMenu(database, storeId, input = {}) {
+  const includeUnavailable = Boolean(input.includeUnavailable);
   const storeResult = await database.query(`
     SELECT id, merchant_id, name, address, phone, business_status
     FROM stores
@@ -58,18 +63,18 @@ async function getPostgresPublicStoreMenu(database, storeId) {
       SELECT id, store_id, name, category, description, base_price, is_available
       FROM menu_items
       WHERE store_id = $1
-        AND is_available = true
+        AND ($2::boolean = true OR is_available = true)
       ORDER BY category ASC, name ASC, id ASC
-    `, [storeId]),
+    `, [storeId, includeUnavailable]),
     database.query(`
       SELECT option.id, option.menu_item_id, option.option_type, option.label,
              option.price_delta, option.sort_order, option.is_available
       FROM customization_options option
       JOIN menu_items menu_item ON menu_item.id = option.menu_item_id
       WHERE menu_item.store_id = $1
-        AND option.is_available = true
+        AND ($2::boolean = true OR option.is_available = true)
       ORDER BY option.menu_item_id, option.option_type, option.sort_order, option.id
-    `, [storeId]),
+    `, [storeId, includeUnavailable]),
     database.query(`
       SELECT rule.menu_item_id, rule.option_type, rule.min_selections, rule.max_selections
       FROM menu_item_customization_rules rule
@@ -90,12 +95,13 @@ async function getPostgresPublicStoreMenu(database, storeId) {
     menuItems: menuItemsResult.rows.map((menuItem) => mapMenuItem(
       menuItem,
       optionsResult.rows.filter((option) => option.menu_item_id === menuItem.id),
-      rulesResult.rows.filter((rule) => rule.menu_item_id === menuItem.id)
+      rulesResult.rows.filter((rule) => rule.menu_item_id === menuItem.id),
+      includeUnavailable
     )),
   };
 }
 
-function mapMenuItem(row, options, rules) {
+function mapMenuItem(row, options, rules, includeUnavailable = false) {
   const optionTypeOrder = ["size", "sweetness", "ice", "topping"];
   const groupTypes = [...new Set([
     ...optionTypeOrder,
@@ -124,6 +130,7 @@ function mapMenuItem(row, options, rules) {
         maxSelections: configuredRule?.max_selections ?? fallback.maxSelections,
         options: options
           .filter((option) => option.option_type === optionType)
+          .filter((option) => includeUnavailable || toBoolean(option.is_available))
           .map((option) => ({
             id: option.id,
             optionType,
@@ -143,5 +150,7 @@ function toBoolean(value) {
 module.exports = {
   createStoreMenuReadRepository,
   getPostgresPublicStoreMenu,
+  getPostgresStoreMenu,
+  mapMenuItem,
   resolveStoreMenuReadRuntime,
 };

@@ -48,6 +48,7 @@ async function main() {
         STORE_MENU_READ_RUNTIME: "postgres",
         GROUP_BUY_ACTIVITY_READ_RUNTIME: "postgres",
         GROUP_BUY_ACTIVITY_WRITE_RUNTIME: "postgres",
+        MERCHANT_MENU_RUNTIME: "postgres",
         AUTH_SESSION_SECRET: "postgres-activity-write-http-smoke-secret",
         PAYMENT_RECONCILIATION_ENABLED: "false",
         SETTLEMENT_SCHEDULER_ENABLED: "false",
@@ -71,11 +72,8 @@ async function main() {
       `${baseUrl}/api/merchant/stores/store-001/menu`,
       { headers: { Authorization: `Bearer ${session.token}` } }
     );
-    assert.equal(merchantMenuResponse.status, 503);
-    assert.equal(
-      (await merchantMenuResponse.json()).error,
-      "merchant_menu_runtime_mismatch"
-    );
+    assert.equal(merchantMenuResponse.status, 200);
+    assert.ok((await merchantMenuResponse.json()).menuItems.length > 0);
 
     lockClient = await lockPool.connect();
     await lockClient.query("BEGIN");

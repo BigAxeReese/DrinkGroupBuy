@@ -1,6 +1,6 @@
 # 目前進度
 
-最後更新：2026-07-30
+最後更新：2026-07-31
 
 換電腦或交接給其他 AI 時，請先閱讀 `docs/handoff-summary.md`。
 
@@ -10,7 +10,7 @@
 
 - Firebase Auth + Google Login 已實作，backend 會驗證 Firebase ID token，再依開發資料庫的 `users.firebase_uid`、`user_roles` 與 `merchant_users` 判斷身份。
 - 本機開發已新增 dev-only 身份切換器；只有 backend `AUTH_DEV_MODE=true` 且 mobile `EXPO_PUBLIC_AUTH_MODE=dev` 時才會顯示，可用下拉選單切換 SQLite 內所有有效顧客、商家與開發補救身份。
-- 開發 runtime 預設仍使用 SQLite；三個唯讀切片與商家建立團購寫入可由各自環境變數獨立切換 PostgreSQL。活動寫入開關為 `GROUP_BUY_ACTIVITY_WRITE_RUNTIME`；目前只供受控驗證，沒有雙寫，商家菜單修改、訂單與付款仍使用 SQLite。
+- 開發 runtime 預設仍使用 SQLite；三個唯讀切片、商家建立團購與商家菜單管理已可切換 PostgreSQL。兩個寫入切片必須與 auth／公開菜單／活動讀取一起切換，沒有雙寫；訂單與付款仍使用 SQLite。
 - LINE Pay 付款主幹已拆成獨立模組，已有 request、confirm、cancel、capture、void、refund、訂單修改後重新預授權與截止結算排程。
 - 付款結算 smoke test 已於 2026-07-19 通過，包含達標請款、未達標原價請款／取消授權、排程結算、修改訂單替換授權、截止後拒絕預授權、三次自動請款上限、取餐前 15 分鐘以前的手動重新付款，以及退款 idempotency。
 - 開發資料庫曾暴露同一筆 LINE Pay 失敗請款被無限重試的問題；目前已改為截止時第一次請款，暫時性失敗後每 30 秒重試，總計最多三次，並在重試前查詢 provider 狀態。
@@ -22,6 +22,7 @@
 - 三次自動請款失敗或遇到不可重試錯誤後，顧客可在取餐開始前 15 分鐘以前使用結算後金額直接重新付款；後端會先查原交易狀態並解除仍有效的原授權，付款成功後訂單改為已扣款並加入製作流程。
 - 已新增 `npm run check:sql-safety`，用來檢查 backend、database 與 scripts 內是否出現未審核的動態 SQL、SQL 字串插值或字串相加，降低後續開發時引入 SQL 注入風險。
 - 2026-07-30 已完成 SQL safety、database adapter、真實 PostgreSQL runtime、SQLite／PostgreSQL 公開菜單與團購活動列表 repositories／HTTP source proofs、付款可靠性／雙程序 lease、付款結算、取貨碼、菜單／訂單權威與訂單列表／取消 smoke 回歸；41 個 Backend／script／database JavaScript 檔語法通過，SQLite `integrity_check = ok`、`foreign_key_check = 0`。
+- 2026-07-31 已完成 PostgreSQL 商家完整菜單查詢、建立、修改與停售 transaction；跨連線 HTTP proof 驗證 store-first row lock、公開菜單過濾、選項軟停用、稽核紀錄與測試資料歸零。
 - 訂單流程新增 `npm run order-flow:smoke` 與 `npm run order-api:smoke`，覆蓋 cursor、門市／活動篩選、匿名顧客、重複下單、取消鎖定、取消冪等、idempotency key 衝突及跨店 403。
 - 已執行非強制 `npm audit fix`；最近一次結果為 Root `11` 項（`6 moderate`、`5 high`、`0 critical`），Mobile `46` 項（`1 low`、`11 moderate`、`33 high`、`1 critical`）。剩餘項目需要 Expo／React Native 或相關傳遞依賴的主版本升級，因此未使用 `--force` 破壞目前 Expo SDK 51 相容性。
 - 系統分析書已整理為五大功能，五組描述性綱目已更新，並已抽出 `docs/system-analysis-extracted.md`；各小節使用個案描述與活動圖仍待更新。
@@ -324,8 +325,8 @@ database/test/drink-group-buy-test.sqlite
 
 建議下一步：
 
-1. 搬移商家菜單查詢／修改到 PostgreSQL，沿用 activity write 的 store-first lock 順序，消除目前活動寫入受控模式的跨資料庫菜單限制。
-2. 菜單與活動建立可在同一 PostgreSQL runtime 穩定後，再規劃顧客訂單建立 transaction 與 activity capacity row lock。
+1. 規劃顧客建立訂單的 PostgreSQL transaction，以 activity capacity row lock 同步驗證截止時間、剩餘杯數、菜單價格與客製化選項。
+2. 訂單 transaction 穩定後，再搬移 payment authorization confirm 與 authorized cups 更新；仍禁止 SQLite／PostgreSQL 雙寫。
 3. LINE Pay 核准分離式請款後，執行 sandbox reconciliation、capture、void 與 lease takeover 人工端對端驗證。
 4. PostgreSQL settlement 寫入 vertical slice 時必須顯式寫入 `003` 的五個快照欄位；在此之前維持 SQLite runtime 與無雙寫。
 5. 建立站內通知／delivery schema 與正式告警管道，並細化 revision、容量不足及 void 失敗提示。

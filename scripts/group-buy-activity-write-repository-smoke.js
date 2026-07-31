@@ -49,8 +49,12 @@ async function verifyPostgresTransactionContract() {
   assert.equal(activity.estimatedDiscountPerCup, 0);
   assert.equal(activity.tiers.length, 1);
 
+  const storeLockCall = calls.find((call) => (
+    call.sql.includes("FROM stores") && call.sql.includes("FOR UPDATE")
+  ));
+  assert.deepEqual(storeLockCall.parameters, ["store-001"]);
   const accessCall = calls.find((call) => call.sql.includes("FROM merchant_users"));
-  assert.match(accessCall.sql, /FOR UPDATE OF merchant_user, store_record/);
+  assert.match(accessCall.sql, /FOR UPDATE OF merchant_user, user_account, user_role/);
   assert.deepEqual(accessCall.parameters, ["user-merchant-001", "store-001"]);
   assert.ok(calls.some((call) => (
     call.sql.includes("FROM menu_items") && call.sql.includes("FOR SHARE")
@@ -138,6 +142,16 @@ function createFakePostgresDatabase(calls, options = {}) {
   };
   async function query(sql, parameters = []) {
     calls.push({ sql, parameters });
+    if (sql.includes("FROM stores") && sql.includes("FOR UPDATE")) {
+      return { rows: [{
+        id: "store-001",
+        merchant_id: "merchant-001",
+        name: "青山手作茶 中科店",
+        address: "台中市北區三民路三段 150 號",
+        latitude: 24.1511,
+        longitude: 120.6817,
+      }] };
+    }
     if (sql.includes("FROM merchant_users")) {
       return { rows: options.denyAccess ? [] : [{
         id: "store-001",

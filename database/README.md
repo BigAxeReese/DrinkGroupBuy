@@ -4,7 +4,7 @@
 
 目前 backend runtime 預設與多數流程使用 SQLite，主要目的是讓開發階段可以先把資料流程跑起來。
 
-PostgreSQL 是未來正式資料庫方向。`database/migrations/` 保存 schema/seed draft，`backend/database/` 已有隔離 adapter；公開菜單與團購活動列表已有獨立唯讀切片，`backend/db.js` 尚未整體切換。
+PostgreSQL 是未來正式資料庫方向。`database/migrations/` 保存 schema/seed draft，`backend/database/` 已有隔離 adapter；三個唯讀切片、商家建立團購與商家菜單管理已可受控切換，`backend/db.js` 尚未整體切換。
 
 ## 目前用途
 
@@ -23,7 +23,7 @@ PostgreSQL 是未來正式資料庫方向。`database/migrations/` 保存 schema
 | `seed-dev-db.js` | 匯入 `seed-dev.sql` |
 | `drink-group-buy-dev.sqlite` | 產生出的本機資料庫檔案，不應上傳 Git |
 | `migrations/001_initial_postgres.sql` | PostgreSQL v1 schema draft，含付款可靠性工作與 operation lease |
-| `migrations/002_seed_dev_postgres.sql` | PostgreSQL dev seed；目前供公開菜單與團購活動列表唯讀 runtime 驗證使用 |
+| `migrations/002_seed_dev_postgres.sql` | PostgreSQL dev seed；供 auth、菜單與團購活動讀寫 runtime 驗證使用 |
 | `docker-compose.postgres.yml` | 本機 PostgreSQL dev container 設定 |
 | `test/` | 測試/展示用資料，不是正式 schema 來源 |
 
@@ -46,7 +46,7 @@ database/drink-group-buy-dev.sqlite
 
 ## PostgreSQL draft 驗證方式
 
-目前 PostgreSQL 已用於 schema／seed、adapter、顧客公開菜單與團購活動列表 HTTP 唯讀切片驗證；其餘 HTTP route 仍使用 SQLite。
+目前 PostgreSQL 已用於 schema／seed、adapter、auth／公開菜單／活動列表唯讀切片，以及商家建團與菜單管理寫入驗證；訂單與付款 HTTP route 仍使用 SQLite。
 
 本機沒有安裝 `psql` 也可以用 Docker container 內的 `psql` 驗證：
 
@@ -83,6 +83,7 @@ postgres://drink_group_buy:drink_group_buy_dev_password@localhost:5432/drink_gro
 - 2026-07-30：本機 PostgreSQL 16 已重新套用 `001`／`002`，`npm run database-adapter:smoke` 與真實 `npm run postgres-runtime:smoke` 均通過；服務只監聽 `localhost`。
 - 2026-07-30：公開菜單 HTTP route 已用 PostgreSQL 專用臨時品項證明資料來源，驗證後臨時品項已清除。
 - 2026-07-30：團購活動列表 HTTP route 已用 PostgreSQL 專用臨時活動證明資料來源，驗證後活動與級距均已清除。
+- 2026-07-31：商家菜單建立／修改／停售已通過 PostgreSQL transaction、store row lock 與 HTTP proof；臨時品項、選項與 audit log 均已清除。
 - 驗證後 runtime 資料仍為 0 group_buy_activities、0 promotion_tiers、0 orders、0 payment_authorizations、0 payment_captures、0 pickup_credentials。
 
 ## 目前主要資料表
@@ -113,7 +114,7 @@ postgres://drink_group_buy:drink_group_buy_dev_password@localhost:5432/drink_gro
 
 ## 目前與後端的關係
 
-後端預設與多數流程仍讀寫 SQLite；顧客公開菜單 `GET /api/stores/:storeId/menu` 與團購活動列表 `GET /api/group-buy-activities` 已可透過各自 repository 切換 PostgreSQL，沒有雙寫，`backend/db.js` 尚未整體搬移。
+後端預設與多數流程仍讀寫 SQLite；auth、公開菜單、團購活動讀取／建立與商家菜單管理已有 PostgreSQL repositories。兩個寫入切片需一起切換且不雙寫；訂單、付款與 `backend/db.js` 其餘流程尚未整體搬移。
 
 目前已接上的資料流程：
 
