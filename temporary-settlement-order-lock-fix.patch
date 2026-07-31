@@ -1,0 +1,17 @@
+diff --git a/backend/payments/settlementService.js b/backend/payments/settlementService.js
+--- a/backend/payments/settlementService.js
++++ b/backend/payments/settlementService.js
+@@ -214,4 +214,3 @@ async function settleGroupBuyActivityUnlocked(input = {}) {
+           finalAmount: order.finalAmount,
+           reason: `deadline_settlement_${order.actionReason}`,
+-          paymentCaptureRepository,
+-          operationLockHeld: settlementRepository?.kind === "postgres"
++          paymentCaptureRepository
+         });
+@@ -232,4 +231,3 @@ async function settleGroupBuyActivityUnlocked(input = {}) {
+         provider: order.paymentProvider,
+         reason: `deadline_settlement_${order.actionReason}`,
+-        authorizationCancelRepository,
+-        operationLockHeld: settlementRepository?.kind === "postgres"
++        authorizationCancelRepository
+       });
