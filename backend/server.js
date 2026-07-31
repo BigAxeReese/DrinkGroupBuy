@@ -7,6 +7,9 @@ const {
   createOrderRevision,
   getCustomerOrderCancellationEligibility,
   getOrderDetail,
+  getOrderPaymentContext,
+  getLatestLinePayAuthorizationForOrder,
+  createPendingLinePayAuthorization,
   getUserAuthProfileByFirebaseUid: getSqliteUserAuthProfileByFirebaseUid,
   getUserAuthProfileByLoginIdentifier: getSqliteUserAuthProfileByLoginIdentifier,
   getUserAuthProfileById: getSqliteUserAuthProfileById,
@@ -67,6 +70,12 @@ const {
 const {
   createCustomerOrderWriteRepository
 } = require("./database/repositories/customerOrderWriteRepository");
+const {
+  createCustomerOrderReadRepository
+} = require("./database/repositories/customerOrderReadRepository");
+const {
+  createPaymentAuthorizationRequestRepository
+} = require("./database/repositories/paymentAuthorizationRequestRepository");
 
 const port = Number(process.env.PORT ?? 3000);
 const storeMenuReadRepository = createStoreMenuReadRepository({ sqliteReader: listStoreMenu });
@@ -91,10 +100,27 @@ const merchantMenuRepository = createMerchantMenuRepository({
 const customerOrderWriteRepository = createCustomerOrderWriteRepository({
   sqliteWriter: createOrder,
 });
+const customerOrderReadRepository = createCustomerOrderReadRepository({
+  sqliteReaders: {
+    getOrderDetail,
+    getOrderPaymentContext,
+    listCustomerOrders,
+    listMerchantStoreOrders,
+  },
+});
+const paymentAuthorizationRequestRepository = createPaymentAuthorizationRequestRepository({
+  sqliteGateway: {
+    getOrderPaymentContext,
+    getLatestAuthorizationForOrder: getLatestLinePayAuthorizationForOrder,
+    createPendingAuthorization: createPendingLinePayAuthorization,
+  },
+});
 if (
   groupBuyActivityWriteRepository.kind === "postgres"
   || merchantMenuRepository.kind === "postgres"
   || customerOrderWriteRepository.kind === "postgres"
+  || customerOrderReadRepository.kind === "postgres"
+  || paymentAuthorizationRequestRepository.kind === "postgres"
 ) {
   const requiredPostgresRepositories = [
     authProfileReadRepository,
@@ -103,13 +129,16 @@ if (
     groupBuyActivityWriteRepository,
     merchantMenuRepository,
     customerOrderWriteRepository,
+    customerOrderReadRepository,
+    paymentAuthorizationRequestRepository,
   ];
   if (requiredPostgresRepositories.some((repository) => repository.kind !== "postgres")) {
     throw new Error(
       "PostgreSQL write slices require AUTH_PROFILE_READ_RUNTIME, "
       + "STORE_MENU_READ_RUNTIME, GROUP_BUY_ACTIVITY_READ_RUNTIME, "
       + "GROUP_BUY_ACTIVITY_WRITE_RUNTIME, MERCHANT_MENU_RUNTIME, "
-      + "and CUSTOMER_ORDER_WRITE_RUNTIME to be postgres"
+      + "CUSTOMER_ORDER_WRITE_RUNTIME, CUSTOMER_ORDER_READ_RUNTIME, "
+      + "and PAYMENT_AUTHORIZATION_REQUEST_RUNTIME to be postgres"
     );
   }
 }
@@ -479,7 +508,14 @@ const server = http.createServer(async (request, response) => {
       const authUser = await getAuthenticatedUser(request);
       if (!authUser) return sendJson(response, 401, { error: "Authentication required" });
       if (!authUser.roles.includes("customer")) return sendJson(response, 403, { error: "Customer role required" });
-      sendJson(response, 200, listCustomerOrders(authUser.id, readOrderListQuery(url)));
+      sendJson(
+        response,
+        200,
+        await customerOrderReadRepository.listCustomerOrders(
+          authUser.id,
+          readOrderListQuery(url)
+        )
+      );
       return;
     }
 
@@ -490,7 +526,14 @@ const server = http.createServer(async (request, response) => {
       if (!authUser.roles.includes("merchant") || !canManageStore(authUser, merchantOrdersMatch[1])) {
         return sendJson(response, 403, { error: "Store access denied" });
       }
-      sendJson(response, 200, listMerchantStoreOrders(merchantOrdersMatch[1], readOrderListQuery(url)));
+      sendJson(
+        response,
+        200,
+        await customerOrderReadRepository.listMerchantStoreOrders(
+          merchantOrdersMatch[1],
+          readOrderListQuery(url)
+        )
+      );
       return;
     }
 
@@ -768,7 +811,7 @@ const server = http.createServer(async (request, response) => {
         return;
       }
 
-      const order = getOrderDetail(orderMatch[1]);
+      const order = await customerOrderReadRepository.getOrderDetail(orderMatch[1]);
       if (!order) {
         sendJson(response, 404, { error: "Order not found" });
         return;
@@ -791,7 +834,11 @@ const server = http.createServer(async (request, response) => {
 
       const body = await readJsonBody(request);
       try {
-        const result = await requestLinePayAuthorization({ authUser, body });
+        const result = await requestLinePayAuthorization({
+          authUser,
+          body,
+          authorizationRequestRepository: paymentAuthorizationRequestRepository
+        });
         sendJson(response, 201, result);
       } catch (error) {
         if (error instanceof PaymentServiceError) {
@@ -1071,10 +1118,20 @@ const server = http.createServer(async (request, response) => {
 let deadlineSettlementScheduler;
 let linePayReconciliationScheduler;
 let pickupExpirationScheduler;
+const controlledPostgresOrderRuntime = customerOrderWriteRepository.kind === "postgres";
+const schedulerEnvironment = controlledPostgresOrderRuntime
+  ? {
+      ...process.env,
+      SETTLEMENT_SCHEDULER_ENABLED: "false",
+      PICKUP_EXPIRATION_SCHEDULER_ENABLED: "false"
+    }
+  : process.env;
 
 server.listen(port, () => {
   console.log(`DrinkGroupBuy backend listening on http://localhost:${port}`);
-  linePayReconciliationScheduler = startLinePayReconciliationScheduler();
+  linePayReconciliationScheduler = startLinePayReconciliationScheduler({
+    enabled: controlledPostgresOrderRuntime ? false : undefined
+  });
   if (linePayReconciliationScheduler.enabled) {
     console.log(
       `LINE Pay reconciliation scheduler enabled (${linePayReconciliationScheduler.intervalMs}ms interval)`
@@ -1086,14 +1143,18 @@ server.listen(port, () => {
   }
 
 
-  deadlineSettlementScheduler = startDeadlineSettlementScheduler();
+  deadlineSettlementScheduler = startDeadlineSettlementScheduler({
+    env: schedulerEnvironment
+  });
   if (deadlineSettlementScheduler.enabled) {
     console.log(`Deadline settlement scheduler enabled (${deadlineSettlementScheduler.intervalMs}ms interval)`);
   } else {
     console.log(`Deadline settlement scheduler disabled: ${deadlineSettlementScheduler.reason}`);
   }
 
-  pickupExpirationScheduler = startPickupExpirationScheduler();
+  pickupExpirationScheduler = startPickupExpirationScheduler({
+    env: schedulerEnvironment
+  });
   if (pickupExpirationScheduler.enabled) {
     console.log(`Pickup expiration scheduler enabled (${pickupExpirationScheduler.intervalMs}ms interval)`);
   } else {
@@ -1309,9 +1370,11 @@ function canManageStore(user, storeId) {
 
 function isSqliteOrderDependentRoute(method, pathname) {
   if (method === "POST" && pathname === "/api/orders") return false;
-  return pathname === "/api/customers/me/orders"
-    || /^\/api\/merchant\/stores\/[^/]+\/orders$/.test(pathname)
-    || pathname.startsWith("/api/orders/")
+  if (method === "GET" && pathname === "/api/customers/me/orders") return false;
+  if (method === "GET" && /^\/api\/merchant\/stores\/[^/]+\/orders$/.test(pathname)) return false;
+  if (method === "GET" && /^\/api\/orders\/[^/]+$/.test(pathname)) return false;
+  if (method === "POST" && pathname === "/api/payments/line-pay/request") return false;
+  return pathname.startsWith("/api/orders/")
     || pathname.startsWith("/api/payments/")
     || pathname.startsWith("/api/pickup-credentials/")
     || pathname.startsWith("/api/merchant/pickup-credentials/")

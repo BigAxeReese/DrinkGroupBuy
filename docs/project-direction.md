@@ -58,9 +58,9 @@ API：groupBuyActivity
 
 - 商家建立團購活動：Mobile -> API -> SQLite。
 - 公開菜單、活動、商家菜單與首次建單：Mobile／API 預設使用 SQLite；受控 PostgreSQL 模式下，auth、菜單、活動讀寫與建單會一起切換。Mobile 首頁仍待完整串接活動 API。
-- 顧客建立、修改、revision、列表與取消訂單：Mobile -> API -> SQLite。
-- 商家查看門市訂單、標記可取餐、查碼與核銷取貨：Mobile -> API -> SQLite。
-- LINE Pay request、confirm、cancel、capture、void、重新付款與開發／補救用 refund。
+- 顧客訂單預設仍為 Mobile -> API -> SQLite；受控 PostgreSQL 已涵蓋首次建單、列表、明細與首次 authorization request context，修改／revision／取消尚未搬移。
+- 商家門市訂單列表已可受控讀 PostgreSQL；標記可取餐、查碼與核銷取貨仍使用 SQLite。
+- LINE Pay 首次 request context 與 pending 紀錄已可受控使用 PostgreSQL；confirm、cancel、capture、void、重新付款與開發／補救用 refund 仍使用 SQLite。
 - Deadline settlement 與 pickup expiration 的單一 Backend process scheduler。
 
 仍未完全由 Backend 或正式環境驅動：
@@ -68,7 +68,7 @@ API：groupBuyActivity
 - 團購活動首頁、地圖與部分店家摘要仍使用 mobile local state 或 mock。
 - 購物車仍是 Mobile local state；送單、改單與重新授權前由 Backend 重新驗證。
 - LINE Pay reconciliation、持久化 retry、admin 警示查詢及 payment／settlement／cancel／repay／pickup DB lease 已完成；兩程序 lease 測試已通過，尚缺正式通知與核准後的 Sandbox 人工驗證。
-- PostgreSQL reliability schema parity、adapter、三個唯讀與三個受控寫入 repositories 已完成；真實 PostgreSQL 16 transaction／HTTP proofs 已通過，訂單後續與付款 route 仍使用 SQLite。
+- PostgreSQL reliability schema parity、adapter、訂單建立／列表／明細／首次 authorization request repositories 已完成；真實 PostgreSQL 16 transaction／HTTP proofs 已通過。confirm 與其後付款、改單／取消、pickup／settlement 仍待搬移，受控模式尚非付款 E2E runtime。
 - Android、Firebase 正式設定與 LINE Pay sandbox 人工 E2E 尚未完成。
 
 ## 架構原則

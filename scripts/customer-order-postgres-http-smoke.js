@@ -6,6 +6,9 @@ const { spawn } = require("node:child_process");
 const path = require("node:path");
 const { Pool } = require("pg");
 const { createRuntimeDatabaseAdapter } = require("../backend/database");
+const {
+  createPaymentAuthorizationRequestRepository,
+} = require("../backend/database/repositories/paymentAuthorizationRequestRepository");
 
 const repoRoot = path.join(__dirname, "..");
 const port = 39950 + (process.pid % 100);
@@ -40,6 +43,9 @@ async function main() {
         GROUP_BUY_ACTIVITY_WRITE_RUNTIME: "postgres",
         MERCHANT_MENU_RUNTIME: "postgres",
         CUSTOMER_ORDER_WRITE_RUNTIME: "postgres",
+        CUSTOMER_ORDER_READ_RUNTIME: "postgres",
+        PAYMENT_AUTHORIZATION_REQUEST_RUNTIME: "postgres",
+        LINE_PAY_CAPTURE_SEPARATED: "false",
         AUTH_SESSION_SECRET: "postgres-customer-order-http-smoke-secret",
         PAYMENT_RECONCILIATION_ENABLED: "false",
         SETTLEMENT_SCHEDULER_ENABLED: "false",
@@ -54,6 +60,7 @@ async function main() {
     const [firstToken, secondToken, thirdToken] = await Promise.all(
       fixture.customerIds.map(createCustomerSession)
     );
+    const merchantToken = await createCustomerSession(fixture.merchantUserId);
 
     lockClient = await lockPool.connect();
     await lockClient.query("BEGIN");
@@ -79,6 +86,89 @@ async function main() {
     assert.equal(createdOrder.totalCups, 1);
     assert.equal(createdOrder.originalAmount, fixture.unitPrice);
     assert.equal(createdOrder.items[0].customizations.length, fixture.optionIds.length);
+
+    const detailResponse = await fetch(`${baseUrl}/api/orders/${createdOrder.id}`, {
+      headers: { Authorization: `Bearer ${firstToken}` },
+    });
+    const detailText = await detailResponse.text();
+    assert.equal(detailResponse.status, 200, detailText);
+    const detailOrder = JSON.parse(detailText).order;
+    assert.equal(detailOrder.id, createdOrder.id);
+    assert.equal(detailOrder.items[0].customizations.length, fixture.optionIds.length);
+
+    const customerListResponse = await fetch(`${baseUrl}/api/customers/me/orders`, {
+      headers: { Authorization: `Bearer ${firstToken}` },
+    });
+    const customerListText = await customerListResponse.text();
+    assert.equal(customerListResponse.status, 200, customerListText);
+    assert.equal(JSON.parse(customerListText).orders[0].id, createdOrder.id);
+
+    const merchantListResponse = await fetch(
+      `${baseUrl}/api/merchant/stores/store-001/orders`,
+      { headers: { Authorization: `Bearer ${merchantToken}` } }
+    );
+    const merchantListText = await merchantListResponse.text();
+    assert.equal(merchantListResponse.status, 200, merchantListText);
+    assert.equal(JSON.parse(merchantListText).orders[0].id, createdOrder.id);
+
+    const paymentRequestResponse = await fetch(
+      `${baseUrl}/api/payments/line-pay/request`,
+      {
+        method: "POST",
+        headers: {
+          Authorization: `Bearer ${firstToken}`,
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({
+          orderId: createdOrder.id,
+          amount: createdOrder.originalAmount,
+          products: [],
+        }),
+      }
+    );
+    const paymentRequestText = await paymentRequestResponse.text();
+    assert.equal(paymentRequestResponse.status, 409, paymentRequestText);
+    assert.equal(
+      JSON.parse(paymentRequestText).status,
+      "capture_separated_not_enabled"
+    );
+
+    const authorizationRepository = createPaymentAuthorizationRequestRepository({
+      runtime: "postgres",
+      database,
+    });
+    const pendingAuthorization = await authorizationRepository.createPendingAuthorization({
+      orderId: createdOrder.id,
+      amount: createdOrder.originalAmount,
+      providerTransactionId: `transaction-order-proof-${proofId}`,
+      now: new Date().toISOString(),
+    });
+    assert.equal(pendingAuthorization.orderId, createdOrder.id);
+    assert.equal(pendingAuthorization.status, "pending");
+    const paymentPersistence = await database.query(`
+      SELECT
+        (SELECT COUNT(*)::integer
+         FROM payment_authorizations
+         WHERE id = $1) AS authorization_count,
+        (SELECT COUNT(*)::integer
+         FROM status_history
+         WHERE resource_type = 'payment_authorization'
+           AND resource_id = $1) AS history_count,
+        (SELECT COUNT(*)::integer
+         FROM audit_logs
+         WHERE resource_type = 'payment_authorization'
+           AND resource_id = $1) AS audit_count,
+        (SELECT COUNT(*)::integer
+         FROM payment_reliability_jobs
+         WHERE resource_type = 'payment_authorization'
+           AND resource_id = $1) AS job_count
+    `, [pendingAuthorization.id]);
+    assert.deepEqual(paymentPersistence.rows[0], {
+      authorization_count: 1,
+      history_count: 1,
+      audit_count: 1,
+      job_count: 1,
+    });
 
     const duplicate = await postOrder(firstToken, fixture.orderBody);
     assert.equal(duplicate.response.status, 409, duplicate.text);
@@ -107,12 +197,6 @@ async function main() {
     assert.equal(capacityPayload.authorizedCups, 1);
     assert.equal(capacityPayload.requestedCups, 2);
 
-    const mismatch = await fetch(`${baseUrl}/api/customers/me/orders`, {
-      headers: { Authorization: `Bearer ${firstToken}` },
-    });
-    assert.equal(mismatch.status, 503);
-    assert.equal((await mismatch.json()).error, "customer_order_runtime_mismatch");
-
     const persisted = await database.query(`
       SELECT
         order_record.id,
@@ -138,7 +222,7 @@ async function main() {
       history_count: 1,
       audit_count: 1,
     });
-    console.log("PostgreSQL customer order transaction, capacity-lock, and HTTP proof passed.");
+    console.log("PostgreSQL customer order write/read and payment-context HTTP proof passed.");
   } finally {
     if (lockTransactionOpen && lockClient) await lockClient.query("ROLLBACK");
     if (lockClient) lockClient.release();
@@ -232,6 +316,7 @@ async function createProofFixture(database) {
 
   return {
     customerIds: customersResult.rows.map((row) => row.id),
+    merchantUserId: merchantResult.rows[0].user_id,
     optionIds: selectedOptions.map((option) => option.id),
     unitPrice,
     orderBody: {
@@ -290,7 +375,34 @@ async function cleanupProofData(database) {
     [activityId]
   );
   const orderIds = orderIdsResult.rows.map((row) => row.id);
+  const authorizationIds = [];
   if (orderIds.length > 0) {
+    const authorizationIdsResult = await database.query(
+      "SELECT id FROM payment_authorizations WHERE order_id = ANY($1::text[])",
+      [orderIds]
+    );
+    authorizationIds.push(...authorizationIdsResult.rows.map((row) => row.id));
+    if (authorizationIds.length > 0) {
+      await database.query(`
+        DELETE FROM payment_reliability_jobs
+        WHERE resource_type = 'payment_authorization'
+          AND resource_id = ANY($1::text[])
+      `, [authorizationIds]);
+      await database.query(`
+        DELETE FROM status_history
+        WHERE resource_type = 'payment_authorization'
+          AND resource_id = ANY($1::text[])
+      `, [authorizationIds]);
+      await database.query(`
+        DELETE FROM audit_logs
+        WHERE resource_type = 'payment_authorization'
+          AND resource_id = ANY($1::text[])
+      `, [authorizationIds]);
+      await database.query(
+        "DELETE FROM payment_authorizations WHERE id = ANY($1::text[])",
+        [authorizationIds]
+      );
+    }
     await database.query(`
       DELETE FROM status_history
       WHERE resource_type = 'order'
@@ -309,12 +421,19 @@ async function cleanupProofData(database) {
       (SELECT COUNT(*)::integer FROM orders WHERE activity_id = $1) AS order_count,
       (SELECT COUNT(*)::integer FROM group_buy_activities WHERE id = $1) AS activity_count,
       (SELECT COUNT(*)::integer FROM audit_logs
-       WHERE resource_type = 'order' AND resource_id = ANY($2::text[])) AS audit_count
-  `, [activityId, orderIds]);
+       WHERE resource_type = 'order' AND resource_id = ANY($2::text[])) AS audit_count,
+      (SELECT COUNT(*)::integer FROM payment_authorizations
+       WHERE order_id = ANY($2::text[])) AS authorization_count,
+      (SELECT COUNT(*)::integer FROM payment_reliability_jobs
+       WHERE resource_type = 'payment_authorization'
+         AND resource_id = ANY($3::text[])) AS proof_job_count
+  `, [activityId, orderIds, authorizationIds]);
   assert.deepEqual(cleanup.rows[0], {
     order_count: 0,
     activity_count: 0,
     audit_count: 0,
+    authorization_count: 0,
+    proof_job_count: 0,
   });
 }
 

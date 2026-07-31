@@ -207,6 +207,8 @@ npm run payment-reliability:multiprocess
 - `backend/database/repositories/groupBuyActivityWriteRepository.js`
 - `backend/database/repositories/merchantMenuRepository.js`
 - `backend/database/repositories/customerOrderWriteRepository.js`
+- `backend/database/repositories/customerOrderReadRepository.js`
+- `backend/database/repositories/paymentAuthorizationRequestRepository.js`
 
 預設不改變目前行為：
 
@@ -216,6 +218,8 @@ GROUP_BUY_ACTIVITY_READ_RUNTIME=sqlite
 GROUP_BUY_ACTIVITY_WRITE_RUNTIME=sqlite
 MERCHANT_MENU_RUNTIME=sqlite
 CUSTOMER_ORDER_WRITE_RUNTIME=sqlite
+CUSTOMER_ORDER_READ_RUNTIME=sqlite
+PAYMENT_AUTHORIZATION_REQUEST_RUNTIME=sqlite
 AUTH_PROFILE_READ_RUNTIME=sqlite
 ```
 
@@ -227,10 +231,12 @@ GROUP_BUY_ACTIVITY_READ_RUNTIME=postgres
 GROUP_BUY_ACTIVITY_WRITE_RUNTIME=postgres
 MERCHANT_MENU_RUNTIME=postgres
 CUSTOMER_ORDER_WRITE_RUNTIME=postgres
+CUSTOMER_ORDER_READ_RUNTIME=postgres
+PAYMENT_AUTHORIZATION_REQUEST_RUNTIME=postgres
 AUTH_PROFILE_READ_RUNTIME=postgres
 ```
 
-啟用 PostgreSQL 寫入時，Backend 會要求 auth、公開菜單、活動讀取／寫入、商家菜單與顧客建單全部使用 PostgreSQL。顧客建單會先鎖 activity row，再驗證截止時間、權威菜單、折扣與已授權杯數；訂單列表／明細、改單、取消與付款仍未遷移，這些 route 會回 `503 customer_order_runtime_mismatch`，因此仍是受控切片。
+啟用 PostgreSQL 訂單切片時，Backend 會要求 auth、公開菜單、活動讀取／寫入、商家菜單、顧客建單、訂單讀取與首次 authorization request 全部使用 PostgreSQL。顧客建單會鎖 activity row；列表／明細已讀 PostgreSQL，首次付款 request 會先以 `operation_locks` 防止跨執行個體重複建付款頁，再在同一 transaction 寫 pending authorization、status history、audit 與 reconciliation job。改單、取消、revision payment、confirm、capture、void、refund、pickup 與 settlement 仍回 `503 customer_order_runtime_mismatch`。受控 PostgreSQL 訂單模式會自動停用仍依賴 SQLite 的 reconciliation／settlement／pickup scheduler；因此目前不是付款 E2E runtime。
 
 本機契約測試會驗證 SQLite 委派、adapter 與 PostgreSQL API 格式：
 
@@ -242,6 +248,8 @@ npm run auth-profile-read:smoke
 npm run group-buy-activity-write:smoke
 npm run merchant-menu-write:smoke
 npm run customer-order-write:smoke
+npm run customer-order-read:smoke
+npm run payment-authorization-request:smoke
 ```
 
 設定本機 `DATABASE_URL` 並套用 PostgreSQL migrations 後，可執行：
@@ -256,7 +264,7 @@ npm run customer-order-postgres-http:smoke
 ```
 PostgreSQL HTTP proofs 會建立臨時資料並自動清除；活動、菜單與顧客建單寫入 proof 都使用第二條連線持有對應 row lock，確認請求等待、釋放後整筆 transaction 成功。建單 proof 另驗證重複訂單、即時改價、容量拒絕、item／option snapshots、history 與 audit。
 
-2026-07-31 已在本機 PostgreSQL 16 驗證三個唯讀切片與三個受控寫入切片。顧客建單 transaction 會鎖定 activity、拒絕截止／超量／重複／改價要求，並保存 order、items、customizations、status history 與 audit log。所有開關預設仍是 SQLite，沒有雙寫；訂單後續與付款尚未遷移。
+2026-07-31 已在本機 PostgreSQL 16 驗證訂單建立、列表、明細與首次付款 request context。首次付款 request 的 provider 成功結果會持久化 pending authorization、status history、audit 與 reconciliation job；所有開關預設仍是 SQLite，沒有雙寫。confirm 與其後付款狀態、改單／取消／pickup／settlement 尚未遷移。
 
 
 

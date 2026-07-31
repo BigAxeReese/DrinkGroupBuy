@@ -248,7 +248,7 @@ payment_status text not null check (payment_status in ('pending', 'authorized', 
 
 ### Phase 5：建立 backend repository layer
 
-以 adapter / repository layer 逐步抽換資料庫存取。目前三個唯讀切片與三個受控寫入切片已完成程式、真實 runtime 與 HTTP source proof：
+以 adapter / repository layer 逐步抽換資料庫存取。目前已完成下列程式、真實 runtime 與 HTTP source proof：
 
 1. Customer public store menu read（已完成；repository、真實 PostgreSQL runtime 與 HTTP source proof 均通過）。
 2. List activities（已完成；repository、真實 PostgreSQL runtime 與 HTTP source proof 均通過）。
@@ -256,10 +256,10 @@ payment_status text not null check (payment_status in ('pending', 'authorized', 
 4. Merchant creates activity（已完成；transaction、merchant/store row lock、菜單價格鎖定、idempotency 與 HTTP source proof 均通過）。
 5. Merchant reads／writes full store menu（已完成；store-first row lock、折扣回歸防護、audit log、HTTP source proof 與清理均通過）。
 6. Customer creates order（已完成；activity row lock、deadline／capacity／price／duplicate guards、snapshots、history、audit 與 HTTP proof 均通過）。
-7. Customer order read／payment request context。
+7. Customer order read／payment request context（已完成；列表、明細、request lease、pending authorization、history、audit、retry job 與 HTTP proof 均通過）。
 8. LINE Pay authorization confirm。
 
-商家菜單、建立團購與顧客首次建單已使用同一 PostgreSQL 資料來源；建單採 activity-first lock。訂單後續操作、付款與結算仍使用 SQLite，因此尚未完成整體 runtime 切換。
+商家菜單、建立團購、顧客首次建單、訂單讀取與首次 authorization request context 已使用同一 PostgreSQL 資料來源；建單採 activity-first lock，付款 request 採 operation lease。confirm、改單／取消、後續付款、pickup 與結算仍未搬移，因此尚未完成整體 runtime 切換。
 
 要求：
 
@@ -296,6 +296,8 @@ GROUP_BUY_ACTIVITY_READ_RUNTIME=sqlite
 GROUP_BUY_ACTIVITY_WRITE_RUNTIME=sqlite
 MERCHANT_MENU_RUNTIME=sqlite
 CUSTOMER_ORDER_WRITE_RUNTIME=sqlite
+CUSTOMER_ORDER_READ_RUNTIME=sqlite
+PAYMENT_AUTHORIZATION_REQUEST_RUNTIME=sqlite
 AUTH_PROFILE_READ_RUNTIME=sqlite
 AUTH_SESSION_SECRET=...
 LINE_PAY_CHANNEL_ID=...
@@ -346,7 +348,7 @@ PostgreSQL 遷移後，以下流程需要 transaction：
 
 ## 下一步
 
-下一步搬移 PostgreSQL 訂單明細／列表與 payment authorization request context，讓新建訂單可繼續付款；之後再搬移 confirm，以 activity row lock 更新 authorized cups 並重驗容量。仍禁止 SQLite／PostgreSQL 雙寫。
+下一步搬移 PostgreSQL authorization confirm，以 activity row lock 更新 authorized cups、重驗容量並同步 authorization／order／history／audit；之後再搬移 cancel/void。仍禁止 SQLite／PostgreSQL 雙寫。
 
 ## 2026-07-30～2026-07-31 驗證進度
 
@@ -365,7 +367,7 @@ PostgreSQL 遷移後，以下流程需要 transaction：
 - 跨連線 HTTP proof 已確認鎖定期間請求等待、釋放後成功、重複 idempotency key 只建立一次，測試資料最後清除為 0。
 - 商家完整菜單查詢／建立／修改／停售已完成 PostgreSQL repository 與跨連線 HTTP proof；公開菜單會排除停售項目，商家完整菜單仍可讀取，測試資料與 audit log 均已清除。
 - PostgreSQL 顧客首次建單已完成：跨連線 proof 確認 activity lock 等待、截止／容量／重複／改價防護、快照、history／audit 與清理為 0。
-- 訂單後續與付款仍使用 SQLite；下一步先補 PostgreSQL order read／payment request context。
+- PostgreSQL 訂單列表／明細與首次 authorization request context 已完成；request 會先取得 `operation_locks` lease，再由 transaction 寫 pending authorization、status history、audit 與 reconciliation job。confirm、後續付款狀態、改單／取消／pickup／settlement 仍待搬移；受控 PostgreSQL 訂單模式會先停用仍讀 SQLite 的背景 scheduler，避免跨 runtime。
 
 ## 2026-07-31 結算快照 migration 驗證
 

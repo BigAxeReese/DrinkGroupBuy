@@ -202,10 +202,44 @@ function enqueuePendingAuthorizationReconciliation(authorization, input = {}) {
 }
 
 
-async function requestLinePayAuthorization({ authUser, body }) {
+async function requestLinePayAuthorization(input) {
+  const { body, authorizationRequestRepository } = input;
   const validationError = validateLinePayRequest(body);
   if (validationError) {
     throw new PaymentServiceError(400, { error: validationError });
+  }
+  const operation = () => requestLinePayAuthorizationUnlocked(input);
+  try {
+    if (authorizationRequestRepository?.kind === "postgres") {
+      return await authorizationRequestRepository.withRequestLock(body.orderId, operation);
+    }
+    return await withOperationLease({
+      lockKey: `line-pay-request:${body.orderId}`,
+      leaseMs: 120_000
+    }, operation);
+  } catch (error) {
+    if (error instanceof OperationLeaseError || error?.code === "operation_locked") {
+      throw new PaymentServiceError(409, {
+        error: "LINE Pay authorization request is already in progress",
+        status: "authorization_request_in_progress",
+        lockKey: error.lock?.lockKey || null,
+        lockedUntil: error.lock?.lockedUntil || null
+      });
+    }
+    throw error;
+  }
+}
+
+async function requestLinePayAuthorizationUnlocked({
+  authUser,
+  body,
+  authorizationRequestRepository
+}) {
+  if (body.orderRevisionId && authorizationRequestRepository?.kind === "postgres") {
+    throw new PaymentServiceError(503, {
+      error: "customer_order_revision_runtime_mismatch",
+      message: "PostgreSQL order revision authorization is not available yet."
+    });
   }
 
   const revision = body.orderRevisionId
@@ -238,7 +272,9 @@ async function requestLinePayAuthorization({ authUser, body }) {
         paymentStatus: revision.paymentStatus,
         authorizationStatus: revision.authorizationStatus
       }
-    : getOrderPaymentContext(body.orderId);
+    : await (authorizationRequestRepository
+        ? authorizationRequestRepository.getOrderPaymentContext(body.orderId)
+        : getOrderPaymentContext(body.orderId));
   if (!order) {
     throw new PaymentServiceError(404, {
       error: "Order not found in backend database",
@@ -266,7 +302,9 @@ async function requestLinePayAuthorization({ authUser, body }) {
 
   const existingAuthorization = revision
     ? getLatestLinePayAuthorizationForOrderRevision(revision.id)
-    : getLatestLinePayAuthorizationForOrder(body.orderId);
+    : await (authorizationRequestRepository
+        ? authorizationRequestRepository.getLatestAuthorizationForOrder(body.orderId)
+        : getLatestLinePayAuthorizationForOrder(body.orderId));
   if (order.paymentStatus === "authorized" || existingAuthorization?.status === "authorized") {
     if (!revision) {
       throw new PaymentServiceError(409, {
@@ -294,13 +332,18 @@ async function requestLinePayAuthorization({ authUser, body }) {
   const payload = await requestLinePayPayment(body);
   const info = payload.info || {};
   const transactionId = info.transactionId ? String(info.transactionId) : null;
-  const authorization = createPendingLinePayAuthorization({
+  const authorizationInput = {
     orderId: body.orderId,
     orderRevisionId: revision?.id || null,
     amount: Number(body.amount),
     providerTransactionId: transactionId
-  });
-  enqueuePendingAuthorizationReconciliation(authorization, { amount: Number(body.amount) });
+  };
+  const authorization = revision || !authorizationRequestRepository
+    ? createPendingLinePayAuthorization(authorizationInput)
+    : await authorizationRequestRepository.createPendingAuthorization(authorizationInput);
+  if (authorizationRequestRepository?.kind !== "postgres") {
+    enqueuePendingAuthorizationReconciliation(authorization, { amount: Number(body.amount) });
+  }
   const pendingPayment = {
     orderId: body.orderId,
     orderRevisionId: revision?.id || null,

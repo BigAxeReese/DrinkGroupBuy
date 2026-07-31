@@ -1,0 +1,304 @@
+"use strict";
+
+const { randomUUID } = require("node:crypto");
+const { createRuntimeDatabaseAdapter } = require("..");
+
+function resolvePaymentAuthorizationRequestRuntime(input = {}) {
+  const env = input.env || process.env;
+  const runtime = String(
+    input.runtime || env.PAYMENT_AUTHORIZATION_REQUEST_RUNTIME || "sqlite"
+  ).trim().toLowerCase();
+  if (runtime === "sqlite") return "sqlite";
+  if (runtime === "postgres" || runtime === "postgresql") return "postgres";
+  throw new Error(`Unsupported PAYMENT_AUTHORIZATION_REQUEST_RUNTIME: ${runtime}`);
+}
+
+function createPaymentAuthorizationRequestRepository(input = {}) {
+  const runtime = resolvePaymentAuthorizationRequestRuntime(input);
+  if (runtime === "sqlite") {
+    const gateway = input.sqliteGateway || {};
+    for (const name of [
+      "getOrderPaymentContext",
+      "getLatestAuthorizationForOrder",
+      "createPendingAuthorization",
+    ]) {
+      if (typeof gateway[name] !== "function") {
+        throw new Error(`${name} is required when PAYMENT_AUTHORIZATION_REQUEST_RUNTIME=sqlite`);
+      }
+    }
+    return {
+      kind: "sqlite",
+      getOrderPaymentContext: async (orderId) => gateway.getOrderPaymentContext(orderId),
+      getLatestAuthorizationForOrder: async (orderId) => (
+        gateway.getLatestAuthorizationForOrder(orderId)
+      ),
+      createPendingAuthorization: async (authorizationInput) => (
+        gateway.createPendingAuthorization(authorizationInput)
+      ),
+      withRequestLock: async (orderId, operation) => operation(),
+      close: async () => {},
+    };
+  }
+
+  const ownsDatabase = !input.database;
+  const database = input.database || createRuntimeDatabaseAdapter({
+    ...input,
+    runtime: "postgres",
+  });
+  return {
+    kind: "postgres",
+    getOrderPaymentContext: (orderId) => getPostgresOrderPaymentContext(database, orderId),
+    getLatestAuthorizationForOrder: (orderId) => (
+      getLatestPostgresAuthorizationForOrder(database, orderId)
+    ),
+    createPendingAuthorization: (authorizationInput) => (
+      createPostgresPendingAuthorization(database, authorizationInput)
+    ),
+    withRequestLock: (orderId, operation) => (
+      withPostgresAuthorizationRequestLock(database, orderId, operation)
+    ),
+    close: async () => {
+      if (ownsDatabase) await database.close();
+    },
+  };
+}
+
+async function withPostgresAuthorizationRequestLock(database, orderId, operation, input = {}) {
+  const lockKey = `line-pay-request:${orderId}`;
+  const ownerId = input.ownerId || `line-pay-request-${process.pid}-${randomUUID()}`;
+  const now = input.now || new Date().toISOString();
+  const leaseMs = Number(input.leaseMs) > 0 ? Number(input.leaseMs) : 120_000;
+  const lockedUntil = new Date(Date.parse(now) + leaseMs).toISOString();
+  const result = await database.query(`
+    INSERT INTO operation_locks (
+      lock_key,
+      owner_id,
+      locked_until,
+      created_at,
+      updated_at
+    ) VALUES ($1, $2, $3, $4, $4)
+    ON CONFLICT (lock_key) DO UPDATE
+    SET owner_id = EXCLUDED.owner_id,
+        locked_until = EXCLUDED.locked_until,
+        updated_at = EXCLUDED.updated_at
+    WHERE operation_locks.locked_until <= $4
+    RETURNING lock_key, owner_id, locked_until
+  `, [lockKey, ownerId, lockedUntil, now]);
+  if (!result.rows[0]) {
+    const error = new Error("Payment authorization request is already in progress");
+    error.code = "operation_locked";
+    error.lock = { lockKey };
+    throw error;
+  }
+  try {
+    return await operation();
+  } finally {
+    await database.query(`
+      DELETE FROM operation_locks
+      WHERE lock_key = $1
+        AND owner_id = $2
+    `, [lockKey, ownerId]);
+  }
+}
+
+async function getPostgresOrderPaymentContext(database, orderId) {
+  const result = await database.query(`
+    SELECT
+      id,
+      activity_id,
+      customer_user_id,
+      total_cups,
+      original_amount,
+      payment_status,
+      authorization_status
+    FROM orders
+    WHERE id = $1
+  `, [orderId]);
+  return result.rows[0] ? mapOrderPaymentContext(result.rows[0]) : null;
+}
+
+async function getLatestPostgresAuthorizationForOrder(database, orderId) {
+  const result = await database.query(`
+    SELECT *
+    FROM payment_authorizations
+    WHERE order_id = $1
+      AND provider IN ('line_pay', 'mock_line_pay')
+    ORDER BY created_at DESC, id DESC
+    LIMIT 1
+  `, [orderId]);
+  return result.rows[0] ? mapPaymentAuthorization(result.rows[0]) : null;
+}
+
+async function createPostgresPendingAuthorization(database, input) {
+  if (input.orderRevisionId) return null;
+  const authorizationId = `payment-authorization-${randomUUID()}`;
+  const now = input.now || new Date().toISOString();
+  const provider = input.provider || "line_pay";
+  const paymentFlow = input.paymentFlow || "authorization";
+
+  return database.transaction(async (transaction) => {
+    const orderResult = await transaction.query(`
+      SELECT id, original_amount
+      FROM orders
+      WHERE id = $1
+      FOR UPDATE
+    `, [input.orderId]);
+    const order = orderResult.rows[0];
+    if (!order || Number(order.original_amount) !== Number(input.amount)) return null;
+
+    if (input.providerTransactionId) {
+      const existingResult = await transaction.query(`
+        SELECT *
+        FROM payment_authorizations
+        WHERE provider = $1
+          AND provider_authorization_id = $2
+        LIMIT 1
+      `, [provider, input.providerTransactionId]);
+      if (existingResult.rows[0]) return mapPaymentAuthorization(existingResult.rows[0]);
+    }
+
+    await transaction.query(`
+      INSERT INTO payment_authorizations (
+        id,
+        order_id,
+        provider,
+        payment_flow,
+        status,
+        original_amount,
+        authorized_amount,
+        provider_authorization_id,
+        created_at,
+        updated_at
+      ) VALUES ($1, $2, $3, $4, 'pending', $5, 0, $6, $7, $7)
+    `, [
+      authorizationId,
+      input.orderId,
+      provider,
+      paymentFlow,
+      Number(input.amount),
+      input.providerTransactionId || null,
+      now,
+    ]);
+    await transaction.query(`
+      INSERT INTO status_history (
+        id,
+        resource_type,
+        resource_id,
+        from_status,
+        to_status,
+        reason,
+        actor_user_id,
+        created_at
+      ) VALUES (
+        $1, 'payment_authorization', $2, NULL, 'pending',
+        'line_pay_request_created', NULL, $3
+      )
+    `, [`status-history-${randomUUID()}`, authorizationId, now]);
+    await transaction.query(`
+      INSERT INTO audit_logs (
+        id,
+        actor_user_id,
+        action_type,
+        resource_type,
+        resource_id,
+        metadata_json,
+        created_at
+      ) VALUES (
+        $1, NULL, 'line_pay_request_authorization',
+        'payment_authorization', $2, $3::jsonb, $4
+      )
+    `, [
+      `audit-log-${randomUUID()}`,
+      authorizationId,
+      JSON.stringify({
+        orderId: input.orderId,
+        orderRevisionId: null,
+        paymentFlow,
+        providerTransactionId: input.providerTransactionId || null,
+      }),
+      now,
+    ]);
+    await transaction.query(`
+      INSERT INTO payment_reliability_jobs (
+        id,
+        job_type,
+        resource_type,
+        resource_id,
+        status,
+        payload_json,
+        attempt_count,
+        max_attempts,
+        run_after,
+        alert_required,
+        created_at,
+        updated_at
+      ) VALUES (
+        $1, 'reconcile_line_pay_request', 'payment_authorization', $2,
+        'queued', $3::jsonb, 0, 40, $4, false, $5, $5
+      )
+    `, [
+      `payment-job-${randomUUID()}`,
+      authorizationId,
+      JSON.stringify({
+        orderId: input.orderId,
+        providerTransactionId: input.providerTransactionId || null,
+        paymentFlow,
+        amount: Number(input.amount),
+      }),
+      new Date(Date.parse(now) + 30_000).toISOString(),
+      now,
+    ]);
+
+    const result = await transaction.query(`
+      SELECT *
+      FROM payment_authorizations
+      WHERE id = $1
+    `, [authorizationId]);
+    return result.rows[0] ? mapPaymentAuthorization(result.rows[0]) : null;
+  });
+}
+
+function mapOrderPaymentContext(row) {
+  return {
+    id: row.id,
+    activityId: row.activity_id,
+    customerUserId: row.customer_user_id,
+    totalCups: row.total_cups,
+    originalAmount: Number(row.original_amount),
+    paymentStatus: row.payment_status,
+    authorizationStatus: row.authorization_status,
+  };
+}
+
+function mapPaymentAuthorization(row) {
+  return {
+    id: row.id,
+    orderId: row.order_id,
+    orderRevisionId: null,
+    provider: row.provider,
+    paymentFlow: row.payment_flow || "authorization",
+    status: row.status,
+    originalAmount: Number(row.original_amount),
+    authorizedAmount: Number(row.authorized_amount),
+    providerAuthorizationId: row.provider_authorization_id,
+    expiresAt: toIsoString(row.expires_at),
+    authorizedAt: toIsoString(row.authorized_at),
+    voidedAt: toIsoString(row.voided_at),
+    failureReason: row.failure_reason,
+    createdAt: toIsoString(row.created_at),
+    updatedAt: toIsoString(row.updated_at),
+  };
+}
+
+function toIsoString(value) {
+  return value instanceof Date ? value.toISOString() : value;
+}
+
+module.exports = {
+  createPaymentAuthorizationRequestRepository,
+  createPostgresPendingAuthorization,
+  getLatestPostgresAuthorizationForOrder,
+  getPostgresOrderPaymentContext,
+  resolvePaymentAuthorizationRequestRuntime,
+  withPostgresAuthorizationRequestLock,
+};

@@ -338,7 +338,7 @@ PostgreSQL v1 決策：
 1. 讓 Mobile 啟動時從 Backend 載入 activities，逐步移除活動、地圖與店家摘要 mock。
 2. LINE Pay 回覆開通後，依 `docs/line-pay-separated-capture-sandbox-checklist.md` 執行人工 E2E。
 3. 將 terminal job 的 `alert_required` 接到正式告警通知管道。
-4. 搬移 PostgreSQL order read／payment authorization request context，再處理 confirm 的 activity capacity row lock。
+4. 搬移 PostgreSQL authorization confirm，以 activity row lock 重驗容量並更新 authorized cups；再處理 cancel／void。
 5. 細化 revision、容量不足、void 失敗與重新付款的 Mobile 錯誤提示及重試入口。
 6. 補完整 order revision 歷史查詢與 UI 呈現。
 7. 規劃 Expo SDK／React Native 升級，處理目前無法非破壞性修正的依賴警告。
@@ -346,7 +346,7 @@ PostgreSQL v1 決策：
 
 ## 建議下一步
 
-可靠性核心、三個唯讀與三個受控寫入切片已完成。下一步是 PostgreSQL order read／payment request context，之後再搬移 confirm 與 authorized cups；SQLite 仍是預設。
+PostgreSQL 訂單建立、列表、明細與首次 authorization request context 已完成，SQLite 仍是預設。下一步搬移 confirm，以 activity row lock 重驗容量並更新 authorized cups；受控 PostgreSQL 訂單模式目前仍不是付款 E2E runtime。
 
 ## 換電腦後怎麼接
 

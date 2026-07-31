@@ -225,7 +225,7 @@
 
 目前重要限制：
 
-- `POST /api/orders` 預設使用 SQLite；受控 PostgreSQL 模式會使用同一 PostgreSQL activity／menu source。此模式下訂單列表、明細、改單、取消與付款 route 暫回 `503 customer_order_runtime_mismatch`。
+- 訂單相關 runtime 預設仍是 SQLite；受控 PostgreSQL 模式已涵蓋首次建單、顧客／商家列表、訂單明細與首次 authorization request context；request 以 `operation_locks` 防止跨執行個體重複建付款頁，且不雙寫。改單、取消、revision payment、confirm、capture、void、refund、pickup 與 settlement 仍回 `503 customer_order_runtime_mismatch`。受控 PostgreSQL 訂單模式會自動停用仍讀 SQLite 的 reconciliation／settlement／pickup scheduler，目前不可視為付款 E2E runtime。
 - 如果 mobile local activity 已過期或不存在於後端，送單會失敗。
 
 ## Database / 資料庫
@@ -326,8 +326,8 @@ database/test/drink-group-buy-test.sqlite
 
 建議下一步：
 
-1. 搬移 PostgreSQL 訂單明細／列表與 payment authorization request 所需的 order context，解除受控建單後的 `customer_order_runtime_mismatch`。
-2. 接著搬移 authorization confirm，以 activity row lock 更新 authorized cups 並重驗容量；仍禁止 SQLite／PostgreSQL 雙寫。
+1. 搬移 PostgreSQL authorization confirm，以 activity row lock 更新 authorized cups、重驗容量並交易式寫入 authorization／order／history／audit；仍禁止 SQLite／PostgreSQL 雙寫。
+2. 接著搬移 authorization cancel/void 與顧客取消，保持 provider 結果與 PostgreSQL 狀態可恢復。
 3. LINE Pay 核准分離式請款後，執行 sandbox reconciliation、capture、void 與 lease takeover 人工端對端驗證。
 4. PostgreSQL settlement 寫入 vertical slice 時必須顯式寫入 `003` 的五個快照欄位；在此之前維持 SQLite runtime 與無雙寫。
 5. 建立站內通知／delivery schema 與正式告警管道，並細化 revision、容量不足及 void 失敗提示。
