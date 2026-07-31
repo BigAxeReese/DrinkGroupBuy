@@ -85,7 +85,7 @@ backend/.env
 
 - 顧客與商家訂單列表已在登入、切換頁籤及 App 回到前景時向 Backend 同步；local state 僅作畫面 cache。
 - 團購活動首頁、地圖及部分店家摘要仍混用 local state 或 mock，尚未完全由 Backend 權威資料驅動。
-- LINE Pay reliability 核心已完成；PostgreSQL authorization cancel／一般 void／顧客取消 HTTP proof 已通過。單筆 capture repository／service building block 亦通過真實 PostgreSQL mock-capture 成功／失敗、retry attempt、row-lock 與清理歸零 proof，但尚未接入 server／settlement scheduler；改單／revision、refund、pickup、settlement orchestration 與 Sandbox 人工 E2E 尚未完成。
+- LINE Pay reliability 核心已完成；PostgreSQL authorization cancel／一般 void／顧客取消 HTTP proof 已通過。capture 與 settlement repository／service building blocks 亦通過真實 PostgreSQL mock-capture、折扣快照、持久化 job retry／complete、`SKIP LOCKED`、跨執行個體 lock 與清理歸零 proof；尚未接入 server／scheduler，改單／revision、refund、pickup 與 Sandbox 人工 E2E 尚未完成。
 
 ## 目前 Backend 狀態
 
@@ -288,7 +288,7 @@ PostgreSQL v1 決策：
 - 公開菜單仍可由 `STORE_MENU_READ_RUNTIME` 獨立切換；啟用 PostgreSQL 寫入時，auth、公開菜單、活動讀寫與 `MERCHANT_MENU_RUNTIME` 必須一起切換。
 - PostgreSQL migration／seed 草稿與 reliability schema parity 已完成。
 - `database-adapter:smoke` 與 `store-menu-read:smoke` 已通過。
-- 本機實際 PostgreSQL auth、公開菜單、活動讀寫、商家菜單、首次建單、訂單讀取、付款 request／confirm／cancel、一般 void 與顧客取消 routes 已驗證通過；單筆 capture building block 的真實 PostgreSQL proof 也已通過，沒有雙寫。
+- 本機實際 PostgreSQL auth、公開菜單、活動讀寫、商家菜單、首次建單、訂單讀取、付款 request／confirm／cancel、一般 void 與顧客取消 routes 已驗證通過；capture／settlement building blocks 與 `003` schema／backfill proof 也已通過，沒有雙寫。
 - PostgreSQL draft 拆分 `users`、`user_private_profiles`、`user_public_profiles`，避免商家看到顧客私人資料。
 - PostgreSQL draft 透過 `merchant_users.store_id` 讓每個商家帳號對應一間店。
 - PostgreSQL seed draft 替每個菜單品項建立甜度、冰塊、尺寸、加料選項。
@@ -338,7 +338,7 @@ PostgreSQL v1 決策：
 1. 讓 Mobile 啟動時從 Backend 載入 activities，逐步移除活動、地圖與店家摘要 mock。
 2. LINE Pay 回覆開通後，依 `docs/line-pay-separated-capture-sandbox-checklist.md` 執行人工 E2E。
 3. 將 terminal job 的 `alert_required` 接到正式告警通知管道。
-4. 搬移 PostgreSQL settlement plan、capture retry state、完成交易與持久化 scheduler，再把已驗證的 capture building block 接入。
+4. Sandbox proof 通過後，把已驗證的 capture／settlement building blocks 接入 server，加入全組 runtime 防護並執行 HTTP／scheduler restart proof。
 5. 細化 revision、容量不足、void 失敗與重新付款的 Mobile 錯誤提示及重試入口。
 6. 補完整 order revision 歷史查詢與 UI 呈現。
 7. 規劃 Expo SDK／React Native 升級，處理目前無法非破壞性修正的依賴警告。
@@ -346,7 +346,7 @@ PostgreSQL v1 決策：
 
 ## 建議下一步
 
-PostgreSQL cancel／void／顧客取消與單筆 capture building block proof 已通過，SQLite 仍是預設。下一步搬移 settlement plan、retry state、完成交易與 scheduler；在完成前仍不是付款 E2E runtime。
+PostgreSQL cancel／void／顧客取消 server proof 與 capture／settlement building block proof 已通過，SQLite 仍是預設。下一步等待分離式請款 Sandbox 核准並完成人工 E2E，再接入 server；目前仍不是付款 E2E runtime。
 
 ## 換電腦後怎麼接
 

@@ -351,7 +351,7 @@ PostgreSQL 遷移後，以下流程需要 transaction：
 
 ## 下一步
 
-取消 HTTP proof 已通過；單筆 capture persistence／service building block 亦已完成真實 PostgreSQL mock-capture 成功／失敗、retry attempt、activity lock 與清理歸零 proof。下一步搬移 settlement plan、capture retry state、完成交易與持久化 job scheduler；在整組完成前不接入 server，仍禁止 SQLite／PostgreSQL 雙寫。
+取消 HTTP proof 已通過；capture 與 settlement persistence／service building blocks 已完成真實 PostgreSQL mock-capture、五欄折扣快照、持久化 job retry／complete、`FOR UPDATE SKIP LOCKED`、跨執行個體 lock 與清理歸零 proof。下一步等待分離式請款 Sandbox 核准後做人工 E2E，再接入 server；仍禁止 SQLite／PostgreSQL 雙寫。
 
 ## 2026-07-30～2026-07-31 驗證進度
 
@@ -370,11 +370,11 @@ PostgreSQL 遷移後，以下流程需要 transaction：
 - 跨連線 HTTP proof 已確認鎖定期間請求等待、釋放後成功、重複 idempotency key 只建立一次，測試資料最後清除為 0。
 - 商家完整菜單查詢／建立／修改／停售已完成 PostgreSQL repository 與跨連線 HTTP proof；公開菜單會排除停售項目，商家完整菜單仍可讀取，測試資料與 audit log 均已清除。
 - PostgreSQL 顧客首次建單已完成：跨連線 proof 確認 activity lock 等待、截止／容量／重複／改價防護、快照、history／audit 與清理為 0。
-- PostgreSQL 訂單列表／明細與 authorization request／confirm／cancel、一般 authorization void、顧客取消已完成受控切片，取消 HTTP proof 已通過。單筆 capture repository／service building block 已通過真實 PostgreSQL proof，但尚未接入 server；settlement plan、retry state、完成交易、job scheduler、改單／revision、refund 與 pickup 仍待搬移。受控 PostgreSQL 訂單模式繼續停用仍讀 SQLite 的背景 scheduler，避免跨 runtime。
+- PostgreSQL 訂單列表／明細與 authorization request／confirm／cancel、一般 authorization void、顧客取消已完成受控 server 切片。capture／settlement repositories 已完成真實 PostgreSQL proof，但尚未接入 server；改單／revision、refund 與 pickup 仍待搬移，背景 scheduler 維持停用避免跨 runtime 與未核准自動請款。
 
 ## 2026-07-31 結算快照 migration 驗證
 
 - `003_activity_settlement_discount_snapshot_postgres.sql` 已完成回填、NOT NULL、非負數、出資方與金額一致性 constraints。
 - `npm run postgres-settlement-snapshot:smoke` 已在本機 PostgreSQL 16 transaction 中驗證 3 杯折 100 元會保存每杯 33 元、分配 99 元、尾差 1 元。
 - 不一致快照會被 PostgreSQL `CHECK` constraint 拒絕。
-- smoke 最後執行 rollback；`003` 尚未永久套用，本機 Backend runtime 仍為 SQLite。
+- `npm run postgres-settlement-snapshot:apply` 已將 `003` 永久套用本機開發資料庫並驗證 schema／backfill；Backend runtime 仍預設 SQLite，沒有雙寫。

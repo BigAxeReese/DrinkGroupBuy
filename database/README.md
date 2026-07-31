@@ -46,7 +46,7 @@ database/drink-group-buy-dev.sqlite
 
 ## PostgreSQL draft 驗證方式
 
-目前 PostgreSQL 已用於 schema／seed、adapter、三個唯讀切片，以及商家建團、菜單管理與顧客首次建單驗證；訂單後續與付款 HTTP route 仍使用 SQLite。
+目前 PostgreSQL 已用於 schema／seed、adapter、唯讀切片、商家建團、菜單管理、顧客首次建單與付款 request／confirm／cancel／一般 void／顧客取消。capture／settlement repositories 已完成真實 PostgreSQL proof，但尚未接入 server route／scheduler。
 
 本機沒有安裝 `psql` 也可以用 Docker container 內的 `psql` 驗證：
 
@@ -54,6 +54,13 @@ database/drink-group-buy-dev.sqlite
 docker compose -f database/docker-compose.postgres.yml up -d
 docker compose -f database/docker-compose.postgres.yml exec postgres psql -U drink_group_buy -d drink_group_buy -f /migrations/001_initial_postgres.sql
 docker compose -f database/docker-compose.postgres.yml exec postgres psql -U drink_group_buy -d drink_group_buy -f /migrations/002_seed_dev_postgres.sql
+```
+
+既有資料庫套用 `003` 時，建議使用會檢查未套用／完整套用／部分套用並驗證回填的 runner：
+
+```powershell
+$env:DATABASE_URL='postgres://...'
+npm run postgres-settlement-snapshot:apply
 ```
 
 如果要重建 PostgreSQL dev database，先移除 volume 再重新啟動：
@@ -85,6 +92,8 @@ postgres://drink_group_buy:drink_group_buy_dev_password@localhost:5432/drink_gro
 - 2026-07-30：團購活動列表 HTTP route 已用 PostgreSQL 專用臨時活動證明資料來源，驗證後活動與級距均已清除。
 - 2026-07-31：商家菜單建立／修改／停售已通過 PostgreSQL transaction、store row lock 與 HTTP proof；臨時品項、選項與 audit log 均已清除。
 - 2026-07-31：顧客首次建單已通過 PostgreSQL activity row lock、容量／價格／重複防護與 HTTP proof；臨時訂單、活動、history 與 audit 均已清除。
+- 2026-07-31：`003` 已由專用 transaction runner 永久套用並通過 schema／backfill 驗證。
+- 2026-07-31：結算 proof 已驗證折扣快照、持久化 job retry／complete、`FOR UPDATE SKIP LOCKED`、跨執行個體 lock、mock capture 與清理歸零。
 - 驗證後 runtime 資料仍為 0 group_buy_activities、0 promotion_tiers、0 orders、0 payment_authorizations、0 payment_captures、0 pickup_credentials。
 
 ## 目前主要資料表

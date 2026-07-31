@@ -90,12 +90,17 @@ function classifyLinePayCaptureError(error) {
   };
 }
 
-async function getLinePayCaptureProviderState({ transactionId, orderId, provider = "line_pay" }) {
-  const context = getLinePayAuthorizationContext({
+async function getLinePayCaptureProviderState({
+  transactionId, orderId, provider = "line_pay", paymentCaptureRepository
+}) {
+  const contextInput = {
     orderId,
     providerTransactionId: transactionId,
     provider
-  });
+  };
+  const context = paymentCaptureRepository
+    ? await paymentCaptureRepository.getAuthorizationContext(contextInput)
+    : getLinePayAuthorizationContext(contextInput);
   if (!context) {
     return { state: "missing", payload: null };
   }

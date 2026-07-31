@@ -68,7 +68,7 @@ API：groupBuyActivity
 - 團購活動首頁、地圖與部分店家摘要仍使用 mobile local state 或 mock。
 - 購物車仍是 Mobile local state；送單、改單與重新授權前由 Backend 重新驗證。
 - LINE Pay reconciliation、持久化 retry、admin 警示查詢及 payment／settlement／cancel／repay／pickup DB lease 已完成；兩程序 lease 測試已通過，尚缺正式通知與核准後的 Sandbox 人工驗證。
-- PostgreSQL reliability schema parity、adapter、訂單建立／列表／明細／首次 authorization request／confirm repositories 已完成；真實 PostgreSQL 16 transaction／HTTP proofs 已通過。一般 void／capture、改單／取消、pickup／settlement 仍待搬移，受控模式尚非付款 E2E runtime。
+- PostgreSQL reliability schema parity、adapter、訂單建立／列表／明細／首次 authorization request／confirm／cancel、一般 void 與顧客取消受控 server 切片已完成。capture／settlement repositories 與真實 PostgreSQL proof 也已完成，但尚未接入 server；改單／revision、refund、pickup 與 Sandbox 人工 E2E 仍待完成。
 - Android、Firebase 正式設定與 LINE Pay sandbox 人工 E2E 尚未完成。
 
 ## 架構原則

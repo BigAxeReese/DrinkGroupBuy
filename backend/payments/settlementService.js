@@ -23,6 +23,11 @@ const CAPTURE_MAX_ATTEMPTS = 3;
 const CAPTURE_RETRY_INTERVAL_MS = 30_000;
 
 async function settleGroupBuyActivity(input = {}) {
+  if (input.settlementRepository?.kind === "postgres") {
+    return input.settlementRepository.withOperationLock(input, () => (
+      settleGroupBuyActivityUnlocked(input)
+    ));
+  }
   const ownerId = input.lockOwnerId || `settlement-${process.pid}-${randomUUID()}`;
   const lockKey = `settlement:activity:${input.activityId}`;
   const lock = acquireOperationLock({
@@ -45,12 +50,20 @@ async function settleGroupBuyActivity(input = {}) {
   }
 }
 
-async function settleGroupBuyActivityUnlocked({ activityId, actorUserId, force = false, now } = {}) {
-  const plan = createGroupBuySettlementPlan(activityId, {
+async function settleGroupBuyActivityUnlocked(input = {}) {
+  const {
+    activityId,
     actorUserId,
-    force,
-    now
-  });
+    force = false,
+    now,
+    settlementRepository,
+    paymentCaptureRepository,
+    authorizationCancelRepository
+  } = input;
+  const planInput = { activityId, actorUserId, force, now };
+  const plan = settlementRepository
+    ? await settlementRepository.createPlan(planInput)
+    : createGroupBuySettlementPlan(activityId, { actorUserId, force, now });
 
   if (!plan || plan.error) {
     return plan;
@@ -82,15 +95,18 @@ async function settleGroupBuyActivityUnlocked({ activityId, actorUserId, force =
 
     try {
       if (order.action === "capture") {
-        const retryState = getLinePayCaptureRetryState({
+        const retryInput = {
           orderId: order.id,
           providerTransactionId: order.providerTransactionId,
           provider: order.paymentProvider,
           maxAttempts: CAPTURE_MAX_ATTEMPTS,
           now
-        });
+        };
+        const retryState = settlementRepository
+          ? await settlementRepository.getCaptureRetryState(retryInput)
+          : getLinePayCaptureRetryState(retryInput);
         if (retryState?.exhausted) {
-          const stopped = recordLinePayCaptureFailureInDatabase({
+          const failureInput = {
             orderId: order.id,
             providerTransactionId: order.providerTransactionId,
             provider: order.paymentProvider,
@@ -100,7 +116,10 @@ async function settleGroupBuyActivityUnlocked({ activityId, actorUserId, force =
             retryable: false,
             maxAttempts: CAPTURE_MAX_ATTEMPTS,
             retryIntervalMs: CAPTURE_RETRY_INTERVAL_MS
-          });
+          };
+          const stopped = paymentCaptureRepository
+            ? await paymentCaptureRepository.recordCaptureFailure(failureInput)
+            : recordLinePayCaptureFailureInDatabase(failureInput);
           results.push(createTerminalCaptureFailureResult(order, stopped || retryState, "capture_retry_exhausted"));
           continue;
         }
@@ -118,10 +137,11 @@ async function settleGroupBuyActivityUnlocked({ activityId, actorUserId, force =
           const providerState = await getLinePayCaptureProviderState({
             orderId: order.id,
             transactionId: order.providerTransactionId,
-            provider: order.paymentProvider
+            provider: order.paymentProvider,
+            paymentCaptureRepository
           });
           if (providerState.state === "captured") {
-            const reconciled = captureLinePayAuthorizationInDatabase({
+            const reconciliationInput = {
               orderId: order.id,
               providerTransactionId: order.providerTransactionId,
               provider: order.paymentProvider,
@@ -130,7 +150,10 @@ async function settleGroupBuyActivityUnlocked({ activityId, actorUserId, force =
               finalAmount: order.finalAmount,
               reason: "line_pay_provider_capture_reconciled",
               providerPayload: providerState.payload
-            });
+            };
+            const reconciled = paymentCaptureRepository
+              ? await paymentCaptureRepository.captureAuthorization(reconciliationInput)
+              : captureLinePayAuthorizationInDatabase(reconciliationInput);
             results.push({
               orderId: order.id,
               action: "capture",
@@ -151,7 +174,7 @@ async function settleGroupBuyActivityUnlocked({ activityId, actorUserId, force =
             continue;
           }
           if (!["authorized", "not_captured"].includes(providerState.state)) {
-            const stopped = recordLinePayCaptureFailureInDatabase({
+            const failureInput = {
               orderId: order.id,
               providerTransactionId: order.providerTransactionId,
               provider: order.paymentProvider,
@@ -162,7 +185,10 @@ async function settleGroupBuyActivityUnlocked({ activityId, actorUserId, force =
               maxAttempts: CAPTURE_MAX_ATTEMPTS,
               retryIntervalMs: CAPTURE_RETRY_INTERVAL_MS,
               providerPayload: providerState.payload
-            });
+            };
+            const stopped = paymentCaptureRepository
+              ? await paymentCaptureRepository.recordCaptureFailure(failureInput)
+              : recordLinePayCaptureFailureInDatabase(failureInput);
             results.push(createTerminalCaptureFailureResult(
               order,
               stopped,
@@ -178,7 +204,8 @@ async function settleGroupBuyActivityUnlocked({ activityId, actorUserId, force =
           provider: order.paymentProvider,
           amount: order.captureAmount,
           finalAmount: order.finalAmount,
-          reason: `deadline_settlement_${order.actionReason}`
+          reason: `deadline_settlement_${order.actionReason}`,
+          paymentCaptureRepository
         });
 
         results.push({
@@ -194,7 +221,8 @@ async function settleGroupBuyActivityUnlocked({ activityId, actorUserId, force =
         orderId: order.id,
         transactionId: order.providerTransactionId,
         provider: order.paymentProvider,
-        reason: `deadline_settlement_${order.actionReason}`
+        reason: `deadline_settlement_${order.actionReason}`,
+        authorizationCancelRepository
       });
 
       results.push({
@@ -258,12 +286,17 @@ async function settleGroupBuyActivityUnlocked({ activityId, actorUserId, force =
   const failedOrderCount = results
     .filter((result) => result.action === "capture" && result.status === "failed")
     .length;
-  const completion = completeGroupBuySettlement(activityId, {
+  const completionInput = {
+    activityId,
     actorUserId,
     outcome: plan.outcome,
     authorizedCups: plan.authorizedCups,
     appliedTierId: plan.appliedTier?.id || null,
     discountAmount: plan.appliedTier?.discountAmount || 0,
+    discountPerCup: plan.discountPerCup,
+    allocatedDiscountAmount: plan.allocatedDiscountAmount,
+    undistributedDiscountAmount: plan.undistributedDiscountAmount,
+    discountFunder: plan.discountFunder,
     capturedOrderCount,
     voidedOrderCount,
     failedOrderCount,
@@ -271,7 +304,10 @@ async function settleGroupBuyActivityUnlocked({ activityId, actorUserId, force =
       ? "deadline_settlement_completed_with_payment_failures"
       : "deadline_settlement_completed",
     now
-  });
+  };
+  const completion = settlementRepository
+    ? await settlementRepository.completeSettlement(completionInput)
+    : completeGroupBuySettlement(activityId, completionInput);
 
   return {
     plan,
@@ -299,10 +335,13 @@ function createTerminalCaptureFailureResult(order, retryState, reason) {
 
 async function runDueGroupBuySettlements(input = {}) {
   const now = input.now || new Date().toISOString();
-  const dueActivities = listDueGroupBuyActivitiesForSettlement({
+  const dueInput = {
     now,
     limit: input.limit
-  });
+  };
+  const dueActivities = input.settlementRepository
+    ? await input.settlementRepository.listDueActivities(dueInput)
+    : listDueGroupBuyActivitiesForSettlement(dueInput);
   const results = [];
   const failures = [];
 
@@ -311,7 +350,10 @@ async function runDueGroupBuySettlements(input = {}) {
       const result = await settleGroupBuyActivity({
         activityId: activity.id,
         actorUserId: input.actorUserId || null,
-        now
+        now,
+        settlementRepository: input.settlementRepository,
+        paymentCaptureRepository: input.paymentCaptureRepository,
+        authorizationCancelRepository: input.authorizationCancelRepository
       });
 
       if (!result) {
@@ -371,23 +413,44 @@ async function runDueGroupBuySettlements(input = {}) {
 }
 
 
-function enqueueDueGroupBuySettlementJobs(input = {}) {
+async function enqueueDueGroupBuySettlementJobs(input = {}) {
   const now = input.now || new Date().toISOString();
-  return listDueGroupBuyActivitiesForSettlement({
+  const dueInput = {
     now,
     limit: input.limit
-  }).map((activity) => enqueuePaymentReliabilityJob({
-    jobType: "settle_group_buy_activity",
-    resourceType: "activity",
-    resourceId: activity.id,
-    payload: {
-      activityId: activity.id,
-      actorUserId: input.actorUserId || null
-    },
-    maxAttempts: input.maxAttempts || 20,
-    runAfter: now,
-    now
+  };
+  const dueActivities = input.settlementRepository
+    ? await input.settlementRepository.listDueActivities(dueInput)
+    : listDueGroupBuyActivitiesForSettlement(dueInput);
+  return Promise.all(dueActivities.map((activity) => {
+    const jobInput = {
+      jobType: "settle_group_buy_activity",
+      resourceType: "activity",
+      resourceId: activity.id,
+      payload: {
+        activityId: activity.id,
+        actorUserId: input.actorUserId || null
+      },
+      maxAttempts: input.maxAttempts || 20,
+      runAfter: now,
+      now
+    };
+    return input.settlementRepository
+      ? input.settlementRepository.enqueueJob(jobInput)
+      : enqueuePaymentReliabilityJob(jobInput);
   }));
+}
+
+async function completeSettlementJob(input, jobInput) {
+  return input.settlementRepository
+    ? input.settlementRepository.completeJob(jobInput)
+    : completePaymentReliabilityJob(jobInput);
+}
+
+async function rescheduleSettlementJob(input, jobInput) {
+  return input.settlementRepository
+    ? input.settlementRepository.rescheduleJob(jobInput)
+    : reschedulePaymentReliabilityJob(jobInput);
 }
 
 async function runDueGroupBuySettlementJobs(input = {}) {
@@ -398,14 +461,17 @@ async function runDueGroupBuySettlementJobs(input = {}) {
     null,
     CAPTURE_RETRY_INTERVAL_MS
   );
-  const queued = enqueueDueGroupBuySettlementJobs(input);
-  const jobs = claimPaymentReliabilityJobs({
+  const queued = await enqueueDueGroupBuySettlementJobs(input);
+  const claimInput = {
     jobType: "settle_group_buy_activity",
     workerId,
     limit: input.limit || 20,
     leaseMs: input.leaseMs || 300_000,
     now
-  });
+  };
+  const jobs = input.settlementRepository
+    ? await input.settlementRepository.claimJobs(claimInput)
+    : claimPaymentReliabilityJobs(claimInput);
   const results = [];
 
   for (const job of jobs) {
@@ -415,14 +481,17 @@ async function runDueGroupBuySettlementJobs(input = {}) {
         actorUserId: job.payload.actorUserId || input.actorUserId || null,
         lockOwnerId: `${workerId}:${job.id}`,
         leaseMs: input.leaseMs || 300_000,
-        now
+        now,
+        settlementRepository: input.settlementRepository,
+        paymentCaptureRepository: input.paymentCaptureRepository,
+        authorizationCancelRepository: input.authorizationCancelRepository
       });
       const retryable = !result
         || result.error === "settlement_retry_pending"
         || result.error === "settlement_locked"
         || (result.error && result.error !== "activity_already_settled" && result.error !== "settlement_not_due");
       const persisted = retryable
-        ? reschedulePaymentReliabilityJob({
+        ? await rescheduleSettlementJob(input, {
             jobId: job.id,
             workerId,
             runAfter: new Date(Date.parse(now) + retryIntervalMs).toISOString(),
@@ -430,10 +499,10 @@ async function runDueGroupBuySettlementJobs(input = {}) {
             terminal: !result,
             now
           })
-        : completePaymentReliabilityJob({ jobId: job.id, workerId, now });
+        : await completeSettlementJob(input, { jobId: job.id, workerId, now });
       results.push({ job: persisted, result });
     } catch (error) {
-      const persisted = reschedulePaymentReliabilityJob({
+      const persisted = await rescheduleSettlementJob(input, {
         jobId: job.id,
         workerId,
         runAfter: new Date(Date.parse(now) + retryIntervalMs).toISOString(),
@@ -485,7 +554,10 @@ function startDeadlineSettlementScheduler(input = {}) {
     try {
       const summary = await runDueGroupBuySettlementJobs({
         actorUserId,
-        limit
+        limit,
+        settlementRepository: input.settlementRepository,
+        paymentCaptureRepository: input.paymentCaptureRepository,
+        authorizationCancelRepository: input.authorizationCancelRepository
       });
 
       if (summary.queuedCount > 0 || summary.failedCount > 0) {
