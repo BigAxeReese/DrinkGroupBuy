@@ -3,14 +3,14 @@ import { StyleSheet, Text, View } from "react-native";
 import { MobileScreen, Section } from "../components/MobileScreen";
 import { PlaceholderBox } from "../components/PlaceholderBox";
 import { StatusBadge } from "../components/StatusBadge";
-import { stores } from "../mock/stores";
 import { formatCurrency, getGroupBuyActivityById } from "../utils/calculations";
+import { getGroupBuyActivityStore } from "../utils/groupBuyActivityStores";
 
 export function PickupInfoScreen({ navigation, route, appState, actions, memberAction, selectedCustomerId }) {
   const order = appState.orders.find((item) => item.id === route.params?.orderId && item.customerId === selectedCustomerId)
     ?? appState.orders.find((item) => item.customerId === selectedCustomerId);
   const groupBuyActivity = order ? getGroupBuyActivityById(appState.groupBuyActivities, route.params?.groupBuyActivityId ?? order.groupBuyActivityId) : null;
-  const store = groupBuyActivity ? stores.find((item) => item.id === groupBuyActivity.storeId) : null;
+  const store = order?.backendStore ?? getGroupBuyActivityStore(groupBuyActivity);
   const pickupCode = order?.pickupCredential?.status === "active"
     ? order.pickupCredential.pickupCode
     : null;

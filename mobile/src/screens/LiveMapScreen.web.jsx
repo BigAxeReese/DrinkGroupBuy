@@ -1,11 +1,14 @@
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import Constants from "expo-constants";
 import { Pressable, StyleSheet, Text, View } from "react-native";
-import { databaseMapStores } from "../mock/databaseMapStores";
+import { useDevLocationConfig } from "../hooks/useDevLocationConfig";
 import { mapCenter, mapDefaults } from "../mock/mapConfig";
+import { reportAppliedDevLocation } from "../utils/devLocationControl";
+import { buildGroupBuyActivityMapStores } from "../utils/groupBuyActivityStores";
 
-export function LiveMapScreen({ navigation, appState }) {
+export function LiveMapScreen({ navigation, appState, selectedAuthUserId }) {
   const mapElementRef = useRef(null);
+  const lastReportSignatureRef = useRef("");
   const mapInstanceRef = useRef(null);
   const googleMapsRef = useRef(null);
   const markersRef = useRef([]);
@@ -13,27 +16,86 @@ export function LiveMapScreen({ navigation, appState }) {
   const [selectedStoreId, setSelectedStoreId] = useState(null);
   const [mapError, setMapError] = useState("");
   const [mapReady, setMapReady] = useState(false);
-
-  const mapStores = databaseMapStores.map((store) => {
-    const runtimeGroupBuyActivity = appState?.groupBuyActivities?.find((groupBuyActivity) => groupBuyActivity.storeId === store.id && groupBuyActivity.status === "recruiting");
-    const progressText = runtimeGroupBuyActivity ? getGroupBuyActivityProgressText(runtimeGroupBuyActivity) : "";
-    return {
-      ...store,
-      hasRecruitingGroupBuyActivity: store.hasRecruitingGroupBuyActivity || Boolean(runtimeGroupBuyActivity),
-      recruitingGroupBuyActivityId: store.recruitingGroupBuyActivityId || runtimeGroupBuyActivity?.id || null,
-      progressText
-    };
+  const [locationPermission, setLocationPermission] = useState("not_required");
+  const [userPosition, setUserPosition] = useState({
+    latitude: mapCenter.latitude,
+    longitude: mapCenter.longitude
   });
+  const { config, enabled: devControlEnabled, syncError, syncStatus } = useDevLocationConfig(selectedAuthUserId);
+
+  const mapStores = useMemo(
+    () => buildGroupBuyActivityMapStores(appState?.groupBuyActivities),
+    [appState?.groupBuyActivities]
+  );
 
   const selectedStore = mapStores.find((store) => store.id === selectedStoreId);
   const apiKey = (process.env.EXPO_PUBLIC_GOOGLE_MAPS_API_KEY
     || Constants.expoConfig?.extra?.googleMapsWebApiKey
     || Constants.manifest2?.extra?.expoClient?.extra?.googleMapsWebApiKey
     || "").trim();
-  const webMapCenter = {
-    lat: mapCenter.latitude,
-    lng: mapCenter.longitude
-  };
+  const userMapCenter = useMemo(() => ({
+    lat: userPosition.latitude,
+    lng: userPosition.longitude
+  }), [userPosition.latitude, userPosition.longitude]);
+  const locationName = config.locationMode === "live" && locationPermission === "granted"
+    ? "瀏覽器即時位置"
+    : config.fixedLocation.name;
+
+  useEffect(() => {
+    const fallbackPosition = {
+      latitude: config.fixedLocation.latitude,
+      longitude: config.fixedLocation.longitude
+    };
+    let watchId = null;
+
+    const reportApplied = (permission) => {
+      if (!devControlEnabled || !selectedAuthUserId) return;
+      const signature = `${selectedAuthUserId}:${config.version}:${permission}`;
+      if (lastReportSignatureRef.current === signature) return;
+      lastReportSignatureRef.current = signature;
+      reportAppliedDevLocation({
+        userId: selectedAuthUserId,
+        config,
+        locationPermission: permission
+      }).catch(() => {});
+    };
+
+    setUserPosition(fallbackPosition);
+    if (config.locationMode !== "live") {
+      setLocationPermission("not_required");
+      reportApplied("not_required");
+      return undefined;
+    }
+    if (!navigator.geolocation) {
+      setLocationPermission("unavailable");
+      reportApplied("unavailable");
+      return undefined;
+    }
+
+    setLocationPermission("requesting");
+    watchId = navigator.geolocation.watchPosition(
+      (position) => {
+        setUserPosition({ latitude: position.coords.latitude, longitude: position.coords.longitude });
+        setLocationPermission("granted");
+        reportApplied("granted");
+      },
+      (error) => {
+        const permission = error.code === 1 ? "denied" : "error";
+        setUserPosition(fallbackPosition);
+        setLocationPermission(permission);
+        reportApplied(permission);
+      },
+      { enableHighAccuracy: true, maximumAge: 1000, timeout: 5000 }
+    );
+    return () => navigator.geolocation.clearWatch(watchId);
+  }, [
+    config.fixedLocation.latitude,
+    config.fixedLocation.longitude,
+    config.locationMode,
+    config.version,
+    devControlEnabled,
+    selectedAuthUserId
+  ]);
 
   useEffect(() => {
     if (!apiKey || !mapElementRef.current) {
@@ -51,7 +113,7 @@ export function LiveMapScreen({ navigation, appState }) {
         if (!active || !mapElementRef.current) return;
 
         const map = new googleMaps.Map(mapElementRef.current, {
-          center: webMapCenter,
+          center: userMapCenter,
           zoom: mapDefaults.zoom,
           mapTypeControl: false,
           streetViewControl: false,
@@ -68,7 +130,7 @@ export function LiveMapScreen({ navigation, appState }) {
         googleMapsRef.current = googleMaps;
         mapInstanceRef.current = map;
         googleMaps.event.trigger(map, "resize");
-        map.setCenter(webMapCenter);
+        map.setCenter(userMapCenter);
         if (active) setMapReady(true);
       })
       .catch((error) => {
@@ -90,6 +152,11 @@ export function LiveMapScreen({ navigation, appState }) {
   }, [apiKey]);
 
   useEffect(() => {
+    if (!mapReady || !mapInstanceRef.current) return;
+    mapInstanceRef.current.panTo(userMapCenter);
+  }, [mapReady, userMapCenter]);
+
+  useEffect(() => {
     const map = mapInstanceRef.current;
     const googleMaps = googleMapsRef.current;
     if (!mapReady || !map || !googleMaps) return undefined;
@@ -98,16 +165,16 @@ export function LiveMapScreen({ navigation, appState }) {
     markersByStoreIdRef.current.clear();
     const nextMarkers = [];
 
-    const campusMarker = createStoreOverlayMarker({
+    const userMarker = createStoreOverlayMarker({
       googleMaps,
       map,
-      position: webMapCenter,
-      title: mapCenter.name,
+      position: userMapCenter,
+      title: locationName,
       color: "#2563eb",
-      markerText: "校",
-      labelText: mapCenter.name
+      markerText: "我",
+      labelText: locationName
     });
-    nextMarkers.push(campusMarker);
+    nextMarkers.push(userMarker);
 
     mapStores.forEach((store) => {
       const marker = createStoreOverlayMarker({
@@ -133,21 +200,7 @@ export function LiveMapScreen({ navigation, appState }) {
         markersByStoreIdRef.current.clear();
       }
     };
-  }, [mapReady]);
-
-  useEffect(() => {
-    if (!mapReady) return;
-
-    mapStores.forEach((store) => {
-      const marker = markersByStoreIdRef.current.get(store.id);
-      if (!marker) return;
-      marker.update({
-        title: store.name,
-        color: store.hasRecruitingGroupBuyActivity ? "#facc15" : "#2563eb",
-        labelText: getStoreMarkerLabel(store)
-      });
-    });
-  }, [mapReady, appState?.groupBuyActivities]);
+  }, [locationName, mapReady, mapStores, userMapCenter]);
 
   useEffect(() => {
     const mapElement = mapElementRef.current;
@@ -157,7 +210,7 @@ export function LiveMapScreen({ navigation, appState }) {
 
     const refreshMapSize = () => {
       googleMaps.event.trigger(map, "resize");
-      map.setCenter(map.getCenter() || webMapCenter);
+      map.setCenter(map.getCenter() || userMapCenter);
     };
 
     const frameId = window.requestAnimationFrame(refreshMapSize);
@@ -175,7 +228,7 @@ export function LiveMapScreen({ navigation, appState }) {
       resizeObserver?.disconnect();
       window.removeEventListener("resize", refreshMapSize);
     };
-  }, [mapReady]);
+  }, [mapReady, userMapCenter]);
 
   const focusStore = (store) => {
     setSelectedStoreId(store.id);
@@ -196,9 +249,15 @@ export function LiveMapScreen({ navigation, appState }) {
 
       <View style={styles.overlay}>
         <Text style={styles.title}>即時地圖</Text>
-        <Text style={styles.subtitle}>中心：{mapCenter.name}</Text>
+        <Text style={styles.subtitle}>中心：{locationName}</Text>
+        <Text style={styles.subtitle}>
+          {devControlEnabled
+            ? `控制台：${syncStatus === "ready" ? `${config.locationMode} · v${config.version}` : syncError || "同步中"}`
+            : "開發定位控制未啟用"}
+        </Text>
+        <Text style={styles.subtitle}>{mapStores.length > 0 ? `${mapStores.length} 間活動店家` : "目前沒有含座標的活動店家"}</Text>
         <View style={styles.legendRow}>
-          <LegendDot color="#2563eb" label="測試店家" />
+          <LegendDot color="#2563eb" label="活動店家" />
           <LegendDot color="#facc15" label="團購進行中" />
         </View>
       </View>
@@ -214,7 +273,7 @@ export function LiveMapScreen({ navigation, appState }) {
           <View style={styles.storeInfo}>
             <Text style={styles.storeName}>{selectedStore.name}</Text>
             <Text style={styles.storeMeta}>
-              {selectedStore.distanceText} · {selectedStore.hasRecruitingGroupBuyActivity ? `團購進行中 ${selectedStore.progressText}` : "目前沒有進行中的團購"}
+              {selectedStore.address || "地址未提供"} · {selectedStore.hasRecruitingGroupBuyActivity ? `團購進行中 ${selectedStore.progressText}` : "目前沒有進行中的團購"}
             </Text>
           </View>
           <Pressable
@@ -279,18 +338,6 @@ function loadGoogleMaps(apiKey) {
   });
 
   return window.__drinkGroupBuyGoogleMapsPromise;
-}
-
-function getGroupBuyActivityProgressText(groupBuyActivity) {
-  const tierTargets = (groupBuyActivity.tiers ?? [])
-    .map((tier) => Number(tier.cups))
-    .filter((cups) => Number.isFinite(cups) && cups > 0)
-    .sort((left, right) => left - right);
-  const nextTarget = tierTargets.find((cups) => groupBuyActivity.currentCups < cups)
-    ?? groupBuyActivity.targetCups
-    ?? tierTargets[tierTargets.length - 1]
-    ?? 0;
-  return `${groupBuyActivity.currentCups}/${nextTarget}杯`;
 }
 
 function getStoreMarkerLabel(store) {

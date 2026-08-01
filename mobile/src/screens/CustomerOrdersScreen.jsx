@@ -4,9 +4,9 @@ import { MobileScreen, Section } from "../components/MobileScreen";
 import { PrimaryButton } from "../components/PrimaryButton";
 import { StatusBadge } from "../components/StatusBadge";
 import { useOrderListSync } from "../hooks/useOrderListSync";
-import { stores } from "../mock/stores";
 import { formatCurrency, isWithdrawalLocked } from "../utils/calculations";
 import { getGroupBuyActivityProgress } from "../utils/groupBuyActivityProgress";
+import { getGroupBuyActivityStore } from "../utils/groupBuyActivityStores";
 import { normalizeOrderItem } from "../utils/orderItems";
 
 export function CustomerOrdersScreen({ navigation, appState, actions, memberAction, selectedCustomerId }) {
@@ -149,7 +149,7 @@ function OrderListSection({ title, orders, groupBuyActivities, payments, emptyTe
 function OrderListCard({ order, groupBuyActivities, payments, historical, onPress }) {
   const groupBuyActivity = groupBuyActivities.find((item) => item.id === order.groupBuyActivityId) ?? null;
   const store = order.backendStore
-    ?? (groupBuyActivity ? stores.find((item) => item.id === groupBuyActivity.storeId) : null);
+    ?? getGroupBuyActivityStore(groupBuyActivity);
   const payment = payments.find((item) => item.orderId === order.id);
   const orderItems = (order.items ?? []).map(normalizeOrderItem);
   const total = payment?.captureAmount ?? getOrderSubtotal(order);
@@ -190,7 +190,7 @@ function OrderDetailCard({ order, groupBuyActivities, payments, actions, navigat
   const groupBuyActivity = groupBuyActivities.find((item) => item.id === order.groupBuyActivityId) ?? null;
   const payment = payments.find((item) => item.orderId === order.id);
   const store = order.backendStore
-    ?? (groupBuyActivity ? stores.find((item) => item.id === groupBuyActivity.storeId) : null);
+    ?? getGroupBuyActivityStore(groupBuyActivity);
   const orderItems = (order.items ?? []).map(normalizeOrderItem);
   const displaySubtotal = getOrderSubtotal(order);
   const displayTotal = payment?.captureAmount ?? displaySubtotal;

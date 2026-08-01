@@ -249,13 +249,16 @@ function LoginOptionButton({ icon, iconStyle, label, onPress, disabled = false, 
 
 function getRouteForUser(user) {
   if (user.roles.includes("admin")) {
-    return { role: "admin", routeName: "adminDashboard", params: {} };
+    return { role: "admin", routeName: "adminDashboard", params: { authUserId: user.id } };
   }
   if (user.roles.includes("merchant")) {
     return {
       role: "merchant",
       routeName: "merchantDashboard",
-      params: { storeId: user.merchantStores?.[0]?.id ?? "store-001" }
+      params: {
+        storeId: user.merchantStores?.[0]?.id ?? "store-001",
+        authUserId: user.id
+      }
     };
   }
   if (user.roles.includes("customer")) {
@@ -263,7 +266,8 @@ function getRouteForUser(user) {
       role: "customer",
       routeName: "nearby",
       params: {
-        userId: backendCustomerToPrototypeCustomer[user.id] ?? "customer-yinji"
+        userId: backendCustomerToPrototypeCustomer[user.id] ?? "customer-yinji",
+        authUserId: user.id
       }
     };
   }

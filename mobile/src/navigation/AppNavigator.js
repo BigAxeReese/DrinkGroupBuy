@@ -1,7 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { AppState, Linking, View, StyleSheet } from "react-native";
 import { BottomNav } from "../components/BottomNav";
-import { groupBuyActivities as initialGroupBuyActivities } from "../mock/groupBuyActivities";
 import { orders as initialOrders } from "../mock/orders";
 import { paymentAuthorizations as initialPaymentAuthorizations } from "../mock/paymentAuthorizations";
 import { RoleSelectScreen } from "../screens/RoleSelectScreen";
@@ -331,8 +330,9 @@ export function AppNavigator() {
   const [stack, setStack] = useState([initialRoute]);
   const [currentRole, setCurrentRole] = useState(null);
   const [selectedCustomerId, setSelectedCustomerId] = useState("customer-yinji");
+  const [selectedAuthUserId, setSelectedAuthUserId] = useState(null);
   const [selectedMerchantStoreId, setSelectedMerchantStoreId] = useState("store-001");
-  const [groupBuyActivities, setGroupBuyActivities] = useState(initialGroupBuyActivities);
+  const [groupBuyActivities, setGroupBuyActivities] = useState([]);
   const [groupBuyActivitySyncStatus, setGroupBuyActivitySyncStatus] = useState("idle");
   const [orders, setOrders] = useState(initialOrders);
   const [paymentAuthorizations, setPaymentAuthorizations] = useState(initialPaymentAuthorizations);
@@ -346,7 +346,7 @@ export function AppNavigator() {
     clearPrototypeStateOnce("2026-07-29-clear-all-group-buys-orders-cart");
     const storedState = loadPrototypeState();
     if (storedState) {
-      setGroupBuyActivities(getStoredArray(storedState, "groupBuyActivities", "deals", initialGroupBuyActivities));
+      setGroupBuyActivities(getStoredArray(storedState, "groupBuyActivities", "deals", []));
       setOrders(getStoredArray(storedState, "orders", null, initialOrders).map(normalizeStoredOrder));
       setPaymentAuthorizations(getStoredArray(storedState, "paymentAuthorizations", "paymentReports", initialPaymentAuthorizations));
       setCartItems(getStoredArray(storedState, "cartItems", null, []).map(normalizeStoredCartItem));
@@ -425,6 +425,7 @@ export function AppNavigator() {
   const navigation = useMemo(() => ({
     selectRole(role, routeName, params = {}) {
       setCurrentRole(role);
+      setSelectedAuthUserId(params.authUserId || null);
       if (role === "merchant" && params.storeId) {
         setSelectedMerchantStoreId(params.storeId);
       }
@@ -1213,6 +1214,7 @@ export function AppNavigator() {
     actions,
     currentRole,
     selectedCustomerId,
+    selectedAuthUserId,
     selectedMerchantStoreId,
     memberAction: current.name !== "roleSelect" ? () => navigation.replace("roleSelect") : undefined
   };

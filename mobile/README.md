@@ -11,7 +11,7 @@
 目前已接上的功能：
 
 - Firebase Google Login 入口；本機 dev mode 可用測試身份下拉選單切換顧客與商家流程。
-- 顧客首頁、即時地圖、菜單、購物車、我的訂單。
+- 顧客首頁、活動詳情、即時地圖、菜單、購物車、我的訂單與取餐資訊；活動與顧客店家摘要已接 Backend。
 - 商家建立團購活動，會呼叫 backend API。
 - 顧客送出購物車，會呼叫 backend 建立訂單。
 - 付款頁可以呼叫 backend 建立 LINE Pay sandbox 預授權付款連結。
@@ -20,10 +20,10 @@
 目前仍未完成：
 
 - 正式 Firebase / Google 設定與測試帳號 UID 對應仍需依環境完成。
-- App 重新載入後完整從 backend 載入所有訂單。
-- LINE Pay capture / void / refund。
-- LINE Pay webhook。
-- 團購截止後自動結算。
+- LINE Pay 分離式請款 Sandbox 人工端對端驗證，以及 capture／settlement PostgreSQL building block 的 server／scheduler 接線。
+- 正式商家退款申請與營運審核流程；目前 refund 只有開發／補救 Backend API。
+- LINE Pay webhook 第一版不是必要入口；目前依 confirm／cancel redirect、polling 與 provider reconciliation。
+- 截止後專用最終結算快照畫面。
 - 正式 Android 打包上架流程。
 
 ## 安裝依賴
@@ -101,6 +101,12 @@ EXPO_PUBLIC_GOOGLE_WEB_CLIENT_ID=your_web_oauth_client_id.apps.googleusercontent
 | `EXPO_PUBLIC_GOOGLE_MAPS_API_KEY` | Web 預覽地圖用 |
 
 `EXPO_PUBLIC_` 開頭的變數會進入前端 bundle，所以不能放密碼或真正機密。
+
+### 本機定位控制台
+
+`EXPO_PUBLIC_DEV_CONSOLE_URL` 只在開發 build 且 `EXPO_PUBLIC_AUTH_MODE=dev` 時使用。Android Emulator 連回電腦使用 `http://10.0.2.2:3100`；同一台電腦的 Web 預覽使用 `http://127.0.0.1:3100`。
+
+App 會依目前登入的 Backend `userId` 每 5 秒讀取個別定位設定：固定模式直接套用座標，即時模式使用 GPS。控制台無法連線時，App 會保留最後一次成功設定；首次連線失敗則使用台中科大預設。
 
 Google Maps API key 可以放在 mobile，但要到 Google Cloud Console 設限制：
 
@@ -183,9 +189,9 @@ Group-buy activity not found
 - 不要把真的 API key 寫進 `.env.example`、README 或 source code。
 - 改 `.env` 後要重啟 Expo。
 
-## 主要 mock data 位置
+## 仍保留的開發 fixture
 
-目前 mobile 仍保留部分 prototype mock data：
+目前 mobile 仍保留部分開發身份、訂單與商家／補救畫面 fixture：
 
 ```text
 src/mock/stores.js
@@ -196,4 +202,4 @@ src/mock/paymentAuthorizations.js
 src/mock/customerUsers.js
 ```
 
-未來會逐步改成從 backend API 載入。
+顧客首頁、活動詳情、地圖、顧客訂單與取餐資訊已不再使用 `stores.js`／`databaseMapStores.js` 作 runtime 店家來源；`stores.js` 目前仍供商家與開發補救畫面的部分摘要使用。`groupBuyActivities.js` 保留為空的相容檔，不再提供初始活動。

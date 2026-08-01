@@ -1,29 +1,113 @@
-import { useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
+import * as Location from "expo-location";
 import { Pressable, StyleSheet, Text, View } from "react-native";
 import MapView, { Marker, PROVIDER_GOOGLE } from "react-native-maps";
-import { databaseMapStores } from "../mock/databaseMapStores";
+import { useDevLocationConfig } from "../hooks/useDevLocationConfig";
 import { mapCenter, mapDefaults } from "../mock/mapConfig";
+import { reportAppliedDevLocation } from "../utils/devLocationControl";
+import { buildGroupBuyActivityMapStores } from "../utils/groupBuyActivityStores";
 
-export function LiveMapScreen({ navigation, appState }) {
+export function LiveMapScreen({ navigation, appState, selectedAuthUserId }) {
   const mapRef = useRef(null);
+  const lastReportSignatureRef = useRef("");
   const [zoom, setZoom] = useState(mapDefaults.zoom);
   const [selectedStoreId, setSelectedStoreId] = useState(null);
-  const mapStores = databaseMapStores.map((store) => {
-    const runtimeGroupBuyActivity = appState?.groupBuyActivities?.find((groupBuyActivity) => groupBuyActivity.storeId === store.id && groupBuyActivity.status === "recruiting");
-    const progressText = runtimeGroupBuyActivity ? getGroupBuyActivityProgressText(runtimeGroupBuyActivity) : "";
-    return {
-      ...store,
-      hasRecruitingGroupBuyActivity: store.hasRecruitingGroupBuyActivity || Boolean(runtimeGroupBuyActivity),
-      recruitingGroupBuyActivityId: store.recruitingGroupBuyActivityId || runtimeGroupBuyActivity?.id || null,
-      progressText
-    };
+  const [locationPermission, setLocationPermission] = useState("not_required");
+  const [userPosition, setUserPosition] = useState({
+    latitude: mapCenter.latitude,
+    longitude: mapCenter.longitude
   });
+  const { config, enabled: devControlEnabled, syncError, syncStatus } = useDevLocationConfig(selectedAuthUserId);
+  const mapStores = useMemo(
+    () => buildGroupBuyActivityMapStores(appState?.groupBuyActivities),
+    [appState?.groupBuyActivities]
+  );
   const selectedStore = mapStores.find((store) => store.id === selectedStoreId);
+  const locationName = config.locationMode === "live" && locationPermission === "granted"
+    ? "手機即時位置"
+    : config.fixedLocation.name;
+
+  useEffect(() => {
+    let active = true;
+    let locationSubscription = null;
+    const fallbackPosition = {
+      latitude: config.fixedLocation.latitude,
+      longitude: config.fixedLocation.longitude
+    };
+
+    const reportApplied = (permission) => {
+      if (!devControlEnabled || !selectedAuthUserId) return;
+      const signature = `${selectedAuthUserId}:${config.version}:${permission}`;
+      if (lastReportSignatureRef.current === signature) return;
+      lastReportSignatureRef.current = signature;
+      reportAppliedDevLocation({
+        userId: selectedAuthUserId,
+        config,
+        locationPermission: permission
+      }).catch(() => {});
+    };
+
+    async function applyLocationConfig() {
+      setUserPosition(fallbackPosition);
+      if (config.locationMode !== "live") {
+        setLocationPermission("not_required");
+        reportApplied("not_required");
+        return;
+      }
+
+      setLocationPermission("requesting");
+      try {
+        const permission = await Location.requestForegroundPermissionsAsync();
+        if (!active) return;
+        if (permission.status !== "granted") {
+          setLocationPermission("denied");
+          reportApplied("denied");
+          return;
+        }
+
+        const currentPosition = await Location.getCurrentPositionAsync({ accuracy: Location.Accuracy.Balanced });
+        if (!active) return;
+        setUserPosition({ latitude: currentPosition.coords.latitude, longitude: currentPosition.coords.longitude });
+        setLocationPermission("granted");
+        reportApplied("granted");
+
+        locationSubscription = await Location.watchPositionAsync(
+          { accuracy: Location.Accuracy.Balanced, distanceInterval: 5, timeInterval: 3000 },
+          (nextPosition) => {
+            if (!active) return;
+            setUserPosition({ latitude: nextPosition.coords.latitude, longitude: nextPosition.coords.longitude });
+          }
+        );
+        if (!active) locationSubscription.remove();
+      } catch {
+        if (!active) return;
+        setLocationPermission("error");
+        reportApplied("error");
+      }
+    }
+
+    applyLocationConfig();
+    return () => {
+      active = false;
+      locationSubscription?.remove();
+    };
+  }, [
+    config.fixedLocation.latitude,
+    config.fixedLocation.longitude,
+    config.locationMode,
+    config.version,
+    devControlEnabled,
+    selectedAuthUserId
+  ]);
+
+  useEffect(() => {
+    mapRef.current?.animateCamera({ center: userPosition, zoom }, { duration: 350 });
+  }, [userPosition, zoom]);
 
   const changeZoom = (amount) => {
     const nextZoom = Math.min(mapDefaults.maximumZoom, Math.max(mapDefaults.minimumZoom, zoom + amount));
     setZoom(nextZoom);
-    mapRef.current?.animateCamera({ center: mapCenter, zoom: nextZoom }, { duration: 250 });
+    mapRef.current?.animateCamera({ center: userPosition, zoom: nextZoom }, { duration: 250 });
   };
 
   return (
@@ -46,9 +130,9 @@ export function LiveMapScreen({ navigation, appState }) {
         showsPointsOfInterest={false}
       >
         <Marker
-          coordinate={mapCenter}
-          title={mapCenter.name}
-          description="即時地圖預設中心點"
+          coordinate={userPosition}
+          title={locationName}
+          description={config.locationMode === "live" ? "顧客即時 GPS；失敗時使用固定備援位置" : "控制台指定的顧客固定位置"}
           pinColor="#2563eb"
         />
         {mapStores.map((store) => {
@@ -58,7 +142,7 @@ export function LiveMapScreen({ navigation, appState }) {
               key={store.id}
               coordinate={{ latitude: store.latitude, longitude: store.longitude }}
               title={store.name}
-              description={hasRecruitingGroupBuyActivity ? "有招募中的團購" : "測試店家"}
+              description={hasRecruitingGroupBuyActivity ? "有招募中的團購" : "目前沒有招募中團購"}
               onPress={() => setSelectedStoreId(store.id)}
             >
               <View style={styles.storeMarkerWrap}>
@@ -84,9 +168,15 @@ export function LiveMapScreen({ navigation, appState }) {
 
       <View style={styles.topOverlay}>
         <Text style={styles.title}>即時地圖</Text>
-        <Text style={styles.subtitle}>中心：{mapCenter.name}</Text>
+        <Text style={styles.subtitle}>中心：{locationName}</Text>
+        <Text style={styles.subtitle}>
+          {devControlEnabled
+            ? `控制台：${syncStatus === "ready" ? `${config.locationMode} · v${config.version}` : syncError || "同步中"}`
+            : "開發定位控制未啟用"}
+        </Text>
+        <Text style={styles.subtitle}>{mapStores.length > 0 ? `${mapStores.length} 間活動店家` : "目前沒有含座標的活動店家"}</Text>
         <View style={styles.legendRow}>
-          <LegendDot color="#2563eb" label="測試店家" />
+          <LegendDot color="#2563eb" label="活動店家" />
           <LegendDot color="#facc15" label="團購進行中" />
         </View>
       </View>
@@ -106,7 +196,7 @@ export function LiveMapScreen({ navigation, appState }) {
           <View style={styles.storeInfo}>
             <Text style={styles.storeName}>{selectedStore.name}</Text>
             <Text style={styles.storeMeta}>
-              {selectedStore.distanceText} · {selectedStore.hasRecruitingGroupBuyActivity ? `招募中的團購 ${selectedStore.progressText}` : "目前沒有招募中團購"}
+              {selectedStore.address || "地址未提供"} · {selectedStore.hasRecruitingGroupBuyActivity ? `招募中的團購 ${selectedStore.progressText}` : "目前沒有招募中團購"}
             </Text>
           </View>
           <Pressable
@@ -122,18 +212,6 @@ export function LiveMapScreen({ navigation, appState }) {
       ) : null}
     </View>
   );
-}
-
-function getGroupBuyActivityProgressText(groupBuyActivity) {
-  const tierTargets = (groupBuyActivity.tiers ?? [])
-    .map((tier) => Number(tier.cups))
-    .filter((cups) => Number.isFinite(cups) && cups > 0)
-    .sort((left, right) => left - right);
-  const nextTarget = tierTargets.find((cups) => groupBuyActivity.currentCups < cups)
-    ?? groupBuyActivity.targetCups
-    ?? tierTargets[tierTargets.length - 1]
-    ?? 0;
-  return `${groupBuyActivity.currentCups}/${nextTarget}杯`;
 }
 
 function LegendDot({ color, label }) {

@@ -56,6 +56,7 @@ async function listPostgresGroupBuyActivities(database) {
         activity.cancellation_reason,
         store.name AS store_name,
         store.address AS store_address,
+        store.phone AS store_phone,
         store.latitude,
         store.longitude
       FROM group_buy_activities activity
@@ -124,6 +125,7 @@ async function listPostgresGroupBuyActivities(database) {
       store: {
         name: row.store_name,
         address: row.store_address,
+        phone: row.store_phone,
         latitude: row.latitude,
         longitude: row.longitude,
       },

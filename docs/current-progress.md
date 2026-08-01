@@ -1,6 +1,6 @@
 # 目前進度
 
-最後更新：2026-07-31
+最後更新：2026-08-01
 
 換電腦或交接給其他 AI 時，請先閱讀 `docs/handoff-summary.md`。
 
@@ -25,6 +25,7 @@
 - 2026-07-31 已完成 PostgreSQL 商家完整菜單查詢、建立、修改與停售 transaction；跨連線 HTTP proof 驗證 store-first row lock、公開菜單過濾、選項軟停用、稽核紀錄與測試資料歸零。
 - 2026-07-31 已完成 PostgreSQL 顧客首次建單 transaction；HTTP proof 驗證 activity row lock、截止／容量／重複／改價防護、品項與選項快照、history／audit 與清理歸零。
 - 訂單流程新增 `npm run order-flow:smoke` 與 `npm run order-api:smoke`，覆蓋 cursor、門市／活動篩選、匿名顧客、重複下單、取消鎖定、取消冪等、idempotency key 衝突及跨店 403。
+- 2026-08-01 已完成顧客端活動探索第一個真實資料切片：首頁、活動詳情、Android／Web 地圖、顧客訂單與取餐資訊的店家摘要不再讀取店家／地圖 mock；統一使用 `GET /api/group-buy-activities` 或訂單 API 回傳的店名、地址、電話與座標。地圖目前只顯示曾出現在活動列表且有座標的店家，完整附近店家與距離仍待獨立 API。
 - 已執行非強制 `npm audit fix`；最近一次結果為 Root `11` 項（`6 moderate`、`5 high`、`0 critical`），Mobile `46` 項（`1 low`、`11 moderate`、`33 high`、`1 critical`）。剩餘項目需要 Expo／React Native 或相關傳遞依賴的主版本升級，因此未使用 `--force` 破壞目前 Expo SDK 51 相容性。
 - 系統分析書已整理為五大功能，五組描述性綱目已更新，並已抽出 `docs/system-analysis-extracted.md`；各小節使用個案描述與活動圖仍待更新。
 
@@ -108,13 +109,25 @@
 - 開發 / 補救用取消活動與手動結算 route；不列入第一階段正式 App 使用者流程。
 - 在瀏覽器環境可使用 `localStorage` 做 prototype 本機保存。
 
+### Mobile 模組化進度
+
+| 模組 | 狀態 | 下一個缺口 |
+| --- | --- | --- |
+| 登入與角色 | 已實作程式切片 | Firebase Console、OAuth、UID mapping 與 Android 實機 E2E |
+| 活動探索 | 已完成第一版 backend-driven 切片 | `GET /api/stores/nearby`、定位距離、Android 地圖實機 E2E |
+| 菜單、購物車與訂單 | 已完成第一版串接 | revision／失敗提示細化與 Android E2E |
+| 付款授權與重新付款 | 部分完成 | LINE Pay 分離式請款 Sandbox 人工 E2E、錯誤／重試 UX |
+| 截止結算顯示 | 尚未開始前端專用畫面 | 顯示不可變最終折扣／尾差快照 |
+| 商家履約與取餐 | 已完成第一版串接 | 退款申請／營運審核與 Android E2E |
+
+
 目前 mobile 限制：
 
 - 公開團購活動與顧客／商家訂單列表已由 Backend 同步，mobile local state 僅作 cache；顧客首頁、商家儀表板、活動詳情與團購進度均使用共用活動載入／錯誤／重試元件，同步失敗時保留上次成功資料。
-- 地圖位置、距離與部分店家摘要仍混用 local state 或 mock。
+- 顧客首頁、活動詳情、地圖、顧客訂單與取餐資訊的店家摘要已使用 Backend 資料；dev auth mode 的地圖可依登入 Backend `userId` 每 5 秒同步本機控制台固定位置或 GPS，失敗時保留最後設定／台中科大預設。正式版定位與隱私流程、距離計算及完整附近店家 API 仍未完成。
 - LINE Pay 完成後仍會先回 backend HTML 頁；HTML 頁會提供返回 App deep link，mobile 端仍保留 polling / foreground refresh 作為備援。
 - 部分流程仍保留 fallback 行為。
-- `StoreMenuScreen` / `DrinkSelectionScreen` 已改讀後端菜單；地圖與部分店家基本資料仍保留 prototype mock data。
+- `StoreMenuScreen` / `DrinkSelectionScreen` 已改讀後端菜單；商家與開發補救畫面的部分店家摘要仍保留 prototype mock，需在各自模組改接登入身份可管理的 Backend store。
 
 ## Backend 端
 
@@ -214,11 +227,11 @@
 - 已授權後的訂單修改 / 重新授權 mobile 第一版已串接；訂單列表現以 Backend 回應為權威、local state 僅作 cache，仍需細化失敗提示。
 - LINE Pay refund 目前只有 dev/backend 後端 API 與 smoke test；尚未做商家退款申請、營運審核／執行 UI、退款失敗重試 queue 與正式 sandbox 人工端對端測試。
 - LINE Pay webhook 第一版不列為必要入口；目前付款同步以 confirm/cancel redirect、polling 與後續 provider 狀態查詢為主。
-- 顧客與商家權威訂單列表 API 與 Mobile 第一版已串接，登入、切換分頁及 App 回到前景會同步；Backend 統一回傳 `lifecycleBucket` 與 `availableActions`。已移除訂單清單中的舊 local 訂單覆蓋，其他活動畫面仍有 mock fallback。
+- 顧客與商家權威訂單列表 API 與 Mobile 第一版已串接，登入、切換分頁及 App 回到前景會同步；Backend 統一回傳 `lifecycleBucket` 與 `availableActions`。顧客訂單與取餐資訊的店家 fallback 已改讀 Backend order／activity store。
 - 顧客鎖定前取消訂單已完成第一版：pending 授權失效、authorized 先 void、pending revision 一併取消，captured 訂單拒絕自行取消。
 - 付款結算失敗規則已決定：第一版以自動重試為主，不做人工處理介面；失敗中的訂單不進入製作或取貨。
 - Provider reconciliation、持久化 retry jobs、payment／settlement／cancel／repay／pickup DB lease 與 terminal job 告警旗標已完成第一版；兩程序 claim／lease takeover 與 PostgreSQL settlement row-lock proof 已通過，仍缺正式告警通知管道、LINE Pay Sandbox 人工端對端與 server 接線驗收。
-- Mobile 即時預估折扣／尾差已接上 Backend 活動列表；顧客首頁、商家儀表板、活動詳情與團購進度的同步失敗提示／重試已完成。尚未完成 Android 實機 E2E 與截止後專用最終快照顯示。
+- Mobile 即時預估折扣／尾差已接上 Backend 活動列表；顧客首頁、活動詳情與地圖的店家摘要也已使用同一活動資料。顧客首頁、商家儀表板、活動詳情與團購進度的同步失敗提示／重試已完成；尚未完成 Android 實機 E2E、附近店家距離與截止後專用最終快照顯示。
 - PostgreSQL `003_activity_settlement_discount_snapshot_postgres.sql` 已永久套用本機開發資料庫；專用 runner 會辨識未套用、完整套用與部分套用，並驗證五個折扣快照欄位、constraints 與既有資料回填。SQLite runtime 仍以既有欄位重算，沒有雙寫。
 - 正式 migration 系統。
 - 完整 Android mobile E2E 與 LINE Pay sandbox 人工驗證仍未完成；目前自動 smoke、Expo Doctor 與 Web bundle 已通過。
@@ -321,20 +334,22 @@ database/test/drink-group-buy-test.sqlite
 用途：
 
 - prototype 測試資料。
-- 地圖資料會匯出到 `mobile/src/mock/databaseMapStores.js`。
+- 舊測試工具仍可匯出 `mobile/src/mock/databaseMapStores.js`，但目前顧客地圖 runtime 已不再讀取此檔案。
 - 這不是正式 runtime 資料來源。
 
 ## 下一個建議開發切片
 
 建議下一步：
 
-1. LINE Pay 核准分離式請款後，先執行 Sandbox reconciliation、capture、void 與 lease takeover 人工端對端驗證。
-2. Sandbox proof 通過後，將已驗證的 capture／settlement repositories 明確接入 Backend，並只在 Sandbox 啟用 PostgreSQL settlement route／scheduler；仍禁止雙寫。
-3. 為 server runtime 加入 `PAYMENT_CAPTURE_RUNTIME` 與 `GROUP_BUY_SETTLEMENT_RUNTIME` 全組一致性防護，再做 PostgreSQL HTTP／scheduler restart proof。
-4. 將正式 production 自動請款列為獨立人工核准步驟，不跟 Sandbox 啟用綁在一起。
-5. 建立站內通知／delivery schema 與正式告警管道，並細化 revision、容量不足及 void 失敗提示。
-6. 實作商家退款申請、營運審核執行與帳號關閉／去識別化流程。
-7. 執行 Android 實機 E2E、Firebase Console／OAuth／UID mapping 驗證。
+1. 前端新增截止後專用最終結算快照，明確區分招募中預估折扣與結算後不可變折扣／尾差。
+2. 細化訂單、付款失敗、重試與重新付款狀態，避免只顯示通用錯誤。
+3. 商家端店家摘要改接登入身份可管理的 Backend store，並補退款申請／營運審核流程。
+4. 實作 `GET /api/stores/nearby`、使用者定位與距離，讓地圖涵蓋沒有活動的附近店家。
+5. LINE Pay 核准分離式請款後，執行 Sandbox reconciliation、capture、void 與 lease takeover 人工端對端驗證。
+6. Sandbox proof 通過後，將已驗證的 capture／settlement repositories 明確接入 Backend，並只在 Sandbox 啟用 PostgreSQL settlement route／scheduler；仍禁止雙寫。
+7. 為 server runtime 加入 `PAYMENT_CAPTURE_RUNTIME` 與 `GROUP_BUY_SETTLEMENT_RUNTIME` 全組一致性防護，再做 PostgreSQL HTTP／scheduler restart proof。
+8. 將正式 production 自動請款列為獨立人工核准步驟，不跟 Sandbox 啟用綁在一起。
+9. 執行 Android 實機 E2E、Firebase Console／OAuth／UID mapping 驗證。
 
 ## 系統分析書進度
 

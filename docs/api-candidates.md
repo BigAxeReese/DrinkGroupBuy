@@ -60,9 +60,9 @@ API JSON 使用 `camelCase`。已實作 routes 只對目前開發 prototype 具�
 | 項目          | 內容                                                                                                                                                                                                                                                             |
 | ------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | Method / path | `GET /api/group-buy-activities`                                                                                                                                                                                                                                  |
-| 用途          | 從 SQLite 回傳 activities、stores 與 promotion tiers                                                                                                                                                                                                             |
-| Response      | `{ activities: [{ id, storeId, createdByUserId, title, status, rawStatus, startAt, deadlineAt, pickupStartAt, pickupEndAt, maximumCups, targetCups, currentCups, authorizedCups, participantCount, currentTierId, currentTierTargetCups, currentTierDiscountAmount, estimatedDiscountPerCup, estimatedAllocatedDiscountAmount, estimatedUndistributedDiscountAmount, nextTierTargetCups, cupsToNextTier, withdrawalLockMinutes, cancellationReason, store, tiers }] }` |
-| 目前缺口      | Mobile 啟動時尚未呼叫此 endpoint                                                                                                                                                                                                                                 |
+| 用途          | 從目前選定的 SQLite／PostgreSQL activity read runtime 回傳 activities、stores 與 promotion tiers |
+| Response      | `{ activities: [{ id, storeId, createdByUserId, title, status, rawStatus, startAt, deadlineAt, pickupStartAt, pickupEndAt, maximumCups, targetCups, currentCups, authorizedCups, participantCount, currentTierId, currentTierTargetCups, currentTierDiscountAmount, estimatedDiscountPerCup, estimatedAllocatedDiscountAmount, estimatedUndistributedDiscountAmount, nextTierTargetCups, cupsToNextTier, withdrawalLockMinutes, cancellationReason, store: { name, address, phone, latitude, longitude }, tiers }] }` |
+| Mobile 串接   | App 選定角色與回到前景時同步；顧客首頁、活動詳情與地圖使用同一份 Backend store。地圖目前只涵蓋活動列表中有座標的店家 |
 | 已實作折扣欄位 | 已回傳目前達成級距、`estimatedDiscountPerCup = floor(tierTotalDiscount / authorizedCups)`、預估分配總額、未分配尾差與下一級距差杯數；Mobile 仍須把截止前數值標示為預估 |
 
 ### 商家建立團購活動
@@ -227,7 +227,7 @@ API JSON 使用 `camelCase`。已實作 routes 只對目前開發 prototype 具�
 
 | Method / path                                                | 用途                         | 實作狀態／規則 |
 | ------------------------------------------------------------ | ---------------------------- | ------------------- |
-| `GET /api/stores/nearby?latitude=&longitude=&radiusMeters=`  | 地圖與附近店家資料           | 距離來源與 Google Places 關係仍待收斂 |
+| `GET /api/stores/nearby?latitude=&longitude=&radiusMeters=`  | 地圖與附近店家資料           | 尚未實作；目前地圖只從活動列表整理有座標的店家。距離來源與 Google Places 關係仍待收斂 |
 | `GET /api/stores/:storeId/menu`                              | 顧客查詢菜單與客製化選項     | 已實作；只回傳上架品項／選項與 min/max 選擇數 |
 | `GET /api/merchant/stores/:storeId/menu`                     | 店家查看完整菜單             | 已實作；需 merchant-store permission，包含停售品項／選項 |
 | `POST /api/merchant/stores/:storeId/menu-items`              | 店家新增菜單品項             | 已實作；驗證價格、分類、選項、價差及明確選擇上限 |

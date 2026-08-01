@@ -52,6 +52,7 @@ async function verifyPostgresContract() {
           store_name: "青山手作茶 中科店",
           store_address: "台中市北區三民路三段 150 號",
           latitude: 24.1511,
+          store_phone: "04-2233-0001",
           longitude: 120.6817,
         }] };
       }
@@ -116,6 +117,7 @@ async function verifyPostgresContract() {
       name: "青山手作茶 中科店",
       address: "台中市北區三民路三段 150 號",
       latitude: 24.1511,
+      phone: "04-2233-0001",
       longitude: 120.6817,
     },
     tiers: [

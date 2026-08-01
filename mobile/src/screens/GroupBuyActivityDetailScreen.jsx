@@ -5,8 +5,8 @@ import { DiscountSummaryCard } from "../components/DiscountSummaryCard";
 import { PrimaryButton } from "../components/PrimaryButton";
 import { ProgressSummary } from "../components/ProgressSummary";
 import { StatusBadge } from "../components/StatusBadge";
-import { stores } from "../mock/stores";
-import { getGroupBuyActivityById, getStoreById, formatCurrency, isWithdrawalLocked } from "../utils/calculations";
+import { getGroupBuyActivityById, formatCurrency, isWithdrawalLocked } from "../utils/calculations";
+import { getGroupBuyActivityStore } from "../utils/groupBuyActivityStores";
 
 export function GroupBuyActivityDetailScreen({ navigation, route, appState, actions, memberAction }) {
   const groupBuyActivity = getGroupBuyActivityById(appState.groupBuyActivities, route.params?.groupBuyActivityId);
@@ -28,7 +28,7 @@ export function GroupBuyActivityDetailScreen({ navigation, route, appState, acti
     );
   }
 
-  const store = getStoreById(stores, groupBuyActivity.storeId);
+  const store = getGroupBuyActivityStore(groupBuyActivity);
   const withdrawalLocked = isWithdrawalLocked(groupBuyActivity);
 
   return (
@@ -41,9 +41,9 @@ export function GroupBuyActivityDetailScreen({ navigation, route, appState, acti
       <Section title="店家資訊">
         <View style={styles.rowBetween}>
           <View style={styles.flex}>
-            <Text style={styles.title}>{store?.name}</Text>
-            <Text style={styles.meta}>{store?.address}</Text>
-            <Text style={styles.meta}>{store?.phone} · {store?.distanceText}</Text>
+            <Text style={styles.title}>{store?.name ?? "店家資料未提供"}</Text>
+            <Text style={styles.meta}>{store?.address || "地址未提供"}</Text>
+            {store?.phone ? <Text style={styles.meta}>{store.phone}</Text> : null}
           </View>
           <StatusBadge value={groupBuyActivity.status} />
         </View>

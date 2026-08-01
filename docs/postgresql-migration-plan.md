@@ -259,7 +259,7 @@ payment_status text not null check (payment_status in ('pending', 'authorized', 
 7. Customer order read／payment request context（已完成；列表、明細、request lease、pending authorization、history、audit、retry job 與 HTTP proof 均通過）。
 8. LINE Pay authorization confirm（已完成；activity-first row lock、截止／期限／容量重驗、狀態／provider event／history／audit、retry job 完成與拒絕補償 void proof 均通過）。
 
-商家菜單、建立團購、顧客首次建單、訂單讀取與 authorization request／confirm／cancel 已使用同一 PostgreSQL 資料來源；建單、confirm、cancel／void 與顧客取消採 activity-first row lock，付款生命週期另有跨執行個體 operation lease。改單／revision、capture、refund、pickup 與結算仍未搬移，因此尚未完成整體 runtime 切換。
+商家菜單、建立團購、顧客首次建單、訂單讀取與 authorization request／confirm／cancel 已使用同一 PostgreSQL 資料來源；建單、confirm、cancel／void 與顧客取消採 activity-first row lock，付款生命週期另有跨執行個體 operation lease。capture／settlement 的 repository、持久化 job 與跨執行個體 locking building blocks 已完成真實 PostgreSQL proof，但尚未接入 server route／scheduler；改單／revision、refund 與 pickup 仍未搬移，因此尚未完成整體 runtime 切換。
 
 要求：
 

@@ -3,8 +3,7 @@ import { ActivitySyncNotice } from "../components/ActivitySyncNotice";
 import { MobileScreen, Section } from "../components/MobileScreen";
 import { DiscountSummaryCard } from "../components/DiscountSummaryCard";
 import { customerUsers } from "../mock/customerUsers";
-import { stores } from "../mock/stores";
-import { getStoreById } from "../utils/calculations";
+import { getGroupBuyActivityStore } from "../utils/groupBuyActivityStores";
 import { getGroupBuyActivityProgress } from "../utils/groupBuyActivityProgress";
 
 export function NearbyGroupBuyActivitiesScreen({ navigation, appState, actions, memberAction, selectedCustomerId }) {
@@ -18,7 +17,7 @@ export function NearbyGroupBuyActivitiesScreen({ navigation, appState, actions, 
       .map((order) => order.groupBuyActivityId)
   );
   const activeGroupBuyActivity = groupBuyActivities.find((groupBuyActivity) => joinedGroupBuyActivityIds.has(groupBuyActivity.id) && isOngoingJoinedGroupBuyActivity(groupBuyActivity)) ?? null;
-  const activeStore = activeGroupBuyActivity ? getStoreById(stores, activeGroupBuyActivity.storeId) : null;
+  const activeStore = getGroupBuyActivityStore(activeGroupBuyActivity);
   const activeProgress = activeGroupBuyActivity ? getGroupBuyActivityProgress(activeGroupBuyActivity) : null;
 
   return (
@@ -78,7 +77,9 @@ export function NearbyGroupBuyActivitiesScreen({ navigation, appState, actions, 
               <View style={[styles.progressFill, { width: `${activeProgress.progressPercent}%` }]} />
             </View>
             <DiscountSummaryCard compact groupBuyActivity={activeGroupBuyActivity} />
-            <Text style={styles.storeLine}>{activeStore?.name} · {activeStore?.distanceText}</Text>
+            <Text style={styles.storeLine}>
+              {activeStore?.name ?? "店家資料未提供"} · {activeStore?.address || "地址未提供"}
+            </Text>
           </View>
         </Pressable>
       ) : (
@@ -91,7 +92,7 @@ export function NearbyGroupBuyActivitiesScreen({ navigation, appState, actions, 
       <Section title="附近熱門活動推薦">
         <View style={styles.recommendList}>
           {recruitingGroupBuyActivities.map((groupBuyActivity) => {
-            const store = getStoreById(stores, groupBuyActivity.storeId);
+            const store = getGroupBuyActivityStore(groupBuyActivity);
             const progress = getGroupBuyActivityProgress(groupBuyActivity);
             return (
               <Pressable
@@ -101,7 +102,7 @@ export function NearbyGroupBuyActivitiesScreen({ navigation, appState, actions, 
                 style={({ pressed }) => [styles.recommendRow, pressed && styles.pressed]}
               >
                 <View style={styles.flex}>
-                  <Text style={styles.recommendStore}>{store?.name}</Text>
+                  <Text style={styles.recommendStore}>{store?.name ?? "店家資料未提供"}</Text>
                   <Text style={styles.recommendTitle}>{groupBuyActivity.title}</Text>
                 </View>
                 <Text style={styles.recommendCups}>{progress.currentCups} / {progress.nextTarget} 杯</Text>
@@ -126,7 +127,7 @@ function getTargetSummary(groupBuyActivity, targetCups) {
 }
 
 function isVisibleRecruitingGroupBuyActivity(groupBuyActivity) {
-  return groupBuyActivity.status === "recruiting"
+  return ["recruiting", "confirmed"].includes(groupBuyActivity.status)
     && groupBuyActivity.canJoin !== false
     && !groupBuyActivity.cancellationReason;
 }
