@@ -22,6 +22,8 @@ const {
   listPaymentReliabilityAlerts,
   listMerchantStoreOrders,
   listPublicStores,
+  listRefundRequestsForAdmin,
+  listRefundRequestsForStore,
   listStoreMenu,
   recordLinePayVoidFailureInDatabase,
   saveMerchantMenuItem,
@@ -40,6 +42,16 @@ const {
   refundLinePayPayment,
   voidLinePayAuthorization
 } = require("./payments/linePayService");
+const {
+  handleEcpayReturnWebhook,
+  renderEcpayCheckoutRedirectHtml,
+  requestEcpayAuthorization
+} = require("./payments/ecpayService");
+const {
+  approveRefundRequest,
+  createMerchantRefundRequest,
+  rejectRefundRequest
+} = require("./payments/refundRequestService");
 const {
   settleGroupBuyActivity,
   startDeadlineSettlementScheduler
@@ -584,6 +596,47 @@ const server = http.createServer(async (request, response) => {
       return;
     }
 
+    const merchantRefundRequestsMatch = url.pathname.match(/^\/api\/merchant\/stores\/([^/]+)\/refund-requests$/);
+    if (request.method === "GET" && merchantRefundRequestsMatch) {
+      const authUser = await getAuthenticatedUser(request);
+      if (!authUser) return sendJson(response, 401, { error: "Authentication required" });
+      if (!authUser.roles.includes("merchant") || !canManageStore(authUser, merchantRefundRequestsMatch[1])) {
+        return sendJson(response, 403, { error: "Store access denied" });
+      }
+      sendJson(response, 200, {
+        refundRequests: listRefundRequestsForStore(merchantRefundRequestsMatch[1], {
+          status: url.searchParams.get("status") || undefined
+        })
+      });
+      return;
+    }
+
+    const createMerchantRefundRequestMatch = url.pathname.match(/^\/api\/merchant\/orders\/([^/]+)\/refund-requests$/);
+    if (request.method === "POST" && createMerchantRefundRequestMatch) {
+      const authUser = await getAuthenticatedUser(request);
+      if (!authUser) {
+        sendJson(response, 401, { error: "Authentication required" });
+        return;
+      }
+
+      const body = await readJsonBody(request);
+      try {
+        const result = await createMerchantRefundRequest({
+          authUser,
+          orderId: createMerchantRefundRequestMatch[1],
+          body
+        });
+        sendJson(response, 201, result);
+      } catch (error) {
+        if (error instanceof PaymentServiceError) {
+          sendJson(response, error.statusCode, error.payload);
+          return;
+        }
+        throw error;
+      }
+      return;
+    }
+
     if (request.method === "POST" && url.pathname === "/api/orders") {
       const authUser = await getAuthenticatedUser(request);
       if (!authUser) {
@@ -1056,6 +1109,75 @@ const server = http.createServer(async (request, response) => {
       return;
     }
 
+    if (request.method === "POST" && url.pathname === "/api/payments/ecpay/request") {
+      const authUser = await getAuthenticatedUser(request);
+      if (!authUser) {
+        sendJson(response, 401, { error: "Authentication required" });
+        return;
+      }
+
+      const body = await readJsonBody(request);
+      try {
+        const result = await requestEcpayAuthorization({ authUser, body });
+        sendJson(response, 201, result);
+      } catch (error) {
+        if (error instanceof PaymentServiceError) {
+          sendJson(response, error.statusCode, error.payload);
+          return;
+        }
+        throw error;
+      }
+      return;
+    }
+
+    if (request.method === "GET" && url.pathname === "/api/payments/ecpay/checkout-redirect") {
+      const orderId = url.searchParams.get("orderId");
+      const html = orderId ? renderEcpayCheckoutRedirectHtml(orderId) : null;
+      if (!html) {
+        sendHtml(response, 404, buildLinePayResultPage({
+          title: "找不到待付款的信用卡預授權",
+          message: "請回到 App 重新發起付款。",
+          appReturnUrl: buildLinePayAppReturnUrl({ orderId, status: "failed", error: "ecpay_authorization_not_found", source: "ecpay" })
+        }));
+        return;
+      }
+      sendHtml(response, 200, html);
+      return;
+    }
+
+    // ECPay ReturnURL: the authoritative, server-to-server payment notification. This is
+    // POST + form-encoded, unlike LINE Pay's GET-redirect-is-the-confirm-call model, and
+    // ECPay retries delivery until it receives a literal "1|OK" response body.
+    if (request.method === "POST" && url.pathname === "/api/payments/ecpay/return") {
+      const orderId = url.searchParams.get("orderId");
+      const formFields = await readFormBody(request);
+      if (!orderId) {
+        sendText(response, 400, "0|orderId missing");
+        return;
+      }
+
+      const result = await handleEcpayReturnWebhook({ orderId, formFields });
+      if (result?.error === "invalid_check_mac_value") {
+        sendText(response, 400, "0|CheckMacValue invalid");
+        return;
+      }
+      sendText(response, 200, "1|OK");
+      return;
+    }
+
+    // ECPay ClientBackURL: only carries the customer's browser back. NOT an authoritative
+    // source — the ReturnURL webhook above may not have arrived yet, so this must not
+    // trigger any state change and must read current DB state rather than trust query params.
+    if (request.method === "GET" && url.pathname === "/api/payments/ecpay/client-back") {
+      const orderId = url.searchParams.get("orderId");
+      sendHtml(response, 200, buildLinePayResultPage({
+        title: "信用卡付款處理中",
+        message: "請回到 App 查看付款狀態；若狀態尚未更新，請稍後手動重新整理。",
+        appReturnUrl: buildLinePayAppReturnUrl({ orderId, status: "pending", source: "ecpay" })
+      }));
+      return;
+    }
+
     const adminSettleActivityMatch = url.pathname.match(/^\/api\/admin\/group-buy-activities\/([^/]+)\/settle$/);
     if (request.method === "GET" && url.pathname === "/api/admin/payment-reliability/alerts") {
       const authUser = await getAuthenticatedUser(request);
@@ -1144,6 +1266,72 @@ const server = http.createServer(async (request, response) => {
       }
 
       sendJson(response, 200, result);
+      return;
+    }
+
+    if (request.method === "GET" && url.pathname === "/api/admin/refund-requests") {
+      const authUser = await getAuthenticatedUser(request);
+      if (!authUser) return sendJson(response, 401, { error: "Authentication required" });
+      if (!authUser.roles.includes("admin")) {
+        return sendJson(response, 403, { error: "Admin role required" });
+      }
+      sendJson(response, 200, {
+        refundRequests: listRefundRequestsForAdmin({
+          status: url.searchParams.get("status") || undefined
+        })
+      });
+      return;
+    }
+
+    const approveRefundRequestMatch = url.pathname.match(/^\/api\/admin\/refund-requests\/([^/]+)\/approve$/);
+    if (request.method === "POST" && approveRefundRequestMatch) {
+      const authUser = await getAuthenticatedUser(request);
+      if (!authUser) {
+        sendJson(response, 401, { error: "Authentication required" });
+        return;
+      }
+
+      const body = await readJsonBody(request);
+      try {
+        const result = await approveRefundRequest({
+          authUser,
+          requestId: approveRefundRequestMatch[1],
+          body
+        });
+        sendJson(response, 200, result);
+      } catch (error) {
+        if (error instanceof PaymentServiceError) {
+          sendJson(response, error.statusCode, error.payload);
+          return;
+        }
+        throw error;
+      }
+      return;
+    }
+
+    const rejectRefundRequestMatch = url.pathname.match(/^\/api\/admin\/refund-requests\/([^/]+)\/reject$/);
+    if (request.method === "POST" && rejectRefundRequestMatch) {
+      const authUser = await getAuthenticatedUser(request);
+      if (!authUser) {
+        sendJson(response, 401, { error: "Authentication required" });
+        return;
+      }
+
+      const body = await readJsonBody(request);
+      try {
+        const result = await rejectRefundRequest({
+          authUser,
+          requestId: rejectRefundRequestMatch[1],
+          body
+        });
+        sendJson(response, 200, result);
+      } catch (error) {
+        if (error instanceof PaymentServiceError) {
+          sendJson(response, error.statusCode, error.payload);
+          return;
+        }
+        throw error;
+      }
       return;
     }
 
@@ -1271,6 +1459,14 @@ function sendHtml(response, statusCode, html) {
   response.end(html);
 }
 
+function sendText(response, statusCode, text) {
+  response.writeHead(statusCode, {
+    "Access-Control-Allow-Origin": "*",
+    "Content-Type": "text/plain; charset=utf-8"
+  });
+  response.end(text);
+}
+
 function readJsonBody(request) {
   return new Promise((resolve, reject) => {
     let rawBody = "";
@@ -1283,6 +1479,20 @@ function readJsonBody(request) {
       } catch {
         reject(new Error("Invalid JSON body"));
       }
+    });
+    request.on("error", reject);
+  });
+}
+
+// ECPay's ReturnURL webhook posts application/x-www-form-urlencoded, not JSON.
+function readFormBody(request) {
+  return new Promise((resolve, reject) => {
+    let rawBody = "";
+    request.on("data", (chunk) => {
+      rawBody += chunk;
+    });
+    request.on("end", () => {
+      resolve(Object.fromEntries(new URLSearchParams(rawBody)));
     });
     request.on("error", reject);
   });
@@ -1476,7 +1686,7 @@ function toPublicUserResponse(user) {
   };
 }
 
-function buildLinePayResultPage({ title, message, detail, rawCode, appReturnUrl }) {
+function buildLinePayResultPage({ title, message, detail, rawCode, providerCodeLabel = "LINE Pay returnCode", appReturnUrl }) {
   const autoReturnScript = appReturnUrl
     ? `<script>
   window.setTimeout(function () {
@@ -1530,7 +1740,7 @@ function buildLinePayResultPage({ title, message, detail, rawCode, appReturnUrl 
     <h1>${escapeHtml(title)}</h1>
     <p>${escapeHtml(message)}</p>
     ${detail ? `<p class="code">${escapeHtml(detail)}</p>` : ""}
-    ${rawCode ? `<p>LINE Pay returnCode: ${escapeHtml(rawCode)}</p>` : ""}
+    ${rawCode ? `<p>${escapeHtml(providerCodeLabel)}: ${escapeHtml(rawCode)}</p>` : ""}
     ${appReturnUrl ? `<a class="button" href="${escapeHtml(appReturnUrl)}">返回 App 查看訂單</a>` : ""}
     ${appReturnUrl ? '<p class="hint">若沒有自動返回 App，請點選上方按鈕。</p>' : ""}
   </main>
@@ -1539,11 +1749,11 @@ function buildLinePayResultPage({ title, message, detail, rawCode, appReturnUrl 
 </html>`;
 }
 
-function buildLinePayAppReturnUrl({ orderId, transactionId, status, paymentFlow, error }) {
+function buildLinePayAppReturnUrl({ orderId, transactionId, status, paymentFlow, error, source = "line_pay" }) {
   const baseUrl = process.env.LINE_PAY_APP_RETURN_URL || "drinkgroupbuy://payment/result";
   try {
     const appUrl = new URL(baseUrl);
-    appUrl.searchParams.set("source", "line_pay");
+    appUrl.searchParams.set("source", source);
     if (orderId) appUrl.searchParams.set("orderId", orderId);
     if (transactionId) appUrl.searchParams.set("transactionId", transactionId);
     if (status) appUrl.searchParams.set("status", status);

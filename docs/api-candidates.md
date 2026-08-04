@@ -275,10 +275,17 @@ API JSON 使用 `camelCase`。已實作 routes 只對目前開發 prototype 具�
 | `POST /api/payment-authorizations/:authorizationId/void`    | 取消未使用授權               | Provider expiry 與 idempotency                 |
 | `POST /api/payment-authorizations/:authorizationId/capture` | Partial capture final amount | Backend payment module 已有內部 capture service、持久化重試與跨程序 lease；尚未開公開 API |
 | `POST /api/payment-captures/:captureId/refunds`             | Provider-neutral refund      | 目前已先實作 LINE Pay 專用開發 / 後端補救 route；正式 API shape 尚未決定 |
-| `POST /api/merchant/orders/:orderId/refund-requests`        | 商家提出退款申請              | 只允許所屬門市、已請款且仍有可退餘額的訂單；需金額、原因與 idempotency key，不直接呼叫 provider |
-| `POST /api/operations/refund-requests/:requestId/approve`   | 營運核准並執行退款            | 需補正式營運權限、跨程序鎖、audit log、provider reconciliation 與失敗重試 |
+| `POST /api/merchant/orders/:orderId/refund-requests`        | 商家提出退款申請              | 已實作第一版：只允許所屬門市、已請款且仍有可退餘額的訂單；需金額（`requestedAmount`）與原因（`reason`），可帶 `idempotencyKey`；不直接呼叫 provider，同一筆請款同時只允許一筆 `pending` 申請 |
+| `GET /api/merchant/stores/:storeId/refund-requests`         | 商家查詢自己門市的退款申請     | 已實作第一版；可選 `status` 篩選，沿用 `canManageStore` 門市權限檢查 |
+| `GET /api/admin/refund-requests`                            | 營運查詢待審核退款申請佇列     | 已實作第一版，admin-only；可選 `status` 篩選 |
+| `POST /api/admin/refund-requests/:requestId/approve`        | 營運核准並執行退款            | 已實作第一版，admin-only；內部重用既有 LINE Pay refund service（含 idempotency）；provider 失敗時申請維持 `pending` 供重試，尚未接正式告警通知 |
+| `POST /api/admin/refund-requests/:requestId/reject`         | 營運駁回退款申請              | 已實作第一版，admin-only；需填 `reason`，不呼叫 provider |
 | `GET /api/payments/line-pay/status/:transactionId`          | 查詢 provider 狀態並對帳     | 正式上線前用於重試、redirect 遺失與付款狀態 reconciliation |
 | `GET /api/admin/payment-reliability/alerts`                  | 查詢終止失敗工作             | 已實作 admin-only、jobType/status/limit 白名單篩選；通知通道尚未接入 |
+| `POST /api/payments/ecpay/request`                           | 建立 ECPay 信用卡預授權請求  | 已實作並已用真實 HTTP 請求驗證（含真實建單、dev auth）；`npm run ecpay:smoke` 覆蓋 `mock_ecpay` 情境；尚未打過真實 ECPay Stage 網路（見 `docs/ecpay-checkout-stage-checklist.md`） |
+| `POST /api/payments/ecpay/return`                            | ECPay ReturnURL webhook（權威付款通知） | 已實作並驗證（含 CheckMacValue 驗簽、竄改簽章正確拒絕）；與 LINE Pay 的 GET confirm 模式不同，是 POST + 必須回應純文字 `1\|OK` |
+| `GET /api/payments/ecpay/client-back`                        | ECPay ClientBackURL（僅導回瀏覽器，非權威來源） | 已實作；不觸發任何狀態變更，只查目前 DB 狀態顯示 |
+| `GET /api/payments/ecpay/checkout-redirect`                  | 產生導向 ECPay 託管付款頁的 auto-submit 表單頁 | 已實作並驗證；ECPay AioCheckOut 是 POST 表單跳轉，不是單一 GET URL，故需要這個中介頁面 |
 
 ### 商家履約
 

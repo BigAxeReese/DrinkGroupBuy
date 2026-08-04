@@ -1,6 +1,6 @@
 # 資料庫設計 v1
 
-最後更新：2026-07-30
+最後更新：2026-08-05
 
 ## 語言與註解規則
 
@@ -44,6 +44,8 @@
 | Pickup credentials     | 0        | 已清空，方便乾淨測試                 |
 
 ## 主要資料群組
+
+以下各群組的表格只列 primary key 與跨表關係，聚焦在 PostgreSQL 遷移決策與業務規則；**完整欄位定義（型別、約束、範例）請一律以 `docs/database-field-spec.md` 為準**，避免同一份欄位清單在多份文件重複維護。
 
 ### 身份與角色
 
@@ -205,17 +207,18 @@ PostgreSQL 方向：
 
 | 資料表                    | 用途                             | Primary key | 重要關係                                |
 | ------------------------- | -------------------------------- | ----------- | --------------------------------------- |
-| `payment_authorizations`  | LINE Pay 預授權嘗試              | `id`        | 多筆 authorization 可屬於 1 order       |
+| `payment_authorizations`  | 付款預授權嘗試（LINE Pay 或 ECPay） | `id`        | 多筆 authorization 可屬於 1 order       |
 | `payment_captures`        | 截止後確認折扣後的請款結果       | `id`        | Capture 屬於 1 authorization 與 1 order |
 | `payment_refunds`         | 已請款交易的退款結果             | `id`        | Refund 屬於 1 capture、authorization 與 order |
+| `refund_requests`         | 商家退款申請與營運審核（2026-08-04 新增） | `id` | Request 屬於 1 order/capture；核准後對應 1 筆 `payment_refunds` |
 | `payment_provider_events` | 金流 provider event 紀錄 | `id`        | 以邏輯方式關聯付款資源，保留未來 webhook 擴充空間 |
 
-目前付款方向：
+目前付款 provider：**LINE Pay**（主要）與 **ECPay 信用卡**（2026-08-05 新增的備用方案，因 LINE Pay 分離式請款官方審核卡關）。兩者並存，`payment_authorizations.provider`／`payment_refunds.provider` 皆支援 `line_pay`／`ecpay`（及對應 `mock_line_pay`／`mock_ecpay` 測試值）。以下流程以 provider 中立描述：
 
 1. 顧客送出購物車。
 2. Backend 建立 order。
-3. Backend 建立 LINE Pay authorization request。
-4. LINE Pay redirect 回 backend confirm endpoint。
+3. Backend 建立付款 authorization request（LINE Pay 走 redirect confirm；ECPay 走 ReturnURL webhook，兩者確認機制不同，見 `docs/payment-rules-and-flow.md`）。
+4. 付款 provider 回報確認結果。
 5. Backend 將 authorization 與 order 標記為 authorized。
 6. Authorized cups 立即納入團購杯數統計。
 7. 店家不逐筆確認接單。
@@ -226,18 +229,17 @@ PostgreSQL 方向：
 尚未完成：
 
 - Deadline settlement scheduler 已使用持久化工作、跨程序 lease claim／takeover、admin 警示查詢與結構化日誌；正式通知通道仍待實作。
-- LINE Pay capture 已在付款模組內部實作。
-- LINE Pay void 已在付款模組內部實作。
-- LINE Pay refund 已有後端開發 / 補救切片；正式規則為商家提出退款申請、營運／補救權限執行，仍缺申請與審核 UI、退款失敗重試及正式 sandbox 人工端對端測試。
-- Provider 狀態查詢、付款重試與 reconciliation。
-- Order replacement authorization 已有 SQLite revision tables；仍缺對外歷史查詢 API、UI 呈現與 PostgreSQL draft 同步。
+- LINE Pay／ECPay capture、void 皆已在各自付款模組內部實作，並在截止結算依 `order.paymentProvider` 分派。
+- 退款：`refund_requests`（商家申請）與營運核准／駁回 API 已完成第一版，核准時依訂單實際 provider 自動分派到 LINE Pay 或 ECPay 的 refund 流程；仍缺申請/審核 UI、退款失敗重試佇列及正式 sandbox／ECPay Stage 人工端對端測試。
+- LINE Pay 有 Provider 狀態查詢、付款重試與 reconciliation（`reliabilityService.js`）；ECPay 目前沒有對應的 webhook 遺失輪詢對帳機制，屬於明確延後項目。
+- Order replacement authorization 已有 SQLite revision tables；仍缺對外歷史查詢 API、UI 呈現與 PostgreSQL draft 同步；ECPay 目前不支援訂單修改後重新授權。
 
 PostgreSQL 方向：
 
 - Mobile 不直接呼叫金流 provider。
-- Backend 保存 LINE Pay secrets 並進行 request signing。
-- 付款狀態保存在 `payment_authorizations`、`payment_captures`、`payment_refunds` 與 `payment_provider_events`。
-- PostgreSQL 是 authorization、capture、void、refund、provider event 與付款 reconciliation 的 source of truth。
+- Backend 保存金流 provider secrets（LINE Pay Channel Secret、ECPay HashKey/HashIV）並進行各自的 request signing。
+- 付款狀態保存在 `payment_authorizations`、`payment_captures`、`payment_refunds`、`refund_requests` 與 `payment_provider_events`。
+- PostgreSQL 是 authorization、capture、void、refund、provider event 與付款 reconciliation 的 source of truth；ECPay 相關邏輯目前僅實作於 SQLite runtime，尚未有 PostgreSQL 切片。
 
 ### 結算與取貨
 

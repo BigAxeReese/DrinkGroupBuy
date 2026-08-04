@@ -1,6 +1,6 @@
 # 資料字典
 
-最後更新：2026-07-30
+最後更新：2026-08-05
 
 ## 語言規則
 
@@ -46,6 +46,8 @@
 | 付款可靠性工作   | Provider 對帳或活動結算的持久化工作 | `paymentReliabilityJob` | `payment_reliability_jobs` | 狀態為 queued／running／retry_wait／succeeded／failed／cancelled |
 | 跨執行個體租約   | 保護 provider 操作與整團結算的短期鎖 | `operationLock` | `operation_locks` | 以 `locked_until` 判斷能否由其他 worker 接手 |
 | 付款退款         | 已請款交易的全額或部分退款紀錄 | `paymentRefund` | `payment_refunds` | 與 void 未請款授權不同 |
+| 退款申請         | 商家對已請款訂單提出的退款申請，待營運審核 | `refundRequest`, `refundRequestId` | `refund_requests` | 狀態 `pending`／`approved`／`rejected`；核准後才實際呼叫 provider 並產生一筆 `payment_refunds`，同一筆請款同時只允許一筆 `pending` 申請 |
+| 金流服務商       | 處理付款的第三方 provider        | `provider`                       | `provider`                            | 目前值：`line_pay`、`ecpay`（及對應 `mock_line_pay`、`mock_ecpay` 測試值）；ECPay 為 2026-08-05 新增的備用 provider，與 LINE Pay 並存 |
 | 金流事件         | Provider event payload          | `paymentProviderEvent`           | `payment_provider_events`             | 用於 idempotency 與 reconciliation；未來可包含 webhook |
 | 活動結算         | 截止結果與套用級距              | `activitySettlement`             | `activity_settlements`                | 應只建立一次且可稽核                         |
 | 商家接單狀態     | 舊候選：商家是否接受製作        | `merchantAcceptanceStatus`       | `merchant_acceptance_status`          | 最新規則不需逐筆接單；可固定 accepted 或後續移除 |

@@ -103,10 +103,13 @@ Important docs:
 docs/current-progress.md
 docs/api-candidates.md
 docs/database-candidates.md
+docs/database-field-spec.md
 docs/status-candidates.md
 docs/open-questions.md
 docs/mobile-screen-data-requirements.md
 ```
+
+`docs/database-field-spec.md` is the single authoritative source for exact column definitions (type, constraints, example values) for every table. When a database entity or field changes, update it directly instead of duplicating field-level detail into other docs — `docs/database-candidates.md`, `docs/database-design-v1.md`, and `docs/data-dictionary.md` should link to it rather than re-list columns.
 
 ## Naming Rules
 

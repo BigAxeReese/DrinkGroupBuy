@@ -1,6 +1,6 @@
 # 資料庫欄位規格
 
-最後更新：2026-07-30
+最後更新：2026-08-05
 
 ## 語言與範圍
 
@@ -324,7 +324,7 @@ PostgreSQL draft 另有 `phone_verified_at`、`email_verified_at`、`last_login_
 | 1   | `id`                        | 預授權編號          | TEXT    | PK        | 建議使用 `pay_auth_` 加唯一後綴                                       | `pay_auth_001`              |
 | 2   | `order_id`                  | 訂單編號            | TEXT    | FK, INDEX | References `orders(id)`                                               | `order_001`                 |
 | 3   | `order_revision_id`         | 訂單修改版本編號    | TEXT    | FK        | 可為 NULL；修改訂單重新預授權時使用                                   | `order_revision_001`        |
-| 4   | `provider`                  | 金流服務商          | TEXT    |           | `line_pay`, `mock_line_pay`                                           | `line_pay`                  |
+| 4   | `provider`                  | 金流服務商          | TEXT    |           | `line_pay`, `mock_line_pay`, `ecpay`, `mock_ecpay`（`ecpay`/`mock_ecpay` 為 2026-08-05 新增） | `line_pay`                  |
 | 5   | `payment_flow`              | 付款流程            | TEXT    |           | `authorization`, `direct_repayment`                                   | `direct_repayment`          |
 | 6   | `status`                    | 付款處理狀態        | TEXT    |           | `pending`, `authorized`, `captured`, `authorization_voided`, `failed` | `authorized`                |
 | 7   | `original_amount`           | 原始金額            | INTEGER |           | `>= 0`                                                                | `280`                       |
@@ -365,7 +365,7 @@ PostgreSQL draft 另有 `phone_verified_at`、`email_verified_at`、`last_login_
 | 2   | `payment_capture_id`       | 請款編號          | TEXT    | FK     | References `payment_captures(id)`        | `pay_capture_001`           |
 | 3   | `payment_authorization_id` | 預授權編號        | TEXT    | FK     | References `payment_authorizations(id)`  | `pay_auth_001`              |
 | 4   | `order_id`                 | 訂單編號          | TEXT    | FK     | References `orders(id)`                  | `order_001`                 |
-| 5   | `provider`                 | 金流服務商        | TEXT    |        | `line_pay`, `mock_line_pay`              | `line_pay`                  |
+| 5   | `provider`                 | 金流服務商        | TEXT    |        | `line_pay`, `mock_line_pay`, `ecpay`, `mock_ecpay` | `line_pay`                  |
 | 6   | `status`                   | 退款狀態          | TEXT    |        | `pending`, `refunded`, `failed`          | `refunded`                  |
 | 7   | `refund_amount`            | 退款金額          | INTEGER |        | `> 0`，不得超過該請款剩餘可退款金額       | `248`                       |
 | 8   | `provider_refund_id`       | Provider 退款編號 | TEXT    |        | 成功前可為 NULL                          | `linepay-refund-123`        |
@@ -374,6 +374,28 @@ PostgreSQL draft 另有 `phone_verified_at`、`email_verified_at`、`last_login_
 | 11  | `failure_reason`           | 失敗原因          | TEXT    |        | 可為 NULL                                | `provider_timeout`          |
 | 12  | `created_at`               | 建立時間          | TEXT    |        | ISO datetime string                      | `2026-06-25T15:59:00+08:00` |
 | 13  | `updated_at`               | 更新時間          | TEXT    |        | ISO datetime string                      | `2026-06-25T16:00:00+08:00` |
+
+## `refund_requests`
+
+2026-08-04 新增。保存商家對已請款訂單提出的退款申請，供營運審核；核准時才實際呼叫 provider 並寫入一筆 `payment_refunds`，駁回不呼叫 provider。同一筆 `payment_capture_id` 同時只允許一筆 `status = 'pending'` 的申請（partial unique index）。
+
+| No. | Field name                     | 中文名稱               | Type    | Key    | 規則 / 格式 / 範圍                       | Example                     |
+| --- | ------------------------------- | ---------------------- | ------- | ------ | ---------------------------------------- | ---------------------------- |
+| 1   | `id`                            | 退款申請編號            | TEXT    | PK     | 建議使用 `refund-request-` 加唯一後綴    | `refund-request-001`         |
+| 2   | `order_id`                      | 訂單編號                | TEXT    | FK     | References `orders(id)`                  | `order_001`                  |
+| 3   | `payment_capture_id`            | 請款編號                | TEXT    | FK     | References `payment_captures(id)`        | `pay_capture_001`            |
+| 4   | `store_id`                      | 店家編號                | TEXT    | FK     | References `stores(id)`                  | `store_001`                  |
+| 5   | `requested_by_user_id`          | 提出申請的商家使用者    | TEXT    | FK     | References `users(id)`                   | `user-merchant-001`          |
+| 6   | `requested_amount`              | 申請退款金額            | INTEGER |        | `> 0`                                    | `248`                        |
+| 7   | `reason`                        | 申請原因                | TEXT    |        | 必填                                      | `顧客反映飲品品質異常`       |
+| 8   | `status`                        | 申請狀態                | TEXT    |        | `pending`, `approved`, `rejected`        | `pending`                    |
+| 9   | `idempotency_key`               | 冪等鍵                  | TEXT    | UNIQUE | 可為 NULL                                | `refund-request-order-001`   |
+| 10  | `reviewed_by_user_id`           | 審核的營運使用者        | TEXT    | FK     | 審核前可為 NULL；References `users(id)`  | `user-admin-001`             |
+| 11  | `reviewed_at`                   | 審核時間                | TEXT    |        | 審核前可為 NULL                          | `2026-08-04T16:00:00+08:00`  |
+| 12  | `rejection_reason`              | 駁回原因                | TEXT    |        | 僅駁回時填寫                             | `已改為重新製作`             |
+| 13  | `resulting_payment_refund_id`   | 核准後對應的退款編號    | TEXT    | FK     | 核准前可為 NULL；References `payment_refunds(id)` | `pay_refund_001`   |
+| 14  | `created_at`                    | 建立時間                | TEXT    |        | ISO datetime string                      | `2026-08-04T15:59:00+08:00`  |
+| 15  | `updated_at`                    | 更新時間                | TEXT    |        | ISO datetime string                      | `2026-08-04T16:00:00+08:00`  |
 
 ## `payment_provider_events`
 

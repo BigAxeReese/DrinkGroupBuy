@@ -14,6 +14,8 @@
     "payment-reliability:multiprocess": "node scripts/payment-reliability-multiprocess-smoke.js",
     "payments:cleanup": "node scripts/compact-duplicate-payment-failures.js --apply --vacuum",
     "settlement:smoke": "node scripts/settlement-smoke.js",
+    "refund-request:smoke": "node scripts/refund-request-smoke.js",
+    "ecpay:smoke": "node scripts/ecpay-smoke.js",
     "payment-reliability:smoke": "node scripts/payment-reliability-smoke.js",
     "database-adapter:smoke": "node scripts/database-adapter-smoke.js",
     "postgres-runtime:smoke": "node scripts/postgres-runtime-smoke.js",

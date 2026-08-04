@@ -1,6 +1,6 @@
 # 未決問題
 
-最後更新：2026-07-30
+最後更新：2026-08-05
 
 ## 語言規則
 
@@ -23,7 +23,7 @@
 | Medium | PostgreSQL runtime adapter | Reliability schema parity、`pg`、SQLite/PostgreSQL adapter 與 smoke 已完成；`backend/db.js` 尚未搬移，runtime 仍是 SQLite |
 | Medium | Notification table / delivery | 尚未設計 notification 或 delivery event schema |
 | Medium | 菜單管理與下單 E2E | 權威菜單 API、商家管理畫面、後端驗證與價格重算已完成第一版；仍需完整 Android E2E 與更細的逐項衝突修正 UX |
-| Medium | 正式退款申請 UI 與退款失敗重試 | 商家只提出退款申請、營運執行退款的規則已確認；Admin/dev 後端 refund route 已有，正式申請／審核介面與 retry/reconciliation 尚未完成 |
+| Medium | 正式退款申請 UI 與退款失敗重試 | 商家只提出退款申請、營運執行退款的規則已確認；`POST /api/merchant/orders/:orderId/refund-requests`（商家申請）與 `POST /api/admin/refund-requests/:requestId/approve`／`reject`（營運審核，重用既有 LINE Pay refund service）已完成第一版並有 `refund-request:smoke` 覆蓋；商家／營運手機或後台申請審核 UI、核准失敗時的正式重試 UX 與告警、正式 sandbox 人工端對端測試尚未完成 |
 
 ## 身份與權限
 
@@ -89,6 +89,7 @@
 | -------- | ------------------------------------------------------------------------------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | Resolved | 選定的 LINE Pay 產品是否支援 authorization + partial capture？                                                                                    | LINE Pay 官方支援分離式 confirm/capture 與 partial capture；但台灣 channel 預設是自動請款，使用前需向 LINE Pay 申請開通。                                         |
 | Resolved | 目前 sandbox channel 對 `capture:false` 回傳 "Parameter is not allowed"；此商家帳號是否能透過其他設定或產品類型支援分離式 authorization/capture？ | 已向 LINE Pay 申請 Sandbox 分離式請款，等待回覆；核准前 `LINE_PAY_CAPTURE_SEPARATED` 維持 false，核准後依 Sandbox 清單驗證。 |
+| Resolved | LINE Pay 分離式請款審核進度不可控，是否要新增備援付款 provider？ | 2026-08-05 決定新增綠界 ECPay 信用卡付款作為第二個 provider，**唯一原因是 LINE Pay 審核進度不確定**，LINE Pay 機制不動、兩者並存。信用卡屬於備用方案，不是必須完成或上線的項目——這條路徑接不接完、要不要提供給顧客選擇，可依 LINE Pay 審核結果再決定。走跳轉 ECPay 託管付款頁的標準結帳（AioCheckOut），不做「幕後交易授權」以避免經手卡號、避開 PCI-DSS 負擔。ECPay 的「先授權後關帳」是帳號層級標準設定，不需要像 LINE Pay 分離式請款一樣另外申請審核。詳見 `docs/current-progress.md`「2026-08-05 新增信用卡（ECPay）付款」；後端路由、settlement／refund provider 分派與 mobile 付款方式選擇已完成並驗證（`npm run ecpay:smoke`），尚未執行真正打 ECPay Stage 環境的人工端對端驗證（`docs/ecpay-checkout-stage-checklist.md`）。 |
 | Resolved | authorization 有效期限是多久？                                                                                                                    | 不寫死固定時數。以 LINE Pay confirm 回傳的 `info.authorizationExpireDate` 為準；該時間必須晚於團購截止時間加結算緩衝時間。                                         |
 | Resolved | 團購活動如何降低 authorization 過期風險？                                                                                                         | 團購截止時間限制為 24 小時內；LINE Pay authorization 後，授權到期時間仍必須涵蓋截止時間與結算緩衝時間。                                                           |
 | Resolved | 活動未達標時，authorization 何時 void？                                                                                                           | 截止結算時立即處理；未達標且顧客未接受原價購買的訂單，系統取消授權 `void` 並取消訂單。                                                                             |

@@ -5,7 +5,7 @@ import { PlaceholderBox } from "../components/PlaceholderBox";
 import { PrimaryButton } from "../components/PrimaryButton";
 import { StatusBadge } from "../components/StatusBadge";
 import { formatCurrency } from "../utils/calculations";
-import { requestLinePayAuthorization, requestLinePayRepayment } from "../utils/apiClient";
+import { requestEcpayAuthorization, requestLinePayAuthorization, requestLinePayRepayment } from "../utils/apiClient";
 
 const LINE_PAY_SYNC_POLL_INTERVAL_MS = 3000;
 const LINE_PAY_SYNC_POLL_TIMEOUT_MS = 90000;
@@ -22,6 +22,7 @@ export function PaymentAuthorizationScreen({ navigation, route, appState, action
   const [linePayMessage, setLinePayMessage] = useState("");
   const [syncStatus, setSyncStatus] = useState("idle");
   const [syncMessage, setSyncMessage] = useState("");
+  const [selectedProvider, setSelectedProvider] = useState("line_pay");
   const pollIntervalRef = useRef(null);
   const pollTimeoutRef = useRef(null);
   const pollInFlightRef = useRef(false);
@@ -120,7 +121,9 @@ export function PaymentAuthorizationScreen({ navigation, route, appState, action
 
       <Section title="授權金額">
         <View style={styles.providerCard}>
-          <Text style={styles.providerName}>LINE Pay</Text>
+          <Text style={styles.providerName}>
+            {getProviderDisplayName(isAuthorized || isCaptured ? payment.provider : selectedProvider)}
+          </Text>
           <Text style={styles.providerMeta}>付款對象：{payment.recipientName}</Text>
         </View>
         <View style={styles.amountRows}>
@@ -131,11 +134,28 @@ export function PaymentAuthorizationScreen({ navigation, route, appState, action
         <PlaceholderBox title="Line Pay authorization" />
       </Section>
 
-      <Section title="LINE Pay sandbox">
+      {!isManualRepayment && !isAuthorized && !isCaptured ? (
+        <Section title="付款方式">
+          <View style={styles.providerToggleRow}>
+            <PrimaryButton
+              label="LINE Pay"
+              variant={selectedProvider === "line_pay" ? "primary" : "secondary"}
+              onPress={() => setSelectedProvider("line_pay")}
+            />
+            <PrimaryButton
+              label="信用卡"
+              variant={selectedProvider === "ecpay" ? "primary" : "secondary"}
+              onPress={() => setSelectedProvider("ecpay")}
+            />
+          </View>
+        </Section>
+      ) : null}
+
+      <Section title={selectedProvider === "ecpay" ? "信用卡（ECPay）Stage 測試" : "LINE Pay sandbox"}>
         <Text style={styles.meta}>
           {isManualRepayment
             ? "此按鈕會開啟 LINE Pay，並以結算後金額直接付款。"
-            : "此按鈕會向 backend 建立 LINE Pay 預授權請求，並開啟 LINE Pay 付款頁。"}
+            : `此按鈕會向 backend 建立${selectedProvider === "ecpay" ? "信用卡（ECPay）" : "LINE Pay"}預授權請求，並開啟付款頁。`}
         </Text>
         <Text style={styles.meta}>
           {isManualRepayment
@@ -154,17 +174,20 @@ export function PaymentAuthorizationScreen({ navigation, route, appState, action
           label={repaymentExpired
             ? "已超過重新付款期限"
             : linePayStatus === "loading"
-              ? "正在建立 LINE Pay 請求..."
+              ? "正在建立付款請求..."
               : isManualRepayment
                 ? "前往 LINE Pay 重新付款"
-                : "前往 LINE Pay 預授權"}
+                : selectedProvider === "ecpay"
+                  ? "前往信用卡預授權"
+                  : "前往 LINE Pay 預授權"}
           disabled={repaymentExpired}
           onPress={() => {
             if (linePayStatus !== "loading") {
-              const startPayment = isManualRepayment ? startLinePayRepayment : startLinePayAuthorization;
+              const startPayment = isManualRepayment ? startLinePayRepayment : startPaymentAuthorization;
               startPayment({
                 payment,
                 order,
+                provider: selectedProvider,
                 routeRevision: {
                   id: route.params?.orderRevisionId,
                   amount: route.params?.revisionAmount,
@@ -301,9 +324,10 @@ async function startLinePayRepayment({
   }
 }
 
-async function startLinePayAuthorization({
+async function startPaymentAuthorization({
   payment,
   order,
+  provider = "line_pay",
   routeRevision = null,
   actions,
   pollIntervalRef,
@@ -314,6 +338,7 @@ async function startLinePayAuthorization({
   setSyncStatus,
   setSyncMessage
 }) {
+  const providerLabel = provider === "ecpay" ? "信用卡" : "LINE Pay";
   let revisionPayment = null;
   try {
     if (!payment || !order) {
@@ -325,24 +350,28 @@ async function startLinePayAuthorization({
 
     revisionPayment = getRevisionPaymentContext(order, payment, routeRevision);
     const paymentAmount = revisionPayment?.amount ?? payment.originalAmount;
-    const products = buildLinePayProducts(order, payment, revisionPayment);
 
-    const payload = await requestLinePayAuthorization({
-      orderId: order.id,
-      orderRevisionId: revisionPayment?.id,
-      amount: paymentAmount,
-      productName: order.itemName || "DrinkGroupBuy 飲料訂單",
-      packageName: payment.recipientName || "DrinkGroupBuy",
-      products
-    });
+    const payload = provider === "ecpay"
+      ? await requestEcpayAuthorization({
+          orderId: order.id,
+          amount: paymentAmount
+        })
+      : await requestLinePayAuthorization({
+          orderId: order.id,
+          orderRevisionId: revisionPayment?.id,
+          amount: paymentAmount,
+          productName: order.itemName || "DrinkGroupBuy 飲料訂單",
+          packageName: payment.recipientName || "DrinkGroupBuy",
+          products: buildLinePayProducts(order, payment, revisionPayment)
+        });
     const paymentUrl = payload.paymentUrl?.web || payload.paymentUrl?.app;
     if (!paymentUrl) {
-      throw new Error("LINE Pay 沒有回傳付款網址");
+      throw new Error(`${providerLabel} 沒有回傳付款網址`);
     }
 
     await Linking.openURL(paymentUrl);
     setLinePayStatus("ready");
-    setLinePayMessage("已開啟 LINE Pay。完成授權後回到 App，付款狀態會自動刷新。");
+    setLinePayMessage(`已開啟${providerLabel}。完成授權後回到 App，付款狀態會自動刷新。`);
     startLinePaySyncPolling({
       orderId: payment.orderId,
       orderRevisionId: revisionPayment?.id,
@@ -356,7 +385,7 @@ async function startLinePayAuthorization({
   } catch (error) {
     if (error.payload?.status === "already_authorized") {
       setLinePayStatus("ready");
-      setLinePayMessage("此訂單已完成 LINE Pay 授權，正在同步 backend 狀態。");
+      setLinePayMessage(`此訂單已完成${providerLabel}授權，正在同步 backend 狀態。`);
       syncBackendOrder({
         orderId: payment.orderId,
         actions,
@@ -368,7 +397,7 @@ async function startLinePayAuthorization({
 
     if (error.payload?.status === "authorization_already_pending") {
       setLinePayStatus("ready");
-      setLinePayMessage("此訂單已有一筆 LINE Pay 授權流程進行中，會自動等待 backend 結果。");
+      setLinePayMessage(`此訂單已有一筆${providerLabel}授權流程進行中，會自動等待 backend 結果。`);
       startLinePaySyncPolling({
         orderId: payment.orderId,
         orderRevisionId: revisionPayment?.id,
@@ -486,18 +515,27 @@ function formatRepaymentCutoff(value) {
   });
 }
 
+function getProviderDisplayName(provider) {
+  if (provider === "ecpay" || provider === "mock_ecpay") return "信用卡（ECPay）";
+  return "LINE Pay";
+}
+
 function getDeepLinkResultMessage(params = {}) {
   if (!params.linePayResultStatus) return null;
+  const providerLabel = params.paymentResultSource === "ecpay" ? "信用卡" : "LINE Pay";
   if (params.linePayResultStatus === "authorized") {
-    return { type: "success", message: "已從 LINE Pay 返回 App，正在同步預授權結果。" };
+    return { type: "success", message: `已從${providerLabel}返回 App，正在同步預授權結果。` };
   }
   if (params.linePayResultStatus === "captured") {
-    return { type: "success", message: "已從 LINE Pay 返回 App，正在同步付款結果。" };
+    return { type: "success", message: `已從${providerLabel}返回 App，正在同步付款結果。` };
   }
   if (params.linePayResultStatus === "cancelled") {
-    return { type: "error", message: "LINE Pay 付款已取消，可重新發起付款。" };
+    return { type: "error", message: `${providerLabel}付款已取消，可重新發起付款。` };
   }
-  return { type: "error", message: "LINE Pay 流程未完成，請查看付款狀態或重新付款。" };
+  if (params.linePayResultStatus === "pending") {
+    return { type: "success", message: `已從${providerLabel}返回 App，付款結果確認中，請稍候。` };
+  }
+  return { type: "error", message: `${providerLabel}流程未完成，請查看付款狀態或重新付款。` };
 }
 
 function getRevisionPaymentContext(order, payment, routeRevision = null) {
@@ -593,6 +631,10 @@ const styles = StyleSheet.create({
     color: "#047857",
     fontSize: 13,
     fontWeight: "800"
+  },
+  providerToggleRow: {
+    flexDirection: "row",
+    gap: 10
   },
   successText: {
     color: "#047857",

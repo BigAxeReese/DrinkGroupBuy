@@ -1,6 +1,6 @@
 # DrinkGroupBuy 訂單流程開發分析與實作順序
 
-最後更新：2026-07-30
+最後更新：2026-08-05
 
 ## 文件目的
 
@@ -434,7 +434,9 @@ Body 建議包含：
 4. 將 terminal job 的 `alert_required` 接到正式告警通知管道。
 5. 補建立訂單與付款 request 的通用 idempotency 紀錄。
 
-這個切片仍不包含正式通知系統、商家退款申請／營運審核 UI 與 QR Code。Request status reconciliation 已依 LINE Pay Online API v3 官方狀態語意實作；Android 實機、Firebase 正式設定、LINE Pay sandbox 人工 E2E 與多 process 驗證仍是發布前必要工作。
+這個切片仍不包含正式通知系統、商家退款申請／營運審核 UI 與 QR Code；**退款申請與營運審核 API 本身（`refund_requests` 資料表、商家申請與核准／駁回端點）已於 2026-08-04 完成第一版**，只缺前端 UI。Request status reconciliation 已依 LINE Pay Online API v3 官方狀態語意實作；Android 實機、Firebase 正式設定、LINE Pay sandbox 人工 E2E 與多 process 驗證仍是發布前必要工作。
+
+2026-08-05 另新增 ECPay 信用卡作為 LINE Pay 分離式請款審核卡關期間的備用付款 provider（後端與 mobile 第一版已完成並驗證，見 `docs/current-progress.md`）；本文件其餘關於付款流程的規劃內容維持 provider 中立，同樣適用於 ECPay。
 
 ## 七、預計主要修改檔案
 

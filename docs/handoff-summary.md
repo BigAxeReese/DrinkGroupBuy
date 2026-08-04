@@ -1,6 +1,6 @@
 # 交接總整理
 
-最後更新：2026-07-31
+最後更新：2026-08-05
 
 換電腦、交接給其他人、或開新的 Codex 對話時，請先閱讀本文件。
 
@@ -121,6 +121,7 @@ backend/
 | `GET`    | `/api/auth/dev-users`                         | 本機 dev-only 身份清單          |
 | `POST`   | `/api/auth/dev-session`                       | 本機 dev-only 模擬登入          |
 | `GET`    | `/health`                                     | 健康檢查                       |
+| `GET`    | `/api/stores`                                  | 查詢公開營業店家與座標         |
 | `GET`    | `/api/group-buy-activities`                   | 查詢團購活動                   |
 | `GET`    | `/api/stores/:storeId/menu`                   | 顧客查詢上架菜單               |
 | `GET`    | `/api/merchant/stores/:storeId/menu`          | 商家查詢完整菜單               |
@@ -133,6 +134,11 @@ backend/
 | `GET`    | `/api/customers/me/orders`                    | 顧客權威訂單列表               |
 | `GET`    | `/api/merchant/stores/:storeId/orders`        | 商家門市權威訂單列表           |
 | `POST`   | `/api/orders/:orderId/cancel`                 | 顧客在鎖定前取消訂單           |
+| `POST`   | `/api/merchant/orders/:orderId/refund-requests` | 商家對已請款訂單提出退款申請 |
+| `GET`    | `/api/merchant/stores/:storeId/refund-requests` | 商家查詢自己門市的退款申請   |
+| `GET`    | `/api/admin/refund-requests`                  | 營運查詢退款申請佇列           |
+| `POST`   | `/api/admin/refund-requests/:requestId/approve` | 營運核准退款申請並執行退款 |
+| `POST`   | `/api/admin/refund-requests/:requestId/reject`  | 營運駁回退款申請             |
 | `POST`   | `/api/merchant/group-buy-activities/:activityId/ready-for-pickup` | 商家標記活動可取餐 |
 | `GET`    | `/api/orders/:orderId/pickup-credential`      | 顧客查詢取貨憑證               |
 | `POST`   | `/api/merchant/pickup-credentials/lookup`     | 商家查詢取貨碼                 |
@@ -145,6 +151,10 @@ backend/
 | `POST`   | `/api/payments/line-pay/refund`               | 開發 / 補救用已請款交易退款    |
 | `GET`    | `/api/payments/line-pay/confirm`              | LINE Pay confirm redirect      |
 | `GET`    | `/api/payments/line-pay/cancel`               | LINE Pay cancel redirect       |
+| `POST`   | `/api/payments/ecpay/request`                 | 建立信用卡（ECPay）預授權請求  |
+| `GET`    | `/api/payments/ecpay/checkout-redirect`       | 產生導向 ECPay 託管付款頁的中介頁面 |
+| `POST`   | `/api/payments/ecpay/return`                  | ECPay ReturnURL webhook（權威付款通知） |
+| `GET`    | `/api/payments/ecpay/client-back`             | ECPay ClientBackURL（非權威來源） |
 
 目前 backend 限制：
 
@@ -156,7 +166,7 @@ backend/
 - 取貨憑證、標記可取餐、取貨碼查詢／核銷與逾期處理已完成第一版；QR Code、正式通知與完整 Android E2E 尚未完成。
 - 已實作開發 / 補救用手動觸發單一團購結算，也已接上後端啟動時的 deadline settlement scheduler。
 - Scheduler 預設每 30 秒掃描已截止、尚未結算的團購；若 `LINE_PAY_ENV=production`，必須設定 `SETTLEMENT_SCHEDULER_ALLOW_PRODUCTION=true` 才會啟動。
-- 自動檢查包含 `check:sql-safety`、`database-adapter:smoke`、`store-menu-read:smoke`、`payment-reliability:smoke`、`payment-reliability:multiprocess`、`settlement:smoke`、`pickup-expiration:smoke`、`pickup-credential:smoke`、`menu-order:smoke`、`order-flow:smoke`、`order-api:smoke` 與 `postgres-runtime:smoke`；會碰觸 SQLite 的 smoke scripts 完成後會還原開發資料庫。
+- 自動檢查包含 `check:sql-safety`、`database-adapter:smoke`、`store-menu-read:smoke`、`payment-reliability:smoke`、`payment-reliability:multiprocess`、`settlement:smoke`、`refund-request:smoke`、`pickup-expiration:smoke`、`pickup-credential:smoke`、`menu-order:smoke`、`order-flow:smoke`、`order-api:smoke` 與 `postgres-runtime:smoke`；會碰觸 SQLite 的 smoke scripts 完成後會還原開發資料庫。
 - 後端預設仍使用 SQLite；auth、公開菜單、活動讀寫、商家菜單、首次建單、訂單讀取、authorization request／confirm／cancel、一般 void 與顧客取消可受控切換 PostgreSQL，沒有雙寫；其餘訂單後續與付款仍是 SQLite。
 
 ## 2026-07-30～2026-07-31 驗證基準
@@ -319,6 +329,23 @@ PostgreSQL v1 決策：
 
 - LINE Pay secrets 只能放在 `backend/.env`。
 - Mobile app 不可以保存 LINE Pay Channel Secret。
+
+## 信用卡（ECPay）狀態——2026-08-05，後端與 mobile 第一版已完成
+
+**唯一原因是 LINE Pay 分離式請款官方審核進度不確定**，新增綠界 ECPay 作為備用付款 provider（走跳轉 ECPay 託管付款頁的標準結帳方式）。**LINE Pay 完全不受影響、兩者並存**；信用卡是「多一個選擇」不是「取代 LINE Pay」，要不要上線可以視 LINE Pay 審核進度再決定。詳見 `docs/current-progress.md`「2026-08-05 新增信用卡（ECPay）付款」與 `docs/payment-rules-and-flow.md`「付款 Provider 方向」。
+
+目前狀態：
+
+- 已完成並驗證：DB `provider` CHECK 放寬（含 SQLite 重建表遷移）、`ecpayClient.js`（CheckMacValue 簽章已對照官方範例驗證吻合）、`ecpayService.js`、四支 `server.js` 路由（已用真實 HTTP 請求驗證，包含真實建單流程）、`settlementService.js`／`refundRequestService.js` 的 provider 分派、mobile `apiClient.js`／`PaymentAuthorizationScreen.jsx`（付款方式選擇 UI，已用 Babel 驗證語法）。
+- `npm run ecpay:smoke` 已加入自動化回歸測試（`mock_ecpay`），涵蓋建立請求、webhook 確認、竄改簽章拒絕、結算 capture/void、退款自動分派、重複請求阻擋。
+- 尚未做：真正打 ECPay Stage 環境的人工端對端驗證（`docs/ecpay-checkout-stage-checklist.md` 已建立但尚未執行）、webhook 遺失的輪詢對帳機制、ECPay 授權有效期檢查、ECPay 手動重新付款流程。
+- ECPay 官方公開測試特店資料（僅供 Stage 測試環境）已內建於 `ecpayClient.js` 作為預設值：商號 `3002607`；不需要申請真正商業帳號即可開發測試。
+- **注意**：`settlement:smoke`／`refund-request:smoke`／`ecpay:smoke` 等會完整重建 `database/drink-group-buy-dev.sqlite` 的 smoke test，不建議在本機同時有 `npm run backend:start` 執行時跑，曾在開發過程中因檔案鎖定衝突造成一次資料庫損毀（已安全復原）。
+
+安全規則：
+
+- ECPay HashKey／HashIV／MerchantID 正式環境值只能放 `backend/.env`（Stage 測試值可留在程式碼作為預設值，因為官方本來就公開這組資料，僅供測試環境使用）。
+- 一律走跳轉 ECPay 託管付款頁，不做 ECPay 幕後授權 API，避免後端經手卡號。
 
 ## 已決定的重要產品規則
 

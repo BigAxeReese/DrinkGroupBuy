@@ -18,6 +18,11 @@ const {
   getLinePayCaptureProviderState,
   voidLinePayAuthorization
 } = require("./linePayService");
+const {
+  captureEcpayAuthorization,
+  isEcpayProvider,
+  voidEcpayAuthorization
+} = require("./ecpayService");
 
 const CAPTURE_MAX_ATTEMPTS = 3;
 const CAPTURE_RETRY_INTERVAL_MS = 30_000;
@@ -94,6 +99,43 @@ async function settleGroupBuyActivityUnlocked(input = {}) {
     }
 
     try {
+      // ECPay has no retry-state/reconciliation machinery yet (deferred; see
+      // docs/current-progress.md 2026-08-05 entry), so it gets a single capture/void
+      // attempt here instead of going through the LINE Pay retry-state branches below.
+      // A thrown error naturally falls through to the generic failure handling in the
+      // catch block, since it won't carry the LINE-Pay-specific captureFailure markers.
+      if (isEcpayProvider(order.paymentProvider)) {
+        if (order.action === "capture") {
+          const captureResult = await captureEcpayAuthorization({
+            orderId: order.id,
+            provider: order.paymentProvider,
+            amount: order.captureAmount,
+            finalAmount: order.finalAmount,
+            reason: `deadline_settlement_${order.actionReason}`
+          });
+          results.push({
+            orderId: order.id,
+            action: "capture",
+            status: captureResult?.status || "captured",
+            capture: captureResult?.capture || null
+          });
+          continue;
+        }
+
+        const voidResult = await voidEcpayAuthorization({
+          orderId: order.id,
+          provider: order.paymentProvider,
+          reason: `deadline_settlement_${order.actionReason}`
+        });
+        results.push({
+          orderId: order.id,
+          action: "void",
+          status: voidResult?.status || "authorization_voided",
+          authorization: voidResult?.authorization || null
+        });
+        continue;
+      }
+
       if (order.action === "capture") {
         const retryInput = {
           orderId: order.id,

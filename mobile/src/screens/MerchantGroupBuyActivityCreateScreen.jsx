@@ -2,7 +2,6 @@ import { useState } from "react";
 import { Platform, Pressable, StyleSheet, Text, TextInput, View } from "react-native";
 import { MobileScreen, Section } from "../components/MobileScreen";
 import { PrimaryButton } from "../components/PrimaryButton";
-import { stores } from "../mock/stores";
 import { createGroupBuyActivity } from "../utils/apiClient";
 import { createDeadlineIsoFromInput, getDefaultDeadlineInput } from "../utils/deadlineTime";
 import {
@@ -20,7 +19,6 @@ const DEFAULT_PICKUP_AFTER_DEADLINE_MS = 30 * 60 * 1000;
 const DEFAULT_PICKUP_WINDOW_MS = 30 * 60 * 1000;
 
 export function MerchantGroupBuyActivityCreateScreen({ navigation, actions, memberAction, selectedMerchantStoreId }) {
-  const merchantStore = stores.find((store) => store.id === selectedMerchantStoreId) ?? stores[0];
   const initialDeadlineDate = new Date(createDeadlineIsoFromInput(getDefaultDeadlineInput()));
   const [title, setTitle] = useState("離峰優惠團購");
   const [tiers, setTiers] = useState([
@@ -120,7 +118,7 @@ export function MerchantGroupBuyActivityCreateScreen({ navigation, actions, memb
 
     try {
       const activity = await createGroupBuyActivity({
-        storeId: merchantStore.id,
+        storeId: selectedMerchantStoreId,
         title,
         startAt: startTime,
         deadlineAt,
@@ -145,7 +143,7 @@ export function MerchantGroupBuyActivityCreateScreen({ navigation, actions, memb
       }
 
       groupBuyActivityId = actions.createMerchantGroupBuyActivity({
-        storeId: merchantStore.id,
+        storeId: selectedMerchantStoreId,
         title,
         tiers,
         startTime,

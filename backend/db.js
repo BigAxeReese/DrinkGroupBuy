@@ -151,7 +151,7 @@ function ensureRuntimeSchema(database) {
       payment_capture_id TEXT NOT NULL REFERENCES payment_captures(id),
       payment_authorization_id TEXT NOT NULL REFERENCES payment_authorizations(id),
       order_id TEXT NOT NULL REFERENCES orders(id),
-      provider TEXT NOT NULL CHECK (provider IN ('line_pay', 'mock_line_pay')),
+      provider TEXT NOT NULL CHECK (provider IN ('line_pay', 'mock_line_pay', 'ecpay', 'mock_ecpay')),
       status TEXT NOT NULL DEFAULT 'pending' CHECK (status IN ('pending', 'refunded', 'failed')),
       refund_amount INTEGER NOT NULL CHECK (refund_amount > 0),
       provider_refund_id TEXT,
@@ -164,6 +164,34 @@ function ensureRuntimeSchema(database) {
 
     CREATE INDEX IF NOT EXISTS idx_payment_refunds_capture ON payment_refunds(payment_capture_id);
     CREATE INDEX IF NOT EXISTS idx_payment_refunds_order ON payment_refunds(order_id);
+  `);
+
+  widenPaymentProviderCheckConstraints(database);
+
+  database.exec(`
+    CREATE TABLE IF NOT EXISTS refund_requests (
+      id TEXT PRIMARY KEY,
+      order_id TEXT NOT NULL REFERENCES orders(id),
+      payment_capture_id TEXT NOT NULL REFERENCES payment_captures(id),
+      store_id TEXT NOT NULL REFERENCES stores(id),
+      requested_by_user_id TEXT NOT NULL REFERENCES users(id),
+      requested_amount INTEGER NOT NULL CHECK (requested_amount > 0),
+      reason TEXT NOT NULL,
+      status TEXT NOT NULL DEFAULT 'pending' CHECK (status IN ('pending', 'approved', 'rejected')),
+      idempotency_key TEXT UNIQUE,
+      reviewed_by_user_id TEXT REFERENCES users(id),
+      reviewed_at TEXT,
+      rejection_reason TEXT,
+      resulting_payment_refund_id TEXT REFERENCES payment_refunds(id),
+      created_at TEXT NOT NULL,
+      updated_at TEXT NOT NULL
+    );
+
+    CREATE INDEX IF NOT EXISTS idx_refund_requests_store ON refund_requests(store_id, status);
+    CREATE INDEX IF NOT EXISTS idx_refund_requests_order ON refund_requests(order_id);
+    CREATE UNIQUE INDEX IF NOT EXISTS idx_refund_requests_pending_per_capture
+    ON refund_requests(payment_capture_id)
+    WHERE status = 'pending';
   `);
 
   database.exec(`
@@ -205,6 +233,116 @@ function ensureRuntimeSchema(database) {
     CREATE INDEX IF NOT EXISTS idx_operation_locks_expiry
     ON operation_locks(locked_until);
   `);
+}
+
+// SQLite CHECK constraints cannot be altered in place; adding a new provider value
+// requires rebuilding the table (https://www.sqlite.org/lang_altertable.html #6).
+function widenPaymentProviderCheckConstraints(database) {
+  const authorizationTable = database.prepare(
+    "SELECT sql FROM sqlite_master WHERE type = 'table' AND name = 'payment_authorizations'"
+  ).get();
+  const refundTable = database.prepare(
+    "SELECT sql FROM sqlite_master WHERE type = 'table' AND name = 'payment_refunds'"
+  ).get();
+
+  const needsAuthorizationRebuild = Boolean(authorizationTable) && !authorizationTable.sql.includes("'ecpay'");
+  const needsRefundRebuild = Boolean(refundTable) && !refundTable.sql.includes("'ecpay'");
+  if (!needsAuthorizationRebuild && !needsRefundRebuild) return;
+
+  database.exec("PRAGMA foreign_keys = OFF;");
+  try {
+    database.exec("BEGIN;");
+    try {
+      if (needsAuthorizationRebuild) {
+        database.exec(`
+          CREATE TABLE payment_authorizations_new (
+            id TEXT PRIMARY KEY,
+            order_id TEXT NOT NULL REFERENCES orders(id),
+            order_revision_id TEXT REFERENCES order_revisions(id),
+            provider TEXT NOT NULL CHECK (provider IN ('line_pay', 'mock_line_pay', 'ecpay', 'mock_ecpay')),
+            payment_flow TEXT NOT NULL DEFAULT 'authorization',
+            status TEXT NOT NULL DEFAULT 'pending'
+              CHECK (status IN ('pending', 'authorized', 'captured', 'authorization_voided', 'failed')),
+            original_amount INTEGER NOT NULL CHECK (original_amount >= 0),
+            authorized_amount INTEGER NOT NULL DEFAULT 0 CHECK (authorized_amount >= 0),
+            provider_authorization_id TEXT,
+            expires_at TEXT,
+            authorized_at TEXT,
+            voided_at TEXT,
+            failure_reason TEXT,
+            created_at TEXT NOT NULL,
+            updated_at TEXT NOT NULL
+          );
+
+          INSERT INTO payment_authorizations_new (
+            id, order_id, order_revision_id, provider, payment_flow, status,
+            original_amount, authorized_amount, provider_authorization_id,
+            expires_at, authorized_at, voided_at, failure_reason, created_at, updated_at
+          )
+          SELECT
+            id, order_id, order_revision_id, provider, payment_flow, status,
+            original_amount, authorized_amount, provider_authorization_id,
+            expires_at, authorized_at, voided_at, failure_reason, created_at, updated_at
+          FROM payment_authorizations;
+
+          DROP TABLE payment_authorizations;
+          ALTER TABLE payment_authorizations_new RENAME TO payment_authorizations;
+
+          CREATE INDEX idx_payment_authorizations_order ON payment_authorizations(order_id);
+          CREATE INDEX idx_payment_authorizations_order_revision ON payment_authorizations(order_revision_id);
+        `);
+      }
+
+      if (needsRefundRebuild) {
+        database.exec(`
+          CREATE TABLE payment_refunds_new (
+            id TEXT PRIMARY KEY,
+            payment_capture_id TEXT NOT NULL REFERENCES payment_captures(id),
+            payment_authorization_id TEXT NOT NULL REFERENCES payment_authorizations(id),
+            order_id TEXT NOT NULL REFERENCES orders(id),
+            provider TEXT NOT NULL CHECK (provider IN ('line_pay', 'mock_line_pay', 'ecpay', 'mock_ecpay')),
+            status TEXT NOT NULL DEFAULT 'pending' CHECK (status IN ('pending', 'refunded', 'failed')),
+            refund_amount INTEGER NOT NULL CHECK (refund_amount > 0),
+            provider_refund_id TEXT,
+            idempotency_key TEXT UNIQUE,
+            refunded_at TEXT,
+            failure_reason TEXT,
+            created_at TEXT NOT NULL,
+            updated_at TEXT NOT NULL
+          );
+
+          INSERT INTO payment_refunds_new (
+            id, payment_capture_id, payment_authorization_id, order_id, provider, status,
+            refund_amount, provider_refund_id, idempotency_key, refunded_at, failure_reason,
+            created_at, updated_at
+          )
+          SELECT
+            id, payment_capture_id, payment_authorization_id, order_id, provider, status,
+            refund_amount, provider_refund_id, idempotency_key, refunded_at, failure_reason,
+            created_at, updated_at
+          FROM payment_refunds;
+
+          DROP TABLE payment_refunds;
+          ALTER TABLE payment_refunds_new RENAME TO payment_refunds;
+
+          CREATE INDEX idx_payment_refunds_capture ON payment_refunds(payment_capture_id);
+          CREATE INDEX idx_payment_refunds_order ON payment_refunds(order_id);
+        `);
+      }
+
+      const fkViolations = database.prepare("PRAGMA foreign_key_check;").all();
+      if (fkViolations.length > 0) {
+        throw new Error(`payment provider CHECK migration produced foreign key violations: ${JSON.stringify(fkViolations)}`);
+      }
+
+      database.exec("COMMIT;");
+    } catch (error) {
+      database.exec("ROLLBACK;");
+      throw error;
+    }
+  } finally {
+    database.exec("PRAGMA foreign_keys = ON;");
+  }
 }
 
 function listGroupBuyActivities() {
@@ -900,7 +1038,6 @@ function createGroupBuySettlementPlan(activityId, input = {}) {
           SELECT id
           FROM payment_authorizations
           WHERE order_id = orders.id
-            AND provider IN ('line_pay', 'mock_line_pay')
             AND status IN ('authorized', 'captured')
           ORDER BY authorized_at DESC, created_at DESC
           LIMIT 1
@@ -1802,7 +1939,6 @@ function updatePendingOrder(input) {
       SELECT id, status, provider_authorization_id
       FROM payment_authorizations
       WHERE order_id = ?
-        AND provider IN ('line_pay', 'mock_line_pay')
         AND status = 'pending'
     `).all(input.orderId);
 
@@ -2330,7 +2466,6 @@ function getLatestLinePayAuthorizationForOrder(orderId) {
       SELECT *
       FROM payment_authorizations
       WHERE order_id = ?
-        AND provider IN ('line_pay', 'mock_line_pay')
       ORDER BY created_at DESC
       LIMIT 1
     `).get(orderId);
@@ -2348,7 +2483,6 @@ function getLatestLinePayAuthorizationForOrderRevision(orderRevisionId) {
       SELECT *
       FROM payment_authorizations
       WHERE order_revision_id = ?
-        AND provider = 'line_pay'
       ORDER BY created_at DESC
       LIMIT 1
     `).get(orderRevisionId);
@@ -5231,6 +5365,40 @@ function getLatestPaymentCaptureByAuthorizationId(authorizationId) {
   }
 }
 
+// Reads back the raw provider payload most recently recorded for a resource (e.g. the
+// ECPay webhook fields for an authorization), so it can be reused later without a new
+// column — see how authorizeLinePayPaymentInDatabase/voidLinePayAuthorizationInDatabase
+// wrap providerPayload as payload_json = JSON.stringify({ providerPayload, ... }).
+function getLatestPaymentProviderEventPayload({ resourceType, resourceId, eventType }) {
+  const database = openDatabase();
+  try {
+    const row = eventType
+      ? database.prepare(`
+          SELECT payload_json
+          FROM payment_provider_events
+          WHERE resource_type = ?
+            AND resource_id = ?
+            AND event_type = ?
+          ORDER BY received_at DESC
+          LIMIT 1
+        `).get(resourceType, resourceId, eventType)
+      : database.prepare(`
+          SELECT payload_json
+          FROM payment_provider_events
+          WHERE resource_type = ?
+            AND resource_id = ?
+          ORDER BY received_at DESC
+          LIMIT 1
+        `).get(resourceType, resourceId);
+
+    if (!row?.payload_json) return null;
+    const parsed = JSON.parse(row.payload_json);
+    return parsed?.providerPayload ?? parsed;
+  } finally {
+    database.close();
+  }
+}
+
 function getPaymentRefundById(refundId) {
   const database = openDatabase();
   try {
@@ -5461,6 +5629,322 @@ function mapRefundableOrderRow(row) {
     authorizationStatus: row.order_authorization_status,
     finalAmount: row.order_final_amount
   };
+}
+
+function getOrderStoreId(orderId) {
+  const database = openDatabase();
+  try {
+    const row = database.prepare(`
+      SELECT activity.store_id AS store_id
+      FROM orders
+      JOIN group_buy_activities activity ON activity.id = orders.activity_id
+      WHERE orders.id = ?
+    `).get(orderId);
+    return row?.store_id || null;
+  } finally {
+    database.close();
+  }
+}
+
+function findLatestCapturedPaymentForOrder(database, orderId) {
+  return database.prepare(`
+    SELECT
+      capture.id AS capture_id,
+      capture.capture_amount,
+      capture.status AS capture_status,
+      orders.id AS order_id,
+      orders.payment_status AS order_payment_status,
+      activity.store_id AS store_id
+    FROM payment_captures capture
+    JOIN payment_authorizations authorization
+      ON authorization.id = capture.payment_authorization_id
+    JOIN orders
+      ON orders.id = capture.order_id
+    JOIN group_buy_activities activity
+      ON activity.id = orders.activity_id
+    WHERE capture.status = 'captured'
+      AND capture.order_id = ?
+    ORDER BY capture.captured_at DESC, capture.created_at DESC, capture.id DESC
+    LIMIT 1
+  `).get(orderId);
+}
+
+function mapRefundRequest(row) {
+  return {
+    id: row.id,
+    orderId: row.order_id,
+    paymentCaptureId: row.payment_capture_id,
+    storeId: row.store_id,
+    requestedByUserId: row.requested_by_user_id,
+    requestedAmount: row.requested_amount,
+    reason: row.reason,
+    status: row.status,
+    idempotencyKey: row.idempotency_key,
+    reviewedByUserId: row.reviewed_by_user_id,
+    reviewedAt: row.reviewed_at,
+    rejectionReason: row.rejection_reason,
+    resultingPaymentRefundId: row.resulting_payment_refund_id,
+    createdAt: row.created_at,
+    updatedAt: row.updated_at
+  };
+}
+
+function getRefundRequestById(requestId) {
+  const database = openDatabase();
+  try {
+    const row = database.prepare("SELECT * FROM refund_requests WHERE id = ?").get(requestId);
+    return row ? mapRefundRequest(row) : null;
+  } finally {
+    database.close();
+  }
+}
+
+function listRefundRequestsForStore(storeId, { status } = {}) {
+  const database = openDatabase();
+  try {
+    const rows = status
+      ? database.prepare(`
+          SELECT * FROM refund_requests
+          WHERE store_id = ? AND status = ?
+          ORDER BY created_at DESC
+        `).all(storeId, status)
+      : database.prepare(`
+          SELECT * FROM refund_requests
+          WHERE store_id = ?
+          ORDER BY created_at DESC
+        `).all(storeId);
+    return rows.map(mapRefundRequest);
+  } finally {
+    database.close();
+  }
+}
+
+function listRefundRequestsForAdmin({ status } = {}) {
+  const database = openDatabase();
+  try {
+    const rows = status
+      ? database.prepare(`
+          SELECT * FROM refund_requests
+          WHERE status = ?
+          ORDER BY created_at DESC
+        `).all(status)
+      : database.prepare(`
+          SELECT * FROM refund_requests
+          ORDER BY created_at DESC
+        `).all();
+    return rows.map(mapRefundRequest);
+  } finally {
+    database.close();
+  }
+}
+
+function createRefundRequestInDatabase(input) {
+  const database = openDatabase();
+  const now = input.now || new Date().toISOString();
+  const requestId = `refund-request-${randomUUID()}`;
+  let transactionStarted = false;
+
+  try {
+    database.exec("BEGIN IMMEDIATE;");
+    transactionStarted = true;
+    const rollback = (payload) => {
+      database.exec("ROLLBACK;");
+      transactionStarted = false;
+      return payload;
+    };
+
+    const capturedPayment = findLatestCapturedPaymentForOrder(database, input.orderId);
+    if (!capturedPayment) {
+      return rollback({ error: "captured_payment_not_found" });
+    }
+    if (input.storeId && capturedPayment.store_id !== input.storeId) {
+      return rollback({ error: "order_store_mismatch" });
+    }
+
+    const idempotencyKey = normalizeRefundIdempotencyKey(input.idempotencyKey);
+    if (idempotencyKey) {
+      const existing = database.prepare("SELECT * FROM refund_requests WHERE idempotency_key = ?").get(idempotencyKey);
+      if (existing) {
+        return rollback({ refundRequest: mapRefundRequest(existing), alreadyExists: true });
+      }
+    }
+
+    const existingPending = database.prepare(`
+      SELECT * FROM refund_requests
+      WHERE payment_capture_id = ? AND status = 'pending'
+      LIMIT 1
+    `).get(capturedPayment.capture_id);
+    if (existingPending) {
+      return rollback({
+        error: "refund_request_already_pending",
+        refundRequest: mapRefundRequest(existingPending)
+      });
+    }
+
+    const refundedAmount = getRefundedAmountForCapture(database, capturedPayment.capture_id);
+    const remainingRefundableAmount = Math.max(capturedPayment.capture_amount - refundedAmount, 0);
+    if (remainingRefundableAmount <= 0) {
+      return rollback({ error: "already_fully_refunded", remainingRefundableAmount: 0 });
+    }
+
+    const requestedAmount = Number(input.requestedAmount);
+    if (!Number.isInteger(requestedAmount) || requestedAmount <= 0) {
+      return rollback({ error: "invalid_refund_amount", remainingRefundableAmount });
+    }
+    if (requestedAmount > remainingRefundableAmount) {
+      return rollback({ error: "refund_amount_exceeds_remaining_amount", remainingRefundableAmount });
+    }
+
+    const reason = (input.reason || "").trim();
+    if (!reason) {
+      return rollback({ error: "refund_reason_required" });
+    }
+
+    database.prepare(`
+      INSERT INTO refund_requests (
+        id, order_id, payment_capture_id, store_id, requested_by_user_id,
+        requested_amount, reason, status, idempotency_key, created_at, updated_at
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, 'pending', ?, ?, ?)
+    `).run(
+      requestId,
+      input.orderId,
+      capturedPayment.capture_id,
+      capturedPayment.store_id,
+      input.actorUserId,
+      requestedAmount,
+      reason,
+      idempotencyKey,
+      now,
+      now
+    );
+
+    database.prepare(`
+      INSERT INTO audit_logs (
+        id, actor_user_id, action_type, resource_type, resource_id, metadata_json, created_at
+      ) VALUES (?, ?, 'refund_request_created', 'refund_request', ?, ?, ?)
+    `).run(
+      `audit-log-${randomUUID()}`,
+      input.actorUserId || null,
+      requestId,
+      JSON.stringify({
+        orderId: input.orderId,
+        storeId: capturedPayment.store_id,
+        paymentCaptureId: capturedPayment.capture_id,
+        requestedAmount,
+        remainingRefundableAmount,
+        reason
+      }),
+      now
+    );
+
+    database.exec("COMMIT;");
+    transactionStarted = false;
+
+    return {
+      refundRequest: getRefundRequestById(requestId),
+      alreadyExists: false,
+      remainingRefundableAmount: remainingRefundableAmount - requestedAmount
+    };
+  } catch (error) {
+    if (transactionStarted) database.exec("ROLLBACK;");
+    throw error;
+  } finally {
+    database.close();
+  }
+}
+
+function approveRefundRequestInDatabase({ requestId, resultingPaymentRefundId, actorUserId, now: nowInput }) {
+  const database = openDatabase();
+  const now = nowInput || new Date().toISOString();
+  let transactionStarted = false;
+  try {
+    database.exec("BEGIN IMMEDIATE;");
+    transactionStarted = true;
+    const existing = database.prepare("SELECT * FROM refund_requests WHERE id = ?").get(requestId);
+    if (!existing || existing.status !== "pending") {
+      database.exec("ROLLBACK;");
+      transactionStarted = false;
+      return existing ? mapRefundRequest(existing) : null;
+    }
+
+    database.prepare(`
+      UPDATE refund_requests
+      SET status = 'approved',
+          reviewed_by_user_id = ?,
+          reviewed_at = ?,
+          resulting_payment_refund_id = ?,
+          updated_at = ?
+      WHERE id = ? AND status = 'pending'
+    `).run(actorUserId || null, now, resultingPaymentRefundId || null, now, requestId);
+
+    database.prepare(`
+      INSERT INTO audit_logs (
+        id, actor_user_id, action_type, resource_type, resource_id, metadata_json, created_at
+      ) VALUES (?, ?, 'refund_request_approved', 'refund_request', ?, ?, ?)
+    `).run(
+      `audit-log-${randomUUID()}`,
+      actorUserId || null,
+      requestId,
+      JSON.stringify({ resultingPaymentRefundId: resultingPaymentRefundId || null }),
+      now
+    );
+
+    database.exec("COMMIT;");
+    transactionStarted = false;
+    return getRefundRequestById(requestId);
+  } catch (error) {
+    if (transactionStarted) database.exec("ROLLBACK;");
+    throw error;
+  } finally {
+    database.close();
+  }
+}
+
+function rejectRefundRequestInDatabase({ requestId, rejectionReason, actorUserId, now: nowInput }) {
+  const database = openDatabase();
+  const now = nowInput || new Date().toISOString();
+  let transactionStarted = false;
+  try {
+    database.exec("BEGIN IMMEDIATE;");
+    transactionStarted = true;
+    const existing = database.prepare("SELECT * FROM refund_requests WHERE id = ?").get(requestId);
+    if (!existing || existing.status !== "pending") {
+      database.exec("ROLLBACK;");
+      transactionStarted = false;
+      return existing ? mapRefundRequest(existing) : null;
+    }
+
+    database.prepare(`
+      UPDATE refund_requests
+      SET status = 'rejected',
+          reviewed_by_user_id = ?,
+          reviewed_at = ?,
+          rejection_reason = ?,
+          updated_at = ?
+      WHERE id = ? AND status = 'pending'
+    `).run(actorUserId || null, now, rejectionReason, now, requestId);
+
+    database.prepare(`
+      INSERT INTO audit_logs (
+        id, actor_user_id, action_type, resource_type, resource_id, metadata_json, created_at
+      ) VALUES (?, ?, 'refund_request_rejected', 'refund_request', ?, ?, ?)
+    `).run(
+      `audit-log-${randomUUID()}`,
+      actorUserId || null,
+      requestId,
+      JSON.stringify({ rejectionReason }),
+      now
+    );
+
+    database.exec("COMMIT;");
+    transactionStarted = false;
+    return getRefundRequestById(requestId);
+  } catch (error) {
+    if (transactionStarted) database.exec("ROLLBACK;");
+    throw error;
+  } finally {
+    database.close();
+  }
 }
 
 function mapOrderPaymentContext(row) {
@@ -6213,13 +6697,20 @@ function parseJsonObject(value) {
 
 module.exports = {
   acquireOperationLock,
+  approveRefundRequestInDatabase,
   authorizeLinePayPaymentInDatabase,
   claimPaymentReliabilityJobs,
   completePaymentReliabilityJob,
+  createRefundRequestInDatabase,
   enqueuePaymentReliabilityJob,
+  getOrderStoreId,
   getPaymentReliabilityJob,
+  getRefundRequestById,
   listPendingLinePayAuthorizations,
   listPaymentReliabilityAlerts,
+  listRefundRequestsForAdmin,
+  listRefundRequestsForStore,
+  rejectRefundRequestInDatabase,
   releaseOperationLock,
   reschedulePaymentReliabilityJob,
   calculatePickupExpirationAt,
@@ -6243,6 +6734,7 @@ module.exports = {
   getCustomerOrderCancellationEligibility,
   getLatestLinePayAuthorizationForOrder,
   getLatestLinePayAuthorizationForOrderRevision,
+  getLatestPaymentProviderEventPayload,
   getLinePayCaptureRetryState,
   getManualLinePayRepaymentContext,
   getOrderPaymentContext,

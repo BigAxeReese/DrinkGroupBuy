@@ -268,7 +268,7 @@ CREATE TABLE payment_authorizations (
   id TEXT PRIMARY KEY,
   order_id TEXT NOT NULL REFERENCES orders(id),
   order_revision_id TEXT REFERENCES order_revisions(id),
-  provider TEXT NOT NULL CHECK (provider IN ('line_pay', 'mock_line_pay')),
+  provider TEXT NOT NULL CHECK (provider IN ('line_pay', 'mock_line_pay', 'ecpay', 'mock_ecpay')),
   payment_flow TEXT NOT NULL DEFAULT 'authorization'
     CHECK (payment_flow IN ('authorization', 'direct_repayment')),
   status TEXT NOT NULL DEFAULT 'pending'
@@ -313,7 +313,7 @@ CREATE TABLE payment_refunds (
   payment_capture_id TEXT NOT NULL REFERENCES payment_captures(id),
   payment_authorization_id TEXT NOT NULL REFERENCES payment_authorizations(id),
   order_id TEXT NOT NULL REFERENCES orders(id),
-  provider TEXT NOT NULL CHECK (provider IN ('line_pay', 'mock_line_pay')),
+  provider TEXT NOT NULL CHECK (provider IN ('line_pay', 'mock_line_pay', 'ecpay', 'mock_ecpay')),
   status TEXT NOT NULL DEFAULT 'pending' CHECK (status IN ('pending', 'refunded', 'failed')),
   refund_amount INTEGER NOT NULL CHECK (refund_amount > 0),
   provider_refund_id TEXT,
@@ -326,6 +326,30 @@ CREATE TABLE payment_refunds (
 
 CREATE INDEX idx_payment_refunds_capture ON payment_refunds(payment_capture_id);
 CREATE INDEX idx_payment_refunds_order ON payment_refunds(order_id);
+
+CREATE TABLE refund_requests (
+  id TEXT PRIMARY KEY,
+  order_id TEXT NOT NULL REFERENCES orders(id),
+  payment_capture_id TEXT NOT NULL REFERENCES payment_captures(id),
+  store_id TEXT NOT NULL REFERENCES stores(id),
+  requested_by_user_id TEXT NOT NULL REFERENCES users(id),
+  requested_amount INTEGER NOT NULL CHECK (requested_amount > 0),
+  reason TEXT NOT NULL,
+  status TEXT NOT NULL DEFAULT 'pending' CHECK (status IN ('pending', 'approved', 'rejected')),
+  idempotency_key TEXT UNIQUE,
+  reviewed_by_user_id TEXT REFERENCES users(id),
+  reviewed_at TEXT,
+  rejection_reason TEXT,
+  resulting_payment_refund_id TEXT REFERENCES payment_refunds(id),
+  created_at TEXT NOT NULL,
+  updated_at TEXT NOT NULL
+);
+
+CREATE INDEX idx_refund_requests_store ON refund_requests(store_id, status);
+CREATE INDEX idx_refund_requests_order ON refund_requests(order_id);
+CREATE UNIQUE INDEX idx_refund_requests_pending_per_capture
+ON refund_requests(payment_capture_id)
+WHERE status = 'pending';
 
 CREATE TABLE payment_provider_events (
   id TEXT PRIMARY KEY,

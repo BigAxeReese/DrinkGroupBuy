@@ -1,6 +1,6 @@
 # 目前進度
 
-最後更新：2026-08-04
+最後更新：2026-08-05
 
 換電腦或交接給其他 AI 時，請先閱讀 `docs/handoff-summary.md`。
 
@@ -26,8 +26,45 @@
 - 2026-07-31 已完成 PostgreSQL 顧客首次建單 transaction；HTTP proof 驗證 activity row lock、截止／容量／重複／改價防護、品項與選項快照、history／audit 與清理歸零。
 - 訂單流程新增 `npm run order-flow:smoke` 與 `npm run order-api:smoke`，覆蓋 cursor、門市／活動篩選、匿名顧客、重複下單、取消鎖定、取消冪等、idempotency key 衝突及跨店 403。
 - 2026-08-04 已完成公開店家地圖切片：新增 `GET /api/stores`，Android／Web 地圖顯示 SQLite 內全部營業中且有座標的店家，並與活動 API 合併；藍色表示沒有可加入活動，黃色表示有可加入活動。店家 API 失敗時明確顯示錯誤，不回退至 mock。
+- 2026-08-04 商家儀表板、商家開團與開發補救畫面（`MerchantDashboardScreen`／`MerchantGroupBuyActivityCreateScreen`／`AdminDashboardScreen`）已改用 `appState.stores`（`GET /api/stores`）取代 `mobile/src/mock/stores.js`；該 mock 檔已移除。
+- 2026-08-04 已完成商家退款申請後端第一版：新增 `refund_requests` 資料表（`pending`／`approved`／`rejected`，同一筆請款同時只允許一筆 `pending` 申請）、`POST /api/merchant/orders/:orderId/refund-requests`（商家提出申請）、`GET /api/merchant/stores/:storeId/refund-requests`、`GET /api/admin/refund-requests`、`POST /api/admin/refund-requests/:requestId/approve`（重用既有 LINE Pay refund service）與 `POST /api/admin/refund-requests/:requestId/reject`；核准失敗時申請維持 `pending` 供重試。新增 `npm run refund-request:smoke` 覆蓋申請、重複申請阻擋、非門市商家阻擋、核准、重複核准阻擋與駁回情境。僅後端，尚未有商家／營運手機或後台 UI。
 - 已執行非強制 `npm audit fix`；最近一次結果為 Root `11` 項（`6 moderate`、`5 high`、`0 critical`），Mobile `46` 項（`1 low`、`11 moderate`、`33 high`、`1 critical`）。剩餘項目需要 Expo／React Native 或相關傳遞依賴的主版本升級，因此未使用 `--force` 破壞目前 Expo SDK 51 相容性。
 - 系統分析書已整理為五大功能，五組描述性綱目已更新，並已抽出 `docs/system-analysis-extracted.md`；各小節使用個案描述與活動圖仍待更新。
+- 2026-08-05 開始新增信用卡（綠界 ECPay）預授權付款，與 LINE Pay 並存；LINE Pay 分離式請款申請仍卡在 LINE Pay 官方審核，此為備援方案。目前僅完成 DB 遷移與 `ecpayClient.js`／`ecpayService.js` 兩個 provider 層檔案並通過端對端流程驗證，**尚未接上 server.js 路由，因此還不是可從 App 呼叫的功能**；詳見下方「2026-08-05 新增信用卡（ECPay）付款」。
+
+## 2026-08-05 新增信用卡（ECPay）付款——後端與 mobile 第一版已完成
+
+背景：新增信用卡付款的唯一原因是 **LINE Pay 分離式請款申請已送出，但 LINE Pay 官方審核進度不確定、遲遲未核准**；不是因為 LINE Pay 機制本身有問題，也不是要取代 LINE Pay。信用卡（ECPay）是**備用方案**：
+- LINE Pay 既有機制完全不動、不受影響，兩者並存。
+- 這是「多一個選擇」，不是「必須改用」；如果 LINE Pay 核准下來，信用卡這條路徑可以繼續使用或先擱置，**不影響 LINE Pay 這條主線繼續運作**。
+
+已完成並驗證（函式層 + 真實 HTTP 層 + 自動化 smoke test 三層驗證）：
+
+- 資料庫：`payment_authorizations.provider`／`payment_refunds.provider` 的 CHECK 已放寬支援 `ecpay`／`mock_ecpay`；SQLite 用重建表遷移完成，已用真實資料驗證不遺失/錯位欄位，且冪等。
+- 修正 db.js 內 4 處寫死只認 `line_pay`／`mock_line_pay` 的查詢（結算方案訂單授權 join、待處理授權清理、取得最新授權/最新 revision 授權），這些原本會讓 ECPay 訂單在結算、改單時查不到自己的授權記錄。
+- `backend/payments/ecpayClient.js`：CheckMacValue 簽章已對照 ECPay 官方範例逐字元驗證吻合；內建官方公開 Stage 測試特店資料（商號 `3002607`），不需要申請商業帳號即可開發測試。
+- `backend/payments/ecpayService.js`：業務邏輯層，形狀比照 `linePayService.js` 但完全獨立實作，**沒有修改 `linePayService.js` 任何一行**，重用 `db.js` 既有通用付款函式。
+- `backend/server.js`：新增 `readFormBody`／`sendText` helper 與四支路由——`POST /api/payments/ecpay/request`、`GET /api/payments/ecpay/checkout-redirect`（ECPay AioCheckOut 是表單 POST 跳轉，不是單一 GET URL，這支路由回傳 auto-submit HTML 頁面）、`POST /api/payments/ecpay/return`（ReturnURL webhook，權威來源）、`GET /api/payments/ecpay/client-back`（ClientBackURL，非權威來源，只查目前 DB 狀態顯示、不觸發任何狀態變更）。已泛化 `buildLinePayResultPage`／`buildLinePayAppReturnUrl` 讓兩個 provider 共用同一套「回 App deep link」落地頁。**已用真實 HTTP 請求（含真的建訂單、真的走 dev auth）驗證完整流程，包含中途發現並修正一個 `paymentUrl` port 推導錯誤的 bug。**
+- `backend/payments/settlementService.js`：截止結算依 `order.paymentProvider` 分派到 `linePayService`／`ecpayService`；ECPay 走單次 capture/void（無重試狀態機，見下方延後項目），已用真實折扣結算驗證。
+- `backend/payments/refundRequestService.js`：`approveRefundRequest` 原本信任 admin 傳入的 `body.provider`（新增 ECPay 前就存在的缺口），已修正為**以該筆訂單/capture 實際 provider 反查後再分派**，已用測試驗證即使不傳 `provider` 也會自動分派到正確 provider。
+- Mobile：`apiClient.js` 新增 `requestEcpayAuthorization`；`PaymentAuthorizationScreen.jsx` 加入付款方式選擇（LINE Pay／信用卡），`Linking.openURL` 跳轉、polling、deep link 邏輯確認是 provider 中立、未改動，只做了參數化；deep link 解析與訊息文案已能依 `source=ecpay` 顯示對應提示。已用 Babel 驗證語法正確。
+- `npm run ecpay:smoke`：新增自動化 smoke test（`mock_ecpay`，不打真實網路），涵蓋建立請求、checkout 頁面產生、webhook 確認、**竄改簽章拒絕**、達標結算 capture、未達標結算 void、退款申請自動分派、重複請求阻擋，全數通過。
+- `docs/ecpay-checkout-stage-checklist.md`：真正打 ECPay Stage 環境的人工驗證清單（尚未執行，比照 `docs/line-pay-separated-capture-sandbox-checklist.md` 格式）。
+
+ECPay 與 LINE Pay 機制上的關鍵差異（因此無法完全共用程式碼，只共用「資料庫層」與「mobile 端跳轉/輪詢/deep link」這幾層）：
+
+- LINE Pay 是「使用者瀏覽器被導回 confirmUrl，這個 GET redirect 本身觸發後端呼叫 confirm API」；ECPay 是兩條獨立路徑：`ReturnURL`（ECPay 伺服器對後端 **POST** 的權威通知，須驗 CheckMacValue、須回覆 `"1|OK"` 否則會被重試）與 `ClientBackURL`（單純把瀏覽器導回，**不是**權威來源，可能早到、晚到或根本不觸發）。
+- LINE Pay 的「分離式請款」需要 LINE Pay 額外審核開通；ECPay 的「先授權、之後才關帳（capture）」是帳號層級的標準設定，不需要向 ECPay 特別申請。關帳期限（未手動關帳時 21 天內須完成 API 關帳，90 天後系統放棄不請款）也比 LINE Pay 更寬鬆。
+
+尚未完成（明確延後，非本階段範圍）：
+
+1. 真正打 ECPay Stage 環境的人工端對端驗證（`docs/ecpay-checkout-stage-checklist.md` EC-01～EC-08），目前只驗證過 `mock_ecpay`，尚未打過真實 ECPay 網路。
+2. ECPay webhook 遺失的輪詢對帳機制（ECPay 21/90 天關帳寬限期本身是安全網，風險可控，但目前完全沒有自動補救工具）。
+3. ECPay 授權有效期檢查、ECPay 手動重新付款流程（比照 LINE Pay 15 分鐘內重新付款）。
+
+## 開發過程中發現並修復的環境問題（供未來參考）
+
+開發 ECPay 功能時，執行 `npm run refund-request:smoke` 期間，因為本機同時有一個 `npm run backend:start` 啟動的 backend server 在跑（會持續存取 `database/drink-group-buy-dev.sqlite`），造成 smoke test 重建資料庫檔案時發生 Windows 檔案鎖定衝突，一度導致資料庫檔案損毀（刪除到一半、schema 未重建完）。已用 smoke test 自身產生的備份檔安全復原，資料庫最終確認完整且未遺失既有資料。**這類會完整刪除重建 `database/drink-group-buy-dev.sqlite` 的 smoke test（`settlement:smoke`、`refund-request:smoke`、`ecpay:smoke` 等），不建議在本機同時有 backend server 執行時跑**，或至少要有心理準備需要用 smoke test 自動產生的暫存備份（`%TEMP%/drink-group-buy-dev-*-smoke-*.sqlite`）手動復原。
 
 ## 2026-07-30 產品規則收斂
 
@@ -118,7 +155,7 @@
 | 菜單、購物車與訂單 | 已完成第一版串接 | revision／失敗提示細化與 Android E2E |
 | 付款授權與重新付款 | 部分完成 | LINE Pay 分離式請款 Sandbox 人工 E2E、錯誤／重試 UX |
 | 截止結算顯示 | 尚未開始前端專用畫面 | 顯示不可變最終折扣／尾差快照 |
-| 商家履約與取餐 | 已完成第一版串接 | 退款申請／營運審核與 Android E2E |
+| 商家履約與取餐 | 已完成第一版串接；退款申請／營運審核已有後端 API | 商家／營運退款申請審核 UI 與 Android E2E |
 
 
 目前 mobile 限制：
@@ -127,7 +164,7 @@
 - 顧客地圖已使用 `GET /api/stores` 顯示全部營業中且有座標的店家，再與活動 API 合併可加入狀態；dev auth mode 可依登入 Backend `userId` 同步控制台固定位置或 GPS。正式版定位／隱私流程、距離計算與附近公里數篩選仍未完成。
 - LINE Pay 完成後仍會先回 backend HTML 頁；HTML 頁會提供返回 App deep link，mobile 端仍保留 polling / foreground refresh 作為備援。
 - 部分流程仍保留 fallback 行為。
-- `StoreMenuScreen` / `DrinkSelectionScreen` 已改讀後端菜單；商家與開發補救畫面的部分店家摘要仍保留 prototype mock，需在各自模組改接登入身份可管理的 Backend store。
+- `StoreMenuScreen` / `DrinkSelectionScreen` 已改讀後端菜單；商家儀表板、商家開團與開發補救畫面的店家摘要已全面改用 `GET /api/stores`，不再讀取 mock。
 
 ## Backend 端
 
@@ -147,6 +184,9 @@
 | `backend/payments/linePayPendingStore.js` | LINE Pay redirect 前後的記憶體快取；confirm/cancel 以 DB 查找為主 |
 | `backend/payments/settlementService.js`   | 單一團購結算流程，依結果批次 capture / void   |
 | `backend/payments/reliabilityService.js`     | LINE Pay provider reconciliation 與持久化工作 worker |
+| `backend/payments/ecpayClient.js`         | 綠界 ECPay AioCheckOut / CheckMacValue 簽章 / DoAction（capture／void／refund） |
+| `backend/payments/ecpayService.js`        | ECPay request / webhook confirm / capture / void / refund 業務邏輯，重用 db.js 通用付款函式；已接上 server route |
+| `docs/ecpay-checkout-stage-checklist.md`  | ECPay Stage 人工驗證清單（尚未執行，只驗證過 mock_ecpay） |
 | `backend/linePayClient.js`                | payment client 相容匯出                       |
 | `backend/reliability/operationLease.js` | 跨程序狀態變更 lease 共用封裝                  |
 | `backend/database/`                     | SQLite/PostgreSQL adapter 與公開菜單／團購活動列表唯讀 repositories |
@@ -176,6 +216,11 @@
 | `GET`    | `/api/customers/me/orders`                    | 顧客權威進行中／歷史訂單列表          |
 | `GET`    | `/api/merchant/stores/:storeId/orders`        | 商家門市權威訂單列表與履約摘要        |
 | `POST`   | `/api/orders/:orderId/cancel`                 | 顧客在鎖定前退出團購並取消訂單        |
+| `POST`   | `/api/merchant/orders/:orderId/refund-requests` | 商家對已請款訂單提出退款申請        |
+| `GET`    | `/api/merchant/stores/:storeId/refund-requests` | 商家查詢自己門市的退款申請          |
+| `GET`    | `/api/admin/refund-requests`                  | 營運查詢退款申請佇列                  |
+| `POST`   | `/api/admin/refund-requests/:requestId/approve` | 營運核准退款申請並執行 LINE Pay refund |
+| `POST`   | `/api/admin/refund-requests/:requestId/reject`  | 營運駁回退款申請                    |
 | `DELETE` | `/api/admin/group-buy-activities/:activityId` | 開發 / 補救用 soft-cancel 活動        |
 | `POST`   | `/api/admin/group-buy-activities/:activityId/settle` | 開發 / 補救用手動觸發單一團購結算 |
 | `GET`    | `/api/admin/payment-reliability/alerts`        | Admin 查詢需人工處理的付款可靠性工作    |
@@ -184,6 +229,10 @@
 | `POST`   | `/api/payments/line-pay/refund`               | 開發 / 補救用已請款交易退款           |
 | `GET`    | `/api/payments/line-pay/confirm`              | LINE Pay confirm redirect             |
 | `GET`    | `/api/payments/line-pay/cancel`               | LINE Pay cancel redirect              |
+| `POST`   | `/api/payments/ecpay/request`                 | 建立信用卡（ECPay）預授權請求          |
+| `GET`    | `/api/payments/ecpay/checkout-redirect`       | 產生導向 ECPay 託管付款頁的 auto-submit 表單頁 |
+| `POST`   | `/api/payments/ecpay/return`                  | ECPay ReturnURL webhook（權威付款通知，須回應純文字 `1\|OK`） |
+| `GET`    | `/api/payments/ecpay/client-back`             | ECPay ClientBackURL（僅導回 App，非權威來源） |
 
 已實作的保護：
 
@@ -226,7 +275,7 @@
 尚未完成：
 
 - 已授權後的訂單修改 / 重新授權 mobile 第一版已串接；訂單列表現以 Backend 回應為權威、local state 僅作 cache，仍需細化失敗提示。
-- LINE Pay refund 目前只有 dev/backend 後端 API 與 smoke test；尚未做商家退款申請、營運審核／執行 UI、退款失敗重試 queue 與正式 sandbox 人工端對端測試。
+- LINE Pay refund 執行本身仍只有 dev/backend 後端 API 與 smoke test；商家退款申請與營運核准／駁回已有後端第一版（`refund-request:smoke` 覆蓋），但尚未有商家／營運 UI、核准失敗告警與正式 sandbox 人工端對端測試。
 - LINE Pay webhook 第一版不列為必要入口；目前付款同步以 confirm/cancel redirect、polling 與後續 provider 狀態查詢為主。
 - 顧客與商家權威訂單列表 API 與 Mobile 第一版已串接，登入、切換分頁及 App 回到前景會同步；Backend 統一回傳 `lifecycleBucket` 與 `availableActions`。顧客訂單與取餐資訊的店家 fallback 已改讀 Backend order／activity store。
 - 顧客鎖定前取消訂單已完成第一版：pending 授權失效、authorized 先 void、pending revision 一併取消，captured 訂單拒絕自行取消。
@@ -272,7 +321,7 @@ database/seed-dev.sql
 - `cart_drafts` / `cart_draft_items` / `cart_draft_item_customizations`
 - `orders` / `order_items` / `order_item_customizations`
 - `order_revisions` / `order_revision_items` / `order_revision_item_customizations`
-- `payment_authorizations` / `payment_captures` / `payment_refunds` / `payment_provider_events`
+- `payment_authorizations` / `payment_captures` / `payment_refunds` / `refund_requests` / `payment_provider_events`
 - `activity_settlements`
 - `pickup_credentials`
 - `status_history`
@@ -342,9 +391,10 @@ database/test/drink-group-buy-test.sqlite
 
 建議下一步：
 
+0. **信用卡（ECPay）Stage 人工端對端驗證**（`docs/ecpay-checkout-stage-checklist.md` EC-01～EC-08），後端與 mobile 第一版已完成並用 `mock_ecpay` 驗證過，但尚未打過真正的 ECPay 網路；此項為備用方案，優先度依 LINE Pay 審核進度彈性調整，非必須立即完成。
 1. 前端新增截止後專用最終結算快照，明確區分招募中預估折扣與結算後不可變折扣／尾差。
 2. 細化訂單、付款失敗、重試與重新付款狀態，避免只顯示通用錯誤。
-3. 商家端店家摘要改接登入身份可管理的 Backend store，並補退款申請／營運審核流程。
+3. 商家退款申請與營運審核已補後端第一版；下一步是商家／營運申請審核 UI、核准失敗告警通知與正式 sandbox 人工端對端測試。
 4. 增加附近公里數篩選、正式使用者定位／隱私流程與 Android 地圖實機 E2E；目前第一版先顯示全部營業店家。
 5. LINE Pay 核准分離式請款後，執行 Sandbox reconciliation、capture、void 與 lease takeover 人工端對端驗證。
 6. Sandbox proof 通過後，將已驗證的 capture／settlement repositories 明確接入 Backend，並只在 Sandbox 啟用 PostgreSQL settlement route／scheduler；仍禁止雙寫。

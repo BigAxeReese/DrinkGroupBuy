@@ -1,6 +1,6 @@
 # 狀態模型
 
-最後更新：2026-07-13
+最後更新：2026-08-04
 
 ## 語言規則
 
@@ -146,6 +146,27 @@ captured -> refunded
 ```
 
 需要 provider events 與 idempotency records：是。
+
+## 退款申請
+
+狀態值：`pending`、`approved`、`rejected`。此為 `refund_requests` 資料表狀態，與 `payment_refunds.status`（`pending`、`refunded`、`failed`）為兩個不同欄位；`refund_requests.status = approved` 只代表營運已核准並成功觸發 provider refund，實際請款結果仍以對應 `payment_refunds` 記錄與 `orders.payment_status` 為準。
+
+| 系統狀態   | 說明 |
+| ---------- | ---- |
+| `pending`  | 商家已提出退款申請，等待營運審核。同一筆 `payment_capture` 同時只允許一筆 `pending` 申請。 |
+| `approved` | 營運已核准並成功執行 LINE Pay refund；`resulting_payment_refund_id` 指向對應 `payment_refunds` 記錄。 |
+| `rejected` | 營運駁回申請，不呼叫 provider；`rejection_reason` 保存駁回原因。 |
+
+預期流程：
+
+```text
+pending -> approved
+      \--> rejected
+```
+
+若核准時呼叫 provider 失敗（`refundLinePayPayment` 拋出錯誤），申請維持 `pending`，供營運使用相同 idempotency key 重試；第一版無正式告警通知管道。
+
+需要 audit log：是，`refund_request_created`／`refund_request_approved`／`refund_request_rejected` 皆寫入 `audit_logs`。
 
 ## 舊候選：商家接單
 

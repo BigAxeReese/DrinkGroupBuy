@@ -7,7 +7,6 @@ import { PrimaryButton } from "../components/PrimaryButton";
 import { ProgressSummary } from "../components/ProgressSummary";
 import { StatusBadge } from "../components/StatusBadge";
 import { useOrderListSync } from "../hooks/useOrderListSync";
-import { stores } from "../mock/stores";
 import { formatCurrency, getStoreById } from "../utils/calculations";
 
 export function MerchantDashboardScreen({ navigation, appState, actions, memberAction, selectedMerchantStoreId }) {
@@ -23,8 +22,9 @@ export function MerchantDashboardScreen({ navigation, appState, actions, memberA
     selectedMerchantStoreId
   );
   const activitySyncStatus = appState.groupBuyActivitySyncStatus ?? "idle";
-  const merchantStore = stores.find((store) => store.id === selectedMerchantStoreId) ?? stores[0];
-  const merchantGroupBuyActivities = appState.groupBuyActivities.filter((groupBuyActivity) => groupBuyActivity.storeId === merchantStore.id);
+  const merchantStore = getStoreById(appState.stores ?? [], selectedMerchantStoreId) ?? null;
+  const merchantStoreId = merchantStore?.id ?? selectedMerchantStoreId;
+  const merchantGroupBuyActivities = appState.groupBuyActivities.filter((groupBuyActivity) => groupBuyActivity.storeId === merchantStoreId);
   const activeGroupBuyActivities = merchantGroupBuyActivities.filter((groupBuyActivity) => (
     ["recruiting", "confirmed", "ordering", "ready_for_pickup"].includes(groupBuyActivity.status)
   ));
@@ -116,8 +116,8 @@ export function MerchantDashboardScreen({ navigation, appState, actions, memberA
             <Text style={styles.storeAvatarText}>店</Text>
           </View>
           <View style={styles.flex}>
-            <Text style={styles.storeName}>{merchantStore.name}</Text>
-            <Text style={styles.storeSubtitle}>商家首頁 · Prototype 身分：{merchantStore.id}</Text>
+            <Text style={styles.storeName}>{merchantStore?.name ?? "我的店家"}</Text>
+            <Text style={styles.storeSubtitle}>商家首頁 · Prototype 身分：{merchantStoreId}</Text>
           </View>
           <Pressable accessibilityRole="button" onPress={memberAction} style={styles.memberPill}>
             <Text style={styles.memberPillText}>會員</Text>
@@ -224,7 +224,7 @@ export function MerchantDashboardScreen({ navigation, appState, actions, memberA
           <Text style={styles.emptyText}>目前沒有進行中的團購。點右上「＋ 開團」建立測試活動。</Text>
         ) : null}
         {activeGroupBuyActivities.map((groupBuyActivity) => {
-          const store = getStoreById(stores, groupBuyActivity.storeId);
+          const store = getStoreById(appState.stores ?? [], groupBuyActivity.storeId);
           const relatedOrders = appState.orders.filter((order) => (
             order.groupBuyActivityId === groupBuyActivity.id
             && order.status !== "cancelled"

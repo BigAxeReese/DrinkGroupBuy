@@ -2,7 +2,6 @@ import { useState } from "react";
 import { Pressable, StyleSheet, Text, View } from "react-native";
 import { MobileScreen, Section } from "../components/MobileScreen";
 import { StatusBadge } from "../components/StatusBadge";
-import { stores } from "../mock/stores";
 import { deleteGroupBuyActivity } from "../utils/apiClient";
 import { getStoreById } from "../utils/calculations";
 import { getGroupBuyActivityProgress } from "../utils/groupBuyActivityProgress";
@@ -54,7 +53,7 @@ export function AdminDashboardScreen({ navigation, appState, actions, memberActi
           <Text style={styles.emptyText}>目前沒有團購。</Text>
         ) : (
           appState.groupBuyActivities.map((groupBuyActivity) => {
-            const store = getStoreById(stores, groupBuyActivity.storeId);
+            const store = getStoreById(appState.stores ?? [], groupBuyActivity.storeId);
             const relatedOrders = appState.orders.filter((order) => order.groupBuyActivityId === groupBuyActivity.id);
             const relatedAuthorizedOrders = relatedOrders.filter((order) => ["authorized", "captured"].includes(order.paymentStatus)).length;
             const progress = getGroupBuyActivityProgress(groupBuyActivity);

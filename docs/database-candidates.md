@@ -1,6 +1,6 @@
 # 資料庫盤點與候選設計
 
-最後更新：2026-07-30
+最後更新：2026-08-05
 
 ## 語言與命名規則
 
@@ -33,6 +33,7 @@
 | `payment_reliability_jobs`                                        | Provider 對帳與結算持久化工作 | Resource 1:N historical jobs；同資源同類型僅一筆 active job |
 | `operation_locks`                                                 | 跨執行個體操作租約           | `lock_key` 唯一；租約到期後可由其他 worker 接手             |
 | `payment_refunds`                                                   | 退款結果                       | Capture/order 1:N refunds                                  |
+| `refund_requests`                                                   | 商家退款申請與營運審核         | Order/capture 1:N requests；核准後對應一筆 `payment_refunds`；同一筆請款同時只允許一筆 `pending` |
 | `payment_provider_events`                                           | 金流 provider event 原始紀錄   | 以邏輯方式關聯付款資源，保留未來 webhook 擴充空間           |
 | `activity_settlements`                                              | 截止後結算結果與適用門檻       | Activity 1:1 settlement                                    |
 | `pickup_credentials`                                                | 訂單取貨憑證                   | Order 1:1 credential                                       |
@@ -44,9 +45,10 @@
 - Backend 已經會讀寫 `group_buy_activities`、`promotion_tiers`、`activity_notices`、`status_history` 與 `audit_logs`，用於目前已實作的活動 API。
 - 開發 SQLite seed 會建立 users、roles、merchant/store、8 個 menu items、96 個 customization options 與 32 組選擇限制；runtime activities、tiers、orders、payments、settlements 與 pickup credentials 由 API 或 smoke test 產生，不預先 seed 成固定資料。
 - `orders`、`order_revisions`、payment、settlement 與 pickup 已由 Backend 實際讀寫，顧客／商家訂單列表及取貨畫面完成第一版串接；活動首頁與部分摘要仍有 mock fallback。
-- `payment_authorizations.provider` 目前支援 `line_pay` 與本機測試用 `mock_line_pay`；`mock_line_pay` 只用於開發 smoke 測試，不代表正式金流。
+- `payment_authorizations.provider` 目前支援 `line_pay`、`ecpay` 與本機測試用 `mock_line_pay`、`mock_ecpay`；`mock_*` 只用於開發 smoke 測試，不代表正式金流。2026-08-05 新增 ECPay 作為 LINE Pay 分離式請款審核卡關期間的備用 provider，兩者並存，商業規則共用。
 - `payment_authorizations.payment_flow` 用來區分一般 `authorization` 與請款失敗後的 `direct_repayment`，避免重新付款被誤當成新的預授權。
 - `payment_refunds` 用來保存已請款成功後的退款紀錄；尚未請款的預授權取消仍使用 `void`，不寫入退款表。
+- `refund_requests` 保存商家對已請款訂單提出的退款申請（`pending`／`approved`／`rejected`），核准時才由後端呼叫 provider 並寫入一筆 `payment_refunds`；駁回不呼叫 provider。2026-08-04 已完成第一版。
 - PostgreSQL `003` draft 會在 `activity_settlements` 保存 `discount_per_cup`、`allocated_discount_amount`、`undistributed_discount_amount`、`discount_funder`、`calculation_version`；SQLite runtime 尚未加入這些欄位。
 - `database/test/` 是舊 prototype fixture database，不應視為正式 schema 或目前 mobile 的權威資料來源。
 - 購物車與訂單客製化資料已朝 first normal form 調整：甜度、冰塊、加料與尺寸以 child rows 表示，不以 JSON array 當主要資料結構。
@@ -57,7 +59,7 @@
 - 正式登入只使用 Firebase Auth + Google Login。
 - Mobile 不顯示角色選擇，使用者不能自行選顧客、店家或管理員。
 - Backend 驗證 Firebase ID token 後，依 `users.firebase_uid`、`user_roles` 與 `merchant_users` 決定身份。
-- 顧客送出訂單並完成 LINE Pay 預授權後，訂單即納入團購杯數統計。
+- 顧客送出訂單並完成付款預授權後，訂單即納入團購杯數統計；付款 provider 目前有 LINE Pay（主要）與 ECPay 信用卡（2026-08-05 新增的備用方案，因 LINE Pay 分離式請款官方審核卡關），兩者並存，商業規則 provider 中立。
 - 店家不需要逐筆確認接單，也不能任意取消單一已預授權訂單。
 - 顧客可在截止前 30 分鐘以前修改訂單或退出團購；進入截止前 30 分鐘後不可修改或退出。
 - 店家可在截止前 30 分鐘以前取消整個團購；進入截止前 30 分鐘後不可取消。
@@ -67,7 +69,7 @@
 - 取貨憑證到期後，訂單移至歷史訂單；逾期未取不自動退款，店家不再負原飲品保管責任。
 - 若顧客修改已預授權訂單，採 replacement flow：舊預授權先保留，新預授權成功後才替換；新預授權失敗時，原訂單與原預授權維持有效。
 - 已扣款成功後若需要退費，需建立 `payment_refunds` 並保留 provider event 與 audit log；全額退款完成後，訂單付款狀態可更新為 `refunded`。
-- 商家第一階段只能提出退款申請，由營運／補救權限核准並執行；退款申請、實際 provider refund 與審核紀錄必須分開保存。
+- 商家第一階段只能提出退款申請，由營運／補救權限核准並執行；退款申請、實際 provider refund 與審核紀錄分開保存於 `refund_requests` 與 `payment_refunds` 兩張表，核准 API 會依訂單實際 provider（LINE Pay 或 ECPay）自動分派，不信任申請端傳入的 provider 欄位。
 - 每杯折扣為 `floor(級距總折扣 / 最終有效授權杯數)`；實際分配總額等於每杯折扣乘以杯數，未分配尾差由優惠出資方保留。現行商家出資優惠的尾差退回商家。
 - 每個級距的可達杯數區間必須保證每杯折扣至少 1 元；在門檻杯數時的每杯折扣不得高於店內最低可售單杯權威金額。招募中的菜單降價、客製化最低價差或上架動作若會破壞此條件，後端必須拒絕。
 - 顧客電話第一階段為選填並需採加密或等效保護，商家查詢不得取得完整號碼。
@@ -90,7 +92,7 @@
 | Menu authority          | 第一版已完成顧客／商家菜單 API、店家管理畫面、選擇上限、訂單品項驗證與後端價格重算；尚缺完整 Android E2E。 |
 | Authentication          | Password 欄位屬於開發相容；正式方向以 Firebase UID 對應 backend user 與角色權限。                                     |
 | Notification            | 尚未有通知 delivery 或 notification event 資料表。                                                                    |
-| Refund request          | 尚未有商家退款申請、營運審核人員、原因、申請金額、審核結果與 provider refund 關聯資料表。 |
+| Refund request          | 已解決：`refund_requests` 資料表、商家申請 API 與營運審核（核准／駁回）API 已於 2026-08-04 完成第一版；仍缺商家／營運手機或後台審核 UI、核准失敗告警。 |
 | Account closure         | 尚未有帳號關閉時間、登入停用與個資去識別化流程；不可用直接刪除 `users` 取代完整關閉流程。 |
 | Migrations              | 目前 SQLite schema 可重建，尚未有正式 production migration history。                                                  |
 | Test fixture            | `database/test/` 仍有 JSON 欄位供 prototype 匯出，不是權威 normalized schema。                                        |
@@ -113,4 +115,4 @@
 4. 取消活動：只允許截止前 30 分鐘以前取消，取消 eligible orders，處理 authorizations，寫入 history 與 audit log。
 5. 取貨：驗證 pickup credential，確認尚未過期，更新 pickup/order completion，並寫入 status history。
 6. 取貨逾期：依 `expires_at` 或等效規則將未取貨訂單更新為 `pickup_status = expired`，移至歷史訂單並寫入 status history。
-7. 退款：只允許已 capture 的付款進入 refund flow，以 idempotency key 避免重複退款，成功或失敗都寫入 provider event 與 audit log。
+7. 退款：只允許已 capture 的付款進入 refund flow，以 idempotency key 避免重複退款，成功或失敗都寫入 provider event 與 audit log。第一階段商家先建立 `refund_requests`（不呼叫 provider），營運核准時才依訂單實際 provider 執行對應 refund 並寫入 `payment_refunds`。

@@ -324,7 +324,8 @@ function parseLinePayResultDeepLink(rawUrl) {
     status: parsedUrl.searchParams.get("status"),
     paymentFlow: parsedUrl.searchParams.get("paymentFlow"),
     transactionId: parsedUrl.searchParams.get("transactionId"),
-    error: parsedUrl.searchParams.get("error")
+    error: parsedUrl.searchParams.get("error"),
+    source: parsedUrl.searchParams.get("source")
   };
 }
 
@@ -1205,7 +1206,8 @@ export function AppNavigator() {
         linePayResultStatus: deepLink.status,
         linePayPaymentFlow: deepLink.paymentFlow,
         linePayTransactionId: deepLink.transactionId,
-        linePayError: deepLink.error
+        linePayError: deepLink.error,
+        paymentResultSource: deepLink.source
       });
       actions.syncOrderFromBackend(deepLink.orderId).catch(() => {
         // PaymentAuthorizationScreen still allows manual refresh when auth/session state is not ready.
