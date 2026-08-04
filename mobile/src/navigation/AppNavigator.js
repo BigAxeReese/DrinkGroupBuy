@@ -19,6 +19,7 @@ import { AdminDashboardScreen } from "../screens/AdminDashboardScreen";
 import { CartScreen } from "../screens/CartScreen";
 import { LiveMapScreen } from "../screens/LiveMapScreen";
 import { StoreMenuScreen } from "../screens/StoreMenuScreen";
+import { StoreGroupBuyActivitiesScreen } from "../screens/StoreGroupBuyActivitiesScreen";
 import { formatDeadlineLabel, getMinutesUntilDeadline, isDeadlineReached } from "../utils/deadlineTime";
 import { getGroupBuyActivityCapacityInfo, wouldExceedGroupBuyActivityCapacity } from "../utils/groupBuyActivityProgress";
 import { normalizeOrderItem } from "../utils/orderItems";
@@ -32,6 +33,7 @@ import {
   getPickupCredential as fetchPickupCredential,
   listCustomerOrders as fetchCustomerOrders,
   listGroupBuyActivities,
+  listStores,
   listMerchantStoreOrders as fetchMerchantStoreOrders,
   lookupPickupCredential as lookupPickupCredentialApi,
   markGroupBuyActivityReadyForPickup,
@@ -332,6 +334,8 @@ export function AppNavigator() {
   const [selectedCustomerId, setSelectedCustomerId] = useState("customer-yinji");
   const [selectedAuthUserId, setSelectedAuthUserId] = useState(null);
   const [selectedMerchantStoreId, setSelectedMerchantStoreId] = useState("store-001");
+  const [stores, setStores] = useState([]);
+  const [storeSyncStatus, setStoreSyncStatus] = useState("idle");
   const [groupBuyActivities, setGroupBuyActivities] = useState([]);
   const [groupBuyActivitySyncStatus, setGroupBuyActivitySyncStatus] = useState("idle");
   const [orders, setOrders] = useState(initialOrders);
@@ -375,34 +379,40 @@ export function AppNavigator() {
           .map((groupBuyActivity) => groupBuyActivity.id)
       );
 
-      setGroupBuyActivities((items) => items.map((groupBuyActivity) => {
-        const minutesUntilDeadline = getMinutesUntilDeadline(groupBuyActivity, now);
-        if (minutesUntilDeadline == null) return groupBuyActivity;
+      setGroupBuyActivities((items) => {
+        let didChange = false;
+        const nextItems = items.map((groupBuyActivity) => {
+          const minutesUntilDeadline = getMinutesUntilDeadline(groupBuyActivity, now);
+          if (minutesUntilDeadline == null) return groupBuyActivity;
 
-        const expired = minutesUntilDeadline <= 0;
-        const nextStatus = expired && ["recruiting", "confirmed"].includes(groupBuyActivity.status)
-          ? "ordering"
-          : groupBuyActivity.status;
-        const nextCanJoin = expired ? false : groupBuyActivity.canJoin;
-        const nextRemainingTimeText = expired ? "已截止" : `剩 ${minutesUntilDeadline} 分鐘`;
+          const expired = minutesUntilDeadline <= 0;
+          const nextStatus = expired && ["recruiting", "confirmed"].includes(groupBuyActivity.status)
+            ? "ordering"
+            : groupBuyActivity.status;
+          const nextCanJoin = expired ? false : groupBuyActivity.canJoin;
+          const nextRemainingTimeText = expired ? "已截止" : `剩 ${minutesUntilDeadline} 分鐘`;
 
-        if (
-          groupBuyActivity.minutesUntilDeadline === minutesUntilDeadline
-          && groupBuyActivity.status === nextStatus
-          && groupBuyActivity.canJoin === nextCanJoin
-          && groupBuyActivity.remainingTimeText === nextRemainingTimeText
-        ) {
-          return groupBuyActivity;
-        }
+          if (
+            groupBuyActivity.minutesUntilDeadline === minutesUntilDeadline
+            && groupBuyActivity.status === nextStatus
+            && groupBuyActivity.canJoin === nextCanJoin
+            && groupBuyActivity.remainingTimeText === nextRemainingTimeText
+          ) {
+            return groupBuyActivity;
+          }
 
-        return {
-          ...groupBuyActivity,
-          minutesUntilDeadline,
-          remainingTimeText: nextRemainingTimeText,
-          canJoin: nextCanJoin,
-          status: nextStatus
-        };
-      }));
+          didChange = true;
+          return {
+            ...groupBuyActivity,
+            minutesUntilDeadline,
+            remainingTimeText: nextRemainingTimeText,
+            canJoin: nextCanJoin,
+            status: nextStatus
+          };
+        });
+
+        return didChange ? nextItems : items;
+      });
 
       if (expiredGroupBuyActivityIds.size === 0) return;
       setOrders((items) => items.map((order) => (
@@ -446,6 +456,18 @@ export function AppNavigator() {
   }), []);
 
   const actions = useMemo(() => ({
+    async syncStores() {
+      setStoreSyncStatus("loading");
+      try {
+        const backendStores = await listStores();
+        setStores(backendStores);
+        setStoreSyncStatus("ready");
+        return backendStores;
+      } catch (error) {
+        setStoreSyncStatus("error");
+        throw error;
+      }
+    },
     async syncGroupBuyActivities() {
       setGroupBuyActivitySyncStatus("loading");
       try {
@@ -1156,6 +1178,7 @@ export function AppNavigator() {
     if (!storageLoaded || !currentRole) return undefined;
 
     function syncBackendState() {
+      actionsRef.current.syncStores().catch(() => {});
       actionsRef.current.syncGroupBuyActivities().catch(() => {});
       if (currentRole === "customer") actionsRef.current.syncCustomerOrderList("active").catch(() => {});
       if (currentRole === "merchant") actionsRef.current.syncMerchantOrderList("active").catch(() => {});
@@ -1205,7 +1228,9 @@ export function AppNavigator() {
     groupBuyActivitySyncStatus,
     orders,
     paymentAuthorizations,
-    cartItems
+    cartItems,
+    stores,
+    storeSyncStatus
   };
   const screenProps = {
     navigation,
@@ -1230,6 +1255,7 @@ export function AppNavigator() {
         {current.name === "drinkSelection" && <DrinkSelectionScreen {...screenProps} />}
         {current.name === "cart" && <CartScreen {...screenProps} />}
         {current.name === "groupProgress" && <GroupProgressScreen {...screenProps} />}
+        {current.name === "storeGroupBuyActivities" && <StoreGroupBuyActivitiesScreen {...screenProps} />}
         {current.name === "paymentAuthorization" && <PaymentAuthorizationScreen {...screenProps} />}
         {current.name === "pickupInfo" && <PickupInfoScreen {...screenProps} />}
         {current.name === "merchantCreate" && <MerchantGroupBuyActivityCreateScreen {...screenProps} />}

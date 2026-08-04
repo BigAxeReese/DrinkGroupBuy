@@ -4,7 +4,7 @@ import { Pressable, StyleSheet, Text, View } from "react-native";
 import { useDevLocationConfig } from "../hooks/useDevLocationConfig";
 import { mapCenter, mapDefaults } from "../mock/mapConfig";
 import { reportAppliedDevLocation } from "../utils/devLocationControl";
-import { buildGroupBuyActivityMapStores } from "../utils/groupBuyActivityStores";
+import { buildStoreMapStores, getStoreMapDestination } from "../utils/groupBuyActivityStores";
 
 export function LiveMapScreen({ navigation, appState, selectedAuthUserId }) {
   const mapElementRef = useRef(null);
@@ -24,11 +24,17 @@ export function LiveMapScreen({ navigation, appState, selectedAuthUserId }) {
   const { config, enabled: devControlEnabled, syncError, syncStatus } = useDevLocationConfig(selectedAuthUserId);
 
   const mapStores = useMemo(
-    () => buildGroupBuyActivityMapStores(appState?.groupBuyActivities),
-    [appState?.groupBuyActivities]
+    () => buildStoreMapStores(appState?.stores, appState?.groupBuyActivities),
+    [appState?.stores, appState?.groupBuyActivities]
   );
 
   const selectedStore = mapStores.find((store) => store.id === selectedStoreId);
+  const storeSyncStatus = appState?.storeSyncStatus ?? "idle";
+  const storeStatusText = storeSyncStatus === "error"
+    ? "店家資料載入失敗"
+    : storeSyncStatus === "loading" && mapStores.length === 0
+      ? "店家資料載入中..."
+      : `${mapStores.length} 間店家`;
   const apiKey = (process.env.EXPO_PUBLIC_GOOGLE_MAPS_API_KEY
     || Constants.expoConfig?.extra?.googleMapsWebApiKey
     || Constants.manifest2?.extra?.expoClient?.extra?.googleMapsWebApiKey
@@ -237,6 +243,12 @@ export function LiveMapScreen({ navigation, appState, selectedAuthUserId }) {
     mapInstanceRef.current?.setZoom(Math.max(mapInstanceRef.current?.getZoom() ?? mapDefaults.zoom, 17));
   };
 
+  const openSelectedStore = () => {
+    if (!selectedStore) return;
+    const destination = getStoreMapDestination(selectedStore);
+    navigation.go(destination.name, destination.params);
+  };
+
   return (
     <View style={styles.screen}>
       <div ref={mapElementRef} style={styles.map} />
@@ -255,10 +267,10 @@ export function LiveMapScreen({ navigation, appState, selectedAuthUserId }) {
             ? `控制台：${syncStatus === "ready" ? `${config.locationMode} · v${config.version}` : syncError || "同步中"}`
             : "開發定位控制未啟用"}
         </Text>
-        <Text style={styles.subtitle}>{mapStores.length > 0 ? `${mapStores.length} 間活動店家` : "目前沒有含座標的活動店家"}</Text>
+        <Text style={styles.subtitle}>{storeStatusText}</Text>
         <View style={styles.legendRow}>
-          <LegendDot color="#2563eb" label="活動店家" />
-          <LegendDot color="#facc15" label="團購進行中" />
+          <LegendDot color="#2563eb" label="沒有可加入活動" />
+          <LegendDot color="#facc15" label="有可加入活動" />
         </View>
       </View>
 
@@ -278,12 +290,14 @@ export function LiveMapScreen({ navigation, appState, selectedAuthUserId }) {
           </View>
           <Pressable
             accessibilityRole="button"
-            onPress={() => selectedStore.recruitingGroupBuyActivityId
-              ? navigation.go("groupBuyActivityDetail", { groupBuyActivityId: selectedStore.recruitingGroupBuyActivityId })
-              : navigation.go("storeMenu", { storeId: selectedStore.id })}
+            onPress={openSelectedStore}
             style={styles.viewGroupBuyActivitiesButton}
           >
-            <Text style={styles.viewGroupBuyActivitiesText}>查看詳情</Text>
+            <Text style={styles.viewGroupBuyActivitiesText}>
+              {selectedStore.joinableGroupBuyActivityIds.length > 1
+                ? "活動列表"
+                : selectedStore.hasRecruitingGroupBuyActivity ? "查看活動" : "查看菜單"}
+            </Text>
           </Pressable>
         </View>
       ) : null}

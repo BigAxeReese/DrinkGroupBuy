@@ -1,6 +1,6 @@
 # 目前進度
 
-最後更新：2026-08-01
+最後更新：2026-08-04
 
 換電腦或交接給其他 AI 時，請先閱讀 `docs/handoff-summary.md`。
 
@@ -25,7 +25,7 @@
 - 2026-07-31 已完成 PostgreSQL 商家完整菜單查詢、建立、修改與停售 transaction；跨連線 HTTP proof 驗證 store-first row lock、公開菜單過濾、選項軟停用、稽核紀錄與測試資料歸零。
 - 2026-07-31 已完成 PostgreSQL 顧客首次建單 transaction；HTTP proof 驗證 activity row lock、截止／容量／重複／改價防護、品項與選項快照、history／audit 與清理歸零。
 - 訂單流程新增 `npm run order-flow:smoke` 與 `npm run order-api:smoke`，覆蓋 cursor、門市／活動篩選、匿名顧客、重複下單、取消鎖定、取消冪等、idempotency key 衝突及跨店 403。
-- 2026-08-01 已完成顧客端活動探索第一個真實資料切片：首頁、活動詳情、Android／Web 地圖、顧客訂單與取餐資訊的店家摘要不再讀取店家／地圖 mock；統一使用 `GET /api/group-buy-activities` 或訂單 API 回傳的店名、地址、電話與座標。地圖目前只顯示曾出現在活動列表且有座標的店家，完整附近店家與距離仍待獨立 API。
+- 2026-08-04 已完成公開店家地圖切片：新增 `GET /api/stores`，Android／Web 地圖顯示 SQLite 內全部營業中且有座標的店家，並與活動 API 合併；藍色表示沒有可加入活動，黃色表示有可加入活動。店家 API 失敗時明確顯示錯誤，不回退至 mock。
 - 已執行非強制 `npm audit fix`；最近一次結果為 Root `11` 項（`6 moderate`、`5 high`、`0 critical`），Mobile `46` 項（`1 low`、`11 moderate`、`33 high`、`1 critical`）。剩餘項目需要 Expo／React Native 或相關傳遞依賴的主版本升級，因此未使用 `--force` 破壞目前 Expo SDK 51 相容性。
 - 系統分析書已整理為五大功能，五組描述性綱目已更新，並已抽出 `docs/system-analysis-extracted.md`；各小節使用個案描述與活動圖仍待更新。
 
@@ -96,7 +96,7 @@
 - 顧客首頁會區分「目前顧客已加入的團購」與「附近招募中的團購推薦」。
 - 顧客可查看進行中訂單、訂單明細、修改訂單、團購進度、取貨碼與歷史訂單。
 - 活動容量依最高優惠級距判斷，例如 20 / 30 / 40 杯代表最多接受 40 杯。
-- App 選定角色與回到前景時會同步 `GET /api/group-buy-activities`；顧客首頁、活動詳情、團購進度與商家儀表板會顯示目前級距、預估每杯折扣、實際預估分配、尾差及下一級距差杯數。
+- App 選定角色與回到前景時會同步 `GET /api/stores` 與 `GET /api/group-buy-activities`；地圖合併店家與可加入活動狀態，其他活動畫面顯示目前級距、預估每杯折扣、實際預估分配、尾差及下一級距差杯數。
 - 顧客首頁與商家儀表板已提供活動同步載入、失敗提示與手動重試；同步失敗時保留上次成功資料，不再靜默失敗。
 - LINE Pay 預授權與 partial capture 的 mobile UI / 狀態流程已串接第一版。
 - 付款畫面可向後端建立 LINE Pay sandbox 授權網址，並開啟 LINE Pay 付款頁。
@@ -114,7 +114,7 @@
 | 模組 | 狀態 | 下一個缺口 |
 | --- | --- | --- |
 | 登入與角色 | 已實作程式切片 | Firebase Console、OAuth、UID mapping 與 Android 實機 E2E |
-| 活動探索 | 已完成第一版 backend-driven 切片 | `GET /api/stores/nearby`、定位距離、Android 地圖實機 E2E |
+| 活動探索 | 已完成全部營業店家地圖與活動合併切片 | 附近公里數篩選、正式定位／隱私流程、Android 地圖實機 E2E |
 | 菜單、購物車與訂單 | 已完成第一版串接 | revision／失敗提示細化與 Android E2E |
 | 付款授權與重新付款 | 部分完成 | LINE Pay 分離式請款 Sandbox 人工 E2E、錯誤／重試 UX |
 | 截止結算顯示 | 尚未開始前端專用畫面 | 顯示不可變最終折扣／尾差快照 |
@@ -124,7 +124,7 @@
 目前 mobile 限制：
 
 - 公開團購活動與顧客／商家訂單列表已由 Backend 同步，mobile local state 僅作 cache；顧客首頁、商家儀表板、活動詳情與團購進度均使用共用活動載入／錯誤／重試元件，同步失敗時保留上次成功資料。
-- 顧客首頁、活動詳情、地圖、顧客訂單與取餐資訊的店家摘要已使用 Backend 資料；dev auth mode 的地圖可依登入 Backend `userId` 每 5 秒同步本機控制台固定位置或 GPS，失敗時保留最後設定／台中科大預設。正式版定位與隱私流程、距離計算及完整附近店家 API 仍未完成。
+- 顧客地圖已使用 `GET /api/stores` 顯示全部營業中且有座標的店家，再與活動 API 合併可加入狀態；dev auth mode 可依登入 Backend `userId` 同步控制台固定位置或 GPS。正式版定位／隱私流程、距離計算與附近公里數篩選仍未完成。
 - LINE Pay 完成後仍會先回 backend HTML 頁；HTML 頁會提供返回 App deep link，mobile 端仍保留 polling / foreground refresh 作為備援。
 - 部分流程仍保留 fallback 行為。
 - `StoreMenuScreen` / `DrinkSelectionScreen` 已改讀後端菜單；商家與開發補救畫面的部分店家摘要仍保留 prototype mock，需在各自模組改接登入身份可管理的 Backend store。
@@ -162,6 +162,7 @@
 | `GET`    | `/api/auth/dev-users`                         | 本機 dev-only 身份清單                |
 | `POST`   | `/api/auth/dev-session`                       | 本機 dev-only 模擬登入                |
 | `GET`    | `/health`                                     | 健康檢查                              |
+| `GET`    | `/api/stores`                                  | 查詢公開營業店家與座標                |
 | `GET`    | `/api/group-buy-activities`                   | 查詢團購活動與優惠級距                |
 | `POST`   | `/api/merchant/group-buy-activities`          | 商家建立團購活動                      |
 | `GET`    | `/api/stores/:storeId/menu`                   | 顧客查詢上架飲品、選項與選擇限制      |
@@ -344,7 +345,7 @@ database/test/drink-group-buy-test.sqlite
 1. 前端新增截止後專用最終結算快照，明確區分招募中預估折扣與結算後不可變折扣／尾差。
 2. 細化訂單、付款失敗、重試與重新付款狀態，避免只顯示通用錯誤。
 3. 商家端店家摘要改接登入身份可管理的 Backend store，並補退款申請／營運審核流程。
-4. 實作 `GET /api/stores/nearby`、使用者定位與距離，讓地圖涵蓋沒有活動的附近店家。
+4. 增加附近公里數篩選、正式使用者定位／隱私流程與 Android 地圖實機 E2E；目前第一版先顯示全部營業店家。
 5. LINE Pay 核准分離式請款後，執行 Sandbox reconciliation、capture、void 與 lease takeover 人工端對端驗證。
 6. Sandbox proof 通過後，將已驗證的 capture／settlement repositories 明確接入 Backend，並只在 Sandbox 啟用 PostgreSQL settlement route／scheduler；仍禁止雙寫。
 7. 為 server runtime 加入 `PAYMENT_CAPTURE_RUNTIME` 與 `GROUP_BUY_SETTLEMENT_RUNTIME` 全組一致性防護，再做 PostgreSQL HTTP／scheduler restart proof。

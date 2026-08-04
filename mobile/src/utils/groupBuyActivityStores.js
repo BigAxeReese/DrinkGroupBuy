@@ -15,36 +15,66 @@ export function getGroupBuyActivityStore(groupBuyActivity) {
   };
 }
 
-export function buildGroupBuyActivityMapStores(groupBuyActivities = []) {
+export function buildStoreMapStores(stores = [], groupBuyActivities = []) {
   const storesById = new Map();
+
+  stores.forEach((store) => {
+    const normalizedStore = normalizePublicStore(store);
+    if (!normalizedStore || normalizedStore.latitude == null || normalizedStore.longitude == null) return;
+
+    storesById.set(normalizedStore.id, {
+      ...normalizedStore,
+      hasRecruitingGroupBuyActivity: false,
+      recruitingGroupBuyActivityId: null,
+      joinableGroupBuyActivityIds: [],
+      progressText: ""
+    });
+  });
 
   groupBuyActivities.forEach((groupBuyActivity) => {
     const store = getGroupBuyActivityStore(groupBuyActivity);
-    if (!store || store.latitude == null || store.longitude == null) return;
+    const current = store ? storesById.get(store.id) : null;
+    if (!current || !isJoinableGroupBuyActivity(groupBuyActivity)) return;
 
-    const current = storesById.get(store.id) ?? {
-      ...store,
-      hasRecruitingGroupBuyActivity: false,
-      recruitingGroupBuyActivityId: null,
-      progressText: ""
-    };
-
-    if (!current.recruitingGroupBuyActivityId && isJoinableActivity(groupBuyActivity)) {
-      current.hasRecruitingGroupBuyActivity = true;
-      current.recruitingGroupBuyActivityId = groupBuyActivity.id;
-      current.progressText = getGroupBuyActivityProgressText(groupBuyActivity);
-    }
-
-    storesById.set(store.id, current);
+    current.hasRecruitingGroupBuyActivity = true;
+    current.recruitingGroupBuyActivityId ??= groupBuyActivity.id;
+    current.joinableGroupBuyActivityIds.push(groupBuyActivity.id);
+    current.progressText = current.joinableGroupBuyActivityIds.length === 1
+      ? getGroupBuyActivityProgressText(groupBuyActivity)
+      : `${current.joinableGroupBuyActivityIds.length} 個團購`;
   });
 
   return [...storesById.values()];
 }
 
-function isJoinableActivity(groupBuyActivity) {
+export function isJoinableGroupBuyActivity(groupBuyActivity) {
   return ["recruiting", "confirmed"].includes(groupBuyActivity.status)
     && groupBuyActivity.canJoin !== false
     && !groupBuyActivity.cancellationReason;
+}
+
+export function getStoreMapDestination(store) {
+  const activityIds = store?.joinableGroupBuyActivityIds ?? [];
+  if (activityIds.length > 1) {
+    return { name: "storeGroupBuyActivities", params: { storeId: store.id } };
+  }
+  if (activityIds.length === 1) {
+    return { name: "groupBuyActivityDetail", params: { groupBuyActivityId: activityIds[0] } };
+  }
+  return { name: "storeMenu", params: { storeId: store.id } };
+}
+
+function normalizePublicStore(store) {
+  if (!store?.id) return null;
+  return {
+    id: store.id,
+    name: store.name ?? "未命名店家",
+    address: store.address ?? "",
+    phone: store.phone ?? "",
+    businessStatus: store.businessStatus ?? "open",
+    latitude: toFiniteNumber(store.latitude),
+    longitude: toFiniteNumber(store.longitude)
+  };
 }
 
 function getGroupBuyActivityProgressText(groupBuyActivity) {

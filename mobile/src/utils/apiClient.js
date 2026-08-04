@@ -130,6 +130,19 @@ export async function listGroupBuyActivities() {
   });
 }
 
+export async function listStores() {
+  const requestKey = "listStores";
+  return dedupeRequest(requestKey, async () => {
+    const response = await fetch(`${backendBaseUrl}/api/stores`);
+    const payload = await response.json();
+    if (!response.ok) {
+      throw new Error(payload.error ?? "List stores failed");
+    }
+
+    return payload.stores;
+  });
+}
+
 export async function getStoreMenu(storeId) {
   return getMenuRequest(`/api/stores/${encodeURIComponent(storeId)}/menu`, false);
 }

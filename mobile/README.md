@@ -63,6 +63,15 @@ npm run mobile:android
 
 可以用 Android Emulator，或在 Android 手機安裝 Expo Go 後掃描 QR code。
 
+Expo Go 適合一般畫面與流程預覽，但不會套用本專案 `app.config.js` 的 Android Google Maps API key。要驗證 Android 原生 Google 地圖圖磚，請改用專案 Development Build：
+
+```powershell
+cd mobile
+npx expo run:android
+```
+
+首次執行會在本機產生已被 Git 忽略的 `mobile/android/`，並安裝 `com.drinkgroupbuy.prototype` 到目前的 Android Emulator。Google Cloud 的 Android key 必須允許此 package name 與本機 debug SHA-1。
+
 ## 環境變數
 
 本機 mobile 設定檔：

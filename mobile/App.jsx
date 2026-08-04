@@ -5,7 +5,7 @@ import { AppNavigator } from "./src/navigation/AppNavigator";
 export default function App() {
   const app = (
     <SafeAreaView style={styles.safeArea}>
-      <StatusBar style="dark" />
+      <StatusBar style="dark" backgroundColor="#f6f8fb" translucent={false} />
       <AppNavigator />
     </SafeAreaView>
   );

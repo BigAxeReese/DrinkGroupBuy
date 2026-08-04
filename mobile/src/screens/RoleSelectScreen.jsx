@@ -15,9 +15,23 @@ const backendCustomerToPrototypeCustomer = {
   "user-customer-jingwei": "customer-jingwei"
 };
 
-export function RoleSelectScreen({ navigation }) {
-  const { redirectUri, signInWithGoogle } = useFirebaseGoogleLogin();
+export function RoleSelectScreen(props) {
   const isDevAuthMode = getAuthMode() === "dev";
+
+  if (isDevAuthMode) {
+    return <RoleSelectContent {...props} isDevAuthMode />;
+  }
+
+  return <FirebaseRoleSelectScreen {...props} />;
+}
+
+function FirebaseRoleSelectScreen(props) {
+  const googleLogin = useFirebaseGoogleLogin();
+  return <RoleSelectContent {...props} isDevAuthMode={false} googleLogin={googleLogin} />;
+}
+
+function RoleSelectContent({ navigation, isDevAuthMode, googleLogin = null }) {
+  const { redirectUri, signInWithGoogle } = googleLogin || {};
   const [loginError, setLoginError] = useState("");
   const [isLoggingIn, setIsLoggingIn] = useState(false);
   const [signedInUser, setSignedInUser] = useState(null);
@@ -112,13 +126,15 @@ export function RoleSelectScreen({ navigation }) {
       <View style={styles.actionStack}>
         {loginError ? <Text style={styles.errorText}>{loginError}</Text> : null}
 
-        <LoginOptionButton
-          icon="G"
-          iconStyle={styles.googleIcon}
-          label={isLoggingIn ? "登入中..." : "使用Google登入"}
-          disabled={isLoggingIn}
-          onPress={() => !isLoggingIn && login()}
-        />
+        {!isDevAuthMode ? (
+          <LoginOptionButton
+            icon="G"
+            iconStyle={styles.googleIcon}
+            label={isLoggingIn ? "登入中..." : "使用Google登入"}
+            disabled={isLoggingIn}
+            onPress={() => !isLoggingIn && login()}
+          />
+        ) : null}
 
         {signedInUser ? (
           <View style={styles.userCard}>
@@ -139,7 +155,7 @@ export function RoleSelectScreen({ navigation }) {
           </View>
         ) : null}
 
-        {signedInUser ? (
+        {!isDevAuthMode && signedInUser ? (
           <Pressable
             accessibilityRole="button"
             onPress={clearFirebaseSession}

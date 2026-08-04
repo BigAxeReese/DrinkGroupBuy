@@ -21,6 +21,7 @@ const {
   listGroupBuyActivities,
   listPaymentReliabilityAlerts,
   listMerchantStoreOrders,
+  listPublicStores,
   listStoreMenu,
   recordLinePayVoidFailureInDatabase,
   saveMerchantMenuItem,
@@ -311,6 +312,11 @@ const server = http.createServer(async (request, response) => {
       });
       return;
     }
+    if (request.method === "GET" && url.pathname === "/api/stores") {
+      sendJson(response, 200, { stores: listPublicStores() });
+      return;
+    }
+
 
     const publicStoreMenuMatch = url.pathname.match(/^\/api\/stores\/([^/]+)\/menu$/);
     if (request.method === "GET" && publicStoreMenuMatch) {

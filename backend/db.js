@@ -304,6 +304,37 @@ function listGroupBuyActivities() {
   }
 }
 
+function listPublicStores() {
+  const database = openDatabase();
+  try {
+    return database.prepare(`
+      SELECT
+        id,
+        name,
+        address,
+        phone,
+        business_status,
+        latitude,
+        longitude
+      FROM stores
+      WHERE business_status = 'open'
+        AND latitude IS NOT NULL
+        AND longitude IS NOT NULL
+      ORDER BY id ASC
+    `).all().map((row) => ({
+      id: row.id,
+      name: row.name,
+      address: row.address,
+      phone: row.phone,
+      businessStatus: row.business_status,
+      latitude: row.latitude,
+      longitude: row.longitude
+    }));
+  } finally {
+    database.close();
+  }
+}
+
 function createGroupBuyActivity(input) {
   const database = openDatabase();
   const now = new Date().toISOString();
@@ -6224,6 +6255,7 @@ module.exports = {
   listDueGroupBuyActivitiesForSettlement,
   listDueGroupBuyActivitiesForPickupExpiration,
   listGroupBuyActivities,
+  listPublicStores,
   listCustomerOrders,
   listMerchantStoreOrders,
   listStoreMenu,

@@ -19,6 +19,14 @@ module.exports = {
   scheme: appScheme,
   orientation: "portrait",
   userInterfaceStyle: "light",
+  splash: {
+    backgroundColor: "#f6f8fb"
+  },
+  androidStatusBar: {
+    backgroundColor: "#f6f8fb",
+    barStyle: "dark-content",
+    translucent: false
+  },
   platforms: ["android", "web"],
   android: {
     package: "com.drinkgroupbuy.prototype",
