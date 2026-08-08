@@ -45,7 +45,7 @@
 - Backend 已經會讀寫 `group_buy_activities`、`promotion_tiers`、`activity_notices`、`status_history` 與 `audit_logs`，用於目前已實作的活動 API。
 - 開發 SQLite seed 會建立 users、roles、merchant/store、8 個 menu items、96 個 customization options 與 32 組選擇限制；runtime activities、tiers、orders、payments、settlements 與 pickup credentials 由 API 或 smoke test 產生，不預先 seed 成固定資料。
 - `orders`、`order_revisions`、payment、settlement 與 pickup 已由 Backend 實際讀寫，顧客／商家訂單列表及取貨畫面完成第一版串接；活動首頁與部分摘要仍有 mock fallback。
-- `payment_authorizations.provider` 目前支援 `line_pay`、`ecpay` 與本機測試用 `mock_line_pay`、`mock_ecpay`；`mock_*` 只用於開發 smoke 測試，不代表正式金流。2026-08-05 新增 ECPay 作為 LINE Pay 分離式請款審核卡關期間的備用 provider，兩者並存，商業規則共用。
+- `payment_authorizations.provider` 目前支援 `line_pay`、`ecpay` 與本機測試用 `mock_line_pay`、`mock_ecpay`；`mock_*` 只用於開發 smoke 測試，不代表正式金流。2026-08-05 新增 ECPay 作為備用 provider（LINE Pay 分離式請款已於 2026-07-31 核准、2026-08-08 完成 Sandbox 驗證），兩者並存，商業規則共用。
 - `payment_authorizations.payment_flow` 用來區分一般 `authorization` 與請款失敗後的 `direct_repayment`，避免重新付款被誤當成新的預授權。
 - `payment_refunds` 用來保存已請款成功後的退款紀錄；尚未請款的預授權取消仍使用 `void`，不寫入退款表。
 - `refund_requests` 保存商家對已請款訂單提出的退款申請（`pending`／`approved`／`rejected`），核准時才由後端呼叫 provider 並寫入一筆 `payment_refunds`；駁回不呼叫 provider。2026-08-04 已完成第一版。
@@ -59,7 +59,7 @@
 - 正式登入只使用 Firebase Auth + Google Login。
 - Mobile 不顯示角色選擇，使用者不能自行選顧客、店家或管理員。
 - Backend 驗證 Firebase ID token 後，依 `users.firebase_uid`、`user_roles` 與 `merchant_users` 決定身份。
-- 顧客送出訂單並完成付款預授權後，訂單即納入團購杯數統計；付款 provider 目前有 LINE Pay（主要）與 ECPay 信用卡（2026-08-05 新增的備用方案，因 LINE Pay 分離式請款官方審核卡關），兩者並存，商業規則 provider 中立。
+- 顧客送出訂單並完成付款預授權後，訂單即納入團購杯數統計；付款 provider 目前有 LINE Pay（主要，分離式請款已核准並完成 Sandbox 驗證）與 ECPay 信用卡（2026-08-05 新增的備援/並行方案），兩者並存，商業規則 provider 中立。
 - 店家不需要逐筆確認接單，也不能任意取消單一已預授權訂單。
 - 顧客可在截止前 30 分鐘以前修改訂單或退出團購；進入截止前 30 分鐘後不可修改或退出。
 - 店家可在截止前 30 分鐘以前取消整個團購；進入截止前 30 分鐘後不可取消。

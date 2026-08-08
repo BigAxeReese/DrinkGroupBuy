@@ -1,6 +1,6 @@
 # 目前進度
 
-最後更新：2026-08-05
+最後更新：2026-08-08
 
 換電腦或交接給其他 AI 時，請先閱讀 `docs/handoff-summary.md`。
 
@@ -30,9 +30,20 @@
 - 2026-08-04 已完成商家退款申請後端第一版：新增 `refund_requests` 資料表（`pending`／`approved`／`rejected`，同一筆請款同時只允許一筆 `pending` 申請）、`POST /api/merchant/orders/:orderId/refund-requests`（商家提出申請）、`GET /api/merchant/stores/:storeId/refund-requests`、`GET /api/admin/refund-requests`、`POST /api/admin/refund-requests/:requestId/approve`（重用既有 LINE Pay refund service）與 `POST /api/admin/refund-requests/:requestId/reject`；核准失敗時申請維持 `pending` 供重試。新增 `npm run refund-request:smoke` 覆蓋申請、重複申請阻擋、非門市商家阻擋、核准、重複核准阻擋與駁回情境。僅後端，尚未有商家／營運手機或後台 UI。
 - 已執行非強制 `npm audit fix`；最近一次結果為 Root `11` 項（`6 moderate`、`5 high`、`0 critical`），Mobile `46` 項（`1 low`、`11 moderate`、`33 high`、`1 critical`）。剩餘項目需要 Expo／React Native 或相關傳遞依賴的主版本升級，因此未使用 `--force` 破壞目前 Expo SDK 51 相容性。
 - 系統分析書已整理為五大功能，五組描述性綱目已更新，並已抽出 `docs/system-analysis-extracted.md`；各小節使用個案描述與活動圖仍待更新。
-- 2026-08-05 開始新增信用卡（綠界 ECPay）預授權付款，與 LINE Pay 並存；LINE Pay 分離式請款申請仍卡在 LINE Pay 官方審核，此為備援方案。目前僅完成 DB 遷移與 `ecpayClient.js`／`ecpayService.js` 兩個 provider 層檔案並通過端對端流程驗證，**尚未接上 server.js 路由，因此還不是可從 App 呼叫的功能**；詳見下方「2026-08-05 新增信用卡（ECPay）付款」。
+- 2026-08-05 開始新增信用卡（綠界 ECPay）預授權付款，與 LINE Pay 並存；當時 LINE Pay 分離式請款申請仍卡在官方審核，此為備援方案。詳見下方「2026-08-05 新增信用卡（ECPay）付款」。
+- **2026-07-31 LINE Pay 已回覆分離式請款開通**（測試商店 test_202606269512），**2026-08-08 已完成 Sandbox 人工端對端驗證**，`docs/line-pay-separated-capture-sandbox-checklist.md` 通過門檻（LP-01、LP-02、LP-04、LP-07、LP-08、LP-09、LP-10）全數通過。LINE Pay 分離式請款重新成為主要付款路徑；ECPay 維持並存的備援角色，不再是唯一可用路徑。`backend/.env` 目前本機已設定 `LINE_PAY_CAPTURE_SEPARATED=true`（僅本機開發驗證用，production 啟用需獨立評估）。
+
+## 2026-08-08 LINE Pay 分離式請款 Sandbox 人工端對端驗證完成
+
+- 測試方式：Android 模擬器（`DrinkGroupBuy_API34`）跑實際 App，走真實 LINE Pay Sandbox 網頁流程（LINE 登入／CAPTCHA 由人工完成，Sandbox 模擬付款頁操作與後端狀態驗證由 Claude 執行）。
+- 通過項目與細節記錄在 `docs/line-pay-separated-capture-sandbox-checklist.md`「已完成驗證結果」；涵蓋建立授權、達標折扣結算 capture、顧客取消 void、未達標結算 void、backend 重啟後 pending 授權持久化、跨程序 lease 競爭與逾時接手、請款重試上限、手動重新付款、全額退款與退款冪等性。
+- LP-03（partial capture）因 LINE Pay 回覆未明確確認是否支援，本輪略過，不影響通過門檻。
+- 過程中意外驗證到系統會正確拒絕「confirm 時已超過團購截止時間」的授權（不計入團購），屬既有設計行為。
+- 額外發現：`backend/payments/reliabilityService.js` 既有 bug（`logAlertRequiredJobs` 函式被誤巢狀在 `stoppedScheduler` 內，導致每次 reconciliation 排程執行都拋出 `ReferenceError`），不影響對帳核心邏輯，只影響告警日誌輸出；已個別追蹤，不在本次修復範圍。
 
 ## 2026-08-05 新增信用卡（ECPay）付款——後端與 mobile 第一版已完成
+
+> **更新（2026-08-08）**：本節「背景」描述的是 2026-08-05 當時的狀況。LINE Pay 分離式請款已於 2026-07-31 核准、2026-08-08 完成 Sandbox 人工端對端驗證（詳見上方「2026-08-08 LINE Pay 分離式請款 Sandbox 人工端對端驗證完成」），下方背景說明的審核卡關狀態已解除，僅供歷史脈絡參考。
 
 背景：新增信用卡付款的唯一原因是 **LINE Pay 分離式請款申請已送出，但 LINE Pay 官方審核進度不確定、遲遲未核准**；不是因為 LINE Pay 機制本身有問題，也不是要取代 LINE Pay。信用卡（ECPay）是**備用方案**：
 - LINE Pay 既有機制完全不動、不受影響，兩者並存。
@@ -391,16 +402,17 @@ database/test/drink-group-buy-test.sqlite
 
 建議下一步：
 
-0. **信用卡（ECPay）Stage 人工端對端驗證**（`docs/ecpay-checkout-stage-checklist.md` EC-01～EC-08），後端與 mobile 第一版已完成並用 `mock_ecpay` 驗證過，但尚未打過真正的 ECPay 網路；此項為備用方案，優先度依 LINE Pay 審核進度彈性調整，非必須立即完成。
-1. 前端新增截止後專用最終結算快照，明確區分招募中預估折扣與結算後不可變折扣／尾差。
-2. 細化訂單、付款失敗、重試與重新付款狀態，避免只顯示通用錯誤。
-3. 商家退款申請與營運審核已補後端第一版；下一步是商家／營運申請審核 UI、核准失敗告警通知與正式 sandbox 人工端對端測試。
-4. 增加附近公里數篩選、正式使用者定位／隱私流程與 Android 地圖實機 E2E；目前第一版先顯示全部營業店家。
-5. LINE Pay 核准分離式請款後，執行 Sandbox reconciliation、capture、void 與 lease takeover 人工端對端驗證。
-6. Sandbox proof 通過後，將已驗證的 capture／settlement repositories 明確接入 Backend，並只在 Sandbox 啟用 PostgreSQL settlement route／scheduler；仍禁止雙寫。
-7. 為 server runtime 加入 `PAYMENT_CAPTURE_RUNTIME` 與 `GROUP_BUY_SETTLEMENT_RUNTIME` 全組一致性防護，再做 PostgreSQL HTTP／scheduler restart proof。
-8. 將正式 production 自動請款列為獨立人工核准步驟，不跟 Sandbox 啟用綁在一起。
-9. 執行 Android 實機 E2E、Firebase Console／OAuth／UID mapping 驗證。
+0. ~~LINE Pay 核准分離式請款後，執行 Sandbox reconciliation、capture、void 與 lease takeover 人工端對端驗證~~ **已於 2026-08-08 完成**，詳見「2026-08-08 LINE Pay 分離式請款 Sandbox 人工端對端驗證完成」。
+1. 修復 `backend/payments/reliabilityService.js` 的 `logAlertRequiredJobs` 函式巢狀錯誤（本次驗證發現，不影響對帳核心邏輯，但告警日誌完全沒有輸出）。
+2. 將已驗證的 capture／settlement repositories 明確接入 Backend，並只在 Sandbox 啟用 PostgreSQL settlement route／scheduler；仍禁止雙寫。
+3. 為 server runtime 加入 `PAYMENT_CAPTURE_RUNTIME` 與 `GROUP_BUY_SETTLEMENT_RUNTIME` 全組一致性防護，再做 PostgreSQL HTTP／scheduler restart proof。
+4. 將正式 production 自動請款列為獨立人工核准步驟，不跟 Sandbox 啟用綁在一起；`backend/.env` 的 `LINE_PAY_CAPTURE_SEPARATED=true` 目前僅為本機驗證設定，正式環境仍需獨立評估與設定流程。
+5. 前端新增截止後專用最終結算快照，明確區分招募中預估折扣與結算後不可變折扣／尾差。
+6. 細化訂單、付款失敗、重試與重新付款狀態，避免只顯示通用錯誤。
+7. 商家退款申請與營運審核已補後端第一版；下一步是商家／營運申請審核 UI、核准失敗告警通知與正式 sandbox 人工端對端測試。
+8. 增加附近公里數篩選、正式使用者定位／隱私流程與 Android 地圖實機 E2E；目前第一版先顯示全部營業店家。
+9. **信用卡（ECPay）Stage 人工端對端驗證**（`docs/ecpay-checkout-stage-checklist.md` EC-01～EC-08），後端與 mobile 第一版已完成並用 `mock_ecpay` 驗證過，但尚未打過真正的 ECPay 網路；LINE Pay 已核准並完成 Sandbox 驗證後，此項優先度降低，僅作為備援方案持續維護，非必須立即完成。
+10. 執行 Android 實機 E2E、Firebase Console／OAuth／UID mapping 驗證。
 
 ## 系統分析書進度
 

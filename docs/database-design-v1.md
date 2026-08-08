@@ -213,7 +213,7 @@ PostgreSQL 方向：
 | `refund_requests`         | 商家退款申請與營運審核（2026-08-04 新增） | `id` | Request 屬於 1 order/capture；核准後對應 1 筆 `payment_refunds` |
 | `payment_provider_events` | 金流 provider event 紀錄 | `id`        | 以邏輯方式關聯付款資源，保留未來 webhook 擴充空間 |
 
-目前付款 provider：**LINE Pay**（主要）與 **ECPay 信用卡**（2026-08-05 新增的備用方案，因 LINE Pay 分離式請款官方審核卡關）。兩者並存，`payment_authorizations.provider`／`payment_refunds.provider` 皆支援 `line_pay`／`ecpay`（及對應 `mock_line_pay`／`mock_ecpay` 測試值）。以下流程以 provider 中立描述：
+目前付款 provider：**LINE Pay**（主要，分離式請款已於 2026-07-31 核准、2026-08-08 完成 Sandbox 人工端對端驗證）與 **ECPay 信用卡**（2026-08-05 新增的備援/並行方案）。兩者並存，`payment_authorizations.provider`／`payment_refunds.provider` 皆支援 `line_pay`／`ecpay`（及對應 `mock_line_pay`／`mock_ecpay` 測試值）。以下流程以 provider 中立描述：
 
 1. 顧客送出購物車。
 2. Backend 建立 order。

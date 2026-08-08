@@ -430,13 +430,13 @@ Body 建議包含：
 
 1. 搬移 PostgreSQL order detail／list 與 payment authorization request context。
 2. 搬移 authorization confirm，使用 activity row lock 重驗容量並更新 authorized cups。
-3. LINE Pay 核准後，以 sandbox 驗證 request reconciliation、capture／void 與 lease takeover。
+3. ~~LINE Pay 核准後，以 sandbox 驗證 request reconciliation、capture／void 與 lease takeover~~ **已於 2026-08-08 完成**，詳見 `docs/line-pay-separated-capture-sandbox-checklist.md`。
 4. 將 terminal job 的 `alert_required` 接到正式告警通知管道。
 5. 補建立訂單與付款 request 的通用 idempotency 紀錄。
 
-這個切片仍不包含正式通知系統、商家退款申請／營運審核 UI 與 QR Code；**退款申請與營運審核 API 本身（`refund_requests` 資料表、商家申請與核准／駁回端點）已於 2026-08-04 完成第一版**，只缺前端 UI。Request status reconciliation 已依 LINE Pay Online API v3 官方狀態語意實作；Android 實機、Firebase 正式設定、LINE Pay sandbox 人工 E2E 與多 process 驗證仍是發布前必要工作。
+這個切片仍不包含正式通知系統、商家退款申請／營運審核 UI 與 QR Code；**退款申請與營運審核 API 本身（`refund_requests` 資料表、商家申請與核准／駁回端點）已於 2026-08-04 完成第一版**，只缺前端 UI。Request status reconciliation 已依 LINE Pay Online API v3 官方狀態語意實作；LINE Pay sandbox 人工 E2E 與多 process 驗證已於 2026-08-08 完成；Android 實機與 Firebase 正式設定仍是發布前必要工作。
 
-2026-08-05 另新增 ECPay 信用卡作為 LINE Pay 分離式請款審核卡關期間的備用付款 provider（後端與 mobile 第一版已完成並驗證，見 `docs/current-progress.md`）；本文件其餘關於付款流程的規劃內容維持 provider 中立，同樣適用於 ECPay。
+2026-08-05 另新增 ECPay 信用卡作為備用付款 provider（後端與 mobile 第一版已完成並驗證，見 `docs/current-progress.md`）；新增時 LINE Pay 分離式請款仍在官方審核，該原因已於 2026-08-08 解除。本文件其餘關於付款流程的規劃內容維持 provider 中立，同樣適用於 ECPay。
 
 ## 七、預計主要修改檔案
 

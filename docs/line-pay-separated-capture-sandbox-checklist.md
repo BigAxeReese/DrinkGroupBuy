@@ -1,13 +1,29 @@
 # LINE Pay 分離式請款 Sandbox 驗證清單
 
-最後更新：2026-07-30
+最後更新：2026-08-08
 
 ## 目前狀態
 
-- 已向 LINE Pay 申請 Sandbox Channel 的分離式請款能力。
-- 在 LINE Pay 明確回覆開通前，`LINE_PAY_CAPTURE_SEPARATED` 必須維持 `false` 或不設定。
+- LINE Pay 已於 2026-07-31 回覆「測試商店 test_202606269512 已開通分開請款功能」，確認分離式請款已開通。
+- 2026-08-08 已完成人工端對端驗證，`backend/.env` 設定 `LINE_PAY_CAPTURE_SEPARATED=true`。**通過門檻（LP-01、LP-02、LP-04、LP-07、LP-08、LP-09、LP-10）全數通過**，詳見下方「已完成驗證結果」。
+- LP-03（partial capture）因 LINE Pay 回覆未明確確認是否支援，本輪仍列為略過；不影響通過門檻。
 - 本清單只用於 Sandbox，不得拿 production Channel 或真實款項測試。
 - Channel ID、Channel Secret 與測試帳號不得寫入 Git、文件或測試輸出。
+
+## 已完成驗證結果（2026-08-08）
+
+- 測試方式：Android 模擬器（`DrinkGroupBuy_API34`）+ 真實 LINE Pay Sandbox 網頁流程（`access.line.me` 登入 + CAPTCHA 由人工完成，`sandbox-web-pay.line.me` 模擬付款頁由 Claude 操作）。
+- Git commit：延續 2026-08-05 ECPay 切片後的工作樹（本輪為文件與驗證更新，未變更程式碼）。
+- Backend 啟動環境：`LINE_PAY_ENV=sandbox`、`LINE_PAY_CAPTURE_SEPARATED=true`。
+- LP-01：`transactionId=2026080802374237210`，confirm 後 `authorized`，`authorizedAmount=65`，`expiresAt` 為 confirm 時間 +5 天（Sandbox 授權效期）。
+- LP-02／LP-06：目標 1 杯達標，截止結算自動 capture，`finalAmount=60`（原價 65 折扣 5），`releasedAmount=5`，僅 1 筆 capture。
+- LP-04：已授權訂單於顧客取消時 void，`failureReason=customer_cancelled_order`，未產生 capture。
+- LP-05：目標 3 杯僅 1 杯下單、顧客不接受原價，截止結算 void，`failureReason=deadline_settlement_discount_not_qualified`，活動狀態 `failed`。
+- LP-07／LP-09：`npm run payment-reliability:smoke`、`npm run payment-reliability:multiprocess` 通過（跨程序 lease 互斥與逾時接手、provider `0121` 對帳）；`multiprocess` 第一次遇到 Windows SQLite `database is locked`，重跑後通過，判斷為暫時性鎖定競爭，非邏輯錯誤。
+- LP-08：建立真實 pending 授權後未完成登入即重啟 backend，重啟後 `providerAuthorizationId` 與狀態完整保留，無遺失或重複。
+- LP-10／LP-11：`npm run settlement:smoke` 通過，`capture retry: interval=30s, attempts=3, fourth_attempt_suppressed=1`；`manual repayment: cutoff=15m, captured=1, duplicate_capture_suppressed=1`。
+- LP-12：已 capture 訂單全額退款成功（`returnCode=0000`），重複呼叫退款回傳同一筆記錄（`idempotent=true`），未產生第二筆退款。
+- 額外發現（非本清單範圍，另案追蹤）：backend 重啟時 log 出現 `[line-pay-reconciliation] ReferenceError: logAlertRequiredJobs is not defined`（`backend/payments/reliabilityService.js` 既有 bug，函式被誤巢狀在 `stoppedScheduler` 內），不影響對帳核心邏輯，只影響告警日誌輸出。
 
 ## 開始條件
 
@@ -59,7 +75,7 @@
 
 ## 通過門檻
 
-- LP-01、LP-02、LP-04、LP-07、LP-08、LP-09、LP-10 全部通過。
-- LINE Pay 明確確認 partial capture 後，LP-03 才列為必要通過。
-- 任一案例出現重複扣款、provider 與本機狀態不一致或無法追溯時，不得進入 PostgreSQL runtime 切換或 production 申請。
+- LP-01、LP-02、LP-04、LP-07、LP-08、LP-09、LP-10 全部通過。**2026-08-08 已全數通過**，詳見上方「已完成驗證結果」。
+- LINE Pay 明確確認 partial capture 後，LP-03 才列為必要通過；目前仍未確認，LP-03 略過不影響門檻。
+- 任一案例出現重複扣款、provider 與本機狀態不一致或無法追溯時，不得進入 PostgreSQL runtime 切換或 production 申請。本輪驗證未發現此類問題。
 - Sandbox 全部通過也不等於可使用正式金流；production Channel 仍需獨立申請、設定與驗收。

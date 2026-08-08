@@ -330,9 +330,15 @@ PostgreSQL v1 決策：
 - LINE Pay secrets 只能放在 `backend/.env`。
 - Mobile app 不可以保存 LINE Pay Channel Secret。
 
+## LINE Pay 分離式請款狀態——2026-08-08，Sandbox 人工端對端驗證已完成
+
+**LINE Pay 分離式請款已於 2026-07-31 獲官方核准**（測試商店 `test_202606269512`），並於 2026-08-08 完成 Sandbox 人工端對端驗證，`docs/line-pay-separated-capture-sandbox-checklist.md` 通過門檻（LP-01、LP-02、LP-04、LP-07、LP-08、LP-09、LP-10）全數達成。`backend/.env` 目前本機已設定 `LINE_PAY_CAPTURE_SEPARATED=true`（僅本機開發驗證用，正式環境啟用是獨立決策，尚未執行）。詳見 `docs/current-progress.md`「2026-08-08 LINE Pay 分離式請款 Sandbox 人工端對端驗證完成」。
+
+驗證過程中發現一個既有 bug（與 LINE Pay 邏輯無關）：`backend/payments/reliabilityService.js` 的 `logAlertRequiredJobs` 函式被誤巢狀在 `stoppedScheduler` 內，導致 reconciliation 排程每次執行都拋出 `ReferenceError`；不影響對帳核心邏輯，只影響告警日誌沒印出來。尚未修復。
+
 ## 信用卡（ECPay）狀態——2026-08-05，後端與 mobile 第一版已完成
 
-**唯一原因是 LINE Pay 分離式請款官方審核進度不確定**，新增綠界 ECPay 作為備用付款 provider（走跳轉 ECPay 託管付款頁的標準結帳方式）。**LINE Pay 完全不受影響、兩者並存**；信用卡是「多一個選擇」不是「取代 LINE Pay」，要不要上線可以視 LINE Pay 審核進度再決定。詳見 `docs/current-progress.md`「2026-08-05 新增信用卡（ECPay）付款」與 `docs/payment-rules-and-flow.md`「付款 Provider 方向」。
+新增綠界 ECPay 作為備用付款 provider（走跳轉 ECPay 託管付款頁的標準結帳方式），當時唯一原因是 LINE Pay 分離式請款官方審核進度不確定；**該原因已隨上方 LINE Pay 核准與驗證完成而解除**，ECPay 現在回歸單純的備援/並行選項角色。**LINE Pay 完全不受影響、兩者並存**；信用卡是「多一個選擇」不是「取代 LINE Pay」。詳見 `docs/current-progress.md`「2026-08-05 新增信用卡（ECPay）付款」與 `docs/payment-rules-and-flow.md`「付款 Provider 方向」。
 
 目前狀態：
 

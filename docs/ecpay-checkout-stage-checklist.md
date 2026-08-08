@@ -1,10 +1,10 @@
 # ECPay 信用卡 Stage 人工驗證清單
 
-最後更新：2026-08-05
+最後更新：2026-08-08
 
 ## 目前狀態
 
-- 信用卡（綠界 ECPay）是 LINE Pay 分離式請款卡關期間的備用付款 provider，詳見 `docs/current-progress.md`「2026-08-05 新增信用卡（ECPay）付款」與 `docs/payment-rules-and-flow.md`「付款 Provider 方向」。
+- 信用卡（綠界 ECPay）原為 LINE Pay 分離式請款卡關期間新增的備用付款 provider；**LINE Pay 已於 2026-07-31 核准、2026-08-08 完成 Sandbox 人工端對端驗證**（詳見 `docs/line-pay-separated-capture-sandbox-checklist.md`），ECPay 回歸單純備援/並行角色，本清單優先度已降低但仍建議完成以維持雙 provider 可用性。詳見 `docs/current-progress.md`「2026-08-05 新增信用卡（ECPay）付款」與 `docs/payment-rules-and-flow.md`「付款 Provider 方向」。
 - `backend/payments/ecpayClient.js`／`ecpayService.js`／`server.js` 路由已完成並通過自動化測試（`npm run ecpay:smoke`，走 `mock_ecpay`，不打真實網路）與函式層/HTTP 層端對端驗證。
 - 本清單用於**真正打 ECPay Stage 測試環境**的人工驗證，尚未執行。
 - 本清單只用於 Stage 測試環境，不得拿 production Channel 或真實款項測試。
