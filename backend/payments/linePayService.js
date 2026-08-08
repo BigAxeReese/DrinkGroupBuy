@@ -310,21 +310,19 @@ async function requestLinePayAuthorizationUnlocked({
     : await (authorizationRequestRepository
         ? authorizationRequestRepository.getLatestAuthorizationForOrder(body.orderId)
         : getLatestLinePayAuthorizationForOrder(body.orderId));
-  if (order.paymentStatus === "authorized" || existingAuthorization?.status === "authorized") {
-    if (!revision) {
-      throw new PaymentServiceError(409, {
-        error: "Order is already authorized",
-        status: "already_authorized",
-        authorization: existingAuthorization
-      });
-    }
-    if (existingAuthorization?.status === "authorized") {
-      throw new PaymentServiceError(409, {
-        error: "Order revision is already authorized",
-        status: "already_authorized",
-        authorization: existingAuthorization
-      });
-    }
+  if (!revision && (order.paymentStatus === "authorized" || existingAuthorization?.status === "authorized")) {
+    throw new PaymentServiceError(409, {
+      error: "Order is already authorized",
+      status: "already_authorized",
+      authorization: existingAuthorization
+    });
+  }
+  if (revision && existingAuthorization?.status === "authorized") {
+    throw new PaymentServiceError(409, {
+      error: "Order revision is already authorized",
+      status: "already_authorized",
+      authorization: existingAuthorization
+    });
   }
   if (existingAuthorization?.status === "pending") {
     throw new PaymentServiceError(409, {
@@ -746,48 +744,14 @@ async function confirmLinePayAuthorizationUnlocked({
     let voidResult = null;
     let voidError = null;
 
-    if ([
-      "capacity_exceeded",
-      "authorization_confirmed_after_deadline",
-      "authorization_expiry_missing",
-      "authorization_expiry_invalid",
-      "authorization_expiry_too_short"
-    ].includes(authorizationResult.error)) {
-      try {
-        voidResult = authorizationConfirmRepository?.kind === "postgres"
-          ? await compensateRejectedPostgresAuthorization({
-              repository: authorizationConfirmRepository,
-              orderId: resolvedOrderId,
-              transactionId,
-              reason: `${authorizationResult.error}_at_confirm`,
-              providerVoider
-            })
-          : await voidLinePayAuthorization({
-              orderId: resolvedOrderId,
-              transactionId,
-              reason: `${authorizationResult.error}_at_confirm`
-            });
-      } catch (error) {
-        try {
-          const failureInput = {
-            orderId: resolvedOrderId,
-            providerTransactionId: transactionId,
-            reason: `${authorizationResult.error}_at_confirm_void_failed`,
-            providerPayload: error.linePayPayload || { message: error.message }
-          };
-          if (authorizationConfirmRepository?.kind === "postgres") {
-            await authorizationConfirmRepository.recordCompensatingVoidFailure(failureInput);
-          } else {
-            recordLinePayVoidFailureInDatabase(failureInput);
-          }
-        } catch {
-          // Keep the original LINE Pay void error visible to the caller.
-        }
-        voidError = {
-          message: error.message,
-          linePayPayload: error.linePayPayload || null
-        };
-      }
+    if (isCompensatableConfirmRejection(authorizationResult.error)) {
+      ({ voidResult, voidError } = await compensateRejectedAuthorization({
+        authorizationConfirmRepository,
+        orderId: resolvedOrderId,
+        transactionId,
+        baseReason: authorizationResult.error,
+        providerVoider
+      }));
     }
 
     return {
@@ -819,6 +783,66 @@ async function confirmLinePayAuthorizationUnlocked({
     payload,
     pendingPayment: resolvedPendingPayment
   };
+}
+
+const COMPENSATABLE_CONFIRM_REJECTION_REASONS = [
+  "capacity_exceeded",
+  "authorization_confirmed_after_deadline",
+  "authorization_expiry_missing",
+  "authorization_expiry_invalid",
+  "authorization_expiry_too_short"
+];
+
+function isCompensatableConfirmRejection(errorReason) {
+  return COMPENSATABLE_CONFIRM_REJECTION_REASONS.includes(errorReason);
+}
+
+async function compensateRejectedAuthorization({
+  authorizationConfirmRepository,
+  orderId,
+  transactionId,
+  baseReason,
+  providerVoider
+}) {
+  try {
+    const voidResult = authorizationConfirmRepository?.kind === "postgres"
+      ? await compensateRejectedPostgresAuthorization({
+          repository: authorizationConfirmRepository,
+          orderId,
+          transactionId,
+          reason: `${baseReason}_at_confirm`,
+          providerVoider
+        })
+      : await voidLinePayAuthorization({
+          orderId,
+          transactionId,
+          reason: `${baseReason}_at_confirm`
+        });
+    return { voidResult, voidError: null };
+  } catch (error) {
+    try {
+      const failureInput = {
+        orderId,
+        providerTransactionId: transactionId,
+        reason: `${baseReason}_at_confirm_void_failed`,
+        providerPayload: error.linePayPayload || { message: error.message }
+      };
+      if (authorizationConfirmRepository?.kind === "postgres") {
+        await authorizationConfirmRepository.recordCompensatingVoidFailure(failureInput);
+      } else {
+        recordLinePayVoidFailureInDatabase(failureInput);
+      }
+    } catch {
+      // Keep the original LINE Pay void error visible to the caller.
+    }
+    return {
+      voidResult: null,
+      voidError: {
+        message: error.message,
+        linePayPayload: error.linePayPayload || null
+      }
+    };
+  }
 }
 
 async function compensateRejectedPostgresAuthorization({

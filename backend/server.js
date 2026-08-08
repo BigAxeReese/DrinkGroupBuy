@@ -1240,32 +1240,7 @@ const server = http.createServer(async (request, response) => {
         sendJson(response, 404, { error: "Group-buy activity not found" });
         return;
       }
-      if (result.error === "settlement_not_due") {
-        sendJson(response, 409, {
-          error: "Group-buy activity deadline has not passed",
-          deadlineAt: result.deadlineAt,
-          now: result.now
-        });
-        return;
-      }
-      if (result.error === "activity_already_settled") {
-        sendJson(response, 200, result);
-        return;
-      }
-      if (result.error === "settlement_retry_pending") {
-        sendJson(response, 202, result);
-        return;
-      }
-      if (result.error === "settlement_payment_failures") {
-        sendJson(response, 409, result);
-        return;
-      }
-      if (result.error) {
-        sendJson(response, 409, result);
-        return;
-      }
-
-      sendJson(response, 200, result);
+      sendSettlementResult(response, result);
       return;
     }
 
@@ -1431,6 +1406,31 @@ function sendPickupServiceResult(response, result) {
     merchant_user_required: 403,
     pickup_code_invalid: 400,
     pickup_code_rate_limited: 429
+  };
+  sendJson(response, statusByError[result.error] || 409, result);
+}
+
+function sendSettlementResult(response, result) {
+  if (!result?.error) {
+    sendJson(response, 200, result);
+    return;
+  }
+  if (result.error === "settlement_not_due") {
+    sendJson(response, 409, {
+      error: "Group-buy activity deadline has not passed",
+      deadlineAt: result.deadlineAt,
+      now: result.now
+    });
+    return;
+  }
+  if (result.error === "activity_already_settled") {
+    sendJson(response, 200, result);
+    return;
+  }
+
+  const statusByError = {
+    settlement_retry_pending: 202,
+    settlement_payment_failures: 409
   };
   sendJson(response, statusByError[result.error] || 409, result);
 }

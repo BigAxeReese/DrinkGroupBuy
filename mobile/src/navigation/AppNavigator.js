@@ -580,14 +580,6 @@ export function AppNavigator() {
           };
         }
 
-        if (existingOrder.paymentStatus !== "pending") {
-          return {
-            error: "existing_order_requires_payment",
-            message: "此團購已有一筆已授權或已鎖定的訂單，目前尚未支援合併新飲料。請先查看既有訂單。",
-            orderId: existingOrder.id
-          };
-        }
-
         let backendOrder;
         try {
           backendOrder = await updateOrder(existingOrder.id, {

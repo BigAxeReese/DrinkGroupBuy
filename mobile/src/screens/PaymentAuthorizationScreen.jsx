@@ -182,36 +182,34 @@ export function PaymentAuthorizationScreen({ navigation, route, appState, action
                   : "前往 LINE Pay 預授權"}
           disabled={repaymentExpired}
           onPress={() => {
-            if (linePayStatus !== "loading") {
-              const startPayment = isManualRepayment ? startLinePayRepayment : startPaymentAuthorization;
-              startPayment({
-                payment,
-                order,
-                provider: selectedProvider,
-                routeRevision: {
-                  id: route.params?.orderRevisionId,
-                  amount: route.params?.revisionAmount,
-                  items: route.params?.revisionItems
-                },
-                actions,
-                pollIntervalRef,
-                pollTimeoutRef,
-                pollInFlightRef,
-                setLinePayStatus,
-                setLinePayMessage,
-                setSyncStatus,
-                setSyncMessage
-              });
-            }
+            if (linePayStatus === "loading") return;
+            const startPayment = isManualRepayment ? startLinePayRepayment : startPaymentAuthorization;
+            startPayment({
+              payment,
+              order,
+              provider: selectedProvider,
+              routeRevision: {
+                id: route.params?.orderRevisionId,
+                amount: route.params?.revisionAmount,
+                items: route.params?.revisionItems
+              },
+              actions,
+              pollIntervalRef,
+              pollTimeoutRef,
+              pollInFlightRef,
+              setLinePayStatus,
+              setLinePayMessage,
+              setSyncStatus,
+              setSyncMessage
+            });
           }}
         />
         <PrimaryButton
           label={syncStatus === "loading" ? "正在刷新付款狀態..." : "刷新付款狀態"}
           variant="secondary"
           onPress={() => {
-            if (syncStatus !== "loading") {
-              syncBackendOrder({ orderId: payment.orderId, actions, setSyncStatus, setSyncMessage });
-            }
+            if (syncStatus === "loading") return;
+            syncBackendOrder({ orderId: payment.orderId, actions, setSyncStatus, setSyncMessage });
           }}
         />
         {syncMessage ? (

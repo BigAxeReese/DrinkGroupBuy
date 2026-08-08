@@ -769,6 +769,62 @@ function listDueGroupBuyActivitiesForPickupExpiration(input = {}) {
   }
 }
 
+function applyPickupWindowExpirationToOrder(order, { expireOrder, completePickedUpOrder, insertHistory, now, actorUserId }) {
+  if (order.payment_status === "captured"
+    && ["not_ready", "ready"].includes(order.pickup_status)
+    && order.status !== "cancelled") {
+    const update = expireOrder.run(now, order.id);
+    if (update.changes !== 1) {
+      return { expired: false, completedPickedUp: false };
+    }
+    insertHistory.run(
+      `status-history-${randomUUID()}`,
+      "pickup",
+      order.id,
+      order.pickup_status,
+      "expired",
+      "pickup_window_expired",
+      actorUserId,
+      now
+    );
+    if (order.status !== "completed") {
+      insertHistory.run(
+        `status-history-${randomUUID()}`,
+        "order",
+        order.id,
+        order.status,
+        "completed",
+        "pickup_window_expired",
+        actorUserId,
+        now
+      );
+    }
+    return { expired: true, completedPickedUp: false };
+  }
+
+  if (order.payment_status === "captured"
+    && order.pickup_status === "picked_up"
+    && !["completed", "cancelled"].includes(order.status)) {
+    const update = completePickedUpOrder.run(now, order.id);
+    if (update.changes !== 1) {
+      return { expired: false, completedPickedUp: false };
+    }
+    insertHistory.run(
+      `status-history-${randomUUID()}`,
+      "order",
+      order.id,
+      order.status,
+      "completed",
+      "pickup_completed_before_window_expired",
+      actorUserId,
+      now
+    );
+    return { expired: false, completedPickedUp: true };
+  }
+
+  return { expired: false, completedPickedUp: false };
+}
+
 function expireGroupBuyPickupWindow(activityId, input = {}) {
   const database = openDatabase();
   const now = input.now || new Date().toISOString();
@@ -852,56 +908,15 @@ function expireGroupBuyPickupWindow(activityId, input = {}) {
     let completedPickedUpOrderCount = 0;
 
     for (const order of orders) {
-      if (order.payment_status === "captured"
-        && ["not_ready", "ready"].includes(order.pickup_status)
-        && order.status !== "cancelled") {
-        const update = expireOrder.run(now, order.id);
-        if (update.changes === 1) {
-          expiredOrderCount += 1;
-          insertHistory.run(
-            `status-history-${randomUUID()}`,
-            "pickup",
-            order.id,
-            order.pickup_status,
-            "expired",
-            "pickup_window_expired",
-            actorUserId,
-            now
-          );
-          if (order.status !== "completed") {
-            insertHistory.run(
-              `status-history-${randomUUID()}`,
-              "order",
-              order.id,
-              order.status,
-              "completed",
-              "pickup_window_expired",
-              actorUserId,
-              now
-            );
-          }
-        }
-        continue;
-      }
-
-      if (order.payment_status === "captured"
-        && order.pickup_status === "picked_up"
-        && !["completed", "cancelled"].includes(order.status)) {
-        const update = completePickedUpOrder.run(now, order.id);
-        if (update.changes === 1) {
-          completedPickedUpOrderCount += 1;
-          insertHistory.run(
-            `status-history-${randomUUID()}`,
-            "order",
-            order.id,
-            order.status,
-            "completed",
-            "pickup_completed_before_window_expired",
-            actorUserId,
-            now
-          );
-        }
-      }
+      const outcome = applyPickupWindowExpirationToOrder(order, {
+        expireOrder,
+        completePickedUpOrder,
+        insertHistory,
+        now,
+        actorUserId
+      });
+      if (outcome.expired) expiredOrderCount += 1;
+      if (outcome.completedPickedUp) completedPickedUpOrderCount += 1;
     }
 
     database.prepare(`
@@ -2569,6 +2584,35 @@ function getLinePayCaptureRetryState(input = {}) {
   }
 }
 
+function determineManualRepaymentIneligibilityReason({
+  row,
+  latestRepayment,
+  terminalCaptureFailure,
+  finalAmount,
+  nowTime,
+  cutoffTime
+}) {
+  if (row.payment_status === "captured" || latestRepayment?.status === "captured") {
+    return "already_paid";
+  }
+  if (latestRepayment?.status === "pending") {
+    return "repayment_already_pending";
+  }
+  if (row.payment_status !== "failed") {
+    return "payment_not_failed";
+  }
+  if (!terminalCaptureFailure) {
+    return "automatic_capture_not_finished";
+  }
+  if (!Number.isInteger(finalAmount) || finalAmount <= 0) {
+    return "final_amount_missing";
+  }
+  if (Number.isNaN(nowTime) || Number.isNaN(cutoffTime) || nowTime >= cutoffTime) {
+    return "manual_repayment_expired";
+  }
+  return null;
+}
+
 function getManualLinePayRepaymentContext(orderId, input = {}) {
   const database = openDatabase();
   const now = input.now || new Date().toISOString();
@@ -2630,20 +2674,14 @@ function getManualLinePayRepaymentContext(orderId, input = {}) {
     const terminalCaptureFailure = Boolean(row.failed_capture_id)
       && !Boolean(row.failed_capture_retryable);
 
-    let reason = null;
-    if (row.payment_status === "captured" || latestRepayment?.status === "captured") {
-      reason = "already_paid";
-    } else if (latestRepayment?.status === "pending") {
-      reason = "repayment_already_pending";
-    } else if (row.payment_status !== "failed") {
-      reason = "payment_not_failed";
-    } else if (!terminalCaptureFailure) {
-      reason = "automatic_capture_not_finished";
-    } else if (!Number.isInteger(finalAmount) || finalAmount <= 0) {
-      reason = "final_amount_missing";
-    } else if (Number.isNaN(nowTime) || Number.isNaN(cutoffTime) || nowTime >= cutoffTime) {
-      reason = "manual_repayment_expired";
-    }
+    const reason = determineManualRepaymentIneligibilityReason({
+      row,
+      latestRepayment,
+      terminalCaptureFailure,
+      finalAmount,
+      nowTime,
+      cutoffTime
+    });
 
     return {
       orderId: row.id,
@@ -2963,27 +3001,40 @@ function getOrderLifecycleBucket(order, context, now) {
 
 function getOrderAvailableActions(order, context, role, lifecycleBucket, now) {
   if (lifecycleBucket === "history") return [];
-  const actions = [];
   const deadline = Date.parse(context.activity.deadlineAt);
   const lockMinutes = Number(context.activity.withdrawalLockMinutes || 30);
   const locked = !Number.isNaN(deadline) && deadline - Date.parse(now) <= lockMinutes * 60 * 1000;
+
   if (role === "customer") {
-    if (order.pendingRevision || (order.status === "submitted" && order.paymentStatus === "pending")) {
-      actions.push("pay");
-    }
-    if (order.status === "submitted" && !locked && ["pending", "authorized"].includes(order.paymentStatus)) {
-      if (!order.pendingRevision) actions.push("edit");
-      actions.push("cancel");
-    }
-    if (order.manualRepayment?.eligible) actions.push("repay");
-    if (["ready", "picked_up"].includes(order.pickupStatus) && context.pickupCredential.exists) {
-      actions.push("viewPickupCredential");
-    }
-  } else if (role === "merchant") {
-    if (context.activity.status === "ordering" && order.paymentStatus === "captured") actions.push("markReadyForPickup");
-    if (order.pickupStatus === "ready" && context.pickupCredential.status === "active") actions.push("redeemPickup");
+    return [...new Set(getCustomerOrderAvailableActions(order, context, locked))];
   }
-  return [...new Set(actions)];
+  if (role === "merchant") {
+    return [...new Set(getMerchantOrderAvailableActions(order, context))];
+  }
+  return [];
+}
+
+function getCustomerOrderAvailableActions(order, context, locked) {
+  const actions = [];
+  if (order.pendingRevision || (order.status === "submitted" && order.paymentStatus === "pending")) {
+    actions.push("pay");
+  }
+  if (order.status === "submitted" && !locked && ["pending", "authorized"].includes(order.paymentStatus)) {
+    if (!order.pendingRevision) actions.push("edit");
+    actions.push("cancel");
+  }
+  if (order.manualRepayment?.eligible) actions.push("repay");
+  if (["ready", "picked_up"].includes(order.pickupStatus) && context.pickupCredential.exists) {
+    actions.push("viewPickupCredential");
+  }
+  return actions;
+}
+
+function getMerchantOrderAvailableActions(order, context) {
+  const actions = [];
+  if (context.activity.status === "ordering" && order.paymentStatus === "captured") actions.push("markReadyForPickup");
+  if (order.pickupStatus === "ready" && context.pickupCredential.status === "active") actions.push("redeemPickup");
+  return actions;
 }
 
 function encodeOrderListCursor(order) {
@@ -3774,6 +3825,122 @@ function failLinePayRefundInDatabase(input) {
   }
 }
 
+function rejectLinePayAuthorizationAtConfirm(database, options) {
+  const {
+    authorization,
+    revision,
+    now,
+    failureReason,
+    providerTransactionId,
+    providerPayload,
+    setExpiresAt,
+    expiresAtValue,
+    eventType,
+    eventPayloadExtra,
+    auditActionType,
+    auditMetadataExtra
+  } = options;
+
+  if (setExpiresAt) {
+    database.prepare(`
+      UPDATE payment_authorizations
+      SET status = 'failed',
+          expires_at = ?,
+          failure_reason = ?,
+          updated_at = ?
+      WHERE id = ?
+    `).run(expiresAtValue, failureReason, now, authorization.id);
+  } else {
+    database.prepare(`
+      UPDATE payment_authorizations
+      SET status = 'failed',
+          failure_reason = ?,
+          updated_at = ?
+      WHERE id = ?
+    `).run(failureReason, now, authorization.id);
+  }
+
+  if (revision) {
+    database.prepare(`
+      UPDATE order_revisions
+      SET status = 'failed',
+          failure_reason = ?,
+          updated_at = ?,
+          cancelled_at = ?
+      WHERE id = ?
+    `).run(failureReason, now, now, revision.id);
+  }
+
+  database.prepare(`
+    INSERT INTO payment_provider_events (
+      id,
+      provider,
+      resource_type,
+      resource_id,
+      event_type,
+      idempotency_key,
+      payload_json,
+      received_at,
+      processed_at
+    ) VALUES (?, ?, 'authorization', ?, ?, ?, ?, ?, ?)
+  `).run(
+    `provider-event-${randomUUID()}`,
+    authorization.provider,
+    authorization.id,
+    eventType,
+    providerTransactionId ? `${authorization.provider}_${eventType}:${providerTransactionId}` : null,
+    JSON.stringify({
+      providerPayload: providerPayload || {},
+      orderRevisionId: revision?.id || null,
+      ...eventPayloadExtra
+    }),
+    now,
+    now
+  );
+
+  database.prepare(`
+    INSERT INTO status_history (
+      id,
+      resource_type,
+      resource_id,
+      from_status,
+      to_status,
+      reason,
+      actor_user_id,
+      created_at
+    ) VALUES (?, 'payment_authorization', ?, ?, 'failed', ?, NULL, ?)
+  `).run(
+    `status-history-${randomUUID()}`,
+    authorization.id,
+    authorization.status,
+    failureReason,
+    now
+  );
+
+  database.prepare(`
+    INSERT INTO audit_logs (
+      id,
+      actor_user_id,
+      action_type,
+      resource_type,
+      resource_id,
+      metadata_json,
+      created_at
+    ) VALUES (?, NULL, ?, 'payment_authorization', ?, ?, ?)
+  `).run(
+    `audit-log-${randomUUID()}`,
+    auditActionType,
+    authorization.id,
+    JSON.stringify({
+      orderId: authorization.order_id,
+      orderRevisionId: revision?.id || null,
+      providerTransactionId,
+      ...auditMetadataExtra
+    }),
+    now
+  );
+}
+
 function authorizeLinePayPaymentInDatabase(input) {
   const database = openDatabase();
   const now = input.now || new Date().toISOString();
@@ -3862,96 +4029,20 @@ function authorizeLinePayPaymentInDatabase(input) {
     `).get(order.activity_id, order.id).cups;
 
     if (deadlineError) {
-      database.prepare(`
-        UPDATE payment_authorizations
-        SET status = 'failed',
-            expires_at = ?,
-            failure_reason = ?,
-            updated_at = ?
-        WHERE id = ?
-      `).run(authorizationExpiresAt, deadlineError, now, authorization.id);
-
-      if (revision) {
-        database.prepare(`
-          UPDATE order_revisions
-          SET status = 'failed',
-              failure_reason = ?,
-              updated_at = ?,
-              cancelled_at = ?
-          WHERE id = ?
-        `).run(deadlineError, now, now, revision.id);
-      }
-
-      database.prepare(`
-        INSERT INTO payment_provider_events (
-          id,
-          provider,
-          resource_type,
-          resource_id,
-          event_type,
-          idempotency_key,
-          payload_json,
-          received_at,
-          processed_at
-        ) VALUES (?, ?, 'authorization', ?, 'confirm_deadline_rejected', ?, ?, ?, ?)
-      `).run(
-        `provider-event-${randomUUID()}`,
-        authorization.provider,
-        authorization.id,
-        input.providerTransactionId
-          ? `${authorization.provider}_confirm_deadline_rejected:${input.providerTransactionId}`
-          : null,
-        JSON.stringify({
-          providerPayload: input.providerPayload || {},
-          orderRevisionId: revision?.id || null,
-          confirmAt: now,
-          deadlineAt: order.deadline_at
-        }),
+      rejectLinePayAuthorizationAtConfirm(database, {
+        authorization,
+        revision,
         now,
-        now
-      );
-
-      database.prepare(`
-        INSERT INTO status_history (
-          id,
-          resource_type,
-          resource_id,
-          from_status,
-          to_status,
-          reason,
-          actor_user_id,
-          created_at
-        ) VALUES (?, 'payment_authorization', ?, ?, 'failed', ?, NULL, ?)
-      `).run(
-        `status-history-${randomUUID()}`,
-        authorization.id,
-        authorization.status,
-        deadlineError,
-        now
-      );
-
-      database.prepare(`
-        INSERT INTO audit_logs (
-          id,
-          actor_user_id,
-          action_type,
-          resource_type,
-          resource_id,
-          metadata_json,
-          created_at
-        ) VALUES (?, NULL, 'line_pay_confirm_deadline_rejected', 'payment_authorization', ?, ?, ?)
-      `).run(
-        `audit-log-${randomUUID()}`,
-        authorization.id,
-        JSON.stringify({
-          orderId: authorization.order_id,
-          orderRevisionId: revision?.id || null,
-          providerTransactionId: input.providerTransactionId,
-          confirmAt: now,
-          deadlineAt: order.deadline_at
-        }),
-        now
-      );
+        failureReason: deadlineError,
+        providerTransactionId: input.providerTransactionId,
+        providerPayload: input.providerPayload,
+        setExpiresAt: true,
+        expiresAtValue: authorizationExpiresAt,
+        eventType: "confirm_deadline_rejected",
+        eventPayloadExtra: { confirmAt: now, deadlineAt: order.deadline_at },
+        auditActionType: "line_pay_confirm_deadline_rejected",
+        auditMetadataExtra: { confirmAt: now, deadlineAt: order.deadline_at }
+      });
 
       database.exec("COMMIT;");
       transactionStarted = false;
@@ -3965,98 +4056,28 @@ function authorizeLinePayPaymentInDatabase(input) {
     }
 
     if (authorizationExpiryError) {
-      database.prepare(`
-        UPDATE payment_authorizations
-        SET status = 'failed',
-            expires_at = ?,
-            failure_reason = ?,
-            updated_at = ?
-        WHERE id = ?
-      `).run(authorizationExpiresAt, authorizationExpiryError, now, authorization.id);
-
-      if (revision) {
-        database.prepare(`
-          UPDATE order_revisions
-          SET status = 'failed',
-              failure_reason = ?,
-              updated_at = ?,
-              cancelled_at = ?
-          WHERE id = ?
-        `).run(authorizationExpiryError, now, now, revision.id);
-      }
-
-      database.prepare(`
-        INSERT INTO payment_provider_events (
-          id,
-          provider,
-          resource_type,
-          resource_id,
-          event_type,
-          idempotency_key,
-          payload_json,
-          received_at,
-          processed_at
-        ) VALUES (?, ?, 'authorization', ?, 'confirm_expiry_rejected', ?, ?, ?, ?)
-      `).run(
-        `provider-event-${randomUUID()}`,
-        authorization.provider,
-        authorization.id,
-        input.providerTransactionId
-          ? `${authorization.provider}_confirm_expiry_rejected:${input.providerTransactionId}`
-          : null,
-        JSON.stringify({
-          providerPayload: input.providerPayload || {},
-          orderRevisionId: revision?.id || null,
-          authorizationExpiresAt,
-          deadlineAt: order.deadline_at,
-          requiredExpiresAfter: getRequiredLinePayAuthorizationExpiry(order.deadline_at)
-        }),
+      rejectLinePayAuthorizationAtConfirm(database, {
+        authorization,
+        revision,
         now,
-        now
-      );
-
-      database.prepare(`
-        INSERT INTO status_history (
-          id,
-          resource_type,
-          resource_id,
-          from_status,
-          to_status,
-          reason,
-          actor_user_id,
-          created_at
-        ) VALUES (?, 'payment_authorization', ?, ?, 'failed', ?, NULL, ?)
-      `).run(
-        `status-history-${randomUUID()}`,
-        authorization.id,
-        authorization.status,
-        authorizationExpiryError,
-        now
-      );
-
-      database.prepare(`
-        INSERT INTO audit_logs (
-          id,
-          actor_user_id,
-          action_type,
-          resource_type,
-          resource_id,
-          metadata_json,
-          created_at
-        ) VALUES (?, NULL, 'line_pay_confirm_expiry_rejected', 'payment_authorization', ?, ?, ?)
-      `).run(
-        `audit-log-${randomUUID()}`,
-        authorization.id,
-        JSON.stringify({
-          orderId: authorization.order_id,
-          orderRevisionId: revision?.id || null,
-          providerTransactionId: input.providerTransactionId,
+        failureReason: authorizationExpiryError,
+        providerTransactionId: input.providerTransactionId,
+        providerPayload: input.providerPayload,
+        setExpiresAt: true,
+        expiresAtValue: authorizationExpiresAt,
+        eventType: "confirm_expiry_rejected",
+        eventPayloadExtra: {
           authorizationExpiresAt,
           deadlineAt: order.deadline_at,
           requiredExpiresAfter: getRequiredLinePayAuthorizationExpiry(order.deadline_at)
-        }),
-        now
-      );
+        },
+        auditActionType: "line_pay_confirm_expiry_rejected",
+        auditMetadataExtra: {
+          authorizationExpiresAt,
+          deadlineAt: order.deadline_at,
+          requiredExpiresAfter: getRequiredLinePayAuthorizationExpiry(order.deadline_at)
+        }
+      });
 
       database.exec("COMMIT;");
       transactionStarted = false;
@@ -4071,96 +4092,19 @@ function authorizeLinePayPaymentInDatabase(input) {
     }
 
     if (order.maximum_cups && authorizedCups + requestedCups > order.maximum_cups) {
-      database.prepare(`
-        UPDATE payment_authorizations
-        SET status = 'failed',
-            failure_reason = 'capacity_exceeded_at_confirm',
-            updated_at = ?
-        WHERE id = ?
-      `).run(now, authorization.id);
-
-      if (revision) {
-        database.prepare(`
-          UPDATE order_revisions
-          SET status = 'failed',
-              failure_reason = 'capacity_exceeded_at_confirm',
-              updated_at = ?,
-              cancelled_at = ?
-          WHERE id = ?
-        `).run(now, now, revision.id);
-      }
-
-      database.prepare(`
-        INSERT INTO payment_provider_events (
-          id,
-          provider,
-          resource_type,
-          resource_id,
-          event_type,
-          idempotency_key,
-          payload_json,
-          received_at,
-          processed_at
-        ) VALUES (?, ?, 'authorization', ?, 'confirm_capacity_rejected', ?, ?, ?, ?)
-      `).run(
-        `provider-event-${randomUUID()}`,
-        authorization.provider,
-        authorization.id,
-        input.providerTransactionId
-          ? `${authorization.provider}_confirm_capacity_rejected:${input.providerTransactionId}`
-          : null,
-        JSON.stringify({
-          providerPayload: input.providerPayload || {},
-          maximumCups: order.maximum_cups,
-          authorizedCups,
-          requestedCups,
-          orderRevisionId: revision?.id || null
-        }),
+      rejectLinePayAuthorizationAtConfirm(database, {
+        authorization,
+        revision,
         now,
-        now
-      );
-
-      database.prepare(`
-        INSERT INTO status_history (
-          id,
-          resource_type,
-          resource_id,
-          from_status,
-          to_status,
-          reason,
-          actor_user_id,
-          created_at
-        ) VALUES (?, 'payment_authorization', ?, ?, 'failed', 'capacity_exceeded_at_confirm', NULL, ?)
-      `).run(
-        `status-history-${randomUUID()}`,
-        authorization.id,
-        authorization.status,
-        now
-      );
-
-      database.prepare(`
-        INSERT INTO audit_logs (
-          id,
-          actor_user_id,
-          action_type,
-          resource_type,
-          resource_id,
-          metadata_json,
-          created_at
-        ) VALUES (?, NULL, 'line_pay_confirm_capacity_rejected', 'payment_authorization', ?, ?, ?)
-      `).run(
-        `audit-log-${randomUUID()}`,
-        authorization.id,
-        JSON.stringify({
-          orderId: authorization.order_id,
-          orderRevisionId: revision?.id || null,
-          providerTransactionId: input.providerTransactionId,
-          maximumCups: order.maximum_cups,
-          authorizedCups,
-          requestedCups
-        }),
-        now
-      );
+        failureReason: "capacity_exceeded_at_confirm",
+        providerTransactionId: input.providerTransactionId,
+        providerPayload: input.providerPayload,
+        setExpiresAt: false,
+        eventType: "confirm_capacity_rejected",
+        eventPayloadExtra: { maximumCups: order.maximum_cups, authorizedCups, requestedCups },
+        auditActionType: "line_pay_confirm_capacity_rejected",
+        auditMetadataExtra: { maximumCups: order.maximum_cups, authorizedCups, requestedCups }
+      });
 
       database.exec("COMMIT;");
       transactionStarted = false;

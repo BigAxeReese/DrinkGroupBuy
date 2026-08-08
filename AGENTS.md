@@ -217,3 +217,59 @@ Be especially careful with:
 - audit logs for sensitive operations
 
 If a requirement is unclear, document the uncertainty instead of silently guessing.
+
+## Control Flow Rules
+
+When writing, maintaining, or reviewing code in this repo, actively check for these three control-flow smells and refactor when found:
+
+1. **Core logic buried in deep indentation** — main logic sits 2-3+ `if` levels deep, or an `if` wraps the whole function body.
+   Fix: rewrite as **guard clauses**. Put invalid-state, permission, null, and format checks at the top of the function; `return`/`raise`/`throw` immediately on failure. The success path stays unindented at the bottom.
+2. **Multiple conditionals stacked handling the same high-level intent** — several `if`/`else if` all computing the same kind of thing (e.g. discount rules, identity checks, shipping rules).
+   Fix: **extract an intent function** with a clear verb name (e.g. `applyEligibleBenefits(...)`). The main flow calls it once instead of inlining every branch.
+3. **Small changes require re-tracing branch logic** — nested `if/else` deep enough that it's hard to tell what paths exist or whether one is missing.
+   Fix: **linearize control flow**. Flatten `else` chains into independent guarded conditions so the code reads top-to-bottom, not tree-branching to the right.
+
+Two principles behind all three:
+
+- **Extract intent**: the main flow states *what* happens, at a high level; *how* each step works lives in its own named function.
+- **Guard clauses over nested happy-path**: reject everything that can't proceed first, at the top; the core success logic always ends up at the bottom of the function, unindented.
+
+Example:
+
+```python
+# Bad — Signal 1 (core logic 3 levels deep) + Signal 2 (benefit checks mixed into main flow)
+def process_order(order):
+    if order.is_success():
+        if order.has_permission():
+            if order.user.is_member:
+                order.apply_discount(0.1)
+            if order.total > 1000:
+                order.free_shipping()
+            if order.data is not None:
+                return parse_and_calculate(order.data)
+            else:
+                raise ValueError("Data is empty")
+        else:
+            raise PermissionError("No permission")
+    else:
+        raise RuntimeError("Server error")
+
+# Good — guard clauses + extracted intent function
+def process_order(order):
+    if not order.is_success():
+        raise RuntimeError("Server error")
+    if not order.has_permission():
+        raise PermissionError("No permission")
+    if order.data is None:
+        raise ValueError("Data is empty")
+
+    apply_eligible_benefits(order)
+    return parse_and_calculate(order.data)
+
+def apply_eligible_benefits(order):
+    """Extracted intent function: owns all discount/benefit rules."""
+    if order.user.is_member:
+        order.apply_discount(0.1)
+    if order.total > 1000:
+        order.free_shipping()
+```
