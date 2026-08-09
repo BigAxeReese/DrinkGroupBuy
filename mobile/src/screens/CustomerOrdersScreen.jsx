@@ -7,7 +7,7 @@ import { useOrderListSync } from "../hooks/useOrderListSync";
 import { formatCurrency, isWithdrawalLocked } from "../utils/calculations";
 import { getGroupBuyActivityProgress } from "../utils/groupBuyActivityProgress";
 import { getGroupBuyActivityStore } from "../utils/groupBuyActivityStores";
-import { normalizeOrderItem } from "../utils/orderItems";
+import { formatOrderItemCustomizations, normalizeOrderItem } from "../utils/orderItems";
 
 export function CustomerOrdersScreen({ navigation, appState, actions, memberAction, selectedCustomerId }) {
   const [tab, setTab] = useState("active");
@@ -478,7 +478,9 @@ function CartDraftSection({ cartGroupBuyActivity, cartItems, cartTotalQuantity, 
         {cartItems.map((item) => (
           <View key={item.id} style={styles.cartDraftItem}>
             <Text style={styles.cartDraftItemName}>{item.itemName} x {item.quantity}</Text>
-            <Text style={styles.cartDraftItemMeta}>{item.sweetness} / {item.ice} / {item.toppings.join("、") || "不加料"}</Text>
+            <Text style={styles.cartDraftItemMeta}>
+              {formatOrderItemCustomizations(item, { separator: " / ", noToppingsLabel: "不加料" })}
+            </Text>
           </View>
         ))}
       </View>

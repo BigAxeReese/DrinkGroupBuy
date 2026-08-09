@@ -1,6 +1,6 @@
 # 目前進度
 
-最後更新：2026-08-08
+最後更新：2026-08-10
 
 換電腦或交接給其他 AI 時，請先閱讀 `docs/handoff-summary.md`。
 
@@ -32,6 +32,8 @@
 - 系統分析書已整理為五大功能，五組描述性綱目已更新，並已抽出 `docs/system-analysis-extracted.md`；各小節使用個案描述與活動圖仍待更新。
 - 2026-08-05 開始新增信用卡（綠界 ECPay）預授權付款，與 LINE Pay 並存；當時 LINE Pay 分離式請款申請仍卡在官方審核，此為備援方案。詳見下方「2026-08-05 新增信用卡（ECPay）付款」。
 - **2026-07-31 LINE Pay 已回覆分離式請款開通**（測試商店 test_202606269512），**2026-08-08 已完成 Sandbox 人工端對端驗證**，`docs/line-pay-separated-capture-sandbox-checklist.md` 通過門檻（LP-01、LP-02、LP-04、LP-07、LP-08、LP-09、LP-10）全數通過。LINE Pay 分離式請款重新成為主要付款路徑；ECPay 維持並存的備援角色，不再是唯一可用路徑。`backend/.env` 目前本機已設定 `LINE_PAY_CAPTURE_SEPARATED=true`（僅本機開發驗證用，production 啟用需獨立評估）。
+- 2026-08-09 購物車客製化摘要已補上尺寸（例如「大杯 · 半糖 · 少冰 · 珍珠」）。付款畫面目前只顯示 LINE Pay 入口；ECPay 的 mobile 處理函式、API 與 backend 功能保留，之後可重新開啟 UI 入口。
+- 2026-08-10 已新增可同步 Git 的 Windows 開發啟動器：`01` 共用 Backend、`02` Android App、`03` Expo Web 預覽、`04` 本機控制台。Web 預覽使用 `8083`，並只在該程序內把 Backend 位址切成 `127.0.0.1`，不覆寫 Android 使用的 `mobile/.env`。
 
 ## 2026-08-08 LINE Pay 分離式請款 Sandbox 人工端對端驗證完成
 

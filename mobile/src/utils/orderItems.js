@@ -18,3 +18,9 @@ export function summarizeOrderItems(items) {
     firstItemName: items[0]?.itemName ?? items[0]?.name ?? ""
   };
 }
+
+export function formatOrderItemCustomizations(item, options = {}) {
+  const { separator = " · ", noToppingsLabel = "" } = options;
+  const toppings = item.toppings?.length ? item.toppings.join("、") : noToppingsLabel;
+  return [item.size, item.sweetness, item.ice, toppings].filter(Boolean).join(separator);
+}

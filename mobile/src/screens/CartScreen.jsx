@@ -5,6 +5,7 @@ import { PrimaryButton } from "../components/PrimaryButton";
 import { formatCurrency, getGroupBuyActivityById, isWithdrawalLocked } from "../utils/calculations";
 import { isDeadlineReached } from "../utils/deadlineTime";
 import { getGroupBuyActivityCapacityInfo } from "../utils/groupBuyActivityProgress";
+import { formatOrderItemCustomizations } from "../utils/orderItems";
 
 export function CartScreen({ navigation, route, appState, actions, memberAction, selectedCustomerId }) {
   const [acceptOriginalPrice, setAcceptOriginalPrice] = useState(true);
@@ -60,7 +61,7 @@ export function CartScreen({ navigation, route, appState, actions, memberAction,
             <View style={styles.itemTop}>
               <View style={styles.itemText}>
                 <Text style={styles.itemName}>{item.itemName} x {item.quantity}</Text>
-                <Text style={styles.meta}>{item.sweetness} · {item.ice} · {item.toppings.join("、")}</Text>
+                <Text style={styles.meta}>{formatOrderItemCustomizations(item)}</Text>
               </View>
               <Text style={styles.itemAmount}>{formatCurrency(item.subtotal)}</Text>
             </View>

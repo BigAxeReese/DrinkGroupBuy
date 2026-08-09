@@ -6,6 +6,7 @@ import { PrimaryButton } from "../components/PrimaryButton";
 import { ProgressSummary } from "../components/ProgressSummary";
 import { StatusBadge } from "../components/StatusBadge";
 import { getGroupBuyActivityById, formatCurrency } from "../utils/calculations";
+import { formatOrderItemCustomizations } from "../utils/orderItems";
 
 export function GroupProgressScreen({ navigation, route, appState, actions, memberAction, selectedCustomerId }) {
   const groupBuyActivity = getGroupBuyActivityById(appState.groupBuyActivities, route.params?.groupBuyActivityId);
@@ -72,7 +73,7 @@ export function GroupProgressScreen({ navigation, route, appState, actions, memb
         {order ? (
           <View style={styles.summary}>
             <Text style={styles.title}>{order.itemName} x {order.quantity}</Text>
-            <Text style={styles.meta}>{order.sweetness} · {order.ice} · {order.toppings.join("、")}</Text>
+            <Text style={styles.meta}>{formatOrderItemCustomizations(order)}</Text>
             <Text style={styles.amount}>{formatCurrency(order.subtotal)}</Text>
             <Text style={styles.meta}>paymentStatus：{order.paymentStatus}</Text>
             <Text style={styles.meta}>流團偏好：{order.fallbackPurchasePreference === "accept_original_price" ? "接受原價購買" : "不原價購買"}</Text>

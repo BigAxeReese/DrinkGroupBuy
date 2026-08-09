@@ -9,6 +9,8 @@ import { requestEcpayAuthorization, requestLinePayAuthorization, requestLinePayR
 
 const LINE_PAY_SYNC_POLL_INTERVAL_MS = 3000;
 const LINE_PAY_SYNC_POLL_TIMEOUT_MS = 90000;
+// ECPay implementation remains available; keep its customer-facing entry hidden for now.
+const SHOW_ECPAY_PAYMENT_OPTION = false;
 const PAYMENT_SYNC_FINISHED_STATUSES = new Set([
   "authorized",
   "captured",
@@ -142,11 +144,13 @@ export function PaymentAuthorizationScreen({ navigation, route, appState, action
               variant={selectedProvider === "line_pay" ? "primary" : "secondary"}
               onPress={() => setSelectedProvider("line_pay")}
             />
-            <PrimaryButton
-              label="信用卡"
-              variant={selectedProvider === "ecpay" ? "primary" : "secondary"}
-              onPress={() => setSelectedProvider("ecpay")}
-            />
+            {SHOW_ECPAY_PAYMENT_OPTION ? (
+              <PrimaryButton
+                label="信用卡"
+                variant={selectedProvider === "ecpay" ? "primary" : "secondary"}
+                onPress={() => setSelectedProvider("ecpay")}
+              />
+            ) : null}
           </View>
         </Section>
       ) : null}

@@ -1,0 +1,23 @@
+{
+  "version": "0.0.1",
+  "configurations": [
+    {
+      "name": "backend",
+      "runtimeExecutable": "npm",
+      "runtimeArgs": ["run", "backend:start"],
+      "port": 3001
+    },
+    {
+      "name": "mobile-web",
+      "runtimeExecutable": "npm",
+      "runtimeArgs": ["run", "mobile:web"],
+      "port": 8083
+    },
+    {
+      "name": "ai-agent-office-client",
+      "runtimeExecutable": "npm",
+      "runtimeArgs": ["--prefix", "C:\\vscode\\ai-agent-office\\client", "run", "dev", "--", "--port", "5173", "--strictPort"],
+      "port": 5173
+    }
+  ]
+}
