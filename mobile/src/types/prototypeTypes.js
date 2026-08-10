@@ -37,3 +37,9 @@ export const pickupStatusLabels = {
   cancelled: "已取消",
   expired: "已逾期"
 };
+
+export const refundRequestStatusLabels = {
+  pending: "待審核",
+  approved: "已核准",
+  rejected: "已駁回"
+};

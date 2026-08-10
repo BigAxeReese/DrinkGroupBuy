@@ -46,6 +46,14 @@ export function AdminDashboardScreen({ navigation, appState, actions, memberActi
         <SummaryCard label="已授權付款" value={authorizedOrders} />
       </View>
 
+      <Pressable
+        accessibilityRole="button"
+        onPress={() => navigation.go("adminRefundRequests")}
+        style={({ pressed }) => [styles.secondaryButton, pressed && styles.pressed]}
+      >
+        <Text style={styles.secondaryButtonText}>退款審核</Text>
+      </Pressable>
+
       {message ? <Text style={styles.message}>{message}</Text> : null}
 
       <Section title="全平台團購">

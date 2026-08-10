@@ -167,6 +167,7 @@ function ensureRuntimeSchema(database) {
   `);
 
   widenPaymentProviderCheckConstraints(database);
+  addCustomizationOptionPriceDeltaCheckConstraint(database);
 
   database.exec(`
     CREATE TABLE IF NOT EXISTS refund_requests (
@@ -333,6 +334,54 @@ function widenPaymentProviderCheckConstraints(database) {
       const fkViolations = database.prepare("PRAGMA foreign_key_check;").all();
       if (fkViolations.length > 0) {
         throw new Error(`payment provider CHECK migration produced foreign key violations: ${JSON.stringify(fkViolations)}`);
+      }
+
+      database.exec("COMMIT;");
+    } catch (error) {
+      database.exec("ROLLBACK;");
+      throw error;
+    }
+  } finally {
+    database.exec("PRAGMA foreign_keys = ON;");
+  }
+}
+
+// SQLite CHECK constraints cannot be altered in place; adding the non-negative
+// guard requires rebuilding the table (https://www.sqlite.org/lang_altertable.html #6).
+function addCustomizationOptionPriceDeltaCheckConstraint(database) {
+  const table = database.prepare(
+    "SELECT sql FROM sqlite_master WHERE type = 'table' AND name = 'customization_options'"
+  ).get();
+  if (!table || table.sql.includes("price_delta >= 0")) return;
+
+  database.exec("PRAGMA foreign_keys = OFF;");
+  try {
+    database.exec("BEGIN;");
+    try {
+      database.exec(`
+        CREATE TABLE customization_options_new (
+          id TEXT PRIMARY KEY,
+          menu_item_id TEXT NOT NULL REFERENCES menu_items(id) ON DELETE CASCADE,
+          option_type TEXT NOT NULL CHECK (option_type IN ('sweetness', 'ice', 'topping', 'size')),
+          label TEXT NOT NULL,
+          price_delta INTEGER NOT NULL DEFAULT 0 CHECK (price_delta >= 0),
+          sort_order INTEGER NOT NULL DEFAULT 0,
+          is_available INTEGER NOT NULL DEFAULT 1 CHECK (is_available IN (0, 1))
+        );
+
+        INSERT INTO customization_options_new (
+          id, menu_item_id, option_type, label, price_delta, sort_order, is_available
+        )
+        SELECT id, menu_item_id, option_type, label, price_delta, sort_order, is_available
+        FROM customization_options;
+
+        DROP TABLE customization_options;
+        ALTER TABLE customization_options_new RENAME TO customization_options;
+      `);
+
+      const fkViolations = database.prepare("PRAGMA foreign_key_check;").all();
+      if (fkViolations.length > 0) {
+        throw new Error(`customization_options price_delta CHECK migration produced foreign key violations: ${JSON.stringify(fkViolations)}`);
       }
 
       database.exec("COMMIT;");

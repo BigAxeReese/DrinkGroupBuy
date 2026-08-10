@@ -77,7 +77,7 @@ CREATE TABLE customization_options (
   menu_item_id TEXT NOT NULL REFERENCES menu_items(id) ON DELETE CASCADE,
   option_type TEXT NOT NULL CHECK (option_type IN ('sweetness', 'ice', 'topping', 'size')),
   label TEXT NOT NULL,
-  price_delta INTEGER NOT NULL DEFAULT 0,
+  price_delta INTEGER NOT NULL DEFAULT 0 CHECK (price_delta >= 0),
   sort_order INTEGER NOT NULL DEFAULT 0,
   is_available INTEGER NOT NULL DEFAULT 1 CHECK (is_available IN (0, 1))
 );

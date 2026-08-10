@@ -434,6 +434,95 @@ export async function getPickupCredential(orderId) {
   return payload.credential;
 }
 
+export async function createMerchantRefundRequest(orderId, input) {
+  const response = await fetch(
+    `${backendBaseUrl}/api/merchant/orders/${encodeURIComponent(orderId)}/refund-requests`,
+    {
+      method: "POST",
+      headers: withAuthHeaders({ "Content-Type": "application/json" }),
+      body: JSON.stringify(input)
+    }
+  );
+  const payload = await response.json();
+  if (!response.ok) {
+    const error = new Error(payload.error ?? "Create refund request failed");
+    error.status = response.status;
+    error.payload = payload;
+    throw error;
+  }
+  return payload;
+}
+
+export async function listMerchantRefundRequests(storeId, input = {}) {
+  const query = input.status ? `?status=${encodeURIComponent(input.status)}` : "";
+  const response = await fetch(
+    `${backendBaseUrl}/api/merchant/stores/${encodeURIComponent(storeId)}/refund-requests${query}`,
+    { headers: withAuthHeaders() }
+  );
+  const payload = await response.json();
+  if (!response.ok) {
+    const error = new Error(payload.error ?? "List refund requests failed");
+    error.status = response.status;
+    error.payload = payload;
+    throw error;
+  }
+  return payload.refundRequests;
+}
+
+export async function listAdminRefundRequests(input = {}) {
+  const query = input.status ? `?status=${encodeURIComponent(input.status)}` : "";
+  const response = await fetch(
+    `${backendBaseUrl}/api/admin/refund-requests${query}`,
+    { headers: withAuthHeaders() }
+  );
+  const payload = await response.json();
+  if (!response.ok) {
+    const error = new Error(payload.error ?? "List refund requests failed");
+    error.status = response.status;
+    error.payload = payload;
+    throw error;
+  }
+  return payload.refundRequests;
+}
+
+export async function approveAdminRefundRequest(requestId, input = {}) {
+  const response = await fetch(
+    `${backendBaseUrl}/api/admin/refund-requests/${encodeURIComponent(requestId)}/approve`,
+    {
+      method: "POST",
+      headers: withAuthHeaders({ "Content-Type": "application/json" }),
+      body: JSON.stringify(input)
+    }
+  );
+  const payload = await response.json();
+  if (!response.ok) {
+    const error = new Error(payload.error ?? "Approve refund request failed");
+    error.status = response.status;
+    error.payload = payload;
+    throw error;
+  }
+  return payload;
+}
+
+export async function rejectAdminRefundRequest(requestId, input) {
+  const response = await fetch(
+    `${backendBaseUrl}/api/admin/refund-requests/${encodeURIComponent(requestId)}/reject`,
+    {
+      method: "POST",
+      headers: withAuthHeaders({ "Content-Type": "application/json" }),
+      body: JSON.stringify(input)
+    }
+  );
+  const payload = await response.json();
+  if (!response.ok) {
+    const error = new Error(payload.error ?? "Reject refund request failed");
+    error.status = response.status;
+    error.payload = payload;
+    throw error;
+  }
+  return payload;
+}
+
 async function postPickupRequest(path, body) {
   const response = await fetch(`${backendBaseUrl}${path}`, {
     method: "POST",

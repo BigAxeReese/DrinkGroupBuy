@@ -1,5 +1,10 @@
 import { StyleSheet, Text, View } from "react-native";
-import { groupBuyActivityStatusLabels, paymentStatusLabels, pickupStatusLabels } from "../types/prototypeTypes";
+import {
+  groupBuyActivityStatusLabels,
+  paymentStatusLabels,
+  pickupStatusLabels,
+  refundRequestStatusLabels
+} from "../types/prototypeTypes";
 
 export function StatusBadge({ owner = "groupBuyActivity", value }) {
   const fallbackLabels = {
@@ -8,7 +13,8 @@ export function StatusBadge({ owner = "groupBuyActivity", value }) {
   const labelMaps = {
     groupBuyActivity: groupBuyActivityStatusLabels,
     payment: paymentStatusLabels,
-    pickup: pickupStatusLabels
+    pickup: pickupStatusLabels,
+    refundRequest: refundRequestStatusLabels
   };
   const label = labelMaps[owner]?.[value] ?? fallbackLabels[value] ?? value;
 
@@ -44,5 +50,7 @@ const styles = StyleSheet.create({
   not_required: { backgroundColor: "#e2e8f0" },
   ready: { backgroundColor: "#dcfce7" },
   picked_up: { backgroundColor: "#e2e8f0" },
+  approved: { backgroundColor: "#dcfce7" },
+  rejected: { backgroundColor: "#fee2e2" },
   default: { backgroundColor: "#e2e8f0" }
 });

@@ -13,9 +13,11 @@ import { PickupInfoScreen } from "../screens/PickupInfoScreen";
 import { MerchantGroupBuyActivityCreateScreen } from "../screens/MerchantGroupBuyActivityCreateScreen";
 import { MerchantDashboardScreen } from "../screens/MerchantDashboardScreen";
 import { MerchantMenuManagementScreen } from "../screens/MerchantMenuManagementScreen";
+import { MerchantRefundRequestsScreen } from "../screens/MerchantRefundRequestsScreen";
 import { CustomerPlaceholderScreen } from "../screens/CustomerPlaceholderScreen";
 import { CustomerOrdersScreen } from "../screens/CustomerOrdersScreen";
 import { AdminDashboardScreen } from "../screens/AdminDashboardScreen";
+import { AdminRefundRequestsScreen } from "../screens/AdminRefundRequestsScreen";
 import { CartScreen } from "../screens/CartScreen";
 import { LiveMapScreen } from "../screens/LiveMapScreen";
 import { StoreMenuScreen } from "../screens/StoreMenuScreen";
@@ -1255,9 +1257,11 @@ export function AppNavigator() {
         {current.name === "merchantCreate" && <MerchantGroupBuyActivityCreateScreen {...screenProps} />}
         {current.name === "merchantDashboard" && <MerchantDashboardScreen {...screenProps} />}
         {current.name === "merchantMenu" && <MerchantMenuManagementScreen {...screenProps} />}
+        {current.name === "merchantRefundRequests" && <MerchantRefundRequestsScreen {...screenProps} />}
         {current.name === "customerPlaceholder" && <CustomerPlaceholderScreen {...screenProps} />}
         {current.name === "customerOrders" && <CustomerOrdersScreen {...screenProps} />}
         {current.name === "adminDashboard" && <AdminDashboardScreen {...screenProps} />}
+        {current.name === "adminRefundRequests" && <AdminRefundRequestsScreen {...screenProps} />}
       </View>
       {current.name !== "roleSelect" ? (
         <BottomNav

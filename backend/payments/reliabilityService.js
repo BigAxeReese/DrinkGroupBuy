@@ -257,6 +257,9 @@ function startLinePayReconciliationScheduler(input = {}) {
 }
 
 function stoppedScheduler(reason) {
+  return { enabled: false, reason, runOnce: async () => null, stop() {} };
+}
+
 function logAlertRequiredJobs(results, logger, source) {
   for (const entry of results || []) {
     if (!entry.job?.alertRequired) continue;
@@ -272,9 +275,6 @@ function logAlertRequiredJobs(results, logger, source) {
       lastError: entry.job.lastError
     });
   }
-}
-
-  return { enabled: false, reason, runOnce: async () => null, stop() {} };
 }
 
 function positiveInteger(value, fallback) {
