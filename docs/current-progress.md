@@ -1,6 +1,6 @@
 # 目前進度
 
-最後更新：2026-08-10
+最後更新：2026-08-12
 
 換電腦或交接給其他 AI 時，請先閱讀 `docs/handoff-summary.md`。
 
@@ -10,7 +10,7 @@
 
 - Firebase Auth + Google Login 已實作，backend 會驗證 Firebase ID token，再依開發資料庫的 `users.firebase_uid`、`user_roles` 與 `merchant_users` 判斷身份。
 - 本機開發已新增 dev-only 身份切換器；只有 backend `AUTH_DEV_MODE=true` 且 mobile `EXPO_PUBLIC_AUTH_MODE=dev` 時才會顯示，可用下拉選單切換 SQLite 內所有有效顧客、商家與開發補救身份。
-- 開發 runtime 預設仍使用 SQLite；auth、菜單、活動、首次建單、訂單讀取、authorization request／confirm／cancel 與顧客取消已可受控切換 PostgreSQL。capture 與 settlement orchestration 已有 PostgreSQL repository／service building block，但尚未接入 server route／scheduler；改單／revision、refund 與 pickup 仍使用 SQLite。
+- 開發 runtime 預設仍使用 SQLite；auth、菜單、活動、首次建單、訂單讀取、authorization request／confirm／cancel、顧客取消、capture／settlement、改單／revision、refund 與 pickup 皆已可受控切換 PostgreSQL（分別由 `PAYMENT_CAPTURE_RUNTIME`／`GROUP_BUY_SETTLEMENT_RUNTIME`／`ORDER_REVISION_RUNTIME`／`PAYMENT_REFUND_RUNTIME`／`PICKUP_CREDENTIAL_RUNTIME` 控制，皆已接上 server route／scheduler，且都要求完整 postgres 訂單寫入 stack）；capture／settlement／refund 在 `LINE_PAY_ENV=production` 時另需明確設定 `PAYMENT_CAPTURE_RUNTIME_ALLOW_PRODUCTION=true` 才允許。
 - LINE Pay 付款主幹已拆成獨立模組，已有 request、confirm、cancel、capture、void、refund、訂單修改後重新預授權與截止結算排程。
 - 付款結算 smoke test 已於 2026-07-19 通過，包含達標請款、未達標原價請款／取消授權、排程結算、修改訂單替換授權、截止後拒絕預授權、三次自動請款上限、取餐前 15 分鐘以前的手動重新付款，以及退款 idempotency。
 - 開發資料庫曾暴露同一筆 LINE Pay 失敗請款被無限重試的問題；目前已改為截止時第一次請款，暫時性失敗後每 30 秒重試，總計最多三次，並在重試前查詢 provider 狀態。
@@ -287,6 +287,7 @@ ECPay 與 LINE Pay 機制上的關鍵差異（因此無法完全共用程式碼�
 
 尚未完成：
 
+- 2026-08-11 已確認付款前必須保存顧客對「取餐與逾期未取規則」的同意證據；候選 `order_rule_consents` 欄位與 LINE Pay request gate 已記錄於 `docs/database-field-spec.md`、`docs/database-candidates.md` 與 `docs/api-candidates.md`。目前尚未修改 SQLite／PostgreSQL schema、Backend、Mobile 或既有資料，現行付款流程也尚未強制此檢查。
 - 已授權後的訂單修改 / 重新授權 mobile 第一版已串接；訂單列表現以 Backend 回應為權威、local state 僅作 cache，仍需細化失敗提示。
 - LINE Pay refund 執行本身仍只有 dev/backend 後端 API 與 smoke test；商家退款申請與營運核准／駁回已有後端第一版（`refund-request:smoke` 覆蓋），但尚未有商家／營運 UI、核准失敗告警與正式 sandbox 人工端對端測試。
 - LINE Pay webhook 第一版不列為必要入口；目前付款同步以 confirm/cancel redirect、polling 與後續 provider 狀態查詢為主。
@@ -296,12 +297,11 @@ ECPay 與 LINE Pay 機制上的關鍵差異（因此無法完全共用程式碼�
 - Provider reconciliation、持久化 retry jobs、payment／settlement／cancel／repay／pickup DB lease 與 terminal job 告警旗標已完成第一版；兩程序 claim／lease takeover 與 PostgreSQL settlement row-lock proof 已通過，仍缺正式告警通知管道、LINE Pay Sandbox 人工端對端與 server 接線驗收。
 - Mobile 即時預估折扣／尾差已接上 Backend 活動列表；顧客首頁、活動詳情與地圖的店家摘要也已使用同一活動資料。顧客首頁、商家儀表板、活動詳情與團購進度的同步失敗提示／重試已完成；尚未完成 Android 實機 E2E、附近店家距離與截止後專用最終快照顯示。
 - PostgreSQL `003_activity_settlement_discount_snapshot_postgres.sql` 已永久套用本機開發資料庫；專用 runner 會辨識未套用、完整套用與部分套用，並驗證五個折扣快照欄位、constraints 與既有資料回填。SQLite runtime 仍以既有欄位重算，沒有雙寫。
-- 正式 migration 系統。
 - 完整 Android mobile E2E 與 LINE Pay sandbox 人工驗證仍未完成；目前自動 smoke、Expo Doctor 與 Web bundle 已通過。
 
 目前重要限制：
 
-- 訂單相關 runtime 預設仍是 SQLite；受控 PostgreSQL server 模式已涵蓋首次建單、顧客／商家列表、訂單明細、首次 authorization request／confirm／cancel、一般 authorization void 與顧客取消。capture／settlement PostgreSQL building block 已驗證，但 server route 與 scheduler 仍保持停用，避免在分離式請款 Sandbox 核准前暴露自動請款；改單／revision、refund 與 pickup 仍回 `503 customer_order_runtime_mismatch`，目前不可視為付款 E2E runtime。
+- 訂單相關 runtime 預設仍是 SQLite；受控 PostgreSQL server 模式已涵蓋首次建單、顧客／商家列表、訂單明細、首次 authorization request／confirm／cancel、一般 authorization void 與顧客取消。capture／settlement、改單／revision、refund 與 pickup 現在也已接上 server route／scheduler，分別由 `PAYMENT_CAPTURE_RUNTIME`／`GROUP_BUY_SETTLEMENT_RUNTIME`／`ORDER_REVISION_RUNTIME`／`PAYMENT_REFUND_RUNTIME`／`PICKUP_CREDENTIAL_RUNTIME` 控制，不再回 `503 customer_order_runtime_mismatch`；capture／settlement 與 refund 在 `LINE_PAY_ENV=production` 時仍需另外明確設定 `PAYMENT_CAPTURE_RUNTIME_ALLOW_PRODUCTION=true` 才會允許，避免在未經評估前暴露正式自動請款／退款。PostgreSQL HTTP／scheduler restart proof 尚未執行，目前仍不可視為付款 E2E runtime。
 - 如果 mobile local activity 已過期或不存在於後端，送單會失敗。
 
 ## Database / 資料庫
@@ -364,16 +364,20 @@ PostgreSQL 方向：
 - PostgreSQL schema draft：`database/migrations/001_initial_postgres.sql`
 - PostgreSQL seed draft：`database/migrations/002_seed_dev_postgres.sql`
 - PostgreSQL 結算快照 migration draft：`database/migrations/003_activity_settlement_discount_snapshot_postgres.sql`
+- PostgreSQL 改單／refund／pickup migration draft：`database/migrations/004_order_revision_refund_pickup_postgres.sql`（`npm run postgres-order-revision-refund-pickup-tables:apply`）
 - PostgreSQL 本機驗證設定：`database/docker-compose.postgres.yml`
 
 目前 PostgreSQL 狀態：
 
-- PostgreSQL 已完成 auth／公開菜單／活動／訂單讀取，以及商家建團、商家菜單、顧客首次建單、付款 request／confirm／cancel、一般 authorization void 與顧客取消受控切片。
-- 所有 server 開關預設仍是 `sqlite`，沒有雙寫。建單、confirm、cancel／void 與顧客取消都採 activity-first lock；capture／settlement repository 已遷移但尚未接 server，改單／revision、refund 與 pickup 尚未遷移。
-- 本機 PostgreSQL 16 已套用 `001_initial_postgres.sql`、`002_seed_dev_postgres.sql` 與 `003_activity_settlement_discount_snapshot_postgres.sql`；服務只監聽 `localhost`，schema／backfill 驗證通過。
+- PostgreSQL 已完成 auth／公開菜單／活動／訂單讀取，以及商家建團、商家菜單、顧客首次建單、付款 request／confirm／cancel、一般 authorization void、顧客取消、capture／settlement、改單／revision、refund 與 pickup 受控切片。
+- 所有 server 開關預設仍是 `sqlite`，沒有雙寫。建單、confirm、cancel／void 與顧客取消都採 activity-first lock；capture／settlement、改單／revision、refund 與 pickup 皆已遷移並接上各自的 server route／scheduler（各自獨立的 `*_RUNTIME` 開關，皆要求完整 postgres 訂單寫入 stack；capture／settlement／refund 在 production 另需 `PAYMENT_CAPTURE_RUNTIME_ALLOW_PRODUCTION=true` 明確 opt-in）。
+- 本機 PostgreSQL 16 已套用 `001_initial_postgres.sql`、`002_seed_dev_postgres.sql`、`003_activity_settlement_discount_snapshot_postgres.sql` 與 `004_order_revision_refund_pickup_postgres.sql`；服務只監聽 `localhost`，schema／backfill 驗證通過。
 - PostgreSQL cancel redirect、mock void、顧客取消、跨連線 activity lock、idempotency 與清理歸零 HTTP proof 已正式通過。
-- 新增單筆 capture repository／service building block；`payment-capture:smoke`、`line-pay-capture-service:smoke` 與真實 PostgreSQL `payment-capture-postgres:smoke` 已通過，覆蓋 mock capture 成功、provider 暫時失敗、retry attempt、activity lock 與清理歸零。此 building block 尚未接入 server／settlement scheduler，不是可直接請款的新入口。
-- 新增 PostgreSQL settlement repository／service building block；`group-buy-settlement:smoke` 與真實 `group-buy-settlement-postgres:smoke` 已驗證 settlement plan、capture retry state、五欄折扣快照、持久化 job retry／complete、`FOR UPDATE SKIP LOCKED`、跨執行個體 operation lock、mock capture 與清理歸零。尚未接入 server，不是可直接請款的新入口。
+- 新增單筆 capture repository／service building block；`payment-capture:smoke`、`line-pay-capture-service:smoke` 與真實 PostgreSQL `payment-capture-postgres:smoke` 已通過，覆蓋 mock capture 成功、provider 暫時失敗、retry attempt、activity lock 與清理歸零。已接入 server：`PAYMENT_CAPTURE_RUNTIME` 與 `GROUP_BUY_SETTLEMENT_RUNTIME` 需同為 postgres 才會啟用結算相關路由與 scheduler。
+- 新增 PostgreSQL settlement repository／service building block；`group-buy-settlement:smoke` 與真實 `group-buy-settlement-postgres:smoke` 已驗證 settlement plan、capture retry state、五欄折扣快照、持久化 job retry／complete、`FOR UPDATE SKIP LOCKED`、跨執行個體 operation lock、mock capture 與清理歸零。已接入 server（見上一項的一致性防護）。
+- 2026-08-12 已套用 PostgreSQL migration `004_order_revision_refund_pickup_postgres.sql`（`npm run postgres-order-revision-refund-pickup-tables:apply`，已驗證冪等）：新增 `order_revisions`／`order_revision_items`／`order_revision_item_customizations`、`payment_authorizations.order_revision_id`、`refund_requests`，並補上 `payment_authorizations`／`payment_refunds` provider CHECK 缺漏的 `ecpay`／`mock_ecpay`（001 draft 早於 ECPay 加入，原本沒收錄）。同批新增三個 PostgreSQL repository 並接入 server route：`backend/database/repositories/orderRevisionRepository.js`（`ORDER_REVISION_RUNTIME`，重用 `customerOrderWriteRepository.js` 既有計價／折扣驗證，並讓 `paymentAuthorizationRequestRepository.js`／`ConfirmRepository.js`／`CancelRepository.js` 的 Postgres 端同步支援 revision，行為對齊 `backend/db.js`）、`backend/database/repositories/paymentRefundRepository.js`（`PAYMENT_REFUND_RUNTIME`，涵蓋 provider 退款執行與商家退款申請審核流程）、`backend/database/repositories/pickupCredentialRepository.js`（`PICKUP_CREDENTIAL_RUNTIME`，涵蓋 mark-ready、顧客／商家查詢、redeem 與取貨逾期排程，皆用 row lock 與 operation lock）。分別以 `npm run order-revision-postgres:smoke`、`npm run payment-refund-postgres:smoke`、`npm run pickup-credential-postgres:smoke` 驗證（含容量超賣、cancel-pending、reserved-word 別名、並行 race、重複 redeem、取貨逾期等情境），並重跑既有約 20 個 SQLite smoke test 確認未受影響。
+- 2026-08-12 本次遷移過程中發現並修正的問題：(a) `server.js` 原本用「order-write runtime 是 postgres 就對 pickup 相關路由回 503」的判斷式，沒有分別檢查 pickup 自己是否已是 postgres，導致 pickup 路由被錯誤擋下；refund 接線時撞到同樣的模式，一併修正並類推套用到 order-revision。(b) refund 查詢把 SQLite 版本沿用的 `authorization` 別名直接搬到 Postgres，但該字是 Postgres 保留字，已改名為 `payment_auth`。(c) 商家退款申請建立流程在 Postgres 上有並行 race：兩筆同時對同一筆請款送出的申請都可能先後通過「目前沒有 pending 申請」檢查，資料庫 unique constraint 雖擋住重複寫入，但落敗的一方原本會收到未處理的資料庫錯誤，已改為攔截該 constraint 錯誤並重查後回傳乾淨的「已有待處理申請」錯誤，並用真實併發請求（`Promise.all` 兩筆同時呼叫）驗證。另外修正一個與本次 postgres 遷移無關、由更早改動遺留的既有問題：`scripts/pickup-credential-smoke.js`（SQLite smoke test）沒有 `await` `backend/pickup/credentialService.js` 內 4 個已改成 async 的函式，已改成 async IIFE 並補上 await。
+- 2026-08-12 已新增統一 PostgreSQL migration runner `database/migrate.js`（`npm run postgres:migrate`），取代個別 migration 各自的 ad hoc apply 腳本：已刪除 `database/apply-postgres-settlement-snapshot.js`（原 `npm run postgres-settlement-snapshot:apply`）與 `database/apply-postgres-order-revision-refund-pickup-tables.js`（原 `npm run postgres-order-revision-refund-pickup-tables:apply`），對應 npm script 也已移除；`001`／`002` 先前完全沒有專屬 apply 腳本，只能靠手動 `psql` 指令套用。Runner 依 `database/migrations/` 檔名數字前綴順序執行，用自動建立的 `schema_migrations` 資料表（`version`／`name`／`applied_at`）追蹤已套用版本，只套用尚未記錄的檔案，每個檔案各自包在一個 transaction 內。已在全新 throwaway PostgreSQL schema 驗證：依序成功套用全部 4 個 migration、建立 35 個資料表並正確記錄 4 個版本，重跑正確偵測無待套用項目；本機開發資料庫已一次性直接 bootstrap `schema_migrations`（非 checked-in 腳本，先確認各 migration 預期資料表／欄位已存在），之後執行 `npm run postgres:migrate` 正確回報已是最新狀態。此工作不含正式環境部署程序（備份、staging 晉升、rollback 工具），目前尚無正式 PostgreSQL 部署。
 - PostgreSQL draft 已拆分 `users`、`user_private_profiles`、`user_public_profiles`。
 - PostgreSQL draft 中每個商家帳號透過 `merchant_users.store_id` 對應一間店；不分 owner／manager／staff，API 相容欄位 `permissionLevel` 在 PostgreSQL 回傳 `null`。
 - PostgreSQL seed draft 有 4 個顧客、7 個商家、1 個 dev/admin 補救帳號、7 間店、8 個菜單項目與 96 個客製化選項。
@@ -406,8 +410,8 @@ database/test/drink-group-buy-test.sqlite
 
 0. ~~LINE Pay 核准分離式請款後，執行 Sandbox reconciliation、capture、void 與 lease takeover 人工端對端驗證~~ **已於 2026-08-08 完成**，詳見「2026-08-08 LINE Pay 分離式請款 Sandbox 人工端對端驗證完成」。
 1. 修復 `backend/payments/reliabilityService.js` 的 `logAlertRequiredJobs` 函式巢狀錯誤（本次驗證發現，不影響對帳核心邏輯，但告警日誌完全沒有輸出）。
-2. 將已驗證的 capture／settlement repositories 明確接入 Backend，並只在 Sandbox 啟用 PostgreSQL settlement route／scheduler；仍禁止雙寫。
-3. 為 server runtime 加入 `PAYMENT_CAPTURE_RUNTIME` 與 `GROUP_BUY_SETTLEMENT_RUNTIME` 全組一致性防護，再做 PostgreSQL HTTP／scheduler restart proof。
+2. ~~將已驗證的 capture／settlement repositories 明確接入 Backend，並只在 Sandbox 啟用 PostgreSQL settlement route／scheduler；仍禁止雙寫。~~ **已完成**：`PAYMENT_CAPTURE_RUNTIME` 與 `GROUP_BUY_SETTLEMENT_RUNTIME` 須同為 postgres 才會啟用 `POST /api/admin/group-buy-activities/:activityId/settle` 與 deadline settlement scheduler，並要求完整 postgres 訂單寫入 stack；`LINE_PAY_ENV=production` 時另需明確設定 `PAYMENT_CAPTURE_RUNTIME_ALLOW_PRODUCTION=true`（此設計已滿足原本第 3 項的一致性防護要求）。PostgreSQL HTTP／scheduler restart proof 尚未執行。
+3. 改單／revision、refund 與 pickup 已比照相同模式接入 Backend（`ORDER_REVISION_RUNTIME`／`PAYMENT_REFUND_RUNTIME`／`PICKUP_CREDENTIAL_RUNTIME`，皆要求完整 postgres 訂單寫入 stack；refund 另需 `PAYMENT_CAPTURE_RUNTIME` 也是 postgres），已分別用 `order-revision-postgres:smoke`／`payment-refund-postgres:smoke`／`pickup-credential-postgres:smoke` 驗證；下一步視需要排定 Sandbox／production 啟用時程與 HTTP／restart proof。
 4. 將正式 production 自動請款列為獨立人工核准步驟，不跟 Sandbox 啟用綁在一起；`backend/.env` 的 `LINE_PAY_CAPTURE_SEPARATED=true` 目前僅為本機驗證設定，正式環境仍需獨立評估與設定流程。
 5. 前端新增截止後專用最終結算快照，明確區分招募中預估折扣與結算後不可變折扣／尾差。
 6. 細化訂單、付款失敗、重試與重新付款狀態，避免只顯示通用錯誤。

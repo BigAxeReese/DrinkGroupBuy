@@ -20,6 +20,7 @@ function createPaymentAuthorizationRequestRepository(input = {}) {
     for (const name of [
       "getOrderPaymentContext",
       "getLatestAuthorizationForOrder",
+      "getLatestAuthorizationForOrderRevision",
       "createPendingAuthorization",
     ]) {
       if (typeof gateway[name] !== "function") {
@@ -31,6 +32,9 @@ function createPaymentAuthorizationRequestRepository(input = {}) {
       getOrderPaymentContext: async (orderId) => gateway.getOrderPaymentContext(orderId),
       getLatestAuthorizationForOrder: async (orderId) => (
         gateway.getLatestAuthorizationForOrder(orderId)
+      ),
+      getLatestAuthorizationForOrderRevision: async (orderRevisionId) => (
+        gateway.getLatestAuthorizationForOrderRevision(orderRevisionId)
       ),
       createPendingAuthorization: async (authorizationInput) => (
         gateway.createPendingAuthorization(authorizationInput)
@@ -50,6 +54,9 @@ function createPaymentAuthorizationRequestRepository(input = {}) {
     getOrderPaymentContext: (orderId) => getPostgresOrderPaymentContext(database, orderId),
     getLatestAuthorizationForOrder: (orderId) => (
       getLatestPostgresAuthorizationForOrder(database, orderId)
+    ),
+    getLatestAuthorizationForOrderRevision: (orderRevisionId) => (
+      getLatestPostgresAuthorizationForOrderRevision(database, orderRevisionId)
     ),
     createPendingAuthorization: (authorizationInput) => (
       createPostgresPendingAuthorization(database, authorizationInput)
@@ -129,22 +136,46 @@ async function getLatestPostgresAuthorizationForOrder(database, orderId) {
   return result.rows[0] ? mapPaymentAuthorization(result.rows[0]) : null;
 }
 
+async function getLatestPostgresAuthorizationForOrderRevision(database, orderRevisionId) {
+  const result = await database.query(`
+    SELECT *
+    FROM payment_authorizations
+    WHERE order_revision_id = $1
+    ORDER BY created_at DESC, id DESC
+    LIMIT 1
+  `, [orderRevisionId]);
+  return result.rows[0] ? mapPaymentAuthorization(result.rows[0]) : null;
+}
+
 async function createPostgresPendingAuthorization(database, input) {
-  if (input.orderRevisionId) return null;
   const authorizationId = `payment-authorization-${randomUUID()}`;
   const now = input.now || new Date().toISOString();
   const provider = input.provider || "line_pay";
   const paymentFlow = input.paymentFlow || "authorization";
 
   return database.transaction(async (transaction) => {
+    let revision = null;
+    if (input.orderRevisionId) {
+      const revisionResult = await transaction.query(`
+        SELECT id, order_id, status, original_amount
+        FROM order_revisions
+        WHERE id = $1
+      `, [input.orderRevisionId]);
+      revision = revisionResult.rows[0] || null;
+      if (!revision || revision.status !== "pending_authorization") return null;
+      if (input.orderId && revision.order_id !== input.orderId) return null;
+    }
+
+    const resolvedOrderId = revision?.order_id || input.orderId;
     const orderResult = await transaction.query(`
       SELECT id, original_amount
       FROM orders
       WHERE id = $1
       FOR UPDATE
-    `, [input.orderId]);
+    `, [resolvedOrderId]);
     const order = orderResult.rows[0];
-    if (!order || Number(order.original_amount) !== Number(input.amount)) return null;
+    const expectedAmount = revision ? Number(revision.original_amount) : Number(order?.original_amount);
+    if (!order || expectedAmount !== Number(input.amount)) return null;
 
     if (input.providerTransactionId) {
       const existingResult = await transaction.query(`
@@ -161,6 +192,7 @@ async function createPostgresPendingAuthorization(database, input) {
       INSERT INTO payment_authorizations (
         id,
         order_id,
+        order_revision_id,
         provider,
         payment_flow,
         status,
@@ -169,10 +201,11 @@ async function createPostgresPendingAuthorization(database, input) {
         provider_authorization_id,
         created_at,
         updated_at
-      ) VALUES ($1, $2, $3, $4, 'pending', $5, 0, $6, $7, $7)
+      ) VALUES ($1, $2, $3, $4, $5, 'pending', $6, 0, $7, $8, $8)
     `, [
       authorizationId,
-      input.orderId,
+      resolvedOrderId,
+      revision?.id || null,
       provider,
       paymentFlow,
       Number(input.amount),
@@ -211,8 +244,8 @@ async function createPostgresPendingAuthorization(database, input) {
       `audit-log-${randomUUID()}`,
       authorizationId,
       JSON.stringify({
-        orderId: input.orderId,
-        orderRevisionId: null,
+        orderId: resolvedOrderId,
+        orderRevisionId: revision?.id || null,
         paymentFlow,
         providerTransactionId: input.providerTransactionId || null,
       }),
@@ -240,7 +273,7 @@ async function createPostgresPendingAuthorization(database, input) {
       `payment-job-${randomUUID()}`,
       authorizationId,
       JSON.stringify({
-        orderId: input.orderId,
+        orderId: resolvedOrderId,
         providerTransactionId: input.providerTransactionId || null,
         paymentFlow,
         amount: Number(input.amount),
@@ -274,7 +307,7 @@ function mapPaymentAuthorization(row) {
   return {
     id: row.id,
     orderId: row.order_id,
-    orderRevisionId: null,
+    orderRevisionId: row.order_revision_id || null,
     provider: row.provider,
     paymentFlow: row.payment_flow || "authorization",
     status: row.status,

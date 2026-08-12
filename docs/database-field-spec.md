@@ -1,6 +1,6 @@
 # 資料庫欄位規格
 
-最後更新：2026-08-05
+最後更新：2026-08-11
 
 ## 語言與範圍
 
@@ -246,6 +246,22 @@ PostgreSQL draft 另有 `phone_verified_at`、`email_verified_at`、`last_login_
 | 12  | `pickup_status`                | 取貨狀態       | TEXT    |           | `not_ready`, `ready`, `picked_up`, `cancelled`, `expired`                         | `ready`                     |
 | 13  | `submitted_at`                 | 送出時間       | TEXT    |           | ISO datetime string                                                               | `2026-06-25T10:15:00+08:00` |
 | 14  | `updated_at`                   | 更新時間       | TEXT    |           | ISO datetime string                                                               | `2026-06-25T10:30:00+08:00` |
+
+## 候選：`order_rule_consents`
+
+此表為 2026-08-11 已確認的候選設計，用於保存顧客在進入付款前對「取餐與逾期未取規則」的同意證據。目前尚未加入 `database/schema.sql`、SQLite runtime、PostgreSQL migration、Backend 或 Mobile，不可視為已實作功能。
+
+同意採追加歷史紀錄，不以可覆寫的單一 boolean 取代；一筆紀錄的存在即表示顧客曾同意該版本。後續規則版本變更時建立新紀錄，舊紀錄不得覆寫。
+
+| No. | Field name             | 中文名稱         | Type | Key               | 規則 / 格式 / 範圍                                                                         | Example                     |
+| --- | ---------------------- | ---------------- | ---- | ----------------- | ------------------------------------------------------------------------------------------ | --------------------------- |
+| 1   | `id`                   | 規則同意紀錄編號 | TEXT | PK                | 建議使用 `rule_consent_` 加唯一後綴                                                        | `rule_consent_001`          |
+| 2   | `order_id`             | 訂單編號         | TEXT | FK, INDEX, UNIQUE triple | References `orders(id)`；與 `rule_type`、`rule_version` 組成唯一鍵                    | `order_001`                 |
+| 3   | `customer_user_id`     | 顧客使用者編號   | TEXT | FK, INDEX         | References `users(id)`；必須與該訂單的 `customer_user_id` 相同                             | `user_001`                  |
+| 4   | `rule_type`            | 規則類型         | TEXT | UNIQUE triple     | 第一版固定為 `pickup_overdue`；與 `order_id`、`rule_version` 組成唯一鍵                    | `pickup_overdue`            |
+| 5   | `rule_version`         | 規則版本         | TEXT | UNIQUE triple     | 必填；由 Backend 驗證為付款當下有效版本，不接受只由 Client 自行宣告                        | `v1.0`                      |
+| 6   | `rule_content_snapshot` | 規則內容快照    | TEXT |                   | 必填；保存 Backend 當時提供的完整規則內容，規則日後修改不得影響既有紀錄                    | `取餐代碼自取餐開始起保留3小時……` |
+| 7   | `consented_at`         | 規則同意時間     | TEXT | INDEX             | 必填；使用 Backend 伺服器產生的 ISO datetime，不採信 Client 本機時間                        | `2026-08-10T10:30:00+08:00` |
 
 ## `order_items`
 

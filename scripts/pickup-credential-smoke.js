@@ -190,6 +190,7 @@ if (hadDatabase) fs.copyFileSync(databasePath, backupPath);
 
 const now = "2026-07-29T10:00:00.000Z";
 
+(async () => {
 try {
   resetDatabase();
   seedDatabase(now);
@@ -200,14 +201,14 @@ try {
     ownerId: "pickup-ready-blocker",
     now
   });
-  const blockedReady = markGroupBuyActivityReadyForPickup("pickup-code-activity", {
+  const blockedReady = await markGroupBuyActivityReadyForPickup("pickup-code-activity", {
     actorUserId: "pickup-merchant-user",
     now
   });
   assert(blockedReady.error === "operation_locked", "activity lease should block ready transition", blockedReady);
   releaseOperationLock({ lockKey: readyLockKey, ownerId: readyLock.ownerId });
 
-  const ready = markGroupBuyActivityReadyForPickup("pickup-code-activity", {
+  const ready = await markGroupBuyActivityReadyForPickup("pickup-code-activity", {
     actorUserId: "pickup-merchant-user",
     now
   });
@@ -216,26 +217,26 @@ try {
   assert(ready.credentials.every((item) => /^\d{6}$/.test(item.pickupCode)), "codes must be six digits", ready);
   assert(new Set(ready.credentials.map((item) => item.pickupCode)).size === 2, "active codes must be unique", ready);
 
-  const repeatReady = markGroupBuyActivityReadyForPickup("pickup-code-activity", {
+  const repeatReady = await markGroupBuyActivityReadyForPickup("pickup-code-activity", {
     actorUserId: "pickup-merchant-user",
     now
   });
   assert(repeatReady.createdCredentialCount === 0, "ready operation must be idempotent", repeatReady);
   assert(repeatReady.readyOrderCount === 0, "orders must not be marked ready twice", repeatReady);
 
-  const customerCredential = getPickupCredentialForOrder("pickup-code-order-a", { now });
+  const customerCredential = await getPickupCredentialForOrder("pickup-code-order-a", { now });
   assert(customerCredential.status === "active", "customer code should be active", customerCredential);
   const firstCode = customerCredential.pickupCode;
   const secondCode = ready.credentials.find((item) => item.orderId === "pickup-code-order-b").pickupCode;
 
-  const crossStore = lookupPickupCode({
+  const crossStore = await lookupPickupCode({
     actorUserId: "other-merchant-user",
     pickupCode: firstCode,
     now
   });
   assert(crossStore.error === "credential_not_found", "other merchant must not access code", crossStore);
 
-  const preview = lookupPickupCode({
+  const preview = await lookupPickupCode({
     actorUserId: "pickup-merchant-user",
     pickupCode: firstCode,
     now
@@ -249,7 +250,7 @@ try {
     ownerId: "pickup-redeem-blocker",
     now
   });
-  const blockedRedeem = redeemPickupCode({
+  const blockedRedeem = await redeemPickupCode({
     actorUserId: "pickup-merchant-user",
     pickupCode: firstCode,
     now
@@ -257,7 +258,7 @@ try {
   assert(blockedRedeem.error === "operation_locked", "code lease should block redemption", blockedRedeem);
   releaseOperationLock({ lockKey: redeemLockKey, ownerId: redeemLock.ownerId });
 
-  const firstRedeem = redeemPickupCode({
+  const firstRedeem = await redeemPickupCode({
     actorUserId: "pickup-merchant-user",
     pickupCode: firstCode,
     now
@@ -265,7 +266,7 @@ try {
   assert(firstRedeem.status === "redeemed", "first code should redeem", firstRedeem);
   assert(firstRedeem.activityCompleted === false, "activity should wait for remaining pickup", firstRedeem);
 
-  const duplicateRedeem = redeemPickupCode({
+  const duplicateRedeem = await redeemPickupCode({
     actorUserId: "pickup-merchant-user",
     pickupCode: firstCode,
     now
@@ -276,7 +277,7 @@ try {
     duplicateRedeem
   );
 
-  const secondRedeem = redeemPickupCode({
+  const secondRedeem = await redeemPickupCode({
     actorUserId: "pickup-merchant-user",
     pickupCode: secondCode,
     now
@@ -284,14 +285,14 @@ try {
   assert(secondRedeem.activityCompleted === true, "all pickups should complete activity", secondRedeem);
 
   for (let attempt = 0; attempt < 4; attempt += 1) {
-    const failed = lookupPickupCode({
+    const failed = await lookupPickupCode({
       actorUserId: "other-merchant-user",
       pickupCode: "invalid",
       now
     });
     assert(failed.error === "pickup_code_invalid", "invalid attempt should be rejected", failed);
   }
-  const limited = lookupPickupCode({
+  const limited = await lookupPickupCode({
     actorUserId: "other-merchant-user",
     pickupCode: "000000",
     now
@@ -329,3 +330,7 @@ try {
     fs.rmSync(databasePath, { force: true });
   }
 }
+})().catch((error) => {
+  console.error(error);
+  process.exitCode = 1;
+});

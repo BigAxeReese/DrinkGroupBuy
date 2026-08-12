@@ -210,7 +210,7 @@ async function captureEcpayAuthorization({ orderId, provider = "ecpay", amount, 
     ? { RtnCode: "1", RtnMsg: "mock_close_success" }
     : await closeEcpayCreditCardAuthorization({
         merchantTradeNo: authorization.providerAuthorizationId,
-        tradeNo: getEcpayTradeNo(authorization),
+        tradeNo: await getEcpayTradeNo(authorization),
         amount: captureAmount
       });
 
@@ -245,7 +245,7 @@ async function voidEcpayAuthorization({ orderId, provider = "ecpay", reason = "e
     ? { RtnCode: "1", RtnMsg: "mock_cancel_success" }
     : await cancelEcpayCreditCardAuthorization({
         merchantTradeNo: authorization.providerAuthorizationId,
-        tradeNo: getEcpayTradeNo(authorization),
+        tradeNo: await getEcpayTradeNo(authorization),
         amount: authorization.authorizedAmount
       });
 
@@ -264,7 +264,7 @@ async function voidEcpayAuthorization({ orderId, provider = "ecpay", reason = "e
   return voidResult;
 }
 
-async function refundEcpayPayment({ authUser, body } = {}) {
+async function refundEcpayPayment({ authUser, body, paymentRefundRepository } = {}) {
   if (!authUser?.roles?.includes("admin")) {
     throw new PaymentServiceError(403, { error: "Admin role required" });
   }
@@ -273,7 +273,7 @@ async function refundEcpayPayment({ authUser, body } = {}) {
   }
 
   const provider = body.provider === "mock_ecpay" ? "mock_ecpay" : "ecpay";
-  const pendingRefund = createPendingPaymentRefundInDatabase({
+  const createPendingRefundInput = {
     orderId: body.orderId,
     captureId: body.captureId,
     provider,
@@ -281,7 +281,10 @@ async function refundEcpayPayment({ authUser, body } = {}) {
     idempotencyKey: body.idempotencyKey,
     reason: body.reason || "ecpay_refund_requested",
     actorUserId: authUser.id
-  });
+  };
+  const pendingRefund = paymentRefundRepository
+    ? await paymentRefundRepository.createPendingRefund(createPendingRefundInput)
+    : createPendingPaymentRefundInDatabase(createPendingRefundInput);
 
   if (!pendingRefund) {
     throw new PaymentServiceError(404, { error: "Captured payment not found" });
@@ -306,16 +309,19 @@ async function refundEcpayPayment({ authUser, body } = {}) {
       ? { RtnCode: "1", RtnMsg: "mock_refund_success" }
       : await callEcpayRefund({
           merchantTradeNo,
-          tradeNo: getEcpayTradeNo(pendingRefund.authorization),
+          tradeNo: await getEcpayTradeNo(pendingRefund.authorization, paymentRefundRepository),
           amount: pendingRefund.refund.refundAmount
         });
   } catch (error) {
-    const failed = failPaymentRefundInDatabase({
+    const failInput = {
       refundId: pendingRefund.refund.id,
       reason: "ecpay_refund_failed",
       actorUserId: authUser.id,
       providerPayload: error.ecpayPayload || { message: error.message }
-    });
+    };
+    const failed = paymentRefundRepository
+      ? await paymentRefundRepository.failRefund(failInput)
+      : failPaymentRefundInDatabase(failInput);
     throw new PaymentServiceError(error.statusCode || 502, {
       error: "ECPay refund failed",
       refund: failed?.refund || pendingRefund.refund,
@@ -323,12 +329,15 @@ async function refundEcpayPayment({ authUser, body } = {}) {
     });
   }
 
-  const completedRefund = completePaymentRefundInDatabase({
+  const completeRefundInput = {
     refundId: pendingRefund.refund.id,
     providerRefundId: null,
     providerPayload: payload,
     actorUserId: authUser.id
-  });
+  };
+  const completedRefund = paymentRefundRepository
+    ? await paymentRefundRepository.completeRefund(completeRefundInput)
+    : completePaymentRefundInDatabase(completeRefundInput);
 
   if (completedRefund?.error) {
     throw new PaymentServiceError(409, completedRefund);
@@ -337,12 +346,15 @@ async function refundEcpayPayment({ authUser, body } = {}) {
   return { ...completedRefund, provider, payload };
 }
 
-function getEcpayTradeNo(authorization) {
-  const webhookPayload = getLatestPaymentProviderEventPayload({
+async function getEcpayTradeNo(authorization, paymentRefundRepository) {
+  const lookupInput = {
     resourceType: "authorization",
     resourceId: authorization.id,
     eventType: "confirm_success"
-  });
+  };
+  const webhookPayload = paymentRefundRepository
+    ? await paymentRefundRepository.getLatestProviderEventPayload(lookupInput)
+    : getLatestPaymentProviderEventPayload(lookupInput);
   return webhookPayload?.TradeNo || null;
 }
 

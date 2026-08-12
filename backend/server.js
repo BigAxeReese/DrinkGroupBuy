@@ -9,7 +9,10 @@ const {
   getCustomerOrderCancellationEligibility,
   getOrderDetail,
   getOrderPaymentContext,
+  getOrderRevisionById,
+  getOrderRevisionPaymentContext,
   getLatestLinePayAuthorizationForOrder,
+  getLatestLinePayAuthorizationForOrderRevision,
   createPendingLinePayAuthorization,
   getLinePayAuthorizationContext,
   authorizeLinePayPaymentInDatabase,
@@ -28,7 +31,28 @@ const {
   recordLinePayVoidFailureInDatabase,
   saveMerchantMenuItem,
   updatePendingOrder,
-  voidLinePayAuthorizationInDatabase
+  voidLinePayAuthorizationInDatabase,
+  captureLinePayAuthorizationInDatabase,
+  claimPaymentReliabilityJobs,
+  completeGroupBuySettlement,
+  completePaymentReliabilityJob,
+  createGroupBuySettlementPlan,
+  enqueuePaymentReliabilityJob,
+  getLinePayCaptureRetryState,
+  listDueGroupBuyActivitiesForSettlement,
+  recordLinePayCaptureFailureInDatabase,
+  reschedulePaymentReliabilityJob,
+  expireGroupBuyPickupWindow,
+  listDueGroupBuyActivitiesForPickupExpiration,
+  completeLinePayRefundInDatabase,
+  createPendingLinePayRefundInDatabase,
+  failLinePayRefundInDatabase,
+  getLatestPaymentProviderEventPayload,
+  getOrderStoreId,
+  approveRefundRequestInDatabase,
+  createRefundRequestInDatabase,
+  getRefundRequestById,
+  rejectRefundRequestInDatabase
 } = require("./db");
 const { createAuthToken, getBearerToken, verifyAuthToken, verifyPassword } = require("./auth");
 const { verifyFirebaseIdToken } = require("./firebaseAuth");
@@ -103,6 +127,21 @@ const {
 const {
   createCustomerOrderCancelRepository
 } = require("./database/repositories/customerOrderCancelRepository");
+const {
+  createPaymentCaptureRepository
+} = require("./database/repositories/paymentCaptureRepository");
+const {
+  createGroupBuySettlementRepository
+} = require("./database/repositories/groupBuySettlementRepository");
+const {
+  createPickupCredentialRepository
+} = require("./database/repositories/pickupCredentialRepository");
+const {
+  createPaymentRefundRepository
+} = require("./database/repositories/paymentRefundRepository");
+const {
+  createOrderRevisionRepository
+} = require("./database/repositories/orderRevisionRepository");
 
 const port = Number(process.env.PORT ?? 3000);
 const storeMenuReadRepository = createStoreMenuReadRepository({ sqliteReader: listStoreMenu });
@@ -139,6 +178,7 @@ const paymentAuthorizationRequestRepository = createPaymentAuthorizationRequestR
   sqliteGateway: {
     getOrderPaymentContext,
     getLatestAuthorizationForOrder: getLatestLinePayAuthorizationForOrder,
+    getLatestAuthorizationForOrderRevision: getLatestLinePayAuthorizationForOrderRevision,
     createPendingAuthorization: createPendingLinePayAuthorization,
   },
 });
@@ -160,6 +200,58 @@ const customerOrderCancelRepository = createCustomerOrderCancelRepository({
   sqliteGateway: {
     getEligibility: getCustomerOrderCancellationEligibility,
     cancelOrder: cancelCustomerOrderInDatabase,
+  },
+});
+const paymentCaptureRepository = createPaymentCaptureRepository({
+  sqliteGateway: {
+    getAuthorizationContext: getLinePayAuthorizationContext,
+    captureAuthorization: captureLinePayAuthorizationInDatabase,
+    recordCaptureFailure: recordLinePayCaptureFailureInDatabase,
+  },
+});
+const groupBuySettlementRepository = createGroupBuySettlementRepository({
+  sqliteGateway: {
+    createPlan: (value) => createGroupBuySettlementPlan(value.activityId, value),
+    getCaptureRetryState: getLinePayCaptureRetryState,
+    completeSettlement: (value) => completeGroupBuySettlement(value.activityId, value),
+    listDueActivities: listDueGroupBuyActivitiesForSettlement,
+    enqueueJob: enqueuePaymentReliabilityJob,
+    claimJobs: claimPaymentReliabilityJobs,
+    completeJob: completePaymentReliabilityJob,
+    rescheduleJob: reschedulePaymentReliabilityJob,
+  },
+});
+const pickupCredentialRepository = createPickupCredentialRepository({
+  sqliteGateway: {
+    markReady: (value) => markGroupBuyActivityReadyForPickup(value.activityId, value),
+    getCredentialForOrder: (value) => getPickupCredentialForOrder(value.orderId, value),
+    lookupCode: (value) => lookupPickupCode(value),
+    redeemCode: (value) => redeemPickupCode(value),
+    listDueActivities: (value) => listDueGroupBuyActivitiesForPickupExpiration(value),
+    expireWindow: (value) => expireGroupBuyPickupWindow(value.activityId, value),
+  },
+});
+const paymentRefundRepository = createPaymentRefundRepository({
+  sqliteGateway: {
+    createPendingRefund: (value) => createPendingLinePayRefundInDatabase(value),
+    completeRefund: (value) => completeLinePayRefundInDatabase(value),
+    failRefund: (value) => failLinePayRefundInDatabase(value),
+    createRefundRequest: (value) => createRefundRequestInDatabase(value),
+    approveRefundRequest: (value) => approveRefundRequestInDatabase(value),
+    rejectRefundRequest: (value) => rejectRefundRequestInDatabase(value),
+    getRefundRequestById: (value) => getRefundRequestById(value.requestId),
+    listRefundRequestsForStore: (value) => listRefundRequestsForStore(value.storeId, { status: value.status }),
+    listRefundRequestsForAdmin: (value) => listRefundRequestsForAdmin({ status: value.status }),
+    getOrderStoreId: (value) => getOrderStoreId(value.orderId),
+    getLatestAuthorizationForOrder: (value) => getLatestLinePayAuthorizationForOrder(value.orderId),
+    getLatestProviderEventPayload: (value) => getLatestPaymentProviderEventPayload(value),
+  },
+});
+const orderRevisionRepository = createOrderRevisionRepository({
+  sqliteGateway: {
+    createRevision: (value) => createOrderRevision(value),
+    getRevisionById: (value) => getOrderRevisionById(value.orderRevisionId),
+    getRevisionPaymentContext: (value) => getOrderRevisionPaymentContext(value.orderRevisionId),
   },
 });
 if (
@@ -197,6 +289,105 @@ if (
   }
 }
 
+// PostgreSQL capture/settlement is a separate, later-added tier on top of the order-write
+// stack above: it reads/writes the same orders/authorizations rows, so it can only be
+// postgres when that whole stack already is. Kept as its own guard (rather than folded into
+// requiredPostgresRepositories) so existing postgres order-write deployments that predate
+// capture/settlement support don't start throwing at boot.
+const settlementPostgresReady = paymentCaptureRepository.kind === "postgres"
+  && groupBuySettlementRepository.kind === "postgres";
+if (paymentCaptureRepository.kind === "postgres" || groupBuySettlementRepository.kind === "postgres") {
+  if (!settlementPostgresReady) {
+    throw new Error(
+      "PAYMENT_CAPTURE_RUNTIME and GROUP_BUY_SETTLEMENT_RUNTIME must both be postgres "
+      + "together, or both left as sqlite."
+    );
+  }
+  if (customerOrderWriteRepository.kind !== "postgres") {
+    throw new Error(
+      "PostgreSQL capture/settlement requires the full PostgreSQL order-write stack "
+      + "(CUSTOMER_ORDER_WRITE_RUNTIME and its dependent *_RUNTIME flags) to be postgres too, "
+      + "since settlement reads and writes the same orders/authorizations rows."
+    );
+  }
+  // Production auto-capture is deliberately its own manual approval step, separate from
+  // just enabling this for Sandbox validation (see docs/current-progress.md).
+  const linePayEnv = String(process.env.LINE_PAY_ENV || "sandbox").toLowerCase();
+  const allowPostgresCaptureInProduction = readBooleanEnv(
+    process.env.PAYMENT_CAPTURE_RUNTIME_ALLOW_PRODUCTION,
+    false
+  );
+  if (linePayEnv === "production" && !allowPostgresCaptureInProduction) {
+    throw new Error(
+      "PostgreSQL capture/settlement in production requires an explicit, separate opt-in: "
+      + "set PAYMENT_CAPTURE_RUNTIME_ALLOW_PRODUCTION=true."
+    );
+  }
+}
+
+// Same reasoning as settlement above: pickup reads/writes the same orders/activities rows,
+// so it can only be postgres once the order-write stack already is. No production-specific
+// gate here (unlike capture/settlement) since redeeming a pickup code doesn't move money.
+const pickupPostgresReady = pickupCredentialRepository.kind === "postgres";
+if (pickupPostgresReady && customerOrderWriteRepository.kind !== "postgres") {
+  throw new Error(
+    "PostgreSQL pickup credentials require the full PostgreSQL order-write stack "
+    + "(CUSTOMER_ORDER_WRITE_RUNTIME and its dependent *_RUNTIME flags) to be postgres too, "
+    + "since pickup reads and writes the same orders/activities rows."
+  );
+}
+
+// Refund reads and writes payment_captures rows directly (remaining-refundable-amount checks),
+// so a postgres refund runtime is meaningless unless capture already writes to the same
+// PostgreSQL table -- a capture made on the SQLite side would simply never be visible to it.
+// This is a one-directional dependency (capture postgres does NOT require refund postgres),
+// so it's deliberately not folded into the symmetric settlementPostgresReady pairing above.
+const refundPostgresReady = paymentRefundRepository.kind === "postgres";
+if (refundPostgresReady) {
+  if (paymentCaptureRepository.kind !== "postgres") {
+    throw new Error(
+      "PostgreSQL refunds require PAYMENT_CAPTURE_RUNTIME to be postgres too, since refunds "
+      + "read and write the same payment_captures rows captures are recorded in."
+    );
+  }
+  if (customerOrderWriteRepository.kind !== "postgres") {
+    throw new Error(
+      "PostgreSQL refunds require the full PostgreSQL order-write stack "
+      + "(CUSTOMER_ORDER_WRITE_RUNTIME and its dependent *_RUNTIME flags) to be postgres too, "
+      + "since refunds read and write the same orders rows."
+    );
+  }
+  // Refunds move money just like capture, so they share capture's explicit production
+  // opt-in rather than getting their own -- by the time refund-postgres is reachable at
+  // all, capture-postgres is already required above, which already demands this same flag.
+  const linePayEnv = String(process.env.LINE_PAY_ENV || "sandbox").toLowerCase();
+  const allowPostgresCaptureInProduction = readBooleanEnv(
+    process.env.PAYMENT_CAPTURE_RUNTIME_ALLOW_PRODUCTION,
+    false
+  );
+  if (linePayEnv === "production" && !allowPostgresCaptureInProduction) {
+    throw new Error(
+      "PostgreSQL refunds in production requires an explicit, separate opt-in: "
+      + "set PAYMENT_CAPTURE_RUNTIME_ALLOW_PRODUCTION=true."
+    );
+  }
+}
+
+// Order revisions read and write orders/order_items directly, and are applied through the
+// same confirm/cancel authorization flow captured above -- so, like pickup, this only needs
+// the order-write stack (which already guarantees request/confirm/cancel are postgres too
+// via requiredPostgresRepositories). No production-specific gate: creating or applying a
+// revision doesn't move money by itself -- the resulting authorization's capture is what
+// does, and that's already gated separately above.
+const orderRevisionPostgresReady = orderRevisionRepository.kind === "postgres";
+if (orderRevisionPostgresReady && customerOrderWriteRepository.kind !== "postgres") {
+  throw new Error(
+    "PostgreSQL order revisions require the full PostgreSQL order-write stack "
+    + "(CUSTOMER_ORDER_WRITE_RUNTIME and its dependent *_RUNTIME flags) to be postgres too, "
+    + "since revisions read and write the same orders/order_items rows."
+  );
+}
+
 const server = http.createServer(async (request, response) => {
   try {
     if (request.method === "OPTIONS") {
@@ -209,6 +400,7 @@ const server = http.createServer(async (request, response) => {
     if (
       customerOrderWriteRepository.kind === "postgres"
       && isSqliteOrderDependentRoute(request.method, url.pathname)
+      && !isSettlementRouteReadyForPostgres(request.method, url.pathname)
     ) {
       sendJson(response, 503, {
         error: "customer_order_runtime_mismatch",
@@ -488,9 +680,12 @@ const server = http.createServer(async (request, response) => {
         return;
       }
 
-      const result = markGroupBuyActivityReadyForPickup(
+      const result = await markGroupBuyActivityReadyForPickup(
         merchantReadyForPickupMatch[1],
-        { actorUserId: authUser.id }
+        {
+          actorUserId: authUser.id,
+          pickupCredentialRepository: pickupPostgresReady ? pickupCredentialRepository : undefined
+        }
       );
       sendPickupServiceResult(response, result);
       return;
@@ -509,9 +704,10 @@ const server = http.createServer(async (request, response) => {
       }
 
       const body = await readJsonBody(request);
-      const result = lookupPickupCode({
+      const result = await lookupPickupCode({
         actorUserId: authUser.id,
-        pickupCode: body.pickupCode
+        pickupCode: body.pickupCode,
+        pickupCredentialRepository: pickupPostgresReady ? pickupCredentialRepository : undefined
       });
       sendPickupServiceResult(response, result);
       return;
@@ -530,9 +726,10 @@ const server = http.createServer(async (request, response) => {
       }
 
       const body = await readJsonBody(request);
-      const result = redeemPickupCode({
+      const result = await redeemPickupCode({
         actorUserId: authUser.id,
-        pickupCode: body.pickupCode
+        pickupCode: body.pickupCode,
+        pickupCredentialRepository: pickupPostgresReady ? pickupCredentialRepository : undefined
       });
       sendPickupServiceResult(response, result);
       return;
@@ -558,7 +755,9 @@ const server = http.createServer(async (request, response) => {
         return;
       }
 
-      const credential = getPickupCredentialForOrder(order.id);
+      const credential = await getPickupCredentialForOrder(order.id, {
+        pickupCredentialRepository: pickupPostgresReady ? pickupCredentialRepository : undefined
+      });
       sendJson(response, 200, { credential });
       return;
     }
@@ -603,11 +802,14 @@ const server = http.createServer(async (request, response) => {
       if (!authUser.roles.includes("merchant") || !canManageStore(authUser, merchantRefundRequestsMatch[1])) {
         return sendJson(response, 403, { error: "Store access denied" });
       }
-      sendJson(response, 200, {
-        refundRequests: listRefundRequestsForStore(merchantRefundRequestsMatch[1], {
-          status: url.searchParams.get("status") || undefined
-        })
-      });
+      const listInput = {
+        storeId: merchantRefundRequestsMatch[1],
+        status: url.searchParams.get("status") || undefined
+      };
+      const refundRequests = refundPostgresReady
+        ? await paymentRefundRepository.listRefundRequestsForStore(listInput)
+        : listRefundRequestsForStore(listInput.storeId, { status: listInput.status });
+      sendJson(response, 200, { refundRequests });
       return;
     }
 
@@ -624,7 +826,8 @@ const server = http.createServer(async (request, response) => {
         const result = await createMerchantRefundRequest({
           authUser,
           orderId: createMerchantRefundRequestMatch[1],
-          body
+          body,
+          paymentRefundRepository: refundPostgresReady ? paymentRefundRepository : undefined
         });
         sendJson(response, 201, result);
       } catch (error) {
@@ -712,11 +915,14 @@ const server = http.createServer(async (request, response) => {
         return;
       }
 
-      const result = createOrderRevision({
+      const revisionInput = {
         ...body,
         orderId: orderRevisionMatch[1],
         customerUserId: authUser.id
-      });
+      };
+      const result = orderRevisionPostgresReady
+        ? await orderRevisionRepository.createRevision(revisionInput)
+        : createOrderRevision(revisionInput);
       if (sendOrderItemValidationError(response, result)) return;
       if (result?.error === "order_not_found") {
         sendJson(response, 404, { error: "Order not found" });
@@ -950,7 +1156,8 @@ const server = http.createServer(async (request, response) => {
         const result = await requestLinePayAuthorization({
           authUser,
           body,
-          authorizationRequestRepository: paymentAuthorizationRequestRepository
+          authorizationRequestRepository: paymentAuthorizationRequestRepository,
+          orderRevisionRepository
         });
         sendJson(response, 201, result);
       } catch (error) {
@@ -993,7 +1200,11 @@ const server = http.createServer(async (request, response) => {
 
       const body = await readJsonBody(request);
       try {
-        const result = await refundLinePayPayment({ authUser, body });
+        const result = await refundLinePayPayment({
+          authUser,
+          body,
+          paymentRefundRepository: refundPostgresReady ? paymentRefundRepository : undefined
+        });
         sendJson(response, 200, result);
       } catch (error) {
         if (error instanceof PaymentServiceError) {
@@ -1233,7 +1444,10 @@ const server = http.createServer(async (request, response) => {
       const result = await settleGroupBuyActivity({
         activityId: adminSettleActivityMatch[1],
         actorUserId: authUser.id,
-        force: Boolean(body.force)
+        force: Boolean(body.force),
+        settlementRepository: settlementPostgresReady ? groupBuySettlementRepository : undefined,
+        paymentCaptureRepository: settlementPostgresReady ? paymentCaptureRepository : undefined,
+        authorizationCancelRepository: settlementPostgresReady ? paymentAuthorizationCancelRepository : undefined
       });
 
       if (!result) {
@@ -1250,11 +1464,11 @@ const server = http.createServer(async (request, response) => {
       if (!authUser.roles.includes("admin")) {
         return sendJson(response, 403, { error: "Admin role required" });
       }
-      sendJson(response, 200, {
-        refundRequests: listRefundRequestsForAdmin({
-          status: url.searchParams.get("status") || undefined
-        })
-      });
+      const listInput = { status: url.searchParams.get("status") || undefined };
+      const refundRequests = refundPostgresReady
+        ? await paymentRefundRepository.listRefundRequestsForAdmin(listInput)
+        : listRefundRequestsForAdmin(listInput);
+      sendJson(response, 200, { refundRequests });
       return;
     }
 
@@ -1271,7 +1485,8 @@ const server = http.createServer(async (request, response) => {
         const result = await approveRefundRequest({
           authUser,
           requestId: approveRefundRequestMatch[1],
-          body
+          body,
+          paymentRefundRepository: refundPostgresReady ? paymentRefundRepository : undefined
         });
         sendJson(response, 200, result);
       } catch (error) {
@@ -1297,7 +1512,8 @@ const server = http.createServer(async (request, response) => {
         const result = await rejectRefundRequest({
           authUser,
           requestId: rejectRefundRequestMatch[1],
-          body
+          body,
+          paymentRefundRepository: refundPostgresReady ? paymentRefundRepository : undefined
         });
         sendJson(response, 200, result);
       } catch (error) {
@@ -1349,14 +1565,19 @@ const server = http.createServer(async (request, response) => {
 let deadlineSettlementScheduler;
 let linePayReconciliationScheduler;
 let pickupExpirationScheduler;
+// LINE Pay reconciliation has no PostgreSQL path at all yet (unlike settlement/capture/
+// pickup below), so it stays gated on order-write runtime alone, independent of how much
+// of the rest of the postgres stack has since become ready.
 const controlledPostgresOrderRuntime = customerOrderWriteRepository.kind === "postgres";
-const schedulerEnvironment = controlledPostgresOrderRuntime
-  ? {
-      ...process.env,
-      SETTLEMENT_SCHEDULER_ENABLED: "false",
-      PICKUP_EXPIRATION_SCHEDULER_ENABLED: "false"
-    }
-  : process.env;
+const schedulerEnvironment = {
+  ...process.env,
+  SETTLEMENT_SCHEDULER_ENABLED: controlledPostgresOrderRuntime && !settlementPostgresReady
+    ? "false"
+    : process.env.SETTLEMENT_SCHEDULER_ENABLED,
+  PICKUP_EXPIRATION_SCHEDULER_ENABLED: controlledPostgresOrderRuntime && !pickupPostgresReady
+    ? "false"
+    : process.env.PICKUP_EXPIRATION_SCHEDULER_ENABLED
+};
 
 server.listen(port, () => {
   console.log(`DrinkGroupBuy backend listening on http://localhost:${port}`);
@@ -1375,7 +1596,10 @@ server.listen(port, () => {
 
 
   deadlineSettlementScheduler = startDeadlineSettlementScheduler({
-    env: schedulerEnvironment
+    env: schedulerEnvironment,
+    settlementRepository: settlementPostgresReady ? groupBuySettlementRepository : undefined,
+    paymentCaptureRepository: settlementPostgresReady ? paymentCaptureRepository : undefined,
+    authorizationCancelRepository: settlementPostgresReady ? paymentAuthorizationCancelRepository : undefined
   });
   if (deadlineSettlementScheduler.enabled) {
     console.log(`Deadline settlement scheduler enabled (${deadlineSettlementScheduler.intervalMs}ms interval)`);
@@ -1384,7 +1608,8 @@ server.listen(port, () => {
   }
 
   pickupExpirationScheduler = startPickupExpirationScheduler({
-    env: schedulerEnvironment
+    env: schedulerEnvironment,
+    pickupCredentialRepository: pickupPostgresReady ? pickupCredentialRepository : undefined
   });
   if (pickupExpirationScheduler.enabled) {
     console.log(`Pickup expiration scheduler enabled (${pickupExpirationScheduler.intervalMs}ms interval)`);
@@ -1660,7 +1885,54 @@ function isSqliteOrderDependentRoute(method, pathname) {
     || pathname.startsWith("/api/pickup-credentials/")
     || pathname.startsWith("/api/merchant/pickup-credentials/")
     || /^\/api\/merchant\/group-buy-activities\/[^/]+\/ready-for-pickup$/.test(pathname)
-    || /^\/api\/admin\/group-buy-activities\/[^/]+\/settle$/.test(pathname);
+    || /^\/api\/admin\/group-buy-activities\/[^/]+\/settle$/.test(pathname)
+    || /^\/api\/merchant\/orders\/[^/]+\/refund-requests$/.test(pathname)
+    || /^\/api\/merchant\/stores\/[^/]+\/refund-requests$/.test(pathname)
+    || pathname === "/api/admin/refund-requests"
+    || /^\/api\/admin\/refund-requests\/[^/]+\/(approve|reject)$/.test(pathname);
+}
+
+// NOTE: despite the name, this covers every postgres-gated follow-up domain (settlement,
+// pickup, refund), not just settlement -- kept as one function since it's one boolean the
+// request handler needs, and each branch already names the domain it exempts.
+function isSettlementRouteReadyForPostgres(method, pathname) {
+  if (
+    method === "POST"
+    && groupBuySettlementRepository.kind === "postgres"
+    && /^\/api\/admin\/group-buy-activities\/[^/]+\/settle$/.test(pathname)
+  ) {
+    return true;
+  }
+  if (
+    pickupCredentialRepository.kind === "postgres"
+    && (
+      pathname.startsWith("/api/pickup-credentials/")
+      || pathname.startsWith("/api/merchant/pickup-credentials/")
+      || (method === "POST" && /^\/api\/merchant\/group-buy-activities\/[^/]+\/ready-for-pickup$/.test(pathname))
+    )
+  ) {
+    return true;
+  }
+  if (
+    paymentRefundRepository.kind === "postgres"
+    && (
+      (method === "POST" && pathname === "/api/payments/line-pay/refund")
+      || (method === "POST" && /^\/api\/merchant\/orders\/[^/]+\/refund-requests$/.test(pathname))
+      || (method === "GET" && /^\/api\/merchant\/stores\/[^/]+\/refund-requests$/.test(pathname))
+      || (method === "GET" && pathname === "/api/admin/refund-requests")
+      || (method === "POST" && /^\/api\/admin\/refund-requests\/[^/]+\/(approve|reject)$/.test(pathname))
+    )
+  ) {
+    return true;
+  }
+  if (
+    orderRevisionRepository.kind === "postgres"
+    && method === "POST"
+    && /^\/api\/orders\/[^/]+\/revisions$/.test(pathname)
+  ) {
+    return true;
+  }
+  return false;
 }
 
 function isDevAuthModeEnabled() {

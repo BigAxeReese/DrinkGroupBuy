@@ -8,17 +8,28 @@ async function runDuePickupExpirations(input = {}) {
   const now = input.now || new Date().toISOString();
   const limit = normalizeSchedulerNumber(input.limit, 20);
   const actorUserId = input.actorUserId || null;
-  const dueActivities = listDueGroupBuyActivitiesForPickupExpiration({ now, limit });
+  const repository = input.pickupCredentialRepository;
+  const dueActivities = repository?.kind === "postgres"
+    ? await repository.listDueActivities({ now, limit })
+    : listDueGroupBuyActivitiesForPickupExpiration({ now, limit });
   const results = [];
   const failures = [];
 
   for (const activity of dueActivities) {
     try {
-      const result = withOperationLeaseSync({
-        lockKey: `pickup:activity:${activity.id}:transition`,
-        leaseMs: 120_000,
-        now
-      }, () => expireGroupBuyPickupWindow(activity.id, { now, actorUserId }));
+      let result;
+      if (repository?.kind === "postgres") {
+        result = await repository.withOperationLock(
+          { activityId: activity.id, now },
+          () => repository.expireWindow({ activityId: activity.id, actorUserId, now })
+        );
+      } else {
+        result = withOperationLeaseSync({
+          lockKey: `pickup:activity:${activity.id}:transition`,
+          leaseMs: 120_000,
+          now
+        }, () => expireGroupBuyPickupWindow(activity.id, { now, actorUserId }));
+      }
       results.push({ activityId: activity.id, status: result.status, ...result });
     } catch (error) {
       failures.push({ activityId: activity.id, error: error.message });
@@ -58,7 +69,11 @@ function startPickupExpirationScheduler(input = {}) {
     if (running || stopped) return null;
     running = true;
     try {
-      const summary = await runDuePickupExpirations({ actorUserId, limit });
+      const summary = await runDuePickupExpirations({
+        actorUserId,
+        limit,
+        pickupCredentialRepository: input.pickupCredentialRepository
+      });
       if (summary.dueActivityCount > 0 || summary.failedCount > 0) {
         logger.info?.("[pickup-expiration-scheduler] run completed", summary);
       }

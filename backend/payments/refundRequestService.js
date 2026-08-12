@@ -9,7 +9,7 @@ const {
 const { PaymentServiceError, refundLinePayPayment } = require("./linePayService");
 const { isEcpayProvider, refundEcpayPayment } = require("./ecpayService");
 
-async function createMerchantRefundRequest({ authUser, orderId, body } = {}) {
+async function createMerchantRefundRequest({ authUser, orderId, body, paymentRefundRepository } = {}) {
   if (!authUser?.roles?.includes("merchant")) {
     throw new PaymentServiceError(403, { error: "Merchant role required" });
   }
@@ -27,7 +27,9 @@ async function createMerchantRefundRequest({ authUser, orderId, body } = {}) {
     throw new PaymentServiceError(400, { error: "reason is required" });
   }
 
-  const storeId = getOrderStoreId(orderId);
+  const storeId = paymentRefundRepository
+    ? await paymentRefundRepository.getOrderStoreId({ orderId })
+    : getOrderStoreId(orderId);
   if (!storeId) {
     throw new PaymentServiceError(404, { error: "Order not found" });
   }
@@ -35,14 +37,17 @@ async function createMerchantRefundRequest({ authUser, orderId, body } = {}) {
     throw new PaymentServiceError(403, { error: "Store access denied" });
   }
 
-  const result = createRefundRequestInDatabase({
+  const createInput = {
     orderId,
     storeId,
     requestedAmount,
     reason,
     idempotencyKey: body?.idempotencyKey,
     actorUserId: authUser.id
-  });
+  };
+  const result = paymentRefundRepository
+    ? await paymentRefundRepository.createRefundRequest(createInput)
+    : createRefundRequestInDatabase(createInput);
 
   if (result.error) {
     throw new PaymentServiceError(refundRequestErrorStatusCode(result.error), {
@@ -57,12 +62,14 @@ async function createMerchantRefundRequest({ authUser, orderId, body } = {}) {
   return result;
 }
 
-async function approveRefundRequest({ authUser, requestId, body } = {}) {
+async function approveRefundRequest({ authUser, requestId, body, paymentRefundRepository } = {}) {
   if (!authUser?.roles?.includes("admin")) {
     throw new PaymentServiceError(403, { error: "Admin role required" });
   }
 
-  const refundRequest = getRefundRequestById(requestId);
+  const refundRequest = paymentRefundRepository
+    ? await paymentRefundRepository.getRefundRequestById({ requestId })
+    : getRefundRequestById(requestId);
   if (!refundRequest) {
     throw new PaymentServiceError(404, { error: "Refund request not found" });
   }
@@ -77,13 +84,16 @@ async function approveRefundRequest({ authUser, requestId, body } = {}) {
   // Resolve the provider from the order's own authorization record rather than trusting
   // a client-supplied value — an admin passing the wrong provider here would otherwise
   // call the wrong provider's refund API for a real payment.
-  const authorization = getLatestLinePayAuthorizationForOrder(refundRequest.orderId);
+  const authorization = paymentRefundRepository
+    ? await paymentRefundRepository.getLatestAuthorizationForOrder({ orderId: refundRequest.orderId })
+    : getLatestLinePayAuthorizationForOrder(refundRequest.orderId);
   const refundIdempotencyKey = body?.idempotencyKey || `refund-request-approval:${refundRequest.id}`;
   const refundReason = `refund_request_approved:${refundRequest.id}`;
 
   const refundResult = isEcpayProvider(authorization?.provider)
     ? await refundEcpayPayment({
         authUser,
+        paymentRefundRepository,
         body: {
           orderId: refundRequest.orderId,
           refundAmount: refundRequest.requestedAmount,
@@ -94,6 +104,7 @@ async function approveRefundRequest({ authUser, requestId, body } = {}) {
       })
     : await refundLinePayPayment({
         authUser,
+        paymentRefundRepository,
         body: {
           orderId: refundRequest.orderId,
           refundAmount: refundRequest.requestedAmount,
@@ -103,21 +114,26 @@ async function approveRefundRequest({ authUser, requestId, body } = {}) {
         }
       });
 
-  const approvedRequest = approveRefundRequestInDatabase({
+  const approveInput = {
     requestId: refundRequest.id,
     resultingPaymentRefundId: refundResult.refund?.id || null,
     actorUserId: authUser.id
-  });
+  };
+  const approvedRequest = paymentRefundRepository
+    ? await paymentRefundRepository.approveRefundRequest(approveInput)
+    : approveRefundRequestInDatabase(approveInput);
 
   return { refundRequest: approvedRequest, refund: refundResult };
 }
 
-async function rejectRefundRequest({ authUser, requestId, body } = {}) {
+async function rejectRefundRequest({ authUser, requestId, body, paymentRefundRepository } = {}) {
   if (!authUser?.roles?.includes("admin")) {
     throw new PaymentServiceError(403, { error: "Admin role required" });
   }
 
-  const refundRequest = getRefundRequestById(requestId);
+  const refundRequest = paymentRefundRepository
+    ? await paymentRefundRepository.getRefundRequestById({ requestId })
+    : getRefundRequestById(requestId);
   if (!refundRequest) {
     throw new PaymentServiceError(404, { error: "Refund request not found" });
   }
@@ -134,11 +150,14 @@ async function rejectRefundRequest({ authUser, requestId, body } = {}) {
     throw new PaymentServiceError(400, { error: "reason is required" });
   }
 
-  const rejectedRequest = rejectRefundRequestInDatabase({
+  const rejectInput = {
     requestId: refundRequest.id,
     rejectionReason: reason,
     actorUserId: authUser.id
-  });
+  };
+  const rejectedRequest = paymentRefundRepository
+    ? await paymentRefundRepository.rejectRefundRequest(rejectInput)
+    : rejectRefundRequestInDatabase(rejectInput);
 
   return { refundRequest: rejectedRequest };
 }

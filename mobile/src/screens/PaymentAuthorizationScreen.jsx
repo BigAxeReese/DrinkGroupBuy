@@ -5,6 +5,7 @@ import { PlaceholderBox } from "../components/PlaceholderBox";
 import { PrimaryButton } from "../components/PrimaryButton";
 import { StatusBadge } from "../components/StatusBadge";
 import { formatCurrency } from "../utils/calculations";
+import { getManualRepaymentStateInfo } from "../utils/manualRepayment";
 import { requestEcpayAuthorization, requestLinePayAuthorization, requestLinePayRepayment } from "../utils/apiClient";
 
 const LINE_PAY_SYNC_POLL_INTERVAL_MS = 3000;
@@ -91,7 +92,7 @@ export function PaymentAuthorizationScreen({ navigation, route, appState, action
     || payment.paymentStatus === "failed"
     || order?.paymentStatus === "failed";
   const manualRepayment = order?.manualRepayment ?? null;
-  const repaymentExpired = manualRepayment?.reason === "manual_repayment_expired";
+  const repaymentState = isManualRepayment ? getManualRepaymentStateInfo(manualRepayment) : null;
   const canCapture = payment.discountStatus === "qualified";
   const deepLinkResultMessage = getDeepLinkResultMessage(route.params);
 
@@ -106,12 +107,10 @@ export function PaymentAuthorizationScreen({ navigation, route, appState, action
         <Text style={styles.amount}>{formatCurrency(isManualRepayment ? (manualRepayment?.finalAmount ?? payment.finalAmount ?? payment.originalAmount) : payment.originalAmount)}</Text>
         {isManualRepayment ? (
           <>
-            <Text style={styles.meta}>自動扣款已停止，這次將依結算後金額直接付款。</Text>
-            <Text style={styles.meta}>
-              {repaymentExpired
-                ? "已超過重新付款期限。"
-                : `可付款至 ${formatRepaymentCutoff(manualRepayment?.cutoffAt)}。`}
-            </Text>
+            <Text style={styles.meta}>{repaymentState.statusText}</Text>
+            {manualRepayment?.reason !== "manual_repayment_expired" ? (
+              <Text style={styles.meta}>可付款至 {formatRepaymentCutoff(manualRepayment?.cutoffAt)}。</Text>
+            ) : null}
           </>
         ) : (
           <>
@@ -175,8 +174,8 @@ export function PaymentAuthorizationScreen({ navigation, route, appState, action
           </Text>
         ) : null}
         <PrimaryButton
-          label={repaymentExpired
-            ? "已超過重新付款期限"
+          label={repaymentState?.disabled
+            ? repaymentState.disabledLabel
             : linePayStatus === "loading"
               ? "正在建立付款請求..."
               : isManualRepayment
@@ -184,9 +183,9 @@ export function PaymentAuthorizationScreen({ navigation, route, appState, action
                 : selectedProvider === "ecpay"
                   ? "前往信用卡預授權"
                   : "前往 LINE Pay 預授權"}
-          disabled={repaymentExpired}
+          disabled={Boolean(repaymentState?.disabled)}
           onPress={() => {
-            if (linePayStatus === "loading") return;
+            if (linePayStatus === "loading" || repaymentState?.disabled) return;
             const startPayment = isManualRepayment ? startLinePayRepayment : startPaymentAuthorization;
             startPayment({
               payment,

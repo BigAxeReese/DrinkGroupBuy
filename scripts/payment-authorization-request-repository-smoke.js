@@ -22,11 +22,16 @@ async function verifySqliteDelegation() {
     sqliteGateway: {
       getOrderPaymentContext: (id) => ({ id }),
       getLatestAuthorizationForOrder: (id) => ({ orderId: id }),
+      getLatestAuthorizationForOrderRevision: (id) => ({ orderRevisionId: id }),
       createPendingAuthorization: () => expected,
     },
   });
   assert.equal(repository.kind, "sqlite");
   assert.deepEqual(await repository.getOrderPaymentContext("order-001"), { id: "order-001" });
+  assert.deepEqual(
+    await repository.getLatestAuthorizationForOrderRevision("revision-001"),
+    { orderRevisionId: "revision-001" }
+  );
   assert.equal(await repository.createPendingAuthorization({}), expected);
 }
 

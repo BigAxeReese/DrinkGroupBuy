@@ -238,17 +238,13 @@ async function requestLinePayAuthorization(input) {
 async function requestLinePayAuthorizationUnlocked({
   authUser,
   body,
-  authorizationRequestRepository
+  authorizationRequestRepository,
+  orderRevisionRepository
 }) {
-  if (body.orderRevisionId && authorizationRequestRepository?.kind === "postgres") {
-    throw new PaymentServiceError(503, {
-      error: "customer_order_revision_runtime_mismatch",
-      message: "PostgreSQL order revision authorization is not available yet."
-    });
-  }
-
   const revision = body.orderRevisionId
-    ? getOrderRevisionPaymentContext(body.orderRevisionId)
+    ? await (orderRevisionRepository
+        ? orderRevisionRepository.getRevisionPaymentContext({ orderRevisionId: body.orderRevisionId })
+        : getOrderRevisionPaymentContext(body.orderRevisionId))
     : null;
   if (body.orderRevisionId && !revision) {
     throw new PaymentServiceError(404, {
@@ -306,7 +302,9 @@ async function requestLinePayAuthorizationUnlocked({
   }
 
   const existingAuthorization = revision
-    ? getLatestLinePayAuthorizationForOrderRevision(revision.id)
+    ? await (authorizationRequestRepository
+        ? authorizationRequestRepository.getLatestAuthorizationForOrderRevision(revision.id)
+        : getLatestLinePayAuthorizationForOrderRevision(revision.id))
     : await (authorizationRequestRepository
         ? authorizationRequestRepository.getLatestAuthorizationForOrder(body.orderId)
         : getLatestLinePayAuthorizationForOrder(body.orderId));
@@ -341,9 +339,9 @@ async function requestLinePayAuthorizationUnlocked({
     amount: Number(body.amount),
     providerTransactionId: transactionId
   };
-  const authorization = revision || !authorizationRequestRepository
-    ? createPendingLinePayAuthorization(authorizationInput)
-    : await authorizationRequestRepository.createPendingAuthorization(authorizationInput);
+  const authorization = authorizationRequestRepository
+    ? await authorizationRequestRepository.createPendingAuthorization(authorizationInput)
+    : createPendingLinePayAuthorization(authorizationInput);
   if (authorizationRequestRepository?.kind !== "postgres") {
     enqueuePendingAuthorizationReconciliation(authorization, { amount: Number(body.amount) });
   }
@@ -1050,13 +1048,30 @@ async function captureLinePayAuthorizationUnlocked({
 }
 
 async function refundLinePayPayment(input = {}) {
+  const repository = input.paymentRefundRepository;
   const lockInput = {
     orderId: input.body?.orderId || input.body?.paymentCaptureId || input.body?.providerTransactionId
   };
-  return withLinePayOperationLock(lockInput, () => refundLinePayPaymentUnlocked(input));
+  const operation = () => refundLinePayPaymentUnlocked(input);
+  if (repository?.kind === "postgres") {
+    try {
+      return await repository.withOperationLock(lockInput, operation);
+    } catch (error) {
+      if (error?.code === "operation_locked") {
+        throw new PaymentServiceError(409, {
+          error: "payment_operation_locked",
+          status: "retry_later",
+          lockKey: error.lock?.lockKey || null,
+          lockedUntil: error.lock?.lockedUntil || null
+        });
+      }
+      throw error;
+    }
+  }
+  return withLinePayOperationLock(lockInput, operation);
 }
 
-async function refundLinePayPaymentUnlocked({ authUser, body } = {}) {
+async function refundLinePayPaymentUnlocked({ authUser, body, paymentRefundRepository } = {}) {
   if (!authUser?.roles?.includes("admin")) {
     throw new PaymentServiceError(403, { error: "Admin role required" });
   }
@@ -1067,7 +1082,7 @@ async function refundLinePayPaymentUnlocked({ authUser, body } = {}) {
   }
 
   const provider = resolveRefundProvider(body.provider);
-  const pendingRefund = createPendingLinePayRefundInDatabase({
+  const createPendingRefundInput = {
     orderId: body.orderId,
     captureId: body.captureId,
     providerTransactionId: body.providerTransactionId,
@@ -1076,7 +1091,10 @@ async function refundLinePayPaymentUnlocked({ authUser, body } = {}) {
     idempotencyKey: body.idempotencyKey,
     reason: body.reason || "line_pay_refund_requested",
     actorUserId: authUser.id
-  });
+  };
+  const pendingRefund = paymentRefundRepository
+    ? await paymentRefundRepository.createPendingRefund(createPendingRefundInput)
+    : createPendingLinePayRefundInDatabase(createPendingRefundInput);
 
   if (!pendingRefund) {
     throw new PaymentServiceError(404, { error: "Captured payment not found" });
@@ -1108,11 +1126,14 @@ async function refundLinePayPaymentUnlocked({ authUser, body } = {}) {
 
   const transactionId = pendingRefund.authorization?.providerAuthorizationId;
   if (!transactionId) {
-    const failed = failLinePayRefundInDatabase({
+    const failInput = {
       refundId: pendingRefund.refund.id,
       reason: "provider_transaction_missing",
       actorUserId: authUser.id
-    });
+    };
+    const failed = paymentRefundRepository
+      ? await paymentRefundRepository.failRefund(failInput)
+      : failLinePayRefundInDatabase(failInput);
     throw new PaymentServiceError(409, {
       error: "LINE Pay transaction ID is missing",
       status: "provider_transaction_missing",
@@ -1128,12 +1149,15 @@ async function refundLinePayPaymentUnlocked({ authUser, body } = {}) {
           refundAmount: pendingRefund.refund.refundAmount
         });
   } catch (error) {
-    const failed = failLinePayRefundInDatabase({
+    const failInput = {
       refundId: pendingRefund.refund.id,
       reason: "line_pay_refund_failed",
       actorUserId: authUser.id,
       providerPayload: error.linePayPayload || { message: error.message }
-    });
+    };
+    const failed = paymentRefundRepository
+      ? await paymentRefundRepository.failRefund(failInput)
+      : failLinePayRefundInDatabase(failInput);
     throw new PaymentServiceError(error.statusCode || 502, {
       error: "LINE Pay refund failed",
       status: "refund_failed",
@@ -1142,12 +1166,15 @@ async function refundLinePayPaymentUnlocked({ authUser, body } = {}) {
     });
   }
 
-  const completedRefund = completeLinePayRefundInDatabase({
+  const completeRefundInput = {
     refundId: pendingRefund.refund.id,
     providerRefundId: payload.info?.refundTransactionId ? String(payload.info.refundTransactionId) : null,
     providerPayload: payload,
     actorUserId: authUser.id
-  });
+  };
+  const completedRefund = paymentRefundRepository
+    ? await paymentRefundRepository.completeRefund(completeRefundInput)
+    : completeLinePayRefundInDatabase(completeRefundInput);
 
   if (completedRefund?.error) {
     throw new PaymentServiceError(409, completedRefund);

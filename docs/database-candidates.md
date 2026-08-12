@@ -1,6 +1,6 @@
 # 資料庫盤點與候選設計
 
-最後更新：2026-08-05
+最後更新：2026-08-11
 
 ## 語言與命名規則
 
@@ -40,6 +40,12 @@
 | `status_history`                                                    | 狀態變更歷程與原因             | Polymorphic resource reference                             |
 | `audit_logs`                                                        | 敏感操作紀錄                   | Polymorphic resource reference                             |
 
+## 尚未建立的候選資料表
+
+| 資料表                  | 用途                               | 重要關係與目前狀態                                                                 |
+| ----------------------- | ---------------------------------- | ---------------------------------------------------------------------------------- |
+| `order_rule_consents`   | 保存顧客付款前同意取餐與逾期規則的歷史證據 | Order 1:N consents、User 1:N consents；欄位定義見 `docs/database-field-spec.md`，目前尚未加入 schema、API 或 App |
+
 ## 目前資料保存狀態
 
 - Backend 已經會讀寫 `group_buy_activities`、`promotion_tiers`、`activity_notices`、`status_history` 與 `audit_logs`，用於目前已實作的活動 API。
@@ -60,6 +66,7 @@
 - Mobile 不顯示角色選擇，使用者不能自行選顧客、店家或管理員。
 - Backend 驗證 Firebase ID token 後，依 `users.firebase_uid`、`user_roles` 與 `merchant_users` 決定身份。
 - 顧客送出訂單並完成付款預授權後，訂單即納入團購杯數統計；付款 provider 目前有 LINE Pay（主要，分離式請款已核准並完成 Sandbox 驗證）與 ECPay 信用卡（2026-08-05 新增的備援/並行方案），兩者並存，商業規則 provider 中立。
+- 顧客進入正式付款前必須勾選同意「取餐與逾期未取規則」；系統需保存訂單、顧客、規則類型、規則版本、完整內容快照與 Backend 同意時間。保存失敗或版本過期時不得呼叫付款 provider。此規則已確認，但 `order_rule_consents` 尚未實作。
 - 店家不需要逐筆確認接單，也不能任意取消單一已預授權訂單。
 - 顧客可在截止前 30 分鐘以前修改訂單或退出團購；進入截止前 30 分鐘後不可修改或退出。
 - 店家可在截止前 30 分鐘以前取消整個團購；進入截止前 30 分鐘後不可取消。

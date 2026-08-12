@@ -7,6 +7,7 @@ import { useOrderListSync } from "../hooks/useOrderListSync";
 import { formatCurrency, isWithdrawalLocked } from "../utils/calculations";
 import { getGroupBuyActivityProgress } from "../utils/groupBuyActivityProgress";
 import { getGroupBuyActivityStore } from "../utils/groupBuyActivityStores";
+import { getManualRepaymentStateInfo } from "../utils/manualRepayment";
 import { formatOrderItemCustomizations, normalizeOrderItem } from "../utils/orderItems";
 
 export function CustomerOrdersScreen({ navigation, appState, actions, memberAction, selectedCustomerId }) {
@@ -209,8 +210,8 @@ function OrderDetailCard({ order, groupBuyActivities, payments, actions, navigat
   const progress = groupBuyActivity ? getGroupBuyActivityProgress(groupBuyActivity) : null;
   const progressText = progress ? `${progress.currentCups} / ${progress.nextTarget} 杯` : "團購資料已不存在";
   const manualRepayment = order.manualRepayment ?? null;
-  const repaymentExpired = manualRepayment?.reason === "manual_repayment_expired";
   const showManualRepayment = order.paymentStatus === "failed" && !historical;
+  const repaymentState = showManualRepayment ? getManualRepaymentStateInfo(manualRepayment) : null;
 
   return (
     <View style={styles.orderCard}>
@@ -239,14 +240,10 @@ function OrderDetailCard({ order, groupBuyActivities, payments, actions, navigat
         {showManualRepayment ? (
           <View style={styles.repaymentNotice}>
             <Text style={styles.repaymentTitle}>扣款失敗</Text>
-            <Text style={styles.repaymentText}>
-              {repaymentExpired
-                ? "已超過取餐前 15 分鐘，不能再重新付款。"
-                : "自動請款已停止，可在取餐開始前 15 分鐘以前重新付款。"}
-            </Text>
+            <Text style={styles.repaymentText}>{repaymentState.statusText}</Text>
             <PrimaryButton
-              label={repaymentExpired ? "已超過重新付款期限" : "重新付款"}
-              disabled={repaymentExpired}
+              label={repaymentState.disabled ? repaymentState.disabledLabel : "重新付款"}
+              disabled={repaymentState.disabled}
               onPress={() => navigation.go("paymentAuthorization", {
                 groupBuyActivityId: order.groupBuyActivityId,
                 orderId: order.id,

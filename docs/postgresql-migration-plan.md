@@ -1,6 +1,6 @@
 # PostgreSQL 遷移規劃
 
-最後更新：2026-07-31
+最後更新：2026-08-12
 
 本文件整理從目前 SQLite 開發資料庫遷移到 PostgreSQL 的方向。它是規劃文件，不是可直接執行的 production migration。
 
@@ -13,6 +13,7 @@
 - PostgreSQL schema draft：`database/migrations/001_initial_postgres.sql`。
 - PostgreSQL seed draft：`database/migrations/002_seed_dev_postgres.sql`。
 - PostgreSQL 結算折扣快照 migration draft：`database/migrations/003_activity_settlement_discount_snapshot_postgres.sql`。
+- 統一 PostgreSQL migration runner：`database/migrate.js`（`npm run postgres:migrate`）。
 - 本機 PostgreSQL 設定草案：`database/docker-compose.postgres.yml`。
 
 ## 為什麼要遷移到 PostgreSQL
@@ -34,7 +35,7 @@ DrinkGroupBuy 後續會處理訂單、付款、截止結算與多使用者同時
 4. 訂單、付款、活動狀態需要保留歷史紀錄。
 5. Mobile app 不應直接連資料庫。
 6. 金流密鑰只放 backend 環境變數，不進 database 或 mobile。
-7. PostgreSQL migration 必須可追蹤、可重跑到乾淨 dev database。
+7. PostgreSQL migration 必須可追蹤、可重跑到乾淨 dev database（已由 `database/migrate.js` 統一 runner 滿足，詳見下方「2026-08-12 統一 migration runner」）。
 8. PostgreSQL draft 可與目前 SQLite runtime schema 有少量差異，但差異要寫清楚。
 
 ## Primary key 決策
@@ -378,3 +379,12 @@ PostgreSQL 遷移後，以下流程需要 transaction：
 - `npm run postgres-settlement-snapshot:smoke` 已在本機 PostgreSQL 16 transaction 中驗證 3 杯折 100 元會保存每杯 33 元、分配 99 元、尾差 1 元。
 - 不一致快照會被 PostgreSQL `CHECK` constraint 拒絕。
 - `npm run postgres-settlement-snapshot:apply` 已將 `003` 永久套用本機開發資料庫並驗證 schema／backfill；Backend runtime 仍預設 SQLite，沒有雙寫。
+
+## 2026-08-12 統一 migration runner
+
+- 新增 `database/migrate.js`，取代個別 migration 各自的 ad hoc apply 腳本，統一以 `npm run postgres:migrate` 套用。Runner 會讀取 `database/migrations/` 內所有 `.sql` 檔，依檔名數字前綴順序執行，並用自動建立的 `schema_migrations` 資料表（`version text PRIMARY KEY`、`name text`、`applied_at timestamptz`）追蹤已套用版本，只套用尚未記錄的檔案，每個檔案各自包在一個 transaction 內。
+- 已刪除 `database/apply-postgres-settlement-snapshot.js`（原 `npm run postgres-settlement-snapshot:apply`）與 `database/apply-postgres-order-revision-refund-pickup-tables.js`（原 `npm run postgres-order-revision-refund-pickup-tables:apply`），對應 npm script 一併從 `package.json` 移除；`001`／`002` 先前完全沒有專屬 apply 腳本，僅靠 README 範例的手動 `psql` 指令套用，新 runner 已統一涵蓋全部四個 migration 檔案。
+- 新鮮 schema 驗證：在一個空的 throwaway PostgreSQL schema（`CREATE SCHEMA` 建立、驗證後 `DROP`）上執行 runner，依序成功套用 `001`～`004`，建立 35 個資料表，`schema_migrations` 正確記錄全部 4 個版本；重跑一次會正確判斷無待套用項目、不重複執行。
+- 本機開發資料庫（先前已用舊 ad hoc 方式套用過全部 4 個 migration）已一次性直接 bootstrap `schema_migrations`（非 checked-in 腳本，屬一次性動作），bootstrap 前已先確認各 migration 預期的資料表／欄位確實存在；bootstrap 後執行 `npm run postgres:migrate` 正確回報「已是最新狀態」，未嘗試重新套用任何檔案。
+- 新 migration 檔案慣例：檔名須以數字前綴開頭（例如 `005_description.sql`）；不應包含自己的 `BEGIN`／`COMMIT`。`database/migrate.js` 檔案開頭以註解記錄一個已知例外：`001`／`002` 這兩個歷史檔案本身就包含 `BEGIN`／`COMMIT`，Postgres 會把巢狀 `BEGIN` 視為無害警告、可正常執行，但檔案自己的 `COMMIT` 會提前結束 transaction，導致這兩個檔案的內容套用與 runner 寫入 `schema_migrations` 的 bookkeeping 不在同一個 transaction 內（不是原子的）；這是已知並接受的落差，不會為此回頭修改已套用過的歷史 migration 檔案。
+- 此工作範圍不含正式環境部署程序（migrate 前備份、staging 驗證晉升、rollback 工具）；目前尚無正式 PostgreSQL 部署，這部分仍待規劃。

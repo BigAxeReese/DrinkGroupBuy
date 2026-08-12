@@ -24,6 +24,7 @@ PostgreSQL 是未來正式資料庫方向。`database/migrations/` 保存 schema
 | `drink-group-buy-dev.sqlite` | 產生出的本機資料庫檔案，不應上傳 Git |
 | `migrations/001_initial_postgres.sql` | PostgreSQL v1 schema draft，含付款可靠性工作與 operation lease |
 | `migrations/002_seed_dev_postgres.sql` | PostgreSQL dev seed；供 auth、菜單與團購活動讀寫 runtime 驗證使用 |
+| `migrate.js` | 統一 PostgreSQL migration runner；依檔名數字前綴順序套用 `migrations/` 內尚未套用的檔案，並記錄於 `schema_migrations` |
 | `docker-compose.postgres.yml` | 本機 PostgreSQL dev container 設定 |
 | `test/` | 測試/展示用資料，不是正式 schema 來源 |
 
@@ -48,22 +49,20 @@ database/drink-group-buy-dev.sqlite
 
 目前 PostgreSQL 已用於 schema／seed、adapter、唯讀切片、商家建團、菜單管理、顧客首次建單與付款 request／confirm／cancel／一般 void／顧客取消。capture／settlement repositories 已完成真實 PostgreSQL proof，但尚未接入 server route／scheduler。
 
-本機沒有安裝 `psql` 也可以用 Docker container 內的 `psql` 驗證：
+先用 Docker 啟動本機 PostgreSQL container：
 
 ```powershell
 docker compose -f database/docker-compose.postgres.yml up -d
-docker compose -f database/docker-compose.postgres.yml exec postgres psql -U drink_group_buy -d drink_group_buy -f /migrations/001_initial_postgres.sql
-docker compose -f database/docker-compose.postgres.yml exec postgres psql -U drink_group_buy -d drink_group_buy -f /migrations/002_seed_dev_postgres.sql
 ```
 
-既有資料庫套用 `003` 時，建議使用會檢查未套用／完整套用／部分套用並驗證回填的 runner：
+套用 migration 統一使用 `database/migrate.js`：它會讀取 `database/migrations/` 內所有 `.sql` 檔，依檔名數字前綴順序執行，並用會自動建立的 `schema_migrations` 資料表追蹤哪些版本已套用，只套用尚未套用的檔案，每個檔案各自包在一個 transaction 內：
 
 ```powershell
 $env:DATABASE_URL='postgres://...'
-npm run postgres-settlement-snapshot:apply
+npm run postgres:migrate
 ```
 
-如果要重建 PostgreSQL dev database，先移除 volume 再重新啟動：
+如果要重建 PostgreSQL dev database，先移除 volume 再重新啟動，接著重新執行 `npm run postgres:migrate` 套用全部 migration：
 
 ```powershell
 docker compose -f database/docker-compose.postgres.yml down -v
@@ -95,6 +94,7 @@ postgres://drink_group_buy:drink_group_buy_dev_password@localhost:5432/drink_gro
 - 2026-07-31：`003` 已由專用 transaction runner 永久套用並通過 schema／backfill 驗證。
 - 2026-07-31：結算 proof 已驗證折扣快照、持久化 job retry／complete、`FOR UPDATE SKIP LOCKED`、跨執行個體 lock、mock capture 與清理歸零。
 - 驗證後 runtime 資料仍為 0 group_buy_activities、0 promotion_tiers、0 orders、0 payment_authorizations、0 payment_captures、0 pickup_credentials。
+- 2026-08-12：新增統一 PostgreSQL migration runner `database/migrate.js`（`npm run postgres:migrate`），取代已刪除的 `database/apply-postgres-settlement-snapshot.js`（原 `npm run postgres-settlement-snapshot:apply`）與 `database/apply-postgres-order-revision-refund-pickup-tables.js`（原 `npm run postgres-order-revision-refund-pickup-tables:apply`）；`001`／`002` 先前沒有專屬 apply 腳本，只能用手動 `psql` 指令套用，新 runner 已統一涵蓋全部四個 migration 檔案。已在全新 throwaway PostgreSQL schema 驗證：依序成功套用 4 個 migration、建立 35 個資料表，`schema_migrations` 正確記錄全部 4 個版本；重跑會正確偵測無待套用項目。本機開發資料庫已一次性直接 bootstrap `schema_migrations`（非 checked-in 腳本，先確認各 migration 預期資料表／欄位已存在），之後執行 `npm run postgres:migrate` 正確回報已是最新狀態、未重複套用。
 
 ## 目前主要資料表
 

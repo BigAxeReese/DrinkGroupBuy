@@ -115,6 +115,13 @@ async function cancelPendingPostgresAuthorization(database, input = {}) {
       WHERE id = $3
       RETURNING *
     `, [reason, now, state.id]);
+    if (state.order_revision_id) {
+      await transaction.query(`
+        UPDATE order_revisions
+        SET status = 'failed', failure_reason = $1, cancelled_at = $2, updated_at = $2
+        WHERE id = $3 AND status = 'pending_authorization'
+      `, [reason, now, state.order_revision_id]);
+    }
     await insertProviderEvent(transaction, state, "cancel_redirect", {
       orderId: state.order_id,
       providerTransactionId: input.providerTransactionId || state.provider_authorization_id || null,
@@ -265,7 +272,7 @@ function mapPaymentAuthorization(row) {
   return {
     id: row.id,
     orderId: row.order_id,
-    orderRevisionId: null,
+    orderRevisionId: row.order_revision_id || null,
     provider: row.provider,
     paymentFlow: row.payment_flow || "authorization",
     status: row.status,

@@ -47,6 +47,25 @@ export function wouldExceedGroupBuyActivityCapacity(groupBuyActivity, additional
 }
 
 export function getGroupBuyActivityDiscountInfo(groupBuyActivity) {
+  const settlement = groupBuyActivity?.settlement;
+  if (settlement) {
+    const appliedTier = (groupBuyActivity?.tiers ?? [])
+      .find((tier) => tier.id === settlement.appliedTierId) ?? null;
+    return {
+      currentCups: settlement.authorizedCups,
+      currentTierId: settlement.appliedTierId,
+      currentTierTargetCups: appliedTier ? Number(appliedTier.cups ?? appliedTier.targetCups) : null,
+      currentTierDiscountAmount: settlement.discountAmount,
+      estimatedDiscountPerCup: settlement.discountPerCup,
+      estimatedAllocatedDiscountAmount: settlement.allocatedDiscountAmount,
+      estimatedUndistributedDiscountAmount: settlement.undistributedDiscountAmount,
+      nextTierTargetCups: null,
+      cupsToNextTier: 0,
+      isQualified: settlement.outcome === "qualified",
+      isEstimated: false
+    };
+  }
+
   const currentCups = Math.max(Number(groupBuyActivity?.currentCups ?? 0), 0);
   const tiers = (groupBuyActivity?.tiers ?? [])
     .map((tier) => ({

@@ -313,7 +313,7 @@ function mapPaymentAuthorization(row) {
   return {
     id: row.id,
     orderId: row.order_id,
-    orderRevisionId: null,
+    orderRevisionId: row.order_revision_id || null,
     provider: row.provider,
     paymentFlow: row.payment_flow || "authorization",
     status: row.status,

@@ -437,6 +437,13 @@ function listGroupBuyActivities() {
       GROUP BY activity_id
     `).all();
     const progressByActivityId = new Map(progressRows.map((row) => [row.activity_id, row]));
+    const settlementRows = database.prepare(`
+      SELECT *
+      FROM activity_settlements
+    `).all();
+    const settlementByActivityId = new Map(
+      settlementRows.map((row) => [row.activity_id, mapActivitySettlement(row)])
+    );
 
     return rows.map((row) => {
       const activityTiers = tiers
@@ -474,6 +481,7 @@ function listGroupBuyActivities() {
         authorizedCups,
         participantCount,
         ...discountSummary,
+        settlement: settlementByActivityId.get(row.id) ?? null,
         withdrawalLockMinutes: row.withdrawal_lock_minutes,
         cancellationReason: row.cancellation_reason,
         store: {

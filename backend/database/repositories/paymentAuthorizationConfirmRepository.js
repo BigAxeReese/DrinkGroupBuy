@@ -2,6 +2,10 @@
 
 const { randomUUID } = require("node:crypto");
 const { createRuntimeDatabaseAdapter } = require("..");
+const {
+  getPostgresOrderRevisionById,
+  mapOrderRevision,
+} = require("./orderRevisionRepository");
 
 function resolvePaymentAuthorizationConfirmRuntime(input = {}) {
   const env = input.env || process.env;
@@ -83,6 +87,43 @@ async function getPostgresAuthorizationContext(database, input = {}, env = proce
   };
 }
 
+async function lockOrderRevisionState(transaction, orderRevisionId) {
+  const result = await transaction.query(`
+    SELECT * FROM order_revisions WHERE id = $1 FOR UPDATE
+  `, [orderRevisionId]);
+  return result.rows[0] || null;
+}
+
+async function copyPostgresOrderRevisionItemsToOrder(transaction, orderRevisionId, orderId) {
+  const itemsResult = await transaction.query(`
+    SELECT * FROM order_revision_items WHERE order_revision_id = $1 ORDER BY id ASC
+  `, [orderRevisionId]);
+  for (const item of itemsResult.rows) {
+    const orderItemId = `order-item-${randomUUID()}`;
+    await transaction.query(`
+      INSERT INTO order_items (
+        id, order_id, menu_item_id, item_name_snapshot, quantity, unit_price_snapshot, subtotal
+      ) VALUES ($1, $2, $3, $4, $5, $6, $7)
+    `, [orderItemId, orderId, item.menu_item_id, item.item_name_snapshot, item.quantity, item.unit_price_snapshot, item.subtotal]);
+
+    const customizationsResult = await transaction.query(`
+      SELECT * FROM order_revision_item_customizations
+      WHERE order_revision_item_id = $1 ORDER BY sort_order ASC
+    `, [item.id]);
+    for (const [index, customization] of customizationsResult.rows.entries()) {
+      await transaction.query(`
+        INSERT INTO order_item_customizations (
+          id, order_item_id, customization_option_id, option_type,
+          label_snapshot, price_delta_snapshot, sort_order
+        ) VALUES ($1, $2, $3, $4, $5, $6, $7)
+      `, [
+        `order-item-customization-${randomUUID()}`, orderItemId, customization.customization_option_id,
+        customization.option_type, customization.label_snapshot, customization.price_delta_snapshot, index,
+      ]);
+    }
+  }
+}
+
 async function withPostgresConfirmLock(database, input, operation) {
   const identifier = input.transactionId || input.orderId;
   const lockKey = `line-pay:${identifier}`;
@@ -147,6 +188,21 @@ async function confirmPostgresAuthorization(database, input, env = process.env) 
     if (!state) return null;
     if (state.status !== "pending") return mapPaymentAuthorization(state);
 
+    let revision = null;
+    if (state.order_revision_id) {
+      revision = await lockOrderRevisionState(transaction, state.order_revision_id);
+      if (!revision) {
+        return { error: "order_revision_not_found", authorization: mapPaymentAuthorization(state) };
+      }
+      if (revision.status !== "pending_authorization") {
+        return {
+          error: "order_revision_not_pending",
+          revision: mapOrderRevision(revision),
+          authorization: mapPaymentAuthorization(state),
+        };
+      }
+    }
+
     const authorizationExpiresAt = extractAuthorizationExpiresAt(input.providerPayload);
     const rejection = validateConfirmation({
       now,
@@ -164,7 +220,7 @@ async function confirmPostgresAuthorization(database, input, env = process.env) 
         AND status != 'cancelled'
     `, [state.activity_id, state.order_id]);
     const authorizedCups = Number(capacityResult.rows[0]?.authorized_cups || 0);
-    const requestedCups = Number(state.total_cups);
+    const requestedCups = revision ? Number(revision.total_cups) : Number(state.total_cups);
     const maximumCups = activity.maximum_cups == null ? null : Number(activity.maximum_cups);
     const capacityExceeded = maximumCups != null && authorizedCups + requestedCups > maximumCups;
     const error = rejection || (capacityExceeded ? "capacity_exceeded" : null);
@@ -172,6 +228,7 @@ async function confirmPostgresAuthorization(database, input, env = process.env) 
     if (error) {
       return persistConfirmRejection(transaction, {
         state,
+        revision,
         activity,
         error,
         now,
@@ -200,21 +257,68 @@ async function confirmPostgresAuthorization(database, input, env = process.env) 
       WHERE id = $4 AND status = 'pending'
       RETURNING *
     `, [amount, authorizationExpiresAt, now, state.id]);
-    await transaction.query(`
-      UPDATE orders
-      SET payment_status = 'authorized',
-          authorization_status = 'authorized',
-          merchant_acceptance_status = 'accepted',
-          updated_at = $1
-      WHERE id = $2
-    `, [now, state.order_id]);
+
+    let replacedAuthorization = null;
+    if (revision) {
+      if (revision.original_payment_authorization_id) {
+        const replacedResult = await transaction.query(`
+          SELECT * FROM payment_authorizations WHERE id = $1
+        `, [revision.original_payment_authorization_id]);
+        replacedAuthorization = replacedResult.rows[0] || null;
+      }
+
+      // Wipe and replace the order's line items from the revision snapshot -- the revision
+      // becomes the new authoritative order content, mirroring authorizeLinePayPaymentInDatabase
+      // in backend/db.js exactly (delete customizations, delete items, then copy from revision).
+      await transaction.query(`
+        DELETE FROM order_item_customizations
+        WHERE order_item_id IN (SELECT id FROM order_items WHERE order_id = $1)
+      `, [state.order_id]);
+      await transaction.query(`DELETE FROM order_items WHERE order_id = $1`, [state.order_id]);
+      await copyPostgresOrderRevisionItemsToOrder(transaction, revision.id, state.order_id);
+
+      await transaction.query(`
+        UPDATE orders
+        SET fallback_purchase_preference = $1,
+            total_cups = $2,
+            original_amount = $3,
+            final_amount = NULL,
+            payment_status = 'authorized',
+            authorization_status = 'authorized',
+            merchant_acceptance_status = 'accepted',
+            pickup_status = 'not_ready',
+            updated_at = $4
+        WHERE id = $5
+      `, [
+        revision.fallback_purchase_preference, revision.total_cups, revision.original_amount,
+        now, state.order_id,
+      ]);
+      await transaction.query(`
+        UPDATE order_revisions
+        SET status = 'applied',
+            replacement_payment_authorization_id = $1,
+            applied_at = $2,
+            updated_at = $2
+        WHERE id = $3
+      `, [state.id, now, revision.id]);
+    } else {
+      await transaction.query(`
+        UPDATE orders
+        SET payment_status = 'authorized',
+            authorization_status = 'authorized',
+            merchant_acceptance_status = 'accepted',
+            updated_at = $1
+        WHERE id = $2
+      `, [now, state.order_id]);
+    }
+
     await insertProviderEvent(transaction, {
       authorization: state,
       eventType: "confirm_success",
       idempotencyKey: input.providerTransactionId
         ? `${state.provider}_confirm:${input.providerTransactionId}`
         : null,
-      payload: { providerPayload: input.providerPayload || {}, orderRevisionId: null },
+      payload: { providerPayload: input.providerPayload || {}, orderRevisionId: revision?.id || null },
       now,
     });
     await insertStatusHistory(transaction, state, "authorized", "line_pay_confirm_success", now);
@@ -224,14 +328,49 @@ async function confirmPostgresAuthorization(database, input, env = process.env) 
       metadata: {
         orderId: state.order_id,
         activityId: state.activity_id,
+        orderRevisionId: revision?.id || null,
         providerTransactionId: input.providerTransactionId,
         authorizedAmount: amount,
         authorizedCups: authorizedCups + requestedCups,
       },
       now,
     });
+
+    if (revision) {
+      // Same-status "submitted" -> "submitted" status_history entry, matching
+      // authorizeLinePayPaymentInDatabase exactly: it's recording the apply event on the
+      // order's timeline, not an actual status transition (the order was already submitted).
+      await transaction.query(`
+        INSERT INTO status_history (
+          id, resource_type, resource_id, from_status, to_status, reason, actor_user_id, created_at
+        ) VALUES ($1, 'order', $2, 'submitted', 'submitted', 'order_revision_authorized_and_applied', NULL, $3)
+      `, [`status-history-${randomUUID()}`, state.order_id, now]);
+      await insertAudit(transaction, {
+        actionType: "apply_order_revision_after_authorization",
+        resourceType: "order",
+        authorizationId: state.order_id,
+        metadata: {
+          orderRevisionId: revision.id,
+          replacementPaymentAuthorizationId: state.id,
+          originalPaymentAuthorizationId: revision.original_payment_authorization_id,
+          previousTotalCups: Number(revision.previous_total_cups),
+          totalCups: Number(revision.total_cups),
+          previousOriginalAmount: Number(revision.previous_original_amount),
+          originalAmount: Number(revision.original_amount),
+        },
+        now,
+      });
+    }
+
     await completeReliabilityJob(transaction, state.id, now);
-    return mapPaymentAuthorization(authorizationResult.rows[0]);
+    const authorizedPayment = mapPaymentAuthorization(authorizationResult.rows[0]);
+    if (!revision) return authorizedPayment;
+
+    return {
+      ...authorizedPayment,
+      appliedOrderRevision: await getPostgresOrderRevisionById(transaction, revision.id),
+      replacedAuthorization: replacedAuthorization ? mapPaymentAuthorization(replacedAuthorization) : null,
+    };
   });
 }
 
@@ -248,6 +387,13 @@ async function persistConfirmRejection(transaction, input) {
     WHERE id = $4
     RETURNING *
   `, [input.authorizationExpiresAt, failureReason, input.now, input.state.id]);
+  if (input.revision) {
+    await transaction.query(`
+      UPDATE order_revisions
+      SET status = 'failed', failure_reason = $1, updated_at = $2, cancelled_at = $2
+      WHERE id = $3
+    `, [failureReason, input.now, input.revision.id]);
+  }
   const eventType = input.error === "capacity_exceeded"
     ? "confirm_capacity_rejected"
     : input.error === "authorization_confirmed_after_deadline"
@@ -261,6 +407,7 @@ async function persistConfirmRejection(transaction, input) {
       : null,
     payload: {
       providerPayload: input.providerPayload || {},
+      orderRevisionId: input.revision?.id || null,
       maximumCups: input.maximumCups,
       authorizedCups: input.authorizedCups,
       requestedCups: input.requestedCups,
@@ -284,6 +431,7 @@ async function persistConfirmRejection(transaction, input) {
     metadata: {
       orderId: input.state.order_id,
       activityId: input.state.activity_id,
+      orderRevisionId: input.revision?.id || null,
       providerTransactionId: input.providerTransactionId,
       maximumCups: input.maximumCups,
       authorizedCups: input.authorizedCups,
@@ -433,10 +581,11 @@ async function insertAudit(database, input) {
   await database.query(`
     INSERT INTO audit_logs (
       id, actor_user_id, action_type, resource_type, resource_id, metadata_json, created_at
-    ) VALUES ($1, NULL, $2, 'payment_authorization', $3, $4::jsonb, $5)
+    ) VALUES ($1, NULL, $2, $3, $4, $5::jsonb, $6)
   `, [
     `audit-log-${randomUUID()}`,
     input.actionType,
+    input.resourceType || "payment_authorization",
     input.authorizationId,
     JSON.stringify(input.metadata || {}),
     input.now,
@@ -496,7 +645,7 @@ function mapPaymentAuthorization(row) {
   return {
     id: row.id,
     orderId: row.order_id,
-    orderRevisionId: null,
+    orderRevisionId: row.order_revision_id || null,
     provider: row.provider,
     paymentFlow: row.payment_flow || "authorization",
     status: row.status,

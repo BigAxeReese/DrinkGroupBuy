@@ -1,6 +1,6 @@
 # API 清單與候選項
 
-最後更新：2026-08-04
+最後更新：2026-08-11
 
 ## 語言規則
 
@@ -172,6 +172,7 @@ API JSON 使用 `camelCase`。已實作 routes 只對目前開發 prototype 具�
 | Response      | `{ provider, orderId, orderRevisionId?, transactionId, paymentUrl, paymentAccessToken, status }`                                                                                                                                                                                                                                                           |
 | 已實作規則    | Owner access check、Channel ID/Secret 只在 backend、LINE Pay request signature、預設 sandbox base URL、確認 SQLite 有對應訂單或 pending revision、確認 request amount 等於訂單或 revision 原價金額、未設定 `LINE_PAY_CAPTURE_SEPARATED=true` 時阻擋真 LINE Pay request、latest LINE Pay authorization 為 `pending` 或 `authorized` 時阻擋重複 request、建立 `payment_authorizations.status = pending`、redirect 以 DB 查找為主且 memory cache 只作輔助 |
 | 尚缺規則      | Provider request status query 與持久化 retry job 已完成第一版；仍缺通用 payment request idempotency table、sandbox callback 人工 E2E 與更細的 mobile 錯誤提示                                                                                                                                    |
+| 已確認候選擴充（未實作） | 顧客前往付款時由 Client 傳送目前顯示的 `ruleVersion` 與明確同意旗標；Backend 必須驗證為目前有效版本，使用伺服器端權威規則內容與伺服器時間新增 `order_rule_consents`，成功後才可呼叫 LINE Pay。未勾選回傳 `rule_consent_required`，版本過期回傳 `rule_version_outdated`，同意紀錄寫入失敗時不得建立 provider request。 |
 
 ### LINE Pay 手動重新付款
 
