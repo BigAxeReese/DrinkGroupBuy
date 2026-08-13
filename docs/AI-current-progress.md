@@ -2,7 +2,7 @@
 
 最後更新：2026-08-12
 
-換電腦或交接給其他 AI 時，請先閱讀 `docs/handoff-summary.md`。
+換電腦或交接給其他 AI 時，請先閱讀 `docs/AI-handoff-summary.md`。
 
 文件語言規則：會影響程式、API、資料庫或工具辨識的內容使用英文；不影響實作的說明、報告文字與備註可使用中文。若英文技術名稱不容易理解，保留英文並加中文註解。
 
@@ -206,46 +206,7 @@ ECPay 與 LINE Pay 機制上的關鍵差異（因此無法完全共用程式碼�
 | `docs/line-pay-separated-capture-sandbox-checklist.md` | LINE Pay 分離式請款 Sandbox 人工驗證清單 |
 | `backend/README.md`                       | 後端啟動與設定說明                            |
 
-目前 API：
-
-| 方法     | 路徑                                          | 用途                                  |
-| -------- | --------------------------------------------- | ------------------------------------- |
-| `POST`   | `/api/auth/login`                             | 開發用登入                            |
-| `POST`   | `/api/auth/firebase-session`                  | Firebase Google Login session         |
-| `GET`    | `/api/auth/dev-users`                         | 本機 dev-only 身份清單                |
-| `POST`   | `/api/auth/dev-session`                       | 本機 dev-only 模擬登入                |
-| `GET`    | `/health`                                     | 健康檢查                              |
-| `GET`    | `/api/stores`                                  | 查詢公開營業店家與座標                |
-| `GET`    | `/api/group-buy-activities`                   | 查詢團購活動與優惠級距                |
-| `POST`   | `/api/merchant/group-buy-activities`          | 商家建立團購活動                      |
-| `GET`    | `/api/stores/:storeId/menu`                   | 顧客查詢上架飲品、選項與選擇限制      |
-| `GET`    | `/api/merchant/stores/:storeId/menu`          | 商家查詢完整菜單                      |
-| `POST`   | `/api/merchant/stores/:storeId/menu-items`    | 商家新增飲品                          |
-| `PATCH`  | `/api/merchant/stores/:storeId/menu-items/:menuItemId` | 商家修改、上架或停售飲品     |
-| `POST`   | `/api/orders`                                 | 建立訂單與訂單品項快照                |
-| `PATCH`  | `/api/orders/:orderId`                        | 更新尚未預授權成功的 pending 訂單明細 |
-| `POST`   | `/api/orders/:orderId/revisions`              | 建立已授權訂單的待重新預授權修改版本  |
-| `GET`    | `/api/orders/:orderId`                        | 查詢訂單明細與最新 LINE Pay 授權      |
-| `GET`    | `/api/customers/me/orders`                    | 顧客權威進行中／歷史訂單列表          |
-| `GET`    | `/api/merchant/stores/:storeId/orders`        | 商家門市權威訂單列表與履約摘要        |
-| `POST`   | `/api/orders/:orderId/cancel`                 | 顧客在鎖定前退出團購並取消訂單        |
-| `POST`   | `/api/merchant/orders/:orderId/refund-requests` | 商家對已請款訂單提出退款申請        |
-| `GET`    | `/api/merchant/stores/:storeId/refund-requests` | 商家查詢自己門市的退款申請          |
-| `GET`    | `/api/admin/refund-requests`                  | 營運查詢退款申請佇列                  |
-| `POST`   | `/api/admin/refund-requests/:requestId/approve` | 營運核准退款申請並執行 LINE Pay refund |
-| `POST`   | `/api/admin/refund-requests/:requestId/reject`  | 營運駁回退款申請                    |
-| `DELETE` | `/api/admin/group-buy-activities/:activityId` | 開發 / 補救用 soft-cancel 活動        |
-| `POST`   | `/api/admin/group-buy-activities/:activityId/settle` | 開發 / 補救用手動觸發單一團購結算 |
-| `GET`    | `/api/admin/payment-reliability/alerts`        | Admin 查詢需人工處理的付款可靠性工作    |
-| `POST`   | `/api/payments/line-pay/request`              | 建立 LINE Pay sandbox 授權請求        |
-| `POST`   | `/api/payments/line-pay/repay`                | 請款失敗後建立 LINE Pay 重新付款      |
-| `POST`   | `/api/payments/line-pay/refund`               | 開發 / 補救用已請款交易退款           |
-| `GET`    | `/api/payments/line-pay/confirm`              | LINE Pay confirm redirect             |
-| `GET`    | `/api/payments/line-pay/cancel`               | LINE Pay cancel redirect              |
-| `POST`   | `/api/payments/ecpay/request`                 | 建立信用卡（ECPay）預授權請求          |
-| `GET`    | `/api/payments/ecpay/checkout-redirect`       | 產生導向 ECPay 託管付款頁的 auto-submit 表單頁 |
-| `POST`   | `/api/payments/ecpay/return`                  | ECPay ReturnURL webhook（權威付款通知，須回應純文字 `1\|OK`） |
-| `GET`    | `/api/payments/ecpay/client-back`             | ECPay ClientBackURL（僅導回 App，非權威來源） |
+完整 API 清單（含 request/response 與已實作規則）以 `docs/AI-api-candidates.md` 為權威來源，本文件不重複維護，避免兩份清單各自過期、彼此不同步。
 
 已實作的保護：
 
@@ -287,7 +248,7 @@ ECPay 與 LINE Pay 機制上的關鍵差異（因此無法完全共用程式碼�
 
 尚未完成：
 
-- 2026-08-11 已確認付款前必須保存顧客對「取餐與逾期未取規則」的同意證據；候選 `order_rule_consents` 欄位與 LINE Pay request gate 已記錄於 `docs/database-field-spec.md`、`docs/database-candidates.md` 與 `docs/api-candidates.md`。目前尚未修改 SQLite／PostgreSQL schema、Backend、Mobile 或既有資料，現行付款流程也尚未強制此檢查。
+- 2026-08-11 已確認付款前必須保存顧客對「取餐與逾期未取規則」的同意證據；候選 `order_rule_consents` 欄位與 LINE Pay request gate 已記錄於 `docs/AI-database-field-spec.md`、`docs/AI-database-candidates.md` 與 `docs/AI-api-candidates.md`。目前尚未修改 SQLite／PostgreSQL schema、Backend、Mobile 或既有資料，現行付款流程也尚未強制此檢查。
 - 已授權後的訂單修改 / 重新授權 mobile 第一版已串接；訂單列表現以 Backend 回應為權威、local state 僅作 cache，仍需細化失敗提示。
 - LINE Pay refund 執行本身仍只有 dev/backend 後端 API 與 smoke test；商家退款申請與營運核准／駁回已有後端第一版（`refund-request:smoke` 覆蓋），但尚未有商家／營運 UI、核准失敗告警與正式 sandbox 人工端對端測試。
 - LINE Pay webhook 第一版不列為必要入口；目前付款同步以 confirm/cancel redirect、polling 與後續 provider 狀態查詢為主。
@@ -359,8 +320,8 @@ database/seed-dev.sql
 
 PostgreSQL 方向：
 
-- 資料庫設計總覽：`docs/database-design-v1.md`
-- PostgreSQL 遷移規劃：`docs/postgresql-migration-plan.md`
+- 資料庫設計總覽：`docs/AI-database-design-v1.md`
+- PostgreSQL 遷移規劃：`docs/AI-postgresql-migration-plan.md`
 - PostgreSQL schema draft：`database/migrations/001_initial_postgres.sql`
 - PostgreSQL seed draft：`database/migrations/002_seed_dev_postgres.sql`
 - PostgreSQL 結算快照 migration draft：`database/migrations/003_activity_settlement_discount_snapshot_postgres.sql`

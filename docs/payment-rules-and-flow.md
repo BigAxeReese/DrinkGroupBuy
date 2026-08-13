@@ -12,7 +12,7 @@
 
 ECPay 與 LINE Pay 在確認機制上有本質差異：LINE Pay 靠使用者瀏覽器被導回 `confirmUrl` 這個 GET redirect 本身觸發後端 confirm；ECPay 是兩條獨立路徑——`ReturnURL`（ECPay 伺服器對後端 POST 的權威通知，須驗 CheckMacValue、須回覆 `"1|OK"`）與 `ClientBackURL`（單純把瀏覽器導回，不是權威來源）。ECPay 的「先授權、之後才關帳（capture）」是帳號層級標準設定，不需要像 LINE Pay 分離式請款那樣另外向 provider 申請；關帳期限（21 天內須完成 API 關帳，90 天後系統放棄不請款）也比 LINE Pay 更寬鬆。
 
-LINE Pay 實作與驗證進度詳見 `docs/current-progress.md`「2026-08-08 LINE Pay 分離式請款 Sandbox 人工端對端驗證完成」與 `docs/line-pay-separated-capture-sandbox-checklist.md`。ECPay 實作進度詳見 `docs/current-progress.md`「2026-08-05 新增信用卡（ECPay）付款」；後端路由、mobile 付款方式選擇 UI 與自動化 smoke test（`npm run ecpay:smoke`）皆已完成並驗證，可從 App 發起信用卡付款。尚未完成的是真正打 ECPay Stage 環境的人工端對端驗證（`docs/ecpay-checkout-stage-checklist.md`），目前只驗證過 `mock_ecpay`；因 LINE Pay 已核准並驗證完成，此項優先度已降低。
+LINE Pay 實作與驗證進度詳見 `docs/AI-current-progress.md`「2026-08-08 LINE Pay 分離式請款 Sandbox 人工端對端驗證完成」與 `docs/line-pay-separated-capture-sandbox-checklist.md`。ECPay 實作進度詳見 `docs/AI-current-progress.md`「2026-08-05 新增信用卡（ECPay）付款」；後端路由、mobile 付款方式選擇 UI 與自動化 smoke test（`npm run ecpay:smoke`）皆已完成並驗證，可從 App 發起信用卡付款。尚未完成的是真正打 ECPay Stage 環境的人工端對端驗證（`docs/ecpay-checkout-stage-checklist.md`），目前只驗證過 `mock_ecpay`；因 LINE Pay 已核准並驗證完成，此項優先度已降低。
 
 ## 已確認規則
 

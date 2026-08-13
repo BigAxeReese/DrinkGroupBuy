@@ -186,8 +186,8 @@ GET /api/merchant/stores/:storeId/orders?scope=active|history&activityId=&limit=
 
 - `backend/db.js`: 新增列表查詢、狀態分類、action 推導與 cursor 查詢。
 - `backend/server.js`: 新增顧客與商家列表 route、參數驗證及權限檢查。
-- `docs/api-candidates.md`: 固定 request／response 契約。
-- `docs/current-progress.md`: 更新權威資料來源進度。
+- `docs/AI-api-candidates.md`: 固定 request／response 契約。
+- `docs/AI-current-progress.md`: 更新權威資料來源進度。
 
 #### 完成條件
 
@@ -436,7 +436,7 @@ Body 建議包含：
 
 這個切片仍不包含正式通知系統、商家退款申請／營運審核 UI 與 QR Code；**退款申請與營運審核 API 本身（`refund_requests` 資料表、商家申請與核准／駁回端點）已於 2026-08-04 完成第一版**，只缺前端 UI。Request status reconciliation 已依 LINE Pay Online API v3 官方狀態語意實作；LINE Pay sandbox 人工 E2E 與多 process 驗證已於 2026-08-08 完成；Android 實機與 Firebase 正式設定仍是發布前必要工作。
 
-2026-08-05 另新增 ECPay 信用卡作為備用付款 provider（後端與 mobile 第一版已完成並驗證，見 `docs/current-progress.md`）；新增時 LINE Pay 分離式請款仍在官方審核，該原因已於 2026-08-08 解除。本文件其餘關於付款流程的規劃內容維持 provider 中立，同樣適用於 ECPay。
+2026-08-05 另新增 ECPay 信用卡作為備用付款 provider（後端與 mobile 第一版已完成並驗證，見 `docs/AI-current-progress.md`）；新增時 LINE Pay 分離式請款仍在官方審核，該原因已於 2026-08-08 解除。本文件其餘關於付款流程的規劃內容維持 provider 中立，同樣適用於 ECPay。
 
 ## 七、預計主要修改檔案
 
@@ -450,13 +450,13 @@ Body 建議包含：
 - `mobile/src/screens/MerchantDashboardScreen.jsx`
 - `database/schema.sql`
 - `database/migrations/001_initial_postgres.sql`
-- `docs/api-candidates.md`
-- `docs/current-progress.md`
-- `docs/mobile-screen-data-requirements.md`
+- `docs/AI-api-candidates.md`
+- `docs/AI-current-progress.md`
+- `docs/AI-mobile-screen-data-requirements.md`
 - `docs/open-questions.md`
-- `docs/order-flow-development-plan.md`
-- `docs/database-candidates.md`
-- `docs/database-field-spec.md`
+- `docs/AI-order-flow-development-plan.md`
+- `docs/AI-database-candidates.md`
+- `docs/AI-database-field-spec.md`
 
 預計不修改：
 

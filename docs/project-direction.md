@@ -1,6 +1,6 @@
 # 專案方向
 
-最後更新：2026-07-31
+最後更新：2026-08-13
 
 ## 產品方向
 
@@ -56,20 +56,20 @@ API：groupBuyActivity
 
 已完成第一版串接：
 
-- 商家建立團購活動：Mobile -> API -> SQLite。
+- 商家建立團購活動：Mobile -> API -> SQLite，並可受控切換 PostgreSQL。
 - 公開菜單、活動、商家菜單與首次建單：Mobile／API 預設使用 SQLite；受控 PostgreSQL 模式下，auth、菜單、活動讀寫與建單會一起切換。Mobile 首頁仍待完整串接活動 API。
-- 顧客訂單預設仍為 Mobile -> API -> SQLite；受控 PostgreSQL 已涵蓋首次建單、列表、明細與首次 authorization request context 與 confirm，修改／revision／取消尚未搬移。
-- 商家門市訂單列表已可受控讀 PostgreSQL；標記可取餐、查碼與核銷取貨仍使用 SQLite。
-- LINE Pay 首次 request、pending 紀錄與 confirm 已可受控使用 PostgreSQL；一般 cancel／void、capture、重新付款與開發／補救用 refund 仍使用 SQLite。
+- 顧客訂單預設仍為 Mobile -> API -> SQLite；受控 PostgreSQL 已涵蓋首次建單、列表、明細、authorization request／confirm／cancel、一般 void、顧客取消、capture／settlement、改單／revision、refund 與 pickup，各自由獨立 `*_RUNTIME` 環境變數控制，不雙寫。
+- 商家門市訂單列表、標記可取餐、查碼與核銷取貨均可受控讀寫 PostgreSQL。
+- LINE Pay request、confirm、cancel／void、capture、重新付款與 refund 均可受控使用 PostgreSQL；LINE Pay 分離式請款已於 2026-07-31 核准、2026-08-08 完成 Sandbox 人工端對端驗證。ECPay 信用卡為並存的備援 provider（後端與 mobile 已完成，尚未打過真實 ECPay Stage 網路）。
 - Deadline settlement 與 pickup expiration 的單一 Backend process scheduler。
 
 仍未完全由 Backend 或正式環境驅動：
 
-- 團購活動首頁、地圖與部分店家摘要仍使用 mobile local state 或 mock。
+- 團購活動首頁、地圖與部分店家摘要仍使用 mobile local state 或 mock；附近公里數篩選尚未實作。
 - 購物車仍是 Mobile local state；送單、改單與重新授權前由 Backend 重新驗證。
-- LINE Pay reconciliation、持久化 retry、admin 警示查詢及 payment／settlement／cancel／repay／pickup DB lease 已完成；兩程序 lease 測試已通過，尚缺正式通知與核准後的 Sandbox 人工驗證。
-- PostgreSQL reliability schema parity、adapter、訂單建立／列表／明細／首次 authorization request／confirm／cancel、一般 void 與顧客取消受控 server 切片已完成。capture／settlement repositories 與真實 PostgreSQL proof 也已完成，但尚未接入 server；改單／revision、refund、pickup 與 Sandbox 人工 E2E 仍待完成。
-- Android、Firebase 正式設定與 LINE Pay sandbox 人工 E2E 尚未完成。
+- LINE Pay reconciliation、持久化 retry、admin 警示查詢及 payment／settlement／cancel／repay／pickup DB lease 已完成；仍缺正式告警通知管道。
+- PostgreSQL 受控切片（auth、菜單、活動、建單、訂單讀取、authorization request／confirm／cancel、一般 void、顧客取消、capture／settlement、改單／revision、refund、pickup）均已接上 server route／scheduler；production 啟用（尤其 capture／settlement／refund 的正式自動請款）仍是獨立待評估與設定的步驟。
+- Android 實機、Firebase 正式設定與 ECPay Stage 人工 E2E 尚未完成。
 
 ## 架構原則
 

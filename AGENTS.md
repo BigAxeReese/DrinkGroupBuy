@@ -100,16 +100,19 @@ When implementing a meaningful feature, update relevant docs when the change aff
 Important docs:
 
 ```text
-docs/current-progress.md
-docs/api-candidates.md
-docs/database-candidates.md
-docs/database-field-spec.md
-docs/status-candidates.md
+docs/AI-current-progress.md
+docs/AI-api-candidates.md
+docs/AI-database-candidates.md
+docs/AI-database-field-spec.md
+docs/AI-status-candidates.md
 docs/open-questions.md
-docs/mobile-screen-data-requirements.md
+docs/AI-mobile-screen-data-requirements.md
+docs/AI-security-review-log.md
 ```
 
-`docs/database-field-spec.md` is the single authoritative source for exact column definitions (type, constraints, example values) for every table. When a database entity or field changes, update it directly instead of duplicating field-level detail into other docs — `docs/database-candidates.md`, `docs/database-design-v1.md`, and `docs/data-dictionary.md` should link to it rather than re-list columns.
+`docs/AI-security-review-log.md` records the results of every `/security-review` pass (manual or triggered by payment/auth-related work) — what was reviewed, what was found, what's still open. Log a new entry every time a security review runs, even when nothing was found (a clean result is still worth recording as evidence that scope was actually covered). Format and template are documented at the top of the file itself.
+
+`docs/AI-database-field-spec.md` is the single authoritative source for exact column definitions (type, constraints, example values) for every table. When a database entity or field changes, update it directly instead of duplicating field-level detail into other docs — `docs/AI-database-candidates.md`, `docs/AI-database-design-v1.md`, and `docs/AI-data-dictionary.md` should link to it rather than re-list columns.
 
 ## Naming Rules
 

@@ -10,9 +10,9 @@
 - API JSON 欄位使用 `camelCase`。
 - 同一個概念不要在不同文件使用不同名稱。
 - 目前正式開發草案以 `database/schema.sql` 為準。
-- PostgreSQL 遷移方向請看 `docs/postgresql-migration-plan.md`。
+- PostgreSQL 遷移方向請看 `docs/AI-postgresql-migration-plan.md`。
 
-`database/schema.sql` 是目前本機開發資料庫的權威草案。本文件只整理目前已存在的 entity、候選補充項目與尚未解決的資料庫問題，不是 migration 檔。欄位細節請看 `docs/database-field-spec.md`。
+`database/schema.sql` 是目前本機開發資料庫的權威草案。本文件只整理目前已存在的 entity、候選補充項目與尚未解決的資料庫問題，不是 migration 檔。欄位細節請看 `docs/AI-database-field-spec.md`。
 
 ## 已建立的開發資料表
 
@@ -44,7 +44,7 @@
 
 | 資料表                  | 用途                               | 重要關係與目前狀態                                                                 |
 | ----------------------- | ---------------------------------- | ---------------------------------------------------------------------------------- |
-| `order_rule_consents`   | 保存顧客付款前同意取餐與逾期規則的歷史證據 | Order 1:N consents、User 1:N consents；欄位定義見 `docs/database-field-spec.md`，目前尚未加入 schema、API 或 App |
+| `order_rule_consents`   | 保存顧客付款前同意取餐與逾期規則的歷史證據 | Order 1:N consents、User 1:N consents；欄位定義見 `docs/AI-database-field-spec.md`，目前尚未加入 schema、API 或 App |
 
 ## 目前資料保存狀態
 

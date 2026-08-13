@@ -261,10 +261,46 @@ async function confirmPostgresAuthorization(database, input, env = process.env) 
     let replacedAuthorization = null;
     if (revision) {
       if (revision.original_payment_authorization_id) {
+        // Lock and void the superseded authorization (A1) in the same transaction that
+        // applies the revision -- without this, A1 was left sitting in 'authorized' status
+        // indefinitely after A2 replaced it. No live double-capture path used it (capture/
+        // cancel/void all select "latest authorization per order"), but leaving a stale
+        // 'authorized' row around is still a real state-integrity gap worth closing, found
+        // during a /security-review pass (see docs/AI-security-review-log.md, 2026-08-11).
         const replacedResult = await transaction.query(`
-          SELECT * FROM payment_authorizations WHERE id = $1
+          SELECT * FROM payment_authorizations WHERE id = $1 FOR UPDATE
         `, [revision.original_payment_authorization_id]);
         replacedAuthorization = replacedResult.rows[0] || null;
+
+        if (replacedAuthorization && replacedAuthorization.status === "authorized") {
+          const voidReason = "superseded_by_order_revision";
+          const voidedResult = await transaction.query(`
+            UPDATE payment_authorizations
+            SET status = 'authorization_voided',
+                voided_at = $1,
+                failure_reason = COALESCE(failure_reason, $2),
+                updated_at = $1
+            WHERE id = $3
+            RETURNING *
+          `, [now, voidReason, replacedAuthorization.id]);
+          replacedAuthorization = voidedResult.rows[0];
+
+          await insertProviderEvent(transaction, {
+            authorization: replacedAuthorization,
+            eventType: "void_success",
+            idempotencyKey: `${replacedAuthorization.provider}_void:order_revision:${revision.id}`,
+            payload: { orderId: state.order_id, orderRevisionId: revision.id, reason: voidReason },
+            now,
+          });
+          await insertStatusHistory(transaction, replacedAuthorization, "authorization_voided", voidReason, now);
+          await insertAudit(transaction, {
+            actionType: "line_pay_void_authorization",
+            authorizationId: replacedAuthorization.id,
+            metadata: { orderId: state.order_id, orderRevisionId: revision.id, reason: voidReason },
+            now,
+          });
+          await cancelReliabilityJob(transaction, replacedAuthorization.id, now);
+        }
       }
 
       // Wipe and replace the order's line items from the revision snapshot -- the revision
@@ -596,6 +632,21 @@ async function completeReliabilityJob(database, authorizationId, now) {
   await database.query(`
     UPDATE payment_reliability_jobs
     SET status = 'succeeded',
+        locked_by = NULL,
+        locked_until = NULL,
+        updated_at = $1,
+        completed_at = $1
+    WHERE job_type = 'reconcile_line_pay_request'
+      AND resource_type = 'payment_authorization'
+      AND resource_id = $2
+      AND status IN ('queued', 'running', 'retry_wait')
+  `, [now, authorizationId]);
+}
+
+async function cancelReliabilityJob(database, authorizationId, now) {
+  await database.query(`
+    UPDATE payment_reliability_jobs
+    SET status = 'cancelled',
         locked_by = NULL,
         locked_until = NULL,
         updated_at = $1,

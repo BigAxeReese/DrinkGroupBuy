@@ -1,6 +1,6 @@
 # 交接總整理
 
-最後更新：2026-08-05
+最後更新：2026-08-13
 
 換電腦、交接給其他人、或開新的 Codex 對話時，請先閱讀本文件。
 
@@ -112,49 +112,7 @@ backend/
 | `backend/database/`                       | SQLite/PostgreSQL adapter 與 auth、菜單、活動、顧客建單 repositories |
 | `backend/README.md`                       | 後端啟動說明                                  |
 
-目前 API：
-
-| 方法     | 路徑                                          | 用途                           |
-| -------- | --------------------------------------------- | ------------------------------ |
-| `POST`   | `/api/auth/login`                             | 登入                           |
-| `POST`   | `/api/auth/firebase-session`                  | Firebase Google Login session   |
-| `GET`    | `/api/auth/dev-users`                         | 本機 dev-only 身份清單          |
-| `POST`   | `/api/auth/dev-session`                       | 本機 dev-only 模擬登入          |
-| `GET`    | `/health`                                     | 健康檢查                       |
-| `GET`    | `/api/stores`                                  | 查詢公開營業店家與座標         |
-| `GET`    | `/api/group-buy-activities`                   | 查詢團購活動                   |
-| `GET`    | `/api/stores/:storeId/menu`                   | 顧客查詢上架菜單               |
-| `GET`    | `/api/merchant/stores/:storeId/menu`          | 商家查詢完整菜單               |
-| `POST`   | `/api/merchant/stores/:storeId/menu-items`    | 商家新增菜單品項               |
-| `PATCH`  | `/api/merchant/stores/:storeId/menu-items/:menuItemId` | 商家修改或上下架品項 |
-| `POST`   | `/api/merchant/group-buy-activities`          | 商家建立團購活動               |
-| `POST`   | `/api/orders`                                 | 顧客建立訂單                   |
-| `PATCH`  | `/api/orders/:orderId`                        | 更新尚未預授權成功的訂單明細   |
-| `POST`   | `/api/orders/:orderId/revisions`              | 建立已授權訂單的修改版本       |
-| `GET`    | `/api/customers/me/orders`                    | 顧客權威訂單列表               |
-| `GET`    | `/api/merchant/stores/:storeId/orders`        | 商家門市權威訂單列表           |
-| `POST`   | `/api/orders/:orderId/cancel`                 | 顧客在鎖定前取消訂單           |
-| `POST`   | `/api/merchant/orders/:orderId/refund-requests` | 商家對已請款訂單提出退款申請 |
-| `GET`    | `/api/merchant/stores/:storeId/refund-requests` | 商家查詢自己門市的退款申請   |
-| `GET`    | `/api/admin/refund-requests`                  | 營運查詢退款申請佇列           |
-| `POST`   | `/api/admin/refund-requests/:requestId/approve` | 營運核准退款申請並執行退款 |
-| `POST`   | `/api/admin/refund-requests/:requestId/reject`  | 營運駁回退款申請             |
-| `POST`   | `/api/merchant/group-buy-activities/:activityId/ready-for-pickup` | 商家標記活動可取餐 |
-| `GET`    | `/api/orders/:orderId/pickup-credential`      | 顧客查詢取貨憑證               |
-| `POST`   | `/api/merchant/pickup-credentials/lookup`     | 商家查詢取貨碼                 |
-| `POST`   | `/api/merchant/pickup-credentials/redeem`     | 商家核銷取貨碼                 |
-| `GET`    | `/api/orders/:orderId`                        | 查詢訂單明細                   |
-| `DELETE` | `/api/admin/group-buy-activities/:activityId` | 開發 / 補救用取消活動         |
-| `POST`   | `/api/admin/group-buy-activities/:activityId/settle` | 開發 / 補救用手動觸發單一團購結算 |
-| `POST`   | `/api/payments/line-pay/request`              | 建立 LINE Pay sandbox 授權請求 |
-| `POST`   | `/api/payments/line-pay/repay`                | 請款失敗後建立 LINE Pay 重新付款 |
-| `POST`   | `/api/payments/line-pay/refund`               | 開發 / 補救用已請款交易退款    |
-| `GET`    | `/api/payments/line-pay/confirm`              | LINE Pay confirm redirect      |
-| `GET`    | `/api/payments/line-pay/cancel`               | LINE Pay cancel redirect       |
-| `POST`   | `/api/payments/ecpay/request`                 | 建立信用卡（ECPay）預授權請求  |
-| `GET`    | `/api/payments/ecpay/checkout-redirect`       | 產生導向 ECPay 託管付款頁的中介頁面 |
-| `POST`   | `/api/payments/ecpay/return`                  | ECPay ReturnURL webhook（權威付款通知） |
-| `GET`    | `/api/payments/ecpay/client-back`             | ECPay ClientBackURL（非權威來源） |
+完整 API 清單（含 request/response 與已實作規則）以 `docs/AI-api-candidates.md` 為權威來源，本文件不重複維護，避免兩份清單各自過期、彼此不同步。
 
 目前 backend 限制：
 
@@ -276,8 +234,8 @@ Firebase Auth / Google Login 與 PostgreSQL 的關係：
 
 | 檔案                                            | 用途                              |
 | ----------------------------------------------- | --------------------------------- |
-| `docs/database-design-v1.md`                    | 目前資料庫設計基準                |
-| `docs/postgresql-migration-plan.md`             | SQLite 轉 PostgreSQL 規劃         |
+| `docs/AI-database-design-v1.md`                    | 目前資料庫設計基準                |
+| `docs/AI-postgresql-migration-plan.md`             | SQLite 轉 PostgreSQL 規劃         |
 | `database/migrations/001_initial_postgres.sql`  | PostgreSQL v1 schema draft        |
 | `database/migrations/002_seed_dev_postgres.sql` | PostgreSQL development seed draft |
 | `database/docker-compose.postgres.yml`          | 本機 PostgreSQL dev container     |
@@ -332,13 +290,13 @@ PostgreSQL v1 決策：
 
 ## LINE Pay 分離式請款狀態——2026-08-08，Sandbox 人工端對端驗證已完成
 
-**LINE Pay 分離式請款已於 2026-07-31 獲官方核准**（測試商店 `test_202606269512`），並於 2026-08-08 完成 Sandbox 人工端對端驗證，`docs/line-pay-separated-capture-sandbox-checklist.md` 通過門檻（LP-01、LP-02、LP-04、LP-07、LP-08、LP-09、LP-10）全數達成。`backend/.env` 目前本機已設定 `LINE_PAY_CAPTURE_SEPARATED=true`（僅本機開發驗證用，正式環境啟用是獨立決策，尚未執行）。詳見 `docs/current-progress.md`「2026-08-08 LINE Pay 分離式請款 Sandbox 人工端對端驗證完成」。
+**LINE Pay 分離式請款已於 2026-07-31 獲官方核准**（測試商店 `test_202606269512`），並於 2026-08-08 完成 Sandbox 人工端對端驗證，`docs/line-pay-separated-capture-sandbox-checklist.md` 通過門檻（LP-01、LP-02、LP-04、LP-07、LP-08、LP-09、LP-10）全數達成。`backend/.env` 目前本機已設定 `LINE_PAY_CAPTURE_SEPARATED=true`（僅本機開發驗證用，正式環境啟用是獨立決策，尚未執行）。詳見 `docs/AI-current-progress.md`「2026-08-08 LINE Pay 分離式請款 Sandbox 人工端對端驗證完成」。
 
 驗證過程中發現一個既有 bug（與 LINE Pay 邏輯無關）：`backend/payments/reliabilityService.js` 的 `logAlertRequiredJobs` 函式被誤巢狀在 `stoppedScheduler` 內，導致 reconciliation 排程每次執行都拋出 `ReferenceError`；不影響對帳核心邏輯，只影響告警日誌沒印出來。尚未修復。
 
 ## 信用卡（ECPay）狀態——2026-08-05，後端與 mobile 第一版已完成
 
-新增綠界 ECPay 作為備用付款 provider（走跳轉 ECPay 託管付款頁的標準結帳方式），當時唯一原因是 LINE Pay 分離式請款官方審核進度不確定；**該原因已隨上方 LINE Pay 核准與驗證完成而解除**，ECPay 現在回歸單純的備援/並行選項角色。**LINE Pay 完全不受影響、兩者並存**；信用卡是「多一個選擇」不是「取代 LINE Pay」。詳見 `docs/current-progress.md`「2026-08-05 新增信用卡（ECPay）付款」與 `docs/payment-rules-and-flow.md`「付款 Provider 方向」。
+新增綠界 ECPay 作為備用付款 provider（走跳轉 ECPay 託管付款頁的標準結帳方式），當時唯一原因是 LINE Pay 分離式請款官方審核進度不確定；**該原因已隨上方 LINE Pay 核准與驗證完成而解除**，ECPay 現在回歸單純的備援/並行選項角色。**LINE Pay 完全不受影響、兩者並存**；信用卡是「多一個選擇」不是「取代 LINE Pay」。詳見 `docs/AI-current-progress.md`「2026-08-05 新增信用卡（ECPay）付款」與 `docs/payment-rules-and-flow.md`「付款 Provider 方向」。
 
 目前狀態：
 
@@ -385,8 +343,8 @@ PostgreSQL cancel／void／顧客取消 server proof 與 capture／settlement bu
 
 1. Pull 或複製專案。
 2. 先讀 `AGENTS.md`。
-3. 再讀 `docs/handoff-summary.md`。
-4. 再讀 `docs/current-progress.md`。
+3. 再讀 `docs/AI-handoff-summary.md`。
+4. 再讀 `docs/AI-current-progress.md`。
 5. 手動檢查 `.env` 檔案，因為 secrets 不會 commit。
 6. 需要時安裝依賴：
 

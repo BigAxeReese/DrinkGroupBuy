@@ -311,7 +311,7 @@ if (paymentCaptureRepository.kind === "postgres" || groupBuySettlementRepository
     );
   }
   // Production auto-capture is deliberately its own manual approval step, separate from
-  // just enabling this for Sandbox validation (see docs/current-progress.md).
+  // just enabling this for Sandbox validation (see docs/AI-current-progress.md).
   const linePayEnv = String(process.env.LINE_PAY_ENV || "sandbox").toLowerCase();
   const allowPostgresCaptureInProduction = readBooleanEnv(
     process.env.PAYMENT_CAPTURE_RUNTIME_ALLOW_PRODUCTION,

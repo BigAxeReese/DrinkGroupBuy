@@ -1,6 +1,6 @@
 # 資料庫設計 v1
 
-最後更新：2026-08-05
+最後更新：2026-08-13
 
 ## 語言與註解規則
 
@@ -9,7 +9,7 @@
 - 資料表與欄位維持 `snake_case`。
 - 產品語意使用中文說明。
 - 同一概念盡量維持一致命名，例如團購活動使用 `group_buy_activity` / `groupBuyActivity`。
-- PostgreSQL 遷移細節請看 `docs/postgresql-migration-plan.md` 與 `database/migrations/001_initial_postgres.sql`。
+- PostgreSQL 遷移細節請看 `docs/AI-postgresql-migration-plan.md` 與 `database/migrations/001_initial_postgres.sql`。
 
 本文件是目前 DrinkGroupBuy 的資料庫設計基準，說明本機 SQLite 開發 schema，並讓後續 PostgreSQL 遷移方向保持一致。
 
@@ -24,28 +24,11 @@
 - SQLite 目前是本機開發 backend database，不只是 mock data。
 - Firebase 不作為主要正式資料庫；目前決策是只用 Firebase Auth 處理 Google Login，業務資料保留在 backend database / PostgreSQL。
 
-## 目前開發資料
-
-截至 2026-07-20，本機開發資料庫內容如下：
-
-| 資料範圍               | 目前數量 | 說明                                 |
-| ---------------------- | -------: | ------------------------------------ |
-| Users                  | 12       | 4 customers、7 merchants、1 dev/admin |
-| User roles             | 12       | 每個 seed user 一個 active role      |
-| Merchants              | 7        | 每間測試店一個 merchant organization |
-| Merchant users         | 7        | 每個店家帳號管理一間門市             |
-| Stores                 | 7        | 包含地圖座標                         |
-| Menu items             | 8        | 開發用菜單品項                       |
-| Group-buy activities   | 0        | 已清空，方便乾淨測試                 |
-| Promotion tiers        | 0        | 隨 activities 清空                   |
-| Orders                 | 0        | 已清空，方便乾淨測試                 |
-| Payment authorizations | 0        | 已清空，方便乾淨測試                 |
-| Payment captures       | 0        | 已清空，方便乾淨測試                 |
-| Pickup credentials     | 0        | 已清空，方便乾淨測試                 |
+目前開發資料庫的即時筆數快照請見 `docs/AI-current-progress.md`，本文件不重複維護（避免多份快照各自過期）。
 
 ## 主要資料群組
 
-以下各群組的表格只列 primary key 與跨表關係，聚焦在 PostgreSQL 遷移決策與業務規則；**完整欄位定義（型別、約束、範例）請一律以 `docs/database-field-spec.md` 為準**，避免同一份欄位清單在多份文件重複維護。
+以下各群組的表格只列 primary key 與跨表關係，聚焦在 PostgreSQL 遷移決策與業務規則；**完整欄位定義（型別、約束、範例）請一律以 `docs/AI-database-field-spec.md` 為準**，避免同一份欄位清單在多份文件重複維護。
 
 ### 身份與角色
 
@@ -286,61 +269,9 @@ PostgreSQL 方向：
 - `status_history` 與 `audit_logs` 應採 append-only。
 - 加入 resource 與 actor index，方便後續後台查詢。
 
-## Primary key 決策
+## PostgreSQL 型別決策
 
-目前所有主要資料表使用名為 `id` 的 text primary key。
-
-PostgreSQL v1 決策：維持 `text` primary key，第一階段不切換 UUID。
-
-原因：
-
-- API JSON 較容易用 `id` 字串引用。
-- 從 SQLite 遷移到 PostgreSQL 時，不需要同時改 mobile/API ID 處理。
-- 開發資料可以使用可讀 ID，例如 `user-customer-yinji` 或 `store-001`。
-- UUID 可作為未來選項，但不是第一版 PostgreSQL migration 的目標。
-
-注意：
-
-- 每張表內使用 `id` 可以接受。
-- Foreign key 仍必須明確命名，例如 `user_id`、`store_id`、`activity_id`、`order_id`。
-
-## PostgreSQL 時間欄位決策
-
-PostgreSQL v1 決策：時間欄位使用 `timestamptz`。
-
-適用欄位包含：
-
-- `created_at`
-- `updated_at`
-- `start_at`
-- `deadline_at`
-- `pickup_start_at`
-- `pickup_end_at`
-- `submitted_at`
-- `authorized_at`
-- `voided_at`
-- `captured_at`
-- `refunded_at`
-- `next_retry_at`
-- `settled_at`
-- 候選：`pickup_credentials.expires_at`、`pickup_credentials.expired_at`
-
-原因：
-
-- 團購截止、付款狀態與取貨時間都必須保存為可靠時間點。
-- App 可以顯示台灣時間，但資料庫不應把 UI 格式化字串作為正式長期格式。
-
-## PostgreSQL Boolean 欄位決策
-
-PostgreSQL v1 決策：true/false 欄位使用 `boolean`。
-
-| 欄位                                                   | PostgreSQL 型別 | 意義                 |
-| ------------------------------------------------------ | --------------- | -------------------- |
-| `menu_items.is_available`                              | `boolean`       | 飲品是否開放販售     |
-| `customization_options.is_available`                   | `boolean`       | 客製化選項是否可使用 |
-| `pickup_credentials.visible_after_merchant_acceptance` | `boolean`       | 取貨憑證顯示規則     |
-
-API JSON 應回傳 `true` / `false`。
+Primary key、時間欄位、boolean 欄位、jsonb 欄位與 status 欄位的完整決策內容與適用欄位清單，以 `docs/AI-postgresql-migration-plan.md` 為權威來源，本文件不重複維護。摘要：primary key 維持 `text`（不切 UUID）；時間欄位用 `timestamptz`；true/false 欄位用 `boolean`；只有 provider event／audit metadata 這類 raw payload 欄位用 `jsonb`；status 欄位用 `text check (...)`，不用 enum。
 
 ## 正規化檢查
 
@@ -353,19 +284,7 @@ API JSON 應回傳 `true` / `false`。
 - 訂單客製化以 child rows 保存。
 - 優惠門檻以 rows 保存。
 
-可接受例外：
-
-- `payment_provider_events.payload_json` 保存 provider 原始 payload。
-- `audit_logs.metadata_json` 保存 audit metadata。
-
-這些例外是 raw event/audit payload，不是核心查詢欄位。
-
-PostgreSQL v1 決策：這些欄位使用 `jsonb`。
-
-| 欄位                                   | PostgreSQL 型別 | 用途                        |
-| -------------------------------------- | --------------- | --------------------------- |
-| `payment_provider_events.payload_json` | `jsonb`         | Provider event 原始 payload |
-| `audit_logs.metadata_json`             | `jsonb`         | 特定操作的 audit metadata   |
+可接受例外：`payment_provider_events.payload_json`、`audit_logs.metadata_json` 這類 raw event/audit payload，不是核心查詢欄位，型別決策見上方「PostgreSQL 型別決策」。
 
 核心訂單、飲品、客製化、優惠、付款狀態與取貨狀態不可用 JSON 取代 relational tables。
 
@@ -396,13 +315,7 @@ PostgreSQL v1 決策：這些欄位使用 `jsonb`。
 
 ## Status owners
 
-PostgreSQL v1 決策：status 欄位使用 `text check (...)`，第一版不使用 PostgreSQL enum。
-
-原因：
-
-- 狀態流程仍會隨產品開發調整。
-- `text check (...)` 能保留有效值限制，又比 enum 更容易修改。
-- 等 activity、order、payment、pickup 流程穩定後，再重新評估 enum。
+status 欄位一律使用 `text check (...)`、不用 enum 的決策與原因見 `docs/AI-postgresql-migration-plan.md`。以下彙整各 status 欄位目前的 owner 與有效值，方便查閱：
 
 | Owner               | 目前 status 欄位                                               | 目前值                                                                                                 |
 | ------------------- | -------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------ |
@@ -424,15 +337,13 @@ PostgreSQL v1 決策：status 欄位使用 `text check (...)`，第一版不使�
 ## 建議下一步
 
 1. 確認目前資料表清單是否作為 database design v1。
-2. 將 SQLite `order_revisions` 第一版同步到 PostgreSQL migration draft。
-3. 為截止結算設計 locking 與 promotion tier 選擇規則。
-4. 將 24 小時截止限制與截止前 30 分鐘鎖定規則落到 API validation。
-5. 依 `docs/postgresql-migration-plan.md` 規劃 runtime database 切換。
+2. 為截止結算設計 locking 與 promotion tier 選擇規則。
+3. 將 24 小時截止限制與截止前 30 分鐘鎖定規則落到 API validation。
+4. 依 `docs/AI-postgresql-migration-plan.md` 規劃 runtime database 切換。
 
 ## 待收斂事項
 
 1. `order_revisions` 需要公開完整歷史查詢 API，並決定是否另存更完整的 before/after snapshot。
 2. `orders.merchant_acceptance_status` 應移除，或在預授權成功後固定為 `accepted`。
-3. `pickup_credentials` 需補 `expires_at` / `expired_at`，並實作逾期處理 job。
-4. 顧客 phone number 是否需要加密，或只需 normalize 並由 access control 保護。
-5. 使用者要求刪除帳號後，訂單、付款與 audit data 應保留到什麼程度。
+3. 顧客 phone number 是否需要加密，或只需 normalize 並由 access control 保護。
+4. 使用者要求刪除帳號後，訂單、付款與 audit data 應保留到什麼程度。

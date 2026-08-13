@@ -10,7 +10,7 @@
 - Mobile / API 使用英文 `camelCase`。
 - Database 使用英文 `snake_case`。
 - 同一概念要固定一組英文命名，再用中文註解輔助理解。
-- 本文件部分早期中文詞彙可能有編碼亂碼；若要交報告，建議以 `docs/database-design-v1.md` 的命名為準重新整理。
+- 本文件部分早期中文詞彙可能有編碼亂碼；若要交報告，建議以 `docs/AI-database-design-v1.md` 的命名為準重新整理。
 
 本文件定義建議使用的產品詞彙，用來維持 mobile UI、API JSON 與 database 命名一致。
 

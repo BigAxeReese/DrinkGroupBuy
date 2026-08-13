@@ -100,7 +100,7 @@ async function settleGroupBuyActivityUnlocked(input = {}) {
 
     try {
       // ECPay has no retry-state/reconciliation machinery yet (deferred; see
-      // docs/current-progress.md 2026-08-05 entry), so it gets a single capture/void
+      // docs/AI-current-progress.md 2026-08-05 entry), so it gets a single capture/void
       // attempt here instead of going through the LINE Pay retry-state branches below.
       // A thrown error naturally falls through to the generic failure handling in the
       // catch block, since it won't carry the LINE-Pay-specific captureFailure markers.

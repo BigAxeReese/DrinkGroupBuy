@@ -1,6 +1,6 @@
 # PostgreSQL 遷移規劃
 
-最後更新：2026-08-12
+最後更新：2026-08-13
 
 本文件整理從目前 SQLite 開發資料庫遷移到 PostgreSQL 的方向。它是規劃文件，不是可直接執行的 production migration。
 
@@ -175,24 +175,20 @@ payment_status text not null check (payment_status in ('pending', 'authorized', 
 | -------------- | ----------------------------------------------------------------------- |
 | 身份與角色     | `users`, `user_roles`, `user_private_profiles`, `user_public_profiles`  |
 | 商家與門市     | `merchants`, `merchant_users`, `stores`                                 |
-| 菜單           | `menu_items`, `customization_options`；仍需補 `menu_item_customization_rules` |
+| 菜單           | `menu_items`, `customization_options`, `menu_item_customization_rules`  |
 | 團購活動       | `group_buy_activities`, `promotion_tiers`, `activity_notices`           |
 | 購物車草稿     | `cart_drafts`, `cart_draft_items`, `cart_draft_item_customizations`     |
-| 訂單           | `orders`, `order_items`, `order_item_customizations`；仍需補 revision 與 idempotency tables |
-| 付款           | `payment_authorizations`, `payment_captures`, `payment_provider_events`；仍需補 `payment_refunds` |
+| 訂單           | `orders`, `order_items`, `order_item_customizations`, `order_action_idempotency`, `order_revisions`, `order_revision_items`, `order_revision_item_customizations` |
+| 付款           | `payment_authorizations`, `payment_captures`, `payment_refunds`, `refund_requests`, `payment_provider_events` |
 | 結算與取貨     | `activity_settlements`, `pickup_credentials`                            |
 | 狀態與稽核     | `status_history`, `audit_logs`                                          |
 
-## PostgreSQL parity 與後續候選 schema
+## PostgreSQL 後續候選 schema
 
-切換 Backend runtime 前，必須先補齊目前 SQLite 已使用的交易結構；純未來功能則可延後。
+目前 SQLite 已使用的交易結構已於 PostgreSQL 全數補齊（`order_revisions`／revision item tables、`menu_item_customization_rules`、`order_action_idempotency`、`payment_refunds`、`refund_requests` 皆已存在於 `001_initial_postgres.sql` 或 `004_order_revision_refund_pickup_postgres.sql`），無 parity 缺口。以下為純未來功能候選，可延後：
 
 | 候選項目             | 可能資料表或欄位                         | 原因                                      |
 | -------------------- | ---------------------------------------- | ----------------------------------------- |
-| 必要 parity：訂單修改 | `order_revisions`, revision item tables | SQLite runtime 已使用，切換前必須補齊 |
-| 必要 parity：菜單規則 | `menu_item_customization_rules` | SQLite runtime 已用於 min/max 選擇限制 |
-| 必要 parity：冪等紀錄 | `order_action_idempotency` | SQLite runtime 已用於取消等操作 |
-| 必要 parity：退款 | `payment_refunds` | SQLite runtime 已保存退款結果 |
 | Session              | `sessions`, `refresh_tokens`             | 若未來 backend 自行管理 session           |
 | Settlement job log   | settlement job attempt table             | 追蹤截止結算重試與失敗原因                |
 | Notification         | `notifications`, `notification_events`   | 實作推播或站內通知時需要                  |
@@ -259,8 +255,12 @@ payment_status text not null check (payment_status in ('pending', 'authorized', 
 6. Customer creates order（已完成；activity row lock、deadline／capacity／price／duplicate guards、snapshots、history、audit 與 HTTP proof 均通過）。
 7. Customer order read／payment request context（已完成；列表、明細、request lease、pending authorization、history、audit、retry job 與 HTTP proof 均通過）。
 8. LINE Pay authorization confirm（已完成；activity-first row lock、截止／期限／容量重驗、狀態／provider event／history／audit、retry job 完成與拒絕補償 void proof 均通過）。
+9. Payment capture／group-buy settlement（已完成並接入 server route／scheduler；`PAYMENT_CAPTURE_RUNTIME`／`GROUP_BUY_SETTLEMENT_RUNTIME` 須同為 postgres，production 另需 `PAYMENT_CAPTURE_RUNTIME_ALLOW_PRODUCTION=true`）。
+10. Order revision（已完成並接入 server route；`ORDER_REVISION_RUNTIME`，重用 customer order write 既有計價／折扣驗證）。
+11. Refund（已完成並接入 server route；`PAYMENT_REFUND_RUNTIME`，涵蓋 provider 退款執行與商家退款申請審核流程）。
+12. Pickup credential（已完成並接入 server route／排程；`PICKUP_CREDENTIAL_RUNTIME`，涵蓋 mark-ready、顧客／商家查詢、redeem 與取貨逾期排程）。
 
-商家菜單、建立團購、顧客首次建單、訂單讀取與 authorization request／confirm／cancel 已使用同一 PostgreSQL 資料來源；建單、confirm、cancel／void 與顧客取消採 activity-first row lock，付款生命週期另有跨執行個體 operation lease。capture／settlement 的 repository、持久化 job 與跨執行個體 locking building blocks 已完成真實 PostgreSQL proof，但尚未接入 server route／scheduler；改單／revision、refund 與 pickup 仍未搬移，因此尚未完成整體 runtime 切換。
+商家菜單、建立團購、顧客首次建單、訂單讀取、authorization request／confirm／cancel、capture／settlement、改單／revision、refund 與 pickup 均已使用同一 PostgreSQL 資料來源並接上各自的 server route／scheduler；建單、confirm、cancel／void 與顧客取消採 activity-first row lock，付款生命週期另有跨執行個體 operation lease。所有切片仍各自由獨立的 `*_RUNTIME` 環境變數控制，預設仍是 SQLite 且不雙寫；capture／settlement／refund 在 `LINE_PAY_ENV=production` 時另需明確 opt-in（詳見 `docs/AI-current-progress.md`）。
 
 要求：
 
