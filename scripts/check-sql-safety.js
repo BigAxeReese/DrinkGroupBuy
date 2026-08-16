@@ -40,7 +40,8 @@ const reviewedExecSources = [
   { file: "scripts/group-buy-discount-smoke.js", expression: "schema" },
   { file: "scripts/group-buy-discount-smoke.js", expression: "seed" },
   { file: "scripts/order-flow-smoke.js", expression: "schema" },
-  { file: "scripts/order-flow-smoke.js", expression: "seed" }
+  { file: "scripts/order-flow-smoke.js", expression: "seed" },
+  { file: "scripts/merchant-activity-cancel-service-smoke.js", expression: "schema" }
 ];
 
 const findings = [];

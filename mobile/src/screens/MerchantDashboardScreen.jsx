@@ -7,7 +7,7 @@ import { PrimaryButton } from "../components/PrimaryButton";
 import { ProgressSummary } from "../components/ProgressSummary";
 import { StatusBadge } from "../components/StatusBadge";
 import { useOrderListSync } from "../hooks/useOrderListSync";
-import { formatCurrency, getStoreById } from "../utils/calculations";
+import { formatCurrency, getStoreById, isWithdrawalLocked } from "../utils/calculations";
 
 export function MerchantDashboardScreen({ navigation, appState, actions, memberAction, selectedMerchantStoreId }) {
   const [pickupCode, setPickupCode] = useState("");
@@ -15,6 +15,9 @@ export function MerchantDashboardScreen({ navigation, appState, actions, memberA
   const [pickupNotice, setPickupNotice] = useState(null);
   const [pickupBusy, setPickupBusy] = useState(false);
   const [readyAction, setReadyAction] = useState(null);
+  const [cancelFormActivityId, setCancelFormActivityId] = useState(null);
+  const [cancelReason, setCancelReason] = useState("");
+  const [cancelAction, setCancelAction] = useState(null);
   const [tab, setTab] = useState("active");
   const { syncStatus, refreshOrders } = useOrderListSync(
     actions.syncMerchantOrderList,
@@ -104,6 +107,46 @@ export function MerchantDashboardScreen({ navigation, appState, actions, memberA
         busy: false,
         type: "error",
         text: getPickupErrorMessage(error)
+      });
+    }
+  }
+
+  function beginCancel(groupBuyActivityId) {
+    setCancelFormActivityId(groupBuyActivityId);
+    setCancelReason("");
+    setCancelAction(null);
+  }
+
+  function cancelCancelForm() {
+    setCancelFormActivityId(null);
+    setCancelReason("");
+  }
+
+  async function handleCancelActivity(groupBuyActivityId) {
+    if (!cancelReason.trim()) {
+      setCancelAction({ activityId: groupBuyActivityId, busy: false, type: "error", text: "請填寫取消原因。" });
+      return;
+    }
+    setCancelAction({ activityId: groupBuyActivityId, busy: true, text: null, type: null });
+    try {
+      const result = await actions.cancelMerchantGroupBuyActivity(groupBuyActivityId, cancelReason.trim());
+      const failedCount = result.failedOrderIds?.length ?? 0;
+      setCancelAction(failedCount > 0
+        ? {
+            activityId: groupBuyActivityId,
+            busy: false,
+            type: "error",
+            text: `團購已取消，但有 ${failedCount} 筆訂單的付款處理失敗，請人工確認後續處理。`
+          }
+        : { activityId: groupBuyActivityId, busy: false, type: "success", text: "團購已取消。" });
+      setCancelFormActivityId(null);
+      setCancelReason("");
+    } catch (error) {
+      setCancelAction({
+        activityId: groupBuyActivityId,
+        busy: false,
+        type: "error",
+        text: getCancelErrorMessage(error)
       });
     }
   }
@@ -286,6 +329,49 @@ export function MerchantDashboardScreen({ navigation, appState, actions, memberA
                   {readyAction.text}
                 </Text>
               ) : null}
+              {groupBuyActivity.status === "recruiting" ? (
+                cancelFormActivityId === groupBuyActivity.id ? (
+                  <View style={styles.cancelForm}>
+                    <Text style={styles.fieldLabel}>取消原因</Text>
+                    <TextInput
+                      accessibilityLabel="取消原因"
+                      multiline
+                      onChangeText={setCancelReason}
+                      placeholder="例如：食材短缺、店家臨時公休"
+                      placeholderTextColor="#94a3b8"
+                      style={styles.cancelReasonInput}
+                      value={cancelReason}
+                    />
+                    <View style={styles.cancelFormActions}>
+                      <PrimaryButton
+                        disabled={cancelAction?.busy}
+                        label="返回"
+                        onPress={cancelCancelForm}
+                        style={styles.cancelFormActionButton}
+                        variant="secondary"
+                      />
+                      <PrimaryButton
+                        disabled={cancelAction?.busy}
+                        label={cancelAction?.busy ? "取消中…" : "確認取消團購"}
+                        onPress={() => handleCancelActivity(groupBuyActivity.id)}
+                        style={styles.cancelFormActionButton}
+                      />
+                    </View>
+                  </View>
+                ) : (
+                  <PrimaryButton
+                    disabled={isWithdrawalLocked(groupBuyActivity)}
+                    label={isWithdrawalLocked(groupBuyActivity) ? "已進入截止前 30 分鐘，無法取消" : "取消團購"}
+                    onPress={() => beginCancel(groupBuyActivity.id)}
+                    variant="secondary"
+                  />
+                )
+              ) : null}
+              {cancelAction?.activityId === groupBuyActivity.id && cancelAction.text ? (
+                <Text style={cancelAction.type === "error" ? styles.errorText : styles.successText}>
+                  {cancelAction.text}
+                </Text>
+              ) : null}
             </View>
           );
         })}
@@ -339,6 +425,17 @@ function getPickupErrorMessage(error) {
     order_not_ready_for_pickup: "這筆訂單目前尚不可取餐。"
   };
   return messages[errorCode] || "取餐操作失敗，請稍後再試。";
+}
+
+function getCancelErrorMessage(error) {
+  const errorCode = error?.payload?.error;
+  const messages = {
+    activity_not_found: "找不到這筆團購活動。",
+    store_access_denied: "沒有權限取消此團購。",
+    activity_locked_by_deadline: "已進入截止前 30 分鐘，無法取消。",
+    activity_not_cancellable: "此團購目前狀態無法取消。"
+  };
+  return messages[errorCode] || "取消團購失敗，請稍後再試。";
 }
 
 function getOrderStatusLabel(status) {
@@ -607,6 +704,33 @@ const styles = StyleSheet.create({
     color: "#2563eb",
     fontSize: 18,
     fontWeight: "900"
+  },
+  cancelForm: {
+    gap: 8
+  },
+  fieldLabel: {
+    color: "#334155",
+    fontSize: 12,
+    fontWeight: "800"
+  },
+  cancelReasonInput: {
+    minHeight: 72,
+    borderWidth: 1,
+    borderColor: "#cbd5e1",
+    borderRadius: 10,
+    backgroundColor: "#ffffff",
+    color: "#0f172a",
+    fontSize: 14,
+    paddingHorizontal: 12,
+    paddingVertical: 8,
+    textAlignVertical: "top"
+  },
+  cancelFormActions: {
+    flexDirection: "row",
+    gap: 8
+  },
+  cancelFormActionButton: {
+    flex: 1
   }
 });
 

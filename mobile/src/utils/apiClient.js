@@ -363,6 +363,25 @@ export async function cancelOrder(orderId, input) {
   return payload.order;
 }
 
+export async function cancelMerchantGroupBuyActivity(activityId, input) {
+  const response = await fetch(
+    `${backendBaseUrl}/api/merchant/group-buy-activities/${encodeURIComponent(activityId)}/cancel`,
+    {
+      method: "POST",
+      headers: withAuthHeaders({ "Content-Type": "application/json" }),
+      body: JSON.stringify(input)
+    }
+  );
+  const payload = await response.json();
+  if (!response.ok) {
+    const error = new Error(payload.error ?? "Cancel group-buy activity failed");
+    error.status = response.status;
+    error.payload = payload;
+    throw error;
+  }
+  return payload;
+}
+
 export async function getPickupOverdueRule() {
   const response = await fetch(`${backendBaseUrl}/api/payment-rules/pickup-overdue`, {
     headers: withAuthHeaders()

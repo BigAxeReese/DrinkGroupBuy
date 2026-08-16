@@ -41,6 +41,8 @@
     "payment-authorization-confirm:smoke": "node scripts/payment-authorization-confirm-repository-smoke.js",
     "payment-authorization-cancel:smoke": "node scripts/payment-authorization-cancel-repository-smoke.js",
     "customer-order-cancel:smoke": "node scripts/customer-order-cancel-repository-smoke.js",
+    "merchant-group-buy-activity-cancel:smoke": "node scripts/merchant-group-buy-activity-cancel-repository-smoke.js",
+    "merchant-activity-cancel-service:smoke": "node scripts/merchant-activity-cancel-service-smoke.js",
     "line-pay-confirm-service:smoke": "node scripts/line-pay-confirm-service-smoke.js",
     "line-pay-cancel-service:smoke": "node scripts/line-pay-cancel-service-smoke.js",
     "payment-capture:smoke": "node scripts/payment-capture-repository-smoke.js",

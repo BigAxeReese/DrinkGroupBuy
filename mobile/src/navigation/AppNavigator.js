@@ -31,6 +31,7 @@ import { normalizeOrderItem } from "../utils/orderItems";
 import { buildOrderItemsChange, rollbackAuthorizedCups } from "../utils/orderState";
 import { clearPrototypeStateOnce, loadPrototypeState, savePrototypeState } from "../utils/prototypeStorage";
 import {
+  cancelMerchantGroupBuyActivity as cancelMerchantGroupBuyActivityApi,
   cancelOrder as cancelOrderApi,
   createOrder,
   createOrderRevision,
@@ -1188,6 +1189,35 @@ export function AppNavigator() {
             }
           : order
       )));
+    },
+    cancelMerchantGroupBuyActivityFromApi(activity, cancelledOrderIds) {
+      const cancelledOrderIdSet = new Set(cancelledOrderIds || []);
+      setGroupBuyActivities((items) => items.map((groupBuyActivity) => (
+        groupBuyActivity.id === activity.id
+          ? {
+              ...groupBuyActivity,
+              status: activity.status,
+              canJoin: activity.status === "recruiting",
+              cancellationReason: activity.cancellationReason
+            }
+            : groupBuyActivity
+      )));
+      setOrders((items) => items.map((order) => (
+        cancelledOrderIdSet.has(order.id)
+          ? {
+              ...order,
+              status: "cancelled",
+              pickupStatus: "cancelled",
+              merchantAcceptanceStatus: "cancelled",
+              cancellationReason: activity.cancellationReason
+            }
+          : order
+      )));
+    },
+    async cancelMerchantGroupBuyActivity(groupBuyActivityId, reason) {
+      const result = await cancelMerchantGroupBuyActivityApi(groupBuyActivityId, { reason });
+      actionsRef.current.cancelMerchantGroupBuyActivityFromApi(result.activity, result.cancelledOrderIds);
+      return result;
     }
   }), [cartItems, groupBuyActivities, orders, selectedCustomerId, selectedMerchantStoreId]);
   const actionsRef = useRef(actions);

@@ -90,6 +90,33 @@
 
 ---
 
+## 2026-08-17 — 商家自助取消團購（新功能）
+
+**範圍**：`backend/server.js`（新路由）、`backend/db.js`（`cancelGroupBuyActivity` 的 `actionType` 參數化＋三個新的 SQLite gateway 函式）、`backend/database/repositories/merchantGroupBuyActivityCancelRepository.js`（新檔案）、`backend/payments/merchantActivityCancelService.js`（新檔案）、mobile 端（`apiClient.js`／`AppNavigator.js`／`MerchantDashboardScreen.jsx`）
+**觸發原因**：CLAUDE.md 規則自動觸發——新功能涉及付款授權撤銷，屬於高風險區域，完成後主動跑一次 `/security-review` 留記錄
+**方法**：只審查這次新增的 diff／新檔案，對照既有 `POST /api/orders/:orderId/cancel` 與 `customerOrderCancelRepository.js` 的既有安全模式（角色檢查、歸屬檢查、參數化查詢）判斷一致性，並追過 `reason`／`:id` path param／`authUser` 從 HTTP 請求到資料庫寫入與撤銷授權呼叫的完整鏈路
+
+### 發現
+
+沒有找到信心度達到門檻（8/10 以上）的問題。
+
+### 沒發現問題的部分（已交叉驗證）
+
+| 面向 | 檢查結果 |
+|------|----------|
+| 商家能不能取消別家店的團購（IDOR／越權） | `canManageStore(authUser, activity.store_id)` 在讀到活動後、任何資料庫異動前就檢查；後續查詢訂單一律限定在已驗證過的 `activity_id`，商家碰不到別家店的訂單 |
+| 角色檢查 | 路由要求 `authUser.roles.includes("merchant")`，跟既有 merchant 路由寫法一致 |
+| 客戶端能不能偽造 `actorUserId`／`activityId`／idempotency key／`actionType` | `actorUserId` 一律來自驗證過的 `authUser.id`；`activityId` 來自 URL path，不受 body 覆寫；idempotency key 與 `actionType`（`merchant_cancel_group_buy_activity`／`merchant_cancel_order`）都是伺服器端組出來的常數，body 傳不進去 |
+| SQL injection | 新增的 SQLite／Postgres 查詢全部用 `?`／`$n` 參數化，包含 `cancelGroupBuyActivity` 新參數化的 `actionType`，沒有字串拼接 |
+| 截止前 30 分鐘鎖定窗口能不能繞過 | 判斷用 `businessClock.nowIso()`（伺服器時間），mobile 端的 `isWithdrawalLocked` 只是 UI 提示，後端有獨立重新檢查 |
+| 撤銷付款授權會不會撤到別人的授權 | `voidLinePayAuthorization`／`voidEcpayAuthorization` 呼叫時的 `orderId` 都來自已經限定 `activity_id` 的 eligible 訂單清單，沒有客戶端可操控指到別筆授權的路徑 |
+| API 回應會不會洩漏多餘資料 | 只回傳 `{ activity, cancelledOrderCount, failedOrderIds }`，內部呼叫 `getOrderDetail` 取得的付款細節沒有被帶進 HTTP 回應 |
+| `reason` 欄位 | 檢查非空、一律走參數化寫入，沒有被拿去組 HTML 或執行，沒有注入面 |
+
+**這次沒審查到的部分**：沒有重新審查既有的 `POST /api/orders/:orderId/cancel`／`customerOrderCancelRepository.js` 本身（這次 diff 沒有動它們，只是拿來對照），也沒有涵蓋 admin 的 `DELETE /api/admin/group-buy-activities/:id` 路徑（這次功能刻意不修它，取消功能本身不完整——只改活動狀態、沒有連動訂單／授權——是已知但這次範圍外的資料完整性問題，不是這次新增的安全漏洞）。
+
+---
+
 ## 2026-08-15 — dev-only 全域業務時間與付款／取餐時限串接
 
 **範圍**：`backend/time/businessClock.js`、`backend/server.js`、`backend/db.js`、`backend/payments/linePayService.js`、`backend/payments/settlementService.js`、`backend/pickup/credentialService.js`、`backend/pickup/expirationService.js`、受影響 activity/order repositories，以及本機 `local-dev-console/` 修改入口

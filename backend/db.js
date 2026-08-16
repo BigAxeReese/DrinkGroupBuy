@@ -687,6 +687,7 @@ function cancelGroupBuyActivity(activityId, input = {}) {
   const now = input.now || new Date().toISOString();
   const reason = input.reason || "Deleted by admin prototype action.";
   const requestedActorUserId = input.actorUserId || null;
+  const actionType = input.actionType || "admin_cancel_group_buy_activity";
   let transactionStarted = false;
 
   try {
@@ -748,10 +749,11 @@ function cancelGroupBuyActivity(activityId, input = {}) {
         resource_id,
         metadata_json,
         created_at
-      ) VALUES (?, ?, 'admin_cancel_group_buy_activity', 'activity', ?, ?, ?)
+      ) VALUES (?, ?, ?, 'activity', ?, ?, ?)
     `).run(
       `audit-log-${randomUUID()}`,
       actorUserId,
+      actionType,
       activityId,
       JSON.stringify({ reason }),
       now
@@ -3009,6 +3011,143 @@ function evaluateCustomerOrderCancellation(database, input, now) {
     return { error: "order_locked_by_deadline", deadlineAt: order.deadline_at, lockMinutes };
   }
   return { eligible: true, paymentStatus: order.payment_status, order };
+}
+
+function getMerchantGroupBuyActivityForCancellation(activityId) {
+  const database = openDatabase();
+  try {
+    return database.prepare(`
+      SELECT id, store_id, status, deadline_at, withdrawal_lock_minutes, cancellation_reason
+      FROM group_buy_activities
+      WHERE id = ?
+    `).get(activityId) || null;
+  } finally {
+    database.close();
+  }
+}
+
+function listEligibleOrdersForMerchantCancellation(activityId) {
+  const database = openDatabase();
+  try {
+    return database.prepare(`
+      SELECT
+        orders.id,
+        orders.payment_status,
+        authorization.provider AS payment_provider
+      FROM orders
+      LEFT JOIN payment_authorizations authorization
+        ON authorization.id = (
+          SELECT id
+          FROM payment_authorizations
+          WHERE order_id = orders.id
+            AND status IN ('authorized', 'captured')
+          ORDER BY authorized_at DESC, created_at DESC
+          LIMIT 1
+        )
+      WHERE orders.activity_id = ?
+        AND orders.status != 'cancelled'
+        AND orders.payment_status NOT IN ('captured', 'refunded')
+    `).all(activityId);
+  } finally {
+    database.close();
+  }
+}
+
+function evaluateMerchantOrderCancellation(database, input) {
+  const order = database.prepare(`SELECT * FROM orders WHERE id = ?`).get(input.orderId);
+  if (!order) return { error: "order_not_found" };
+  if (order.activity_id !== input.activityId) return { error: "order_access_denied" };
+  if (order.status === "cancelled") return { eligible: true, alreadyCancelled: true, order };
+  if (["captured", "refunded"].includes(order.payment_status)) {
+    return { error: "captured_order_cannot_be_cancelled" };
+  }
+  if (order.payment_status === "authorized") {
+    return { error: "authorization_void_required", paymentStatus: order.payment_status };
+  }
+  if (!["pending", "authorization_voided", "failed"].includes(order.payment_status)) {
+    return { error: "order_not_cancellable", paymentStatus: order.payment_status };
+  }
+  return { eligible: true, paymentStatus: order.payment_status, order };
+}
+
+function cancelMerchantOrderInDatabase(input) {
+  const database = openDatabase();
+  const now = input.now || new Date().toISOString();
+  let transactionStarted = false;
+  let result;
+  try {
+    const existingAction = input.idempotencyKey ? database.prepare(`
+      SELECT order_id, actor_user_id, action_type, result_json
+      FROM order_action_idempotency
+      WHERE idempotency_key = ?
+    `).get(input.idempotencyKey) : null;
+    if (existingAction) {
+      if (existingAction.order_id !== input.orderId
+        || existingAction.actor_user_id !== input.actorUserId
+        || existingAction.action_type !== "merchant_cancel_order") {
+        return { error: "idempotency_key_conflict" };
+      }
+      const storedResult = JSON.parse(existingAction.result_json);
+      return { ...storedResult, order: getOrderDetail(storedResult.orderId), idempotent: true };
+    }
+
+    const eligibility = evaluateMerchantOrderCancellation(database, input);
+    if (eligibility.error) return eligibility;
+    const order = eligibility.order;
+    if (eligibility.alreadyCancelled) return { order: getOrderDetail(order.id), idempotent: true };
+
+    database.exec("BEGIN IMMEDIATE;");
+    transactionStarted = true;
+    const updateResult = database.prepare(`
+      UPDATE orders SET status = 'cancelled', pickup_status = 'cancelled',
+        merchant_acceptance_status = 'cancelled', updated_at = ?
+      WHERE id = ?
+        AND status != 'cancelled'
+        AND payment_status NOT IN ('captured', 'refunded')
+    `).run(now, order.id);
+    if (updateResult.changes !== 1) {
+      const currentOrder = database.prepare("SELECT status, payment_status FROM orders WHERE id = ?").get(order.id);
+      database.exec("ROLLBACK;");
+      transactionStarted = false;
+      if (currentOrder?.status === "cancelled") {
+        return { order: getOrderDetail(order.id), idempotent: true };
+      }
+      if (["captured", "refunded"].includes(currentOrder?.payment_status)) {
+        return { error: "captured_order_cannot_be_cancelled" };
+      }
+      return { error: "order_state_changed", status: currentOrder?.status, paymentStatus: currentOrder?.payment_status };
+    }
+    database.prepare(`
+      UPDATE payment_authorizations SET status = 'failed', failure_reason = 'merchant_cancelled_group_buy_activity', updated_at = ?
+      WHERE order_id = ? AND status = 'pending'
+    `).run(now, order.id);
+    database.prepare(`
+      UPDATE order_revisions SET status = 'cancelled', failure_reason = 'merchant_cancelled_group_buy_activity',
+        cancelled_at = ?, updated_at = ?
+      WHERE order_id = ? AND status = 'pending_authorization'
+    `).run(now, now, order.id);
+    database.prepare(`
+      INSERT INTO status_history (id, resource_type, resource_id, from_status, to_status, reason, actor_user_id, created_at)
+      VALUES (?, 'order', ?, ?, 'cancelled', ?, ?, ?)
+    `).run(`status-history-${randomUUID()}`, order.id, order.status, input.reason, input.actorUserId, now);
+    database.prepare(`
+      INSERT INTO audit_logs (id, actor_user_id, action_type, resource_type, resource_id, metadata_json, created_at)
+      VALUES (?, ?, 'merchant_cancel_order', 'order', ?, ?, ?)
+    `).run(`audit-log-${randomUUID()}`, input.actorUserId, order.id, JSON.stringify({ reason: input.reason, activityId: input.activityId }), now);
+    result = { orderId: order.id, status: "cancelled", idempotent: false };
+    if (input.idempotencyKey) database.prepare(`
+      INSERT INTO order_action_idempotency (idempotency_key, order_id, action_type, actor_user_id, result_json, created_at)
+      VALUES (?, ?, 'merchant_cancel_order', ?, ?, ?)
+    `).run(input.idempotencyKey, order.id, input.actorUserId, JSON.stringify(result), now);
+    database.exec("COMMIT;");
+    transactionStarted = false;
+  } catch (error) {
+    if (transactionStarted) database.exec("ROLLBACK;");
+    throw error;
+  } finally {
+    database.close();
+  }
+  return { ...result, order: getOrderDetail(input.orderId) };
 }
 
 function listCustomerOrders(customerUserId, input = {}) {
@@ -6791,6 +6930,9 @@ module.exports = {
   cancelPendingLinePayAuthorizationInDatabase,
   cancelGroupBuyActivity,
   cancelCustomerOrderInDatabase,
+  cancelMerchantOrderInDatabase,
+  getMerchantGroupBuyActivityForCancellation,
+  listEligibleOrdersForMerchantCancellation,
   captureLinePayAuthorizationInDatabase,
   completeManualLinePayRepaymentInDatabase,
   completeLinePayRefundInDatabase,

@@ -2,6 +2,9 @@ const http = require("node:http");
 const {
   cancelGroupBuyActivity,
   cancelCustomerOrderInDatabase,
+  cancelMerchantOrderInDatabase,
+  getMerchantGroupBuyActivityForCancellation,
+  listEligibleOrdersForMerchantCancellation,
   cancelPendingLinePayAuthorizationInDatabase,
   createGroupBuyActivity,
   createOrder,
@@ -70,8 +73,10 @@ const {
 const { getPickupOverdueRule } = require("./payments/orderRuleConsent");
 const {
   handleEcpayReturnWebhook,
+  isEcpayProvider,
   renderEcpayCheckoutRedirectHtml,
-  requestEcpayAuthorization
+  requestEcpayAuthorization,
+  voidEcpayAuthorization
 } = require("./payments/ecpayService");
 const {
   approveRefundRequest,
@@ -82,6 +87,9 @@ const {
   settleGroupBuyActivity,
   startDeadlineSettlementScheduler
 } = require("./payments/settlementService");
+const {
+  cancelMerchantGroupBuyActivity
+} = require("./payments/merchantActivityCancelService");
 const {
   startLinePayReconciliationScheduler
 } = require("./payments/reliabilityService");
@@ -129,6 +137,9 @@ const {
 const {
   createCustomerOrderCancelRepository
 } = require("./database/repositories/customerOrderCancelRepository");
+const {
+  createMerchantGroupBuyActivityCancelRepository
+} = require("./database/repositories/merchantGroupBuyActivityCancelRepository");
 const {
   createPaymentCaptureRepository
 } = require("./database/repositories/paymentCaptureRepository");
@@ -204,6 +215,13 @@ const customerOrderCancelRepository = createCustomerOrderCancelRepository({
   sqliteGateway: {
     getEligibility: getCustomerOrderCancellationEligibility,
     cancelOrder: cancelCustomerOrderInDatabase,
+  },
+});
+const merchantGroupBuyActivityCancelRepository = createMerchantGroupBuyActivityCancelRepository({
+  sqliteGateway: {
+    getActivityForCancellation: getMerchantGroupBuyActivityForCancellation,
+    listEligibleOrders: listEligibleOrdersForMerchantCancellation,
+    cancelOrder: cancelMerchantOrderInDatabase,
   },
 });
 const paymentCaptureRepository = createPaymentCaptureRepository({
@@ -736,6 +754,57 @@ const server = http.createServer(async (request, response) => {
         }
       );
       sendPickupServiceResult(response, result);
+      return;
+    }
+
+    const merchantCancelActivityMatch = url.pathname.match(
+      /^\/api\/merchant\/group-buy-activities\/([^/]+)\/cancel$/
+    );
+    if (request.method === "POST" && merchantCancelActivityMatch) {
+      const authUser = await getAuthenticatedUser(request);
+      if (!authUser) {
+        sendJson(response, 401, { error: "Authentication required" });
+        return;
+      }
+      if (!authUser.roles.includes("merchant")) {
+        sendJson(response, 403, { error: "Merchant role required" });
+        return;
+      }
+
+      const body = await readJsonBody(request);
+      if (!String(body.reason || "").trim()) {
+        sendJson(response, 400, { error: "reason is required" });
+        return;
+      }
+
+      try {
+        const result = await cancelMerchantGroupBuyActivity({
+          activityId: merchantCancelActivityMatch[1],
+          reason: String(body.reason).trim(),
+          actorUserId: authUser.id,
+          now: businessClock.nowIso(),
+          canManageStore: (storeId) => canManageStore(authUser, storeId),
+          merchantGroupBuyActivityCancelRepository,
+          paymentAuthorizationCancelRepository
+        });
+        if (result.error) {
+          const statusByError = {
+            activity_not_found: 404,
+            store_access_denied: 403,
+            activity_locked_by_deadline: 409,
+            activity_not_cancellable: 409
+          };
+          sendJson(response, statusByError[result.error] || 409, result);
+          return;
+        }
+        sendJson(response, 200, result);
+      } catch (error) {
+        if (error instanceof PaymentServiceError) {
+          sendJson(response, error.statusCode, error.payload);
+          return;
+        }
+        throw error;
+      }
       return;
     }
 
@@ -1611,7 +1680,7 @@ const server = http.createServer(async (request, response) => {
 
       const body = await readJsonBody(request);
       const activity = cancelGroupBuyActivity(adminActivityMatch[1], {
-        ...body,
+        reason: body.reason,
         actorUserId: authUser.id,
         now: businessClock.nowIso()
       });
