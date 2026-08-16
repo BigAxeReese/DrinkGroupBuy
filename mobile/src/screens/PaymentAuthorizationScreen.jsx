@@ -36,6 +36,7 @@ export function PaymentAuthorizationScreen({ navigation, route, appState, action
   const [pickupRuleMessage, setPickupRuleMessage] = useState("");
   const [pickupRuleAccepted, setPickupRuleAccepted] = useState(false);
   const [pickupRuleReloadKey, setPickupRuleReloadKey] = useState(0);
+  const [pickupRuleContentExpanded, setPickupRuleContentExpanded] = useState(false);
   const pollIntervalRef = useRef(null);
   const pollTimeoutRef = useRef(null);
   const pollInFlightRef = useRef(false);
@@ -216,25 +217,35 @@ export function PaymentAuthorizationScreen({ navigation, route, appState, action
             </>
           ) : null}
           {pickupRuleStatus === "ready" && pickupRule ? (
-            <Pressable
-              accessibilityRole="checkbox"
-              accessibilityState={{ checked: pickupRuleAccepted }}
-              onPress={() => setPickupRuleAccepted((value) => !value)}
-              style={({ pressed }) => [
-                styles.ruleConsentRow,
-                pickupRuleAccepted && styles.ruleConsentRowActive,
-                pressed && styles.pressed
-              ]}
-            >
-              <View style={[styles.checkbox, pickupRuleAccepted && styles.checkboxActive]}>
-                <Text style={styles.checkboxMark}>{pickupRuleAccepted ? "✓" : ""}</Text>
-              </View>
-              <View style={styles.ruleConsentTextGroup}>
+            <View style={[styles.ruleConsentRow, pickupRuleAccepted && styles.ruleConsentRowActive]}>
+              <Pressable
+                accessibilityRole="checkbox"
+                accessibilityState={{ checked: pickupRuleAccepted }}
+                onPress={() => setPickupRuleAccepted((value) => !value)}
+                style={({ pressed }) => [styles.ruleConsentCheckboxRow, pressed && styles.pressed]}
+              >
+                <View style={[styles.checkbox, pickupRuleAccepted && styles.checkboxActive]}>
+                  <Text style={styles.checkboxMark}>{pickupRuleAccepted ? "✓" : ""}</Text>
+                </View>
                 <Text style={styles.ruleConsentTitle}>我已閱讀並同意「{pickupRule.title}」</Text>
-                <Text style={styles.ruleConsentContent}>{pickupRule.content}</Text>
-                <Text style={styles.ruleVersion}>規則版本：{pickupRule.ruleVersion}</Text>
-              </View>
-            </Pressable>
+              </Pressable>
+              <Pressable
+                accessibilityRole="button"
+                accessibilityLabel={pickupRuleContentExpanded ? "收合規則全文" : "展開閱讀規則全文"}
+                onPress={() => setPickupRuleContentExpanded((value) => !value)}
+                style={({ pressed }) => [styles.ruleConsentToggleRow, pressed && styles.pressed]}
+              >
+                <Text style={styles.ruleConsentToggleText}>
+                  {pickupRuleContentExpanded ? "收合規則全文 ▲" : "展開閱讀規則全文 ▼"}
+                </Text>
+              </Pressable>
+              {pickupRuleContentExpanded ? (
+                <View style={styles.ruleConsentTextGroup}>
+                  <Text style={styles.ruleConsentContent}>{pickupRule.content}</Text>
+                  <Text style={styles.ruleVersion}>規則版本：{pickupRule.ruleVersion}</Text>
+                </View>
+              ) : null}
+            </View>
           ) : null}
         </Section>
       ) : null}
@@ -783,8 +794,6 @@ const styles = StyleSheet.create({
     fontWeight: "900"
   },
   ruleConsentRow: {
-    flexDirection: "row",
-    alignItems: "flex-start",
     gap: 10,
     borderRadius: 14,
     borderWidth: 1,
@@ -795,6 +804,21 @@ const styles = StyleSheet.create({
   ruleConsentRowActive: {
     borderColor: "#1f6feb",
     backgroundColor: "#eff6ff"
+  },
+  ruleConsentCheckboxRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 10
+  },
+  ruleConsentToggleRow: {
+    alignSelf: "flex-start",
+    marginLeft: 32
+  },
+  ruleConsentToggleText: {
+    color: "#1f6feb",
+    fontSize: 12,
+    fontWeight: "700",
+    textDecorationLine: "underline"
   },
   checkbox: {
     width: 22,
@@ -821,6 +845,7 @@ const styles = StyleSheet.create({
     gap: 7
   },
   ruleConsentTitle: {
+    flex: 1,
     color: "#0f172a",
     fontSize: 14,
     fontWeight: "900"
