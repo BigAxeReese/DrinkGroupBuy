@@ -1,8 +1,8 @@
-# 交接總整理
+# 交接總整理（封存快照）
 
 最後更新：2026-08-13
 
-換電腦、交接給其他人、或開新的 Codex 對話時，請先閱讀本文件。
+> 本檔是 2026-08-13 的交接快照，包含後續已變更的進度與架構描述，不再是新任務的預設入口。請先讀 root `AGENTS.md`，再依任務讀 `PROGRESS.md`、`docs/project-direction.md`、`docs/AI-architecture.md` 與直接相關 source；只有追查舊工作脈絡時才讀本檔。
 
 ## 專案方向
 
@@ -339,14 +339,14 @@ PostgreSQL v1 決策：
 
 PostgreSQL cancel／void／顧客取消 server proof 與 capture／settlement building block proof 已通過，SQLite 仍是預設。下一步等待分離式請款 Sandbox 核准並完成人工 E2E，再接入 server；目前仍不是付款 E2E runtime。
 
-## 換電腦後怎麼接
+## 現行交接入口
 
-1. Pull 或複製專案。
-2. 先讀 `AGENTS.md`。
-3. 再讀 `docs/AI-handoff-summary.md`。
-4. 再讀 `docs/AI-current-progress.md`。
-5. 手動檢查 `.env` 檔案，因為 secrets 不會 commit。
-6. 需要時安裝依賴：
+本段取代此快照原本要求依序讀取多份大型文件的流程：
+
+1. Pull 或複製專案後先讀 `AGENTS.md`。
+2. 依任務讀 `PROGRESS.md`、直接相關 source 與 `AGENTS.md` 路由指定的文件；不要預設重讀本快照或 `docs/AI-current-progress.md`。
+3. 手動確認本機 `.env` 類檔案是否已準備，因為 secrets 不會 commit；不要輸出其中的值。
+4. 需要時安裝依賴：
 
 ```bash
 npm install
@@ -354,6 +354,6 @@ cd mobile
 npm install
 ```
 
-7. 依照 `backend/README.md` 與 `mobile/README.md` 啟動 backend / mobile。
+5. 依照 `README.md`、`backend/README.md` 與 `mobile/README.md` 啟動所需 runtime。
 
 注意：機密資料 `secrets` 與本機 SQLite runtime data 不會自動出現在新電腦，除非你另外複製。

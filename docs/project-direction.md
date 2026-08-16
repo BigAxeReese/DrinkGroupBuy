@@ -1,116 +1,63 @@
 # 專案方向
 
-最後更新：2026-08-13
+最後更新：2026-08-16
 
-## 產品方向
+## 產品定位
 
-DrinkGroupBuy 是一個全端開發的 Android-first 手搖飲團購 App。
+DrinkGroupBuy 是 Android-first 的手搖飲團購 App，讓顧客探索附近店家與團購、選購飲品、完成付款授權並追蹤取餐；店家則管理菜單、建立團購、查看有效訂單及核銷取餐。系統仍在開發階段，尚未形成正式 production release。
 
-- `mobile/`：React Native + Expo App，目前使用 Expo Web 作為開發預覽。
-- `backend/`：Node.js HTTP API，預設使用 SQLite；三個唯讀切片、商家建團、商家菜單與顧客首次建單已有可切換 PostgreSQL 的 repository。
-- `database/`：包含 SQLite 開發 schema、seed data、測試資料庫，以及 PostgreSQL migrations／seed 草稿。
-- `docs/`：記錄專案方向、需求、API、資料庫、狀態、未決問題與交接資訊。
+第一階段正式平台是 Android。Expo Web 只用於本機開發預覽；iOS 不在第一階段驗收範圍。
 
-目前系統仍在開發階段，還不是正式上線版本。
+## 使用者與權限
 
-## 文件與命名規則
+- 顧客：瀏覽活動、點餐、付款授權、修改或取消未鎖定訂單、查看進度與取餐憑證。
+- 店家：管理所屬門市菜單與團購、查看訂單、標記可取餐、核銷取餐及提出退款申請。
+- 營運／補救身份：處理退款審核、活動取消、手動結算等敏感補救操作；不是第一階段正式 App 的一般角色。
+- 正式登入方向是 Firebase Auth + Google Login。Mobile 只取得 Firebase ID token；角色與門市權限由 Backend 根據 `users`、`user_roles`、`merchant_users` 判斷，不由前端選擇。
+- `AUTH_DEV_MODE`／`EXPO_PUBLIC_AUTH_MODE=dev` 的身份切換器只供本機開發，production 不得啟用。
 
-原則：**會影響程式、API、資料庫或工具辨識的內容使用英文；不影響實作的說明、報告文字與備註可使用中文。**
+## 核心流程
 
-- 程式變數、函式、檔名使用英文。
-- API method、path、request / response 欄位使用英文。
-- API JSON 欄位使用英文 `camelCase`。
-- 資料庫表名與欄位使用英文 `snake_case`。
-- status value 使用英文，例如 `recruiting`、`authorized`、`ready_for_pickup`。
-- SQL、環境變數、套件名稱、設定 key 使用英文。
-- 專題報告、流程說明、畫面文案、註解與補充說明可使用中文。
-- 若文件中的英文技術名稱不容易理解，應保留英文原名並加中文註解，不要直接翻掉。
+1. 店家維護門市菜單，建立團購草稿並發布為 `recruiting`。
+2. 顧客從地圖或列表選擇活動，依該店目前可販售菜單建立購物車；團購不複製一份獨立的活動菜單。
+3. Backend 在送單或改單時重新驗證店家歸屬、供應狀態、客製化規則、容量與價格，並保存訂單快照。
+4. 顧客完成 LINE Pay 付款授權後才計入有效杯數；授權成功不等同正式扣款。
+5. 截止時系統以有效授權訂單計算最終級距，依結果 capture 或 void；扣款成功的訂單才進入製作。
+6. 店家標記可取餐後，顧客出示取餐憑證，店家核銷；逾期狀態與是否退款分開處理。
 
-範例：
+完整的目標使用者流程以 `docs/final-product-user-flow.md` 為準；付款細節以 `docs/payment-rules-and-flow.md` 為準。這些目標規格不等於目前全部完成，當前狀態只看 `PROGRESS.md` 與 implementation。
 
-```text
-中文說明：團購活動
-API：groupBuyActivity
-資料庫：group_buy_activities
-```
+## 穩定產品規則
 
-## 資料庫方向
+- 活動截止時間不得超過開始或發布後 24 小時；取餐開始至少晚於截止 30 分鐘。
+- 截止前 30 分鐘起，既有顧客不能修改或退出；尚未參與者仍可在未滿容量且未截止時加入。
+- 最高優惠級距杯數同時是第一階段容量上限。
+- 最終級距只計算截止前已完成付款授權且仍有效的訂單。
+- 折扣是級距總額；每杯折扣使用向下取整，無法整除的尾差不分配給顧客。現行商家出資活動的尾差回到商家。
+- 已送出訂單保存品名、價格與客製化快照；菜單後續修改不得回寫歷史訂單。
+- 已授權訂單採替換流程：新 revision 與新授權成功前，原訂單與原授權維持有效。
+- 商家不能直接執行退款；商家提出申請，營運／補救身份審核後才呼叫 provider。
+- 取餐憑證自取餐開始起最多保留 3 小時，且不得晚於取餐結束時間；逾期不自動退款。
 
-- 現階段開發資料庫：SQLite。
-- 未來正式資料庫目標：PostgreSQL。
-- Firebase 不是主要資料庫方向。
-- Firebase 目前決定只規劃用於 Auth / Google Login，不作為主要交易資料庫。
-- 付款、訂單、團購結算、稽核紀錄、授權狀態都應由後端與資料庫控制。
+## 技術方向與邊界
 
-## 登入方向
+- Mobile：React Native + Expo，Android 為正式目標，Web 為開發預覽。
+- Backend：Node.js 內建 HTTP server，業務狀態與權限由 Backend 管理。
+- Database：SQLite 是本機開發預設；PostgreSQL 是正式多人環境方向，透過 repository runtime 開關逐切片驗證，不雙寫。
+- Firebase 只負責身份驗證，不作主要交易資料庫。
+- LINE Pay 是主要付款 provider；ECPay 是備援。付款、訂單、結算、取餐與 audit 資料不得由 Mobile 直接寫入。
+- Secret 只放本機環境檔；任何 `EXPO_PUBLIC_*` 都視為可被 client 讀取的公開設定。
 
-- 正式登入方向：Firebase Auth + Google Login。
-- 開發測試方向：優先使用 Firebase Google 測試帳號；若 Google 帳號不足，本機可用 dev-only 身份切換器測顧客、商家，以及必要的後端補救權限。
-- 正式角色與權限由 backend database 判斷，不由前端自行決定。
-- Mobile 取得 Firebase ID token 後，應交給 backend 驗證。
-- Backend 驗證 Firebase ID token 後，再查 `users`、`user_roles`、`merchant_users` 決定使用者身份。
-- 使用 Firebase Auth 時，backend `users.firebase_uid` 是對應 Firebase 使用者的正式欄位。
-- LINE Pay secret、訂單狀態、付款狀態、團購結算不可放在 mobile 或 Firestore 前端直寫流程。
+系統實際協作方式見 `docs/AI-architecture.md`；精確欄位、status 與未決策事項分別見 `docs/AI-database-field-spec.md`、`docs/AI-status-candidates.md`、`docs/open-questions.md`。
 
-## 目前已串接的範圍
+## 詞彙與命名
 
-已完成第一版串接：
+- 產品概念：團購活動。
+- Mobile／API：`groupBuyActivity`、JSON 欄位使用 `camelCase`。
+- Database：`group_buy_activities`、欄位使用 `snake_case`。
+- Mobile 既有 `deal` 只作相容脈絡，不應擴大使用。
+- 程式、API、schema、status、環境變數使用英文；說明與使用者文案可用中文，必要時保留英文術語並附中文解釋。
 
-- 商家建立團購活動：Mobile -> API -> SQLite，並可受控切換 PostgreSQL。
-- 公開菜單、活動、商家菜單與首次建單：Mobile／API 預設使用 SQLite；受控 PostgreSQL 模式下，auth、菜單、活動讀寫與建單會一起切換。Mobile 首頁仍待完整串接活動 API。
-- 顧客訂單預設仍為 Mobile -> API -> SQLite；受控 PostgreSQL 已涵蓋首次建單、列表、明細、authorization request／confirm／cancel、一般 void、顧客取消、capture／settlement、改單／revision、refund 與 pickup，各自由獨立 `*_RUNTIME` 環境變數控制，不雙寫。
-- 商家門市訂單列表、標記可取餐、查碼與核銷取貨均可受控讀寫 PostgreSQL。
-- LINE Pay request、confirm、cancel／void、capture、重新付款與 refund 均可受控使用 PostgreSQL；LINE Pay 分離式請款已於 2026-07-31 核准、2026-08-08 完成 Sandbox 人工端對端驗證。ECPay 信用卡為並存的備援 provider（後端與 mobile 已完成，尚未打過真實 ECPay Stage 網路）。
-- Deadline settlement 與 pickup expiration 的單一 Backend process scheduler。
+## 舊版邊界
 
-仍未完全由 Backend 或正式環境驅動：
-
-- 團購活動首頁、地圖與部分店家摘要仍使用 mobile local state 或 mock；附近公里數篩選尚未實作。
-- 購物車仍是 Mobile local state；送單、改單與重新授權前由 Backend 重新驗證。
-- LINE Pay reconciliation、持久化 retry、admin 警示查詢及 payment／settlement／cancel／repay／pickup DB lease 已完成；仍缺正式告警通知管道。
-- PostgreSQL 受控切片（auth、菜單、活動、建單、訂單讀取、authorization request／confirm／cancel、一般 void、顧客取消、capture／settlement、改單／revision、refund、pickup）均已接上 server route／scheduler；production 啟用（尤其 capture／settlement／refund 的正式自動請款）仍是獨立待評估與設定的步驟。
-- Android 實機、Firebase 正式設定與 ECPay Stage 人工 E2E 尚未完成。
-
-## 架構原則
-
-1. 新的後端與資料庫設計使用 `groupBuyActivity` / `group_buy_activity` 命名。
-2. Mobile prototype 的主要 state、route、screen 與 mock 已改用 `groupBuyActivity`；舊 `deal` 名稱只允許作本機儲存相容或測試資料表脈絡。
-3. Mobile 與 API 欄位使用 `camelCase`。
-4. 資料庫表名與欄位使用 `snake_case`。
-5. 機密資料只放在本機 `.env` 類檔案，不提交到 Git。
-6. 金流維持 sandbox / 測試模式，正式扣款前必須再確認。
-7. 涉及狀態改變的操作要有驗證、交易、idempotency 與歷史紀錄。
-
-## 舊版注意事項
-
-舊版 Web frontend、root `server.js`、`src/`、`data/` 已刪除。
-
-除非明確要求，不要恢復：
-
-- `frontend/`
-- root `server.js`
-- root `src/`
-- root `data/`
-
-## 2026-07-05 登入方向更新
-
-- 正式登入只使用 Firebase Auth + Google Login。
-- 新的正式產品流程不得以手機密碼、email 密碼或前端角色選擇作為登入設計。
-- 目前的密碼登入與角色選擇 UI 只屬於開發相容功能；Firebase 登入可用後，應移除或隱藏。
-- Mobile app 流程：使用者點選 Google Login -> Firebase 回傳 ID token -> mobile 將 ID token 送到 backend -> backend 驗證 Firebase token -> backend 依 `users`、`user_roles`、`merchant_users` 對應使用者身份。
-- Firebase 只用於身份驗證。Firestore 不是本專案主要業務資料庫。
-- 顧客、商家角色、店家權限、團購活動、訂單、付款、取貨憑證、狀態歷史與 audit logs 都以 backend database 為準；admin 相關能力僅作開發或後端補救工具，第一階段正式 App 不提供管理員流程。
-- 資料庫方向：使用 `users.firebase_uid` 作為穩定對應 Firebase identity 的正式欄位。
-
-## 開發期角色測試策略
-
-- 正式環境規則：使用者永遠不能在 mobile app 手動選擇角色。
-- 開發環境規則：優先用不同 Firebase Google 測試帳號登入，並透過 `users.firebase_uid` 對應不同測試角色。
-- 角色判斷必須在 backend/database 完成，不由 mobile UI 選擇。
-- 建議 seed 對應：
-  - customer A Google 測試帳號 -> customer A 的 `users.firebase_uid` -> `user_roles.role = customer`
-  - customer B Google 測試帳號 -> customer B 的 `users.firebase_uid` -> `user_roles.role = customer`
-  - merchant store 001 Google 測試帳號 -> merchant 001 的 `users.firebase_uid` -> `user_roles.role = merchant` 與 `merchant_users.store_id = store-001`
-- 若需要測後端補救工具，可另行對應 dev/admin 測試帳號；不列入第一階段正式 App 流程。
-- 若測試帳號不足，只在本機開發時可使用明確由環境變數開啟的 dev-only 身份切換器；backend 需設定 `AUTH_DEV_MODE=true`，mobile 需設定 `EXPO_PUBLIC_AUTH_MODE=dev`。
-- dev-only 身份切換器不得預設啟用，也不得用於 production build。
+舊版 root `frontend/`、`server.js`、`src/`、`data/` 已刪除。除非有明確 migration 需求，不得恢復或建立第二套前後端結構。

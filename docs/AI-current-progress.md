@@ -1,8 +1,8 @@
-# 目前進度
+# 實作歷程與舊進度明細（歷史快照）
 
 最後更新：2026-08-15
 
-換電腦或交接給其他 AI 時，請先閱讀 `docs/AI-handoff-summary.md`。
+> 自 2026-08-16 起，本檔不再是 current status 的 source of truth。內容保留作歷史脈絡，部分敘述可能已被後續 implementation 取代；目前進度請讀 root `PROGRESS.md`，架構請讀 `docs/AI-architecture.md`，並以實際 source 與本次驗證為準。不要在一般任務開始時無條件載入本檔。
 
 文件語言規則：會影響程式、API、資料庫或工具辨識的內容使用英文；不影響實作的說明、報告文字與備註可使用中文。若英文技術名稱不容易理解，保留英文並加中文註解。
 

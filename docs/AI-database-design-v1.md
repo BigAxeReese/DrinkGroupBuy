@@ -24,7 +24,7 @@
 - SQLite 目前是本機開發 backend database，不只是 mock data。
 - Firebase 不作為主要正式資料庫；目前決策是只用 Firebase Auth 處理 Google Login，業務資料保留在 backend database / PostgreSQL。
 
-目前開發資料庫的即時筆數快照請見 `docs/AI-current-progress.md`，本文件不重複維護（避免多份快照各自過期）。
+目前開發資料庫的即時筆數不寫入長期文件；需要時應以唯讀方式檢查實際 runtime database，避免快照與程式狀態漂移。
 
 ## 主要資料群組
 

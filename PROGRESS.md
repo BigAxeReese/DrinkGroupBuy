@@ -1,12 +1,12 @@
 ---
-updated: 2026-08-15
+updated: 2026-08-16
 ---
 
 ## 身份驗證與角色 [進行中]
 - Firebase Auth + Google 登入 [完成]
   - Mobile 端 [完成] — Google 登入畫面，取得 Firebase ID token 送到 backend
   - Backend 端 [完成] — 驗證 ID token，依 users/user_roles/merchant_users 判斷身份
-- Firebase Console／OAuth／UID mapping 與 Android 實機 E2E [待處理] — docs/AI-current-progress.md 模組化進度表列為未完成
+- Firebase Console／OAuth／UID mapping 與 Android 實機 E2E [待處理] — repository 只有設定需求與程式切片，沒有目前環境已完成端對端驗證的證據
 
 ## 團購與活動探索 [進行中]
 - 店家地圖 [完成] (8/4)
@@ -37,7 +37,7 @@ updated: 2026-08-15
   - 正式告警通知管道 [待處理]
 - 商家退款申請 [進行中]
   - Backend 端 [完成] (8/4) — 申請／審核 API（pending/approved/rejected），`npm run refund-request:smoke` 涵蓋申請、重複阻擋、核准、駁回
-  - Mobile 端：商家／營運審核 UI [待處理]
+  - Mobile 端：商家／營運審核 UI [進行中] — `MerchantRefundRequestsScreen`／`AdminRefundRequestsScreen` 已接 API 且 navigation 可到達；尚未有 Android／真實 provider E2E 證據
 
 ## 訂單流程 [進行中]
 - 截止後最終結算結果 [完成] (8/15)
@@ -81,10 +81,13 @@ updated: 2026-08-15
 - 各小節使用個案描述與活動圖 [待處理]
 
 ## 非正式與備援功能 [進行中]
-- 本機開發身份切換器（dev-only） [完成] — README／AI-current-progress.md 明講「這不是正式產品角色選擇」
+- 本機開發身份切換器（dev-only） [完成] — Backend 與 Mobile 都有 environment gate，且 README 明講「這不是正式產品角色選擇」
   - Mobile 端 [完成] — 本機測試身份下拉選單
   - Backend 端 [完成] — `AUTH_DEV_MODE` 閘門與 dev-session API
 - ECPay 信用卡付款（備援） [進行中] — 文件明講是 LINE Pay 審核卡關時的備用方案，LINE Pay 已核准後優先度降低
-  - Mobile 端 [完成] — 付款方式選擇 UI
+  - Mobile 端 [暫緩] — API、跳轉與 provider-neutral 結果處理仍保留，但目前付款入口隱藏
   - Backend 端 [完成] — request／webhook／capture／void／refund，真實 HTTP + `mock_ecpay` smoke test 驗證
   - ECPay Stage 真實環境人工端對端驗證 [待處理] — docs/ecpay-checkout-stage-checklist.md EC-01~08 尚未執行，只驗證過 mock
+
+## 開發協作 [完成]
+- AI Agent 漸進式 Context [完成] (8/16) — 已整理 `AGENTS.md`、Claude／Replit 入口、穩定產品 Context 與按需架構文件；Markdown 連結、Context 路由與 `git diff --check` 已驗證

@@ -24,7 +24,7 @@
 - [`docs/final-product-user-flow.md`](./docs/final-product-user-flow.md)：最終產品操作流程。
 - [`docs/payment-rules-and-flow.md`](./docs/payment-rules-and-flow.md)：LINE Pay 付款規則與流程。
 - [`docs/AI-status-candidates.md`](./docs/AI-status-candidates.md)：訂單、付款、團購與取餐狀態定義。
-- [`docs/AI-current-progress.md`](./docs/AI-current-progress.md)：目前開發進度。
+- [`PROGRESS.md`](./PROGRESS.md)：目前開發進度的單一來源。
 
 這份 README 是給第一次開啟專案的人看的。  
 目前專案方向是 Android-first mobile app，但開發與展示時可以先用 Expo Web 在電腦瀏覽器預覽。
