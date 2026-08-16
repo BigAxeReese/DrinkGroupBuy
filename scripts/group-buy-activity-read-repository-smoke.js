@@ -81,6 +81,23 @@ async function verifyPostgresContract() {
           participant_count: "2",
         }] };
       }
+      if (sql.includes("FROM activity_settlements")) {
+        return { rows: [{
+          id: "settlement-pg-001",
+          activity_id: "activity-pg-001",
+          outcome: "qualified",
+          authorized_cups: "20",
+          applied_tier_id: "tier-pg-20",
+          discount_amount: "200",
+          discount_per_cup: "10",
+          allocated_discount_amount: "200",
+          undistributed_discount_amount: "0",
+          discount_funder: "merchant",
+          calculation_version: "floor_per_cup_v1",
+          settled_at: new Date("2026-07-30T02:00:05.000Z"),
+          reason: "deadline_settlement_completed",
+        }] };
+      }
       throw new Error(`Unexpected SQL: ${sql}`);
     },
   };
@@ -111,6 +128,21 @@ async function verifyPostgresContract() {
     estimatedUndistributedDiscountAmount: 0,
     nextTierTargetCups: 40,
     cupsToNextTier: 20,
+    settlement: {
+      id: "settlement-pg-001",
+      activityId: "activity-pg-001",
+      outcome: "qualified",
+      authorizedCups: 20,
+      appliedTierId: "tier-pg-20",
+      discountAmount: 200,
+      discountPerCup: 10,
+      allocatedDiscountAmount: 200,
+      undistributedDiscountAmount: 0,
+      discountFunder: "merchant",
+      calculationVersion: "floor_per_cup_v1",
+      settledAt: "2026-07-30T02:00:05.000Z",
+      reason: "deadline_settlement_completed",
+    },
     withdrawalLockMinutes: 30,
     cancellationReason: null,
     store: {
@@ -125,7 +157,7 @@ async function verifyPostgresContract() {
       { id: "tier-pg-40", targetCups: 40, cups: 40, discountAmount: 600, sortOrder: 1 },
     ],
   }]);
-  assert.equal(calls.length, 3);
+  assert.equal(calls.length, 4);
   assert.ok(calls.every((call) => call.parameters.length === 0));
   assert.match(calls.find((call) => call.sql.includes("FROM orders")).sql, /payment_status IN/);
   await repository.close();

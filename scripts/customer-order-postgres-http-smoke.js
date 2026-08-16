@@ -128,6 +128,11 @@ async function main() {
         body: JSON.stringify({
           orderId: createdOrder.id,
           amount: createdOrder.originalAmount,
+          ruleConsent: {
+            accepted: true,
+            ruleType: "pickup_overdue",
+            ruleVersion: "v1.0",
+          },
           products: [],
         }),
       }

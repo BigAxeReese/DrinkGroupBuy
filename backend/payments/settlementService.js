@@ -29,7 +29,10 @@ const CAPTURE_RETRY_INTERVAL_MS = 30_000;
 
 async function settleGroupBuyActivity(input = {}) {
   if (input.settlementRepository?.kind === "postgres") {
-    return input.settlementRepository.withOperationLock(input, () => (
+    return input.settlementRepository.withOperationLock({
+      ...input,
+      now: undefined,
+    }, () => (
       settleGroupBuyActivityUnlocked(input)
     ));
   }
@@ -38,8 +41,7 @@ async function settleGroupBuyActivity(input = {}) {
   const lock = acquireOperationLock({
     lockKey,
     ownerId,
-    leaseMs: input.leaseMs || 300_000,
-    now: input.now
+    leaseMs: input.leaseMs || 300_000
   });
   if (!lock.acquired) {
     return {
@@ -597,6 +599,7 @@ function startDeadlineSettlementScheduler(input = {}) {
       const summary = await runDueGroupBuySettlementJobs({
         actorUserId,
         limit,
+        now: input.nowProvider ? input.nowProvider() : undefined,
         settlementRepository: input.settlementRepository,
         paymentCaptureRepository: input.paymentCaptureRepository,
         authorizationCancelRepository: input.authorizationCancelRepository

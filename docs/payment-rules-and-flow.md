@@ -1,6 +1,6 @@
 # 付款規則與流程
 
-最後更新：2026-08-08
+最後更新：2026-08-13
 
 本文件紀錄目前已確認的付款商業規則，作為下一階段 LINE Pay 實作依據。
 
@@ -32,7 +32,7 @@ LINE Pay 實作與驗證進度詳見 `docs/AI-current-progress.md`「2026-08-08 
 12. 後端只有在 `LINE_PAY_CAPTURE_SEPARATED=true` 時才會送出 `options.payment.capture=false`；未開啟時會阻擋真 LINE Pay request，避免自動請款被誤當預授權。
 13. 顧客必須在團購截止前完成 LINE Pay confirm，且後端成功寫入 `authorized`，才算加入團購。
 14. 若顧客截止前進入 LINE Pay，但 confirm 回到後端時已達或超過截止時間，該授權視為逾時，不計入團購，系統會標記失敗並嘗試 void。
-15. 顧客完成預授權後，雖然系統內部狀態是 `authorized`，但顧客端與店家端顯示「已付款」。
+15. 顧客完成預授權後，雖然系統內部狀態是 `authorized`，但顧客端顯示「訂單成立」，店家端顯示「已付款」。此時尚未正式請款。
 16. 團購截止後正式扣款期間不顯示「結算中」或「付款處理中」；顧客端仍顯示「訂單已鎖定」。
 
 ### 優惠與原價購買
@@ -51,6 +51,7 @@ LINE Pay 實作與驗證進度詳見 `docs/AI-current-progress.md`「2026-08-08 
 12. 每杯折扣使用 `floor(適用級距總折扣 / 有效授權杯數)`；例如總折扣 100 元、有效 3 杯時，每杯折 33 元，實際分配 99 元。
 13. 無法整除的尾差不進入任何顧客訂單折扣。現行優惠由商家出資，因此尾差退回商家；未來若活動明確由平台出資，尾差才由平台保留。進行中依目前有效授權杯數即時顯示「預估每杯折扣」，截止時重新計算；PostgreSQL 最終快照保存 `discount_per_cup`、`allocated_discount_amount`、`undistributed_discount_amount`、`discount_funder` 與 `calculation_version`。
 14. 活動發布時逐級驗證可達杯數區間。一般級距上限為下一級距 `target_cups - 1`，最高級距上限為 `maximum_cups`；必須滿足 `floor(discount_amount / 區間上限) >= 1`，且門檻杯數時計算的每杯折扣不得高於店內最低可售單杯權威金額。招募中的菜單降價／上架、訂單寫入、重新授權與截止結算皆須重驗，任何應付金額不得為負數。
+15. 顧客端只有在 Backend 已保存並回傳 `activity_settlements` 快照後才顯示「最終結算結果」；顯示最終有效杯數、每杯折扣、訂單 `final_amount` 與未分配尾差。單純抵達截止時間仍只能等待 Backend 結算，不得由 Mobile 自行宣告最終金額。
 
 ### 活動時間限制
 
@@ -93,6 +94,16 @@ LINE Pay 實作與驗證進度詳見 `docs/AI-current-progress.md`「2026-08-08 
 10. 因為新舊預授權會短時間重疊，顧客可能需要足夠額度才能完成增加金額的修改。
 11. 目前第一版已用 `order_revisions` 保存待確認修改內容；`POST /api/orders/:orderId/revisions` 建立 revision，mobile 付款頁會在 `POST /api/payments/line-pay/request` 帶 `orderRevisionId` 發起新預授權。
 12. 新預授權 confirm 成功後，backend 在同一個資料庫交易中套用 revision，再嘗試 void 被替換的舊授權；若 void 舊授權失敗，會保留新訂單狀態並記錄失敗事件。
+
+### 付款前規則同意
+
+1. Mobile 透過 `GET /api/payment-rules/pickup-overdue` 顯示 Backend 目前有效的取餐與逾期未取規則全文與版本。
+2. 顧客未勾選前不能建立 LINE Pay 預授權；Client 送出的資料只有明確同意旗標、規則類型與版本。
+3. Backend 只允許訂單本人同意，並再次驗證規則類型與版本；管理員不能代替顧客建立同意證據。
+4. Backend 以自己的權威規則全文與真實伺服器時間寫入 `order_rule_consents`，不採信 Client 傳入全文、帳號或時間。
+5. 同一訂單、規則類型與版本採 append-only idempotent 紀錄；重試不覆寫第一次同意時間，規則升版則新增一筆歷史紀錄。
+6. 未同意、版本過期或保存失敗都不會呼叫 LINE Pay provider。
+7. 第一版已套用一般預授權與 revision 重新預授權；LINE Pay 手動重新付款沿用該訂單既有同意證據。ECPay 入口目前隱藏，尚未套用同一 gate。
 
 ### 付款結果同步
 
@@ -192,7 +203,7 @@ LINE Pay 實作與驗證進度詳見 `docs/AI-current-progress.md`「2026-08-08 
 11. LINE Pay void 使用官方 `POST /v3/payments/authorizations/{transactionId}/void`；成功後更新 `payment_authorizations.status = authorization_voided`，並同步更新訂單付款狀態與稽核紀錄；失敗時至少記錄 provider event 與 audit log。
 12. LINE Pay capture 使用官方 `POST /v3/payments/authorizations/{transactionId}/capture`；成功後新增 `payment_captures`，更新 `payment_authorizations.status = captured`、`orders.payment_status = captured` 與 `orders.final_amount`，並記錄 provider event、status history 與 audit log。
 13. LINE Pay refund 使用官方 `POST /v3/payments/{transactionId}/refund`；成功後新增 `payment_refunds`，全額退款時更新 `orders.payment_status = refunded`，並記錄 provider event 與 audit log。
-14. 結算的折扣分攤規則：每杯折扣為 `floor(promotion_tiers.discount_amount / 截止時有效授權總杯數)`，各訂單折扣為每杯折扣乘以該訂單杯數；未分配尾差由優惠出資方保留，現行商家出資活動的尾差退回商家。PostgreSQL `003` 會保存不可變快照並以 constraints 驗證分配總額，但尚未切換 Backend runtime。
+14. 結算的折扣分攤規則：每杯折扣為 `floor(promotion_tiers.discount_amount / 截止時有效授權總杯數)`，各訂單折扣為每杯折扣乘以該訂單杯數；未分配尾差由優惠出資方保留，現行商家出資活動的尾差退回商家。PostgreSQL `003` 會保存不可變快照並以 constraints 驗證分配總額；活動列表的 SQLite／PostgreSQL read runtime 均已回傳該快照供 Mobile 顯示。
 15. 第一階段商家只能提出退款申請，由營運／補救權限確認後執行 LINE Pay refund；正式流程需檢查門市權限、可退餘額、冪等、跨程序鎖、audit log、reconciliation 與失敗告警。
 16. 本機開發可使用 `mock_line_pay` 測試截止結算與退款，不呼叫外部 LINE Pay API；`npm run settlement:smoke` 會使用乾淨 schema 暫時建立 mock 預授權訂單，驗證達標 capture、未達標 fallback capture、void、scheduler due activity 結算、order revision 套用與 refund idempotency，並在測試後還原開發資料庫。
 

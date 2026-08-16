@@ -114,6 +114,12 @@ docs/AI-security-review-log.md
 
 `docs/AI-database-field-spec.md` is the single authoritative source for exact column definitions (type, constraints, example values) for every table. When a database entity or field changes, update it directly instead of duplicating field-level detail into other docs — `docs/AI-database-candidates.md`, `docs/AI-database-design-v1.md`, and `docs/AI-data-dictionary.md` should link to it rather than re-list columns.
 
+## Progress Tracking (`PROGRESS.md`)
+
+This repo's root has a `PROGRESS.md` that a separate dashboard tool (ProgressMap) renders as a mind map — the single source of truth for progress, never cache a copy elsewhere. This applies to any agent working in this repo (Claude Code, Codex, or others), not just one specific tool.
+
+Full format, granularity, and evidence rules: [docs/progress-tracking-rules.md](docs/progress-tracking-rules.md) — read it when starting or finishing a unit of work; update `PROGRESS.md` accordingly.
+
 ## Naming Rules
 
 Use consistent naming:

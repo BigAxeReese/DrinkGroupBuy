@@ -4,6 +4,7 @@
   "private": true,
   "description": "B2C drink group-buying preorder prototype.",
   "scripts": {
+    "test": "node --test backend/**/*.test.js mobile/tests/*.test.mjs",
     "backend:start": "node backend/server.js",
     "mobile:web": "npm --prefix mobile run web",
     "mobile:android": "npm --prefix mobile run android",

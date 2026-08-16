@@ -41,6 +41,7 @@ const {
   getLinePayCaptureRetryState,
   listDueGroupBuyActivitiesForSettlement,
   recordLinePayCaptureFailureInDatabase,
+  recordOrderRuleConsentInDatabase,
   reschedulePaymentReliabilityJob,
   expireGroupBuyPickupWindow,
   listDueGroupBuyActivitiesForPickupExpiration,
@@ -66,6 +67,7 @@ const {
   refundLinePayPayment,
   voidLinePayAuthorization
 } = require("./payments/linePayService");
+const { getPickupOverdueRule } = require("./payments/orderRuleConsent");
 const {
   handleEcpayReturnWebhook,
   renderEcpayCheckoutRedirectHtml,
@@ -142,6 +144,7 @@ const {
 const {
   createOrderRevisionRepository
 } = require("./database/repositories/orderRevisionRepository");
+const { businessClock } = require("./time/businessClock");
 
 const port = Number(process.env.PORT ?? 3000);
 const storeMenuReadRepository = createStoreMenuReadRepository({ sqliteReader: listStoreMenu });
@@ -179,6 +182,7 @@ const paymentAuthorizationRequestRepository = createPaymentAuthorizationRequestR
     getOrderPaymentContext,
     getLatestAuthorizationForOrder: getLatestLinePayAuthorizationForOrder,
     getLatestAuthorizationForOrderRevision: getLatestLinePayAuthorizationForOrderRevision,
+    recordRuleConsent: recordOrderRuleConsentInDatabase,
     createPendingAuthorization: createPendingLinePayAuthorization,
   },
 });
@@ -397,6 +401,11 @@ const server = http.createServer(async (request, response) => {
 
     const url = new URL(request.url, `http://${request.headers.host}`);
 
+    if (request.method === "GET" && url.pathname === "/api/payment-rules/pickup-overdue") {
+      sendJson(response, 200, { rule: getPickupOverdueRule() });
+      return;
+    }
+
     if (
       customerOrderWriteRepository.kind === "postgres"
       && isSqliteOrderDependentRoute(request.method, url.pathname)
@@ -483,6 +492,43 @@ const server = http.createServer(async (request, response) => {
 
       const token = createAuthToken(user);
       sendJson(response, 200, { token, user: toPublicUserResponse(user) });
+      return;
+    }
+
+    if (request.method === "GET" && url.pathname === "/api/dev/business-time") {
+      if (!isDevAuthModeEnabled()) {
+        sendJson(response, 404, { error: "Not found" });
+        return;
+      }
+
+      sendJson(response, 200, { businessTime: businessClock.getSnapshot() });
+      return;
+    }
+
+    if (request.method === "PUT" && url.pathname === "/api/dev/business-time") {
+      if (!isDevAuthModeEnabled()) {
+        sendJson(response, 404, { error: "Not found" });
+        return;
+      }
+      if (!isLoopbackRequest(request)) {
+        sendJson(response, 403, { error: "Business time can only be changed from the backend host." });
+        return;
+      }
+
+      const body = await readJsonBody(request);
+      try {
+        const businessTime = businessClock.configure(body, { nodeEnv: process.env.NODE_ENV });
+        console.warn("[dev-business-time] setting changed", {
+          mode: businessTime.mode,
+          offsetMinutes: businessTime.offsetMinutes,
+          fixedNow: businessTime.fixedNow,
+          effectiveNow: businessTime.effectiveNow,
+          realNow: businessTime.realNow,
+        });
+        sendJson(response, 200, { businessTime });
+      } catch (error) {
+        sendJson(response, 400, { error: error.code || "business_time_invalid", message: error.message });
+      }
       return;
     }
 
@@ -652,7 +698,8 @@ const server = http.createServer(async (request, response) => {
 
       const activity = await groupBuyActivityWriteRepository.createActivity({
         ...body,
-        createdByUserId: authUser.id
+        createdByUserId: authUser.id,
+        now: businessClock.nowIso()
       });
       if (activity?.error === "store_access_denied") {
         sendJson(response, 403, { error: "Store access denied" });
@@ -684,6 +731,7 @@ const server = http.createServer(async (request, response) => {
         merchantReadyForPickupMatch[1],
         {
           actorUserId: authUser.id,
+          now: businessClock.nowIso(),
           pickupCredentialRepository: pickupPostgresReady ? pickupCredentialRepository : undefined
         }
       );
@@ -707,6 +755,7 @@ const server = http.createServer(async (request, response) => {
       const result = await lookupPickupCode({
         actorUserId: authUser.id,
         pickupCode: body.pickupCode,
+        now: businessClock.nowIso(),
         pickupCredentialRepository: pickupPostgresReady ? pickupCredentialRepository : undefined
       });
       sendPickupServiceResult(response, result);
@@ -729,6 +778,7 @@ const server = http.createServer(async (request, response) => {
       const result = await redeemPickupCode({
         actorUserId: authUser.id,
         pickupCode: body.pickupCode,
+        now: businessClock.nowIso(),
         pickupCredentialRepository: pickupPostgresReady ? pickupCredentialRepository : undefined
       });
       sendPickupServiceResult(response, result);
@@ -745,7 +795,7 @@ const server = http.createServer(async (request, response) => {
         return;
       }
 
-      const order = getOrderDetail(orderPickupCredentialMatch[1]);
+      const order = getOrderDetail(orderPickupCredentialMatch[1], { now: businessClock.nowIso() });
       if (!order) {
         sendJson(response, 404, { error: "Order not found" });
         return;
@@ -756,6 +806,7 @@ const server = http.createServer(async (request, response) => {
       }
 
       const credential = await getPickupCredentialForOrder(order.id, {
+        now: businessClock.nowIso(),
         pickupCredentialRepository: pickupPostgresReady ? pickupCredentialRepository : undefined
       });
       sendJson(response, 200, { credential });
@@ -771,7 +822,7 @@ const server = http.createServer(async (request, response) => {
         200,
         await customerOrderReadRepository.listCustomerOrders(
           authUser.id,
-          readOrderListQuery(url)
+          { ...readOrderListQuery(url), now: businessClock.nowIso() }
         )
       );
       return;
@@ -789,7 +840,7 @@ const server = http.createServer(async (request, response) => {
         200,
         await customerOrderReadRepository.listMerchantStoreOrders(
           merchantOrdersMatch[1],
-          readOrderListQuery(url)
+          { ...readOrderListQuery(url), now: businessClock.nowIso() }
         )
       );
       return;
@@ -860,7 +911,8 @@ const server = http.createServer(async (request, response) => {
 
       const result = await customerOrderWriteRepository.createOrder({
         ...body,
-        customerUserId: authUser.id
+        customerUserId: authUser.id,
+        now: businessClock.nowIso()
       });
       if (sendOrderItemValidationError(response, result)) return;
       if (result?.error === "activity_not_found") {
@@ -918,7 +970,8 @@ const server = http.createServer(async (request, response) => {
       const revisionInput = {
         ...body,
         orderId: orderRevisionMatch[1],
-        customerUserId: authUser.id
+        customerUserId: authUser.id,
+        now: businessClock.nowIso()
       };
       const result = orderRevisionPostgresReady
         ? await orderRevisionRepository.createRevision(revisionInput)
@@ -987,12 +1040,18 @@ const server = http.createServer(async (request, response) => {
       if (!String(body.idempotencyKey || "").trim()) {
         return sendJson(response, 400, { error: "idempotencyKey is required" });
       }
-      const order = await customerOrderReadRepository.getOrderDetail(orderCancelMatch[1]);
+      const order = await customerOrderReadRepository.getOrderDetail(
+        orderCancelMatch[1],
+        { now: businessClock.nowIso() }
+      );
       if (!order) return sendJson(response, 404, { error: "Order not found" });
       if (!canAccessOrder(authUser, order)) return sendJson(response, 403, { error: "Order access denied" });
-      const requestedAt = new Date().toISOString();
+      const requestedAt = businessClock.nowIso();
       const cancelOperation = async () => {
-        const lockedOrder = await customerOrderReadRepository.getOrderDetail(order.id);
+        const lockedOrder = await customerOrderReadRepository.getOrderDetail(
+          order.id,
+          { now: requestedAt }
+        );
         if (!lockedOrder) return sendJson(response, 404, { error: "Order not found" });
         const eligibility = await customerOrderCancelRepository.getEligibility({
           orderId: lockedOrder.id,
@@ -1024,15 +1083,17 @@ const server = http.createServer(async (request, response) => {
           now: requestedAt
         });
         if (result.error) return sendJson(response, result.error === "order_not_found" ? 404 : 409, result);
-        result.order = await customerOrderReadRepository.getOrderDetail(lockedOrder.id);
+        result.order = await customerOrderReadRepository.getOrderDetail(
+          lockedOrder.id,
+          { now: requestedAt }
+        );
         sendJson(response, 200, result);
       };
       try {
         if (paymentAuthorizationCancelRepository.kind === "postgres") {
           await paymentAuthorizationCancelRepository.withOperationLock({
             orderId: order.id,
-            leaseMs: 300_000,
-            now: requestedAt
+            leaseMs: 300_000
           }, cancelOperation);
         } else {
           await withOperationLease({
@@ -1077,7 +1138,8 @@ const server = http.createServer(async (request, response) => {
       const result = updatePendingOrder({
         ...body,
         orderId: orderMatch[1],
-        customerUserId: authUser.id
+        customerUserId: authUser.id,
+        now: businessClock.nowIso()
       });
       if (sendOrderItemValidationError(response, result)) return;
       if (result?.error === "order_not_found") {
@@ -1130,7 +1192,10 @@ const server = http.createServer(async (request, response) => {
         return;
       }
 
-      const order = await customerOrderReadRepository.getOrderDetail(orderMatch[1]);
+      const order = await customerOrderReadRepository.getOrderDetail(
+        orderMatch[1],
+        { now: businessClock.nowIso() }
+      );
       if (!order) {
         sendJson(response, 404, { error: "Order not found" });
         return;
@@ -1179,7 +1244,11 @@ const server = http.createServer(async (request, response) => {
 
       const body = await readJsonBody(request);
       try {
-        const result = await requestManualLinePayRepayment({ authUser, body });
+        const result = await requestManualLinePayRepayment({
+          authUser,
+          body,
+          now: businessClock.nowIso()
+        });
         sendJson(response, 201, result);
       } catch (error) {
         if (error instanceof PaymentServiceError) {
@@ -1222,6 +1291,7 @@ const server = http.createServer(async (request, response) => {
       const result = await confirmLinePayAuthorization({
         transactionId,
         orderId,
+        now: businessClock.nowIso(),
         authorizationConfirmRepository: paymentAuthorizationConfirmRepository
       });
 
@@ -1445,6 +1515,7 @@ const server = http.createServer(async (request, response) => {
         activityId: adminSettleActivityMatch[1],
         actorUserId: authUser.id,
         force: Boolean(body.force),
+        now: businessClock.nowIso(),
         settlementRepository: settlementPostgresReady ? groupBuySettlementRepository : undefined,
         paymentCaptureRepository: settlementPostgresReady ? paymentCaptureRepository : undefined,
         authorizationCancelRepository: settlementPostgresReady ? paymentAuthorizationCancelRepository : undefined
@@ -1541,7 +1612,8 @@ const server = http.createServer(async (request, response) => {
       const body = await readJsonBody(request);
       const activity = cancelGroupBuyActivity(adminActivityMatch[1], {
         ...body,
-        actorUserId: authUser.id
+        actorUserId: authUser.id,
+        now: businessClock.nowIso()
       });
       if (!activity) {
         sendJson(response, 404, { error: "Group-buy activity not found" });
@@ -1597,6 +1669,7 @@ server.listen(port, () => {
 
   deadlineSettlementScheduler = startDeadlineSettlementScheduler({
     env: schedulerEnvironment,
+    nowProvider: () => businessClock.nowIso(),
     settlementRepository: settlementPostgresReady ? groupBuySettlementRepository : undefined,
     paymentCaptureRepository: settlementPostgresReady ? paymentCaptureRepository : undefined,
     authorizationCancelRepository: settlementPostgresReady ? paymentAuthorizationCancelRepository : undefined
@@ -1609,6 +1682,7 @@ server.listen(port, () => {
 
   pickupExpirationScheduler = startPickupExpirationScheduler({
     env: schedulerEnvironment,
+    nowProvider: () => businessClock.nowIso(),
     pickupCredentialRepository: pickupPostgresReady ? pickupCredentialRepository : undefined
   });
   if (pickupExpirationScheduler.enabled) {
@@ -1938,6 +2012,13 @@ function isSettlementRouteReadyForPostgres(method, pathname) {
 function isDevAuthModeEnabled() {
   if (process.env.NODE_ENV === "production") return false;
   return readBooleanEnv(process.env.AUTH_DEV_MODE, false);
+}
+
+function isLoopbackRequest(request) {
+  const remoteAddress = request.socket?.remoteAddress;
+  return remoteAddress === "127.0.0.1"
+    || remoteAddress === "::1"
+    || remoteAddress === "::ffff:127.0.0.1";
 }
 
 function readBooleanEnv(value, fallback = false) {

@@ -15,7 +15,7 @@ async function markGroupBuyActivityReadyForPickup(activityId, input = {}) {
   if (repository?.kind === "postgres") {
     try {
       return await repository.withOperationLock(
-        { activityId, now: input.now },
+        { activityId },
         () => repository.markReady({ activityId, actorUserId: input.actorUserId || null, now: input.now })
       );
     } catch (error) {
@@ -32,8 +32,7 @@ async function markGroupBuyActivityReadyForPickup(activityId, input = {}) {
   try {
     return withOperationLeaseSync({
       lockKey: `pickup:activity:${activityId}:transition`,
-      leaseMs: 120_000,
-      now: input.now
+      leaseMs: 120_000
     }, () => markGroupBuyActivityReadyForPickupUnlocked(activityId, input));
   } catch (error) {
     if (error instanceof OperationLeaseError) {
@@ -269,8 +268,7 @@ async function redeemPickupCode(input = {}) {
   try {
     return withOperationLeaseSync({
       lockKey: `pickup:code:${pickupCode}:redeem`,
-      leaseMs: 120_000,
-      now: input.now
+      leaseMs: 120_000
     }, () => accessPickupCode(input, true));
   } catch (error) {
     if (error instanceof OperationLeaseError) {
@@ -287,18 +285,23 @@ async function redeemPickupCode(input = {}) {
 async function accessPickupCode(input, shouldRedeem) {
   const actorUserId = input.actorUserId || null;
   const now = input.now || new Date().toISOString();
-  const limited = getRateLimit(actorUserId, now);
+  const rateLimitNow = new Date().toISOString();
+  const limited = getRateLimit(actorUserId, rateLimitNow);
   if (limited) return limited;
 
   const pickupCode = normalizeCode(input.pickupCode);
   if (!pickupCode) {
-    recordFailure(actorUserId, now);
+    recordFailure(actorUserId, rateLimitNow);
     return { error: "pickup_code_invalid" };
   }
 
   const repository = input.pickupCredentialRepository;
   if (repository?.kind === "postgres") {
-    return accessPickupCodePostgres(repository, { pickupCode, actorUserId, now }, shouldRedeem);
+    return accessPickupCodePostgres(
+      repository,
+      { pickupCode, actorUserId, now, rateLimitNow },
+      shouldRedeem
+    );
   }
 
   const database = openDatabase();
@@ -313,7 +316,7 @@ async function accessPickupCode(input, shouldRedeem) {
     if (!row) {
       if (transactionStarted) database.exec("ROLLBACK;");
       transactionStarted = false;
-      recordFailure(actorUserId, now);
+      recordFailure(actorUserId, rateLimitNow);
       return { error: "credential_not_found" };
     }
 
@@ -443,16 +446,20 @@ async function accessPickupCode(input, shouldRedeem) {
   }
 }
 
-async function accessPickupCodePostgres(repository, { pickupCode, actorUserId, now }, shouldRedeem) {
+async function accessPickupCodePostgres(
+  repository,
+  { pickupCode, actorUserId, now, rateLimitNow },
+  shouldRedeem
+) {
   const operation = () => (shouldRedeem
     ? repository.redeemCode({ pickupCode, actorUserId, now })
     : repository.lookupCode({ pickupCode, actorUserId, now }));
   try {
     const result = shouldRedeem
-      ? await repository.withOperationLock({ pickupCode, now }, operation)
+      ? await repository.withOperationLock({ pickupCode }, operation)
       : await operation();
     if (result?.error === "credential_not_found") {
-      recordFailure(actorUserId, now);
+      recordFailure(actorUserId, rateLimitNow);
     } else {
       clearFailures(actorUserId);
     }

@@ -3,6 +3,7 @@ import { Platform, Pressable, StyleSheet, Text, TextInput, View } from "react-na
 import { MobileScreen, Section } from "../components/MobileScreen";
 import { PrimaryButton } from "../components/PrimaryButton";
 import { createGroupBuyActivity } from "../utils/apiClient";
+import { getBusinessNow } from "../utils/businessTime";
 import { createDeadlineIsoFromInput, getDefaultDeadlineInput } from "../utils/deadlineTime";
 import {
   mapGroupBuyActivityCreateError,
@@ -93,7 +94,7 @@ export function MerchantGroupBuyActivityCreateScreen({ navigation, actions, memb
       return;
     }
 
-    const startDate = new Date();
+    const startDate = getBusinessNow();
     const deadlineError = getDeadlineValidationError(startDate, deadlineDate);
     if (deadlineError) {
       setSubmitMessageKind("error");
@@ -350,7 +351,7 @@ function DateTimeInput({ label, value, onChange, maximumDate }) {
           value={value}
           mode={pickerMode}
           display="default"
-          minimumDate={new Date()}
+          minimumDate={getBusinessNow()}
           maximumDate={maximumDate}
           onChange={handleNativeChange}
         />
@@ -365,7 +366,7 @@ function buildDateOptions(maximumDate, days = 31) {
     : null;
 
   return Array.from({ length: days }, (_, index) => {
-    const date = new Date();
+    const date = getBusinessNow();
     date.setDate(date.getDate() + index);
     return {
       value: toMonthDayKey(date),
@@ -420,14 +421,14 @@ function pad(value) {
   return String(value).padStart(2, "0");
 }
 
-function getDeadlineLimit(referenceDate = new Date()) {
+function getDeadlineLimit(referenceDate = getBusinessNow()) {
   return new Date(referenceDate.getTime() + MAX_ACTIVITY_DEADLINE_MS);
 }
 
 function getDefaultPickupStartDate(deadlineDate) {
   const baseTime = deadlineDate instanceof Date && !Number.isNaN(deadlineDate.getTime())
     ? deadlineDate.getTime()
-    : Date.now();
+    : getBusinessNow().getTime();
   return new Date(baseTime + DEFAULT_PICKUP_AFTER_DEADLINE_MS);
 }
 

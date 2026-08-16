@@ -1,6 +1,6 @@
 # API 清單與候選項
 
-最後更新：2026-08-11
+最後更新：2026-08-15
 
 ## 語言規則
 
@@ -47,6 +47,20 @@ API JSON 使用 `camelCase`。已實作 routes 只對目前開發 prototype 具�
 | 禁止行為           | Mobile production UI 不得顯示身份切換下拉選單，也不得允許任意輸入 Firebase UID               |
 | Audit 備註         | dev-only 身份切換不得進入 production deployment config；正式身份仍以 Firebase UID 對應為準    |
 
+### 開發期全域業務時間
+
+| 項目 | 內容 |
+| ---- | ---- |
+| 用途 | 不修改作業系統時間，快速驗證訂單截止、取消限制、團購結算與取餐逾期流程 |
+| 已實作 route | `GET /api/dev/business-time`、`PUT /api/dev/business-time` |
+| GET response | `{ businessTime: { mode, offsetMinutes, fixedNow, simulated, effectiveNow, realNow, updatedAt, version, maxOffsetMinutes } }` |
+| PUT request | `{ mode: "real" }`、`{ mode: "offset", offsetMinutes }` 或 `{ mode: "fixed", fixedNow }` |
+| 套用範圍 | Backend 全域共用，不依帳號或手機分開；Mobile 只讀取，不可修改 |
+| 安全限制 | 僅非 production 且 `AUTH_DEV_MODE=true` 時存在；PUT 另限制只能由 Backend 主機 loopback 位址呼叫；位移與固定時間最多前後 7 天 |
+| 生命週期 | 設定只存在 Backend 記憶體，重啟即恢復 `real`，不寫入 SQLite／PostgreSQL |
+| 金流邊界 | 業務規則與資料庫業務時間使用模擬值；Firebase、session/token、LINE Pay／ECPay provider request、簽章與 webhook 時間仍使用真實時間 |
+| 執行注意 | 改時間本身不會立即觸發 capture／void；啟用中的排程會在下一個 interval 以新業務時間檢查 |
+
 ### 健康檢查
 
 | 項目          | 內容                |
@@ -72,9 +86,9 @@ API JSON 使用 `camelCase`。已實作 routes 只對目前開發 prototype 具�
 | ------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | Method / path | `GET /api/group-buy-activities`                                                                                                                                                                                                                                  |
 | 用途          | 從目前選定的 SQLite／PostgreSQL activity read runtime 回傳 activities、stores 與 promotion tiers |
-| Response      | `{ activities: [{ id, storeId, createdByUserId, title, status, rawStatus, startAt, deadlineAt, pickupStartAt, pickupEndAt, maximumCups, targetCups, currentCups, authorizedCups, participantCount, currentTierId, currentTierTargetCups, currentTierDiscountAmount, estimatedDiscountPerCup, estimatedAllocatedDiscountAmount, estimatedUndistributedDiscountAmount, nextTierTargetCups, cupsToNextTier, withdrawalLockMinutes, cancellationReason, store: { name, address, phone, latitude, longitude }, tiers }] }` |
+| Response      | `{ activities: [{ id, storeId, createdByUserId, title, status, rawStatus, startAt, deadlineAt, pickupStartAt, pickupEndAt, maximumCups, targetCups, currentCups, authorizedCups, participantCount, currentTierId, currentTierTargetCups, currentTierDiscountAmount, estimatedDiscountPerCup, estimatedAllocatedDiscountAmount, estimatedUndistributedDiscountAmount, nextTierTargetCups, cupsToNextTier, settlement: null | { id, activityId, outcome, authorizedCups, appliedTierId, discountAmount, discountPerCup, allocatedDiscountAmount, undistributedDiscountAmount, discountFunder, calculationVersion, settledAt, reason }, withdrawalLockMinutes, cancellationReason, store: { name, address, phone, latitude, longitude }, tiers }] }` |
 | Mobile 串接   | App 選定角色與回到前景時同步；顧客首頁與活動詳情使用活動回傳的 store，地圖則把活動狀態合併至 `GET /api/stores` 的公開店家列表 |
-| 已實作折扣欄位 | 已回傳目前達成級距、`estimatedDiscountPerCup = floor(tierTotalDiscount / authorizedCups)`、預估分配總額、未分配尾差與下一級距差杯數；Mobile 仍須把截止前數值標示為預估 |
+| 已實作折扣欄位 | 截止前回傳目前達成級距、`estimatedDiscountPerCup = floor(tierTotalDiscount / authorizedCups)`、預估分配總額、尾差與下一級距差杯數；完成結算後另回傳 Backend 保存的不可變 `settlement`。SQLite／PostgreSQL read runtime 契約一致，Mobile 已將兩者分成預估與最終結果呈現 |
 
 ### 商家建立團購活動
 
@@ -148,7 +162,7 @@ API JSON 使用 `camelCase`。已實作 routes 只對目前開發 prototype 具�
 | Request       | 需要 customer bearer token。Body 同建立訂單；重新預授權前再次使用最新菜單驗證與重算 |
 | Response      | `{ revision }`；revision 包含 `id`, `orderId`, `status`, `totalCups`, `originalAmount`, `items`                                                                                                                                          |
 | 已實作規則    | 只允許 owner 修改 `status = submitted` 且 `payment_status = authorized` 的訂單；截止前 30 分鐘內不可建立 revision；檢查活動可加入與容量上限；建立 `order_revisions` 與 revision item snapshots；不直接修改原訂單，也不取消舊預授權 |
-| 後續付款      | 使用 `POST /api/payments/line-pay/request` 並帶入 `{ orderId, orderRevisionId, amount }` 對 revision 金額重新預授權                                                                                                                     |
+| 後續付款      | 使用 `POST /api/payments/line-pay/request` 並帶入 `{ orderId, orderRevisionId, amount, ruleConsent }` 對 revision 金額重新預授權；顧客需在付款畫面對現行規則版本再次明確勾選                                                                 |
 | 尚缺規則      | revision 取消 API、完整 revision 歷史查詢 API、失敗狀態的 mobile 告知與重試入口 |
 
 ### 查詢訂單明細
@@ -162,17 +176,26 @@ API JSON 使用 `camelCase`。已實作 routes 只對目前開發 prototype 具�
 | 已實作規則    | 檢查訂單本人權限；開發補救權限另由後端限制。回傳 order item snapshots、最新 LINE Pay authorization 與待重新預授權 revision，讓 mobile 可在 LINE Pay redirect 後刷新付款狀態 |
 | 尚缺規則      | Merchant visibility checks、多筆 authorizations 的 pagination/history                                                                                     |
 
+### 查詢付款前取餐規則
+
+| 項目          | 內容 |
+| ------------- | ---- |
+| Method / path | `GET /api/payment-rules/pickup-overdue` |
+| Response      | `{ rule: { ruleType, ruleVersion, title, content } }` |
+| 已實作規則    | 回傳 Backend 目前有效、可公開顯示的 `pickup_overdue` 完整規則；不包含帳號、訂單或同意紀錄 |
+| 用途          | Mobile 必須顯示此版本並在付款請求送回明確同意；Backend 仍會自行驗證，不能只依賴畫面阻擋 |
+
 ### 建立 LINE Pay 預授權
 
 | 項目          | 內容                                                                                                                                                                                                                                                                                                                                                      |
 | ------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | Method / path | `POST /api/payments/line-pay/request`                                                                                                                                                                                                                                                                                                                     |
 | 相關畫面      | `PaymentAuthorizationScreen`                                                                                                                                                                                                                                                                                                                               |
-| Request       | 需要 bearer token。Body: `{ orderId, orderRevisionId?, amount, currency?, productName?, packageName?, products? }`                                                                                                                                                                                                                                          |
+| Request       | 需要 bearer token。Body: `{ orderId, orderRevisionId?, amount, ruleConsent: { accepted: true, ruleType: "pickup_overdue", ruleVersion: "v1.0" }, currency?, productName?, packageName?, products? }`                                                                                                                                                         |
 | Response      | `{ provider, orderId, orderRevisionId?, transactionId, paymentUrl, paymentAccessToken, status }`                                                                                                                                                                                                                                                           |
-| 已實作規則    | Owner access check、Channel ID/Secret 只在 backend、LINE Pay request signature、預設 sandbox base URL、確認 SQLite 有對應訂單或 pending revision、確認 request amount 等於訂單或 revision 原價金額、未設定 `LINE_PAY_CAPTURE_SEPARATED=true` 時阻擋真 LINE Pay request、latest LINE Pay authorization 為 `pending` 或 `authorized` 時阻擋重複 request、建立 `payment_authorizations.status = pending`、redirect 以 DB 查找為主且 memory cache 只作輔助 |
+| 已實作規則    | 僅訂單本人可請求；Client 必須明確同意 Backend 現行 `pickup_overdue` 規則版本，Backend 用權威全文與真實伺服器時間追加 `order_rule_consents`，保存成功後才呼叫 LINE Pay；Channel ID/Secret 只在 backend、LINE Pay request signature、預設 sandbox base URL、確認 SQLite 有對應訂單或 pending revision、確認 request amount 等於訂單或 revision 原價金額、未設定 `LINE_PAY_CAPTURE_SEPARATED=true` 時阻擋真 LINE Pay request、latest LINE Pay authorization 為 `pending` 或 `authorized` 時阻擋重複 request、建立 `payment_authorizations.status = pending`、redirect 以 DB 查找為主且 memory cache 只作輔助 |
 | 尚缺規則      | Provider request status query 與持久化 retry job 已完成第一版；仍缺通用 payment request idempotency table、sandbox callback 人工 E2E 與更細的 mobile 錯誤提示                                                                                                                                    |
-| 已確認候選擴充（未實作） | 顧客前往付款時由 Client 傳送目前顯示的 `ruleVersion` 與明確同意旗標；Backend 必須驗證為目前有效版本，使用伺服器端權威規則內容與伺服器時間新增 `order_rule_consents`，成功後才可呼叫 LINE Pay。未勾選回傳 `rule_consent_required`，版本過期回傳 `rule_version_outdated`，同意紀錄寫入失敗時不得建立 provider request。 |
+| 同意錯誤      | 未勾選回傳 `rule_consent_required`；規則類型或版本不是現行值回傳 `rule_version_outdated` 並附現行規則；同意紀錄無法保存回傳 `rule_consent_persistence_failed`，三者都不呼叫 LINE Pay provider。 |
 
 ### LINE Pay 手動重新付款
 

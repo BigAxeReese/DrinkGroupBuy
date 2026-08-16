@@ -20,14 +20,13 @@ async function runDuePickupExpirations(input = {}) {
       let result;
       if (repository?.kind === "postgres") {
         result = await repository.withOperationLock(
-          { activityId: activity.id, now },
+          { activityId: activity.id },
           () => repository.expireWindow({ activityId: activity.id, actorUserId, now })
         );
       } else {
         result = withOperationLeaseSync({
           lockKey: `pickup:activity:${activity.id}:transition`,
-          leaseMs: 120_000,
-          now
+          leaseMs: 120_000
         }, () => expireGroupBuyPickupWindow(activity.id, { now, actorUserId }));
       }
       results.push({ activityId: activity.id, status: result.status, ...result });
@@ -72,6 +71,7 @@ function startPickupExpirationScheduler(input = {}) {
       const summary = await runDuePickupExpirations({
         actorUserId,
         limit,
+        now: input.nowProvider ? input.nowProvider() : undefined,
         pickupCredentialRepository: input.pickupCredentialRepository
       });
       if (summary.dueActivityCount > 0 || summary.failedCount > 0) {

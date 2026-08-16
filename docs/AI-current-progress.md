@@ -1,6 +1,6 @@
 # 目前進度
 
-最後更新：2026-08-12
+最後更新：2026-08-15
 
 換電腦或交接給其他 AI 時，請先閱讀 `docs/AI-handoff-summary.md`。
 
@@ -10,6 +10,8 @@
 
 - Firebase Auth + Google Login 已實作，backend 會驗證 Firebase ID token，再依開發資料庫的 `users.firebase_uid`、`user_roles` 與 `merchant_users` 判斷身份。
 - 本機開發已新增 dev-only 身份切換器；只有 backend `AUTH_DEV_MODE=true` 且 mobile `EXPO_PUBLIC_AUTH_MODE=dev` 時才會顯示，可用下拉選單切換 SQLite 內所有有效顧客、商家與開發補救身份。
+- 2026-08-15 已新增 dev-only 全域業務時間：Backend 提供 `GET/PUT /api/dev/business-time`，支援真實時間、前後位移與固定時間（最多前後 7 天），設定只存記憶體且重啟恢復；訂單截止、取消、授權確認、結算排程與取餐時限共用此時間。Mobile 在 dev auth mode 每 5 秒讀取並於模擬中顯示警示；Firebase、session/token 與金流 provider 簽章仍使用真實時間。控制台 UI 位於 Git 忽略的 `local-dev-console/`，因此後端與 Mobile 串接可同步 Git，但控制台畫面仍須另行提供給組員。
+- 2026-08-15 已收尾付款狀態文案：`authorized` 在顧客端顯示「訂單成立」、店家端顯示「已付款」，`captured` 才代表顧客端正式「已付款」；扣款失敗在店家端以灰色「待付款」顯示。團購進度頁不再顯示 `paymentStatus` 等內部欄位名稱，並新增 Mobile 文案契約測試。
 - 開發 runtime 預設仍使用 SQLite；auth、菜單、活動、首次建單、訂單讀取、authorization request／confirm／cancel、顧客取消、capture／settlement、改單／revision、refund 與 pickup 皆已可受控切換 PostgreSQL（分別由 `PAYMENT_CAPTURE_RUNTIME`／`GROUP_BUY_SETTLEMENT_RUNTIME`／`ORDER_REVISION_RUNTIME`／`PAYMENT_REFUND_RUNTIME`／`PICKUP_CREDENTIAL_RUNTIME` 控制，皆已接上 server route／scheduler，且都要求完整 postgres 訂單寫入 stack）；capture／settlement／refund 在 `LINE_PAY_ENV=production` 時另需明確設定 `PAYMENT_CAPTURE_RUNTIME_ALLOW_PRODUCTION=true` 才允許。
 - LINE Pay 付款主幹已拆成獨立模組，已有 request、confirm、cancel、capture、void、refund、訂單修改後重新預授權與截止結算排程。
 - 付款結算 smoke test 已於 2026-07-19 通過，包含達標請款、未達標原價請款／取消授權、排程結算、修改訂單替換授權、截止後拒絕預授權、三次自動請款上限、取餐前 15 分鐘以前的手動重新付款，以及退款 idempotency。
@@ -167,7 +169,7 @@ ECPay 與 LINE Pay 機制上的關鍵差異（因此無法完全共用程式碼�
 | 活動探索 | 已完成全部營業店家地圖與活動合併切片 | 附近公里數篩選、正式定位／隱私流程、Android 地圖實機 E2E |
 | 菜單、購物車與訂單 | 已完成第一版串接 | revision／失敗提示細化與 Android E2E |
 | 付款授權與重新付款 | 部分完成 | LINE Pay 分離式請款 Sandbox 人工 E2E、錯誤／重試 UX |
-| 截止結算顯示 | 尚未開始前端專用畫面 | 顯示不可變最終折扣／尾差快照 |
+| 截止結算顯示 | 已完成第一版 Backend／Mobile 串接 | Android 小螢幕排版人工 E2E |
 | 商家履約與取餐 | 已完成第一版串接；退款申請／營運審核已有後端 API | 商家／營運退款申請審核 UI 與 Android E2E |
 
 
@@ -245,10 +247,12 @@ ECPay 與 LINE Pay 機制上的關鍵差異（因此無法完全共用程式碼�
 - 顧客下單、訂單查詢與 LINE Pay request 需要 bearer token。
 - 商家建立活動需要 merchant bearer token，並檢查該商家帳號是否綁定店家。
 - 開發 / 補救用取消活動目前需要 admin bearer token。
+- 付款前「取餐與逾期未取規則」同意第一版已於 2026-08-15 完成：SQLite schema/runtime 與 PostgreSQL `005` migration 已加入 `order_rule_consents`；Mobile 從 Backend 讀取現行全文與版本並要求顧客勾選；LINE Pay request 僅允許訂單本人，使用 Backend 全文與真實伺服器時間保存 append-only 證據，保存成功後才呼叫 provider。自動測試已驗證缺少／過期同意、保存失敗與管理員代同意都會阻擋 provider。
+- 2026-08-15 Android 人工 E2E 已驗證付款同意畫面的長文排版、未勾選時按鈕停用、勾選後可送出，並成功抵達 LINE Sandbox 登入頁。測試訂單 `order-ce95f543-8bbe-416b-9e06-3f90c3da9f95` 保存 1 筆 `pickup_overdue` v1.0 規則全文快照與 1 筆 `$40`、`pending` 的 LINE Pay 預授權；訂單付款狀態仍為 `pending`。SQLite `integrity_check` 為 `ok`、`foreign_key_check` 0 筆。此輪刻意未輸入 LINE 測試帳密、未執行 authorization confirm／capture，也尚未驗證 App deep link 回跳。
 
 尚未完成：
 
-- 2026-08-11 已確認付款前必須保存顧客對「取餐與逾期未取規則」的同意證據；候選 `order_rule_consents` 欄位與 LINE Pay request gate 已記錄於 `docs/AI-database-field-spec.md`、`docs/AI-database-candidates.md` 與 `docs/AI-api-candidates.md`。目前尚未修改 SQLite／PostgreSQL schema、Backend、Mobile 或既有資料，現行付款流程也尚未強制此檢查。
+- 付款同意畫面的 Android 長文排版、勾選與 LINE Pay Sandbox request 已人工驗證到登入頁；LINE 測試帳號授權、confirm 與 App deep link 回跳尚未執行。ECPay UI 目前隱藏，尚未套用同一同意 gate。
 - 已授權後的訂單修改 / 重新授權 mobile 第一版已串接；訂單列表現以 Backend 回應為權威、local state 僅作 cache，仍需細化失敗提示。
 - LINE Pay refund 執行本身仍只有 dev/backend 後端 API 與 smoke test；商家退款申請與營運核准／駁回已有後端第一版（`refund-request:smoke` 覆蓋），但尚未有商家／營運 UI、核准失敗告警與正式 sandbox 人工端對端測試。
 - LINE Pay webhook 第一版不列為必要入口；目前付款同步以 confirm/cancel redirect、polling 與後續 provider 狀態查詢為主。
@@ -256,7 +260,7 @@ ECPay 與 LINE Pay 機制上的關鍵差異（因此無法完全共用程式碼�
 - 顧客鎖定前取消訂單已完成第一版：pending 授權失效、authorized 先 void、pending revision 一併取消，captured 訂單拒絕自行取消。
 - 付款結算失敗規則已決定：第一版以自動重試為主，不做人工處理介面；失敗中的訂單不進入製作或取貨。
 - Provider reconciliation、持久化 retry jobs、payment／settlement／cancel／repay／pickup DB lease 與 terminal job 告警旗標已完成第一版；兩程序 claim／lease takeover 與 PostgreSQL settlement row-lock proof 已通過，仍缺正式告警通知管道、LINE Pay Sandbox 人工端對端與 server 接線驗收。
-- Mobile 即時預估折扣／尾差已接上 Backend 活動列表；顧客首頁、活動詳情與地圖的店家摘要也已使用同一活動資料。顧客首頁、商家儀表板、活動詳情與團購進度的同步失敗提示／重試已完成；尚未完成 Android 實機 E2E、附近店家距離與截止後專用最終快照顯示。
+- Mobile 即時預估折扣／尾差已接上 Backend 活動列表；顧客首頁、活動詳情與地圖的店家摘要也已使用同一活動資料。團購進度頁在 Backend 回傳 `settlement` 後會另顯示不可變的最終有效杯數、每杯折扣、顧客實際應付與尾差；SQLite／PostgreSQL 活動 read runtime 契約一致。尚未完成 Android 實機排版 E2E與附近店家距離。
 - PostgreSQL `003_activity_settlement_discount_snapshot_postgres.sql` 已永久套用本機開發資料庫；專用 runner 會辨識未套用、完整套用與部分套用，並驗證五個折扣快照欄位、constraints 與既有資料回填。SQLite runtime 仍以既有欄位重算，沒有雙寫。
 - 完整 Android mobile E2E 與 LINE Pay sandbox 人工驗證仍未完成；目前自動 smoke、Expo Doctor 與 Web bundle 已通過。
 
@@ -370,11 +374,11 @@ database/test/drink-group-buy-test.sqlite
 建議下一步：
 
 0. ~~LINE Pay 核准分離式請款後，執行 Sandbox reconciliation、capture、void 與 lease takeover 人工端對端驗證~~ **已於 2026-08-08 完成**，詳見「2026-08-08 LINE Pay 分離式請款 Sandbox 人工端對端驗證完成」。
-1. 修復 `backend/payments/reliabilityService.js` 的 `logAlertRequiredJobs` 函式巢狀錯誤（本次驗證發現，不影響對帳核心邏輯，但告警日誌完全沒有輸出）。
+1. ~~確認並修復 `backend/payments/reliabilityService.js` 的 `logAlertRequiredJobs` 函式巢狀錯誤。~~ **已完成確認**：函式目前位於正確模組層級且 scheduler 會呼叫，並已補單元測試驗證 terminal job 告警日誌；仍缺正式外部通知管道。
 2. ~~將已驗證的 capture／settlement repositories 明確接入 Backend，並只在 Sandbox 啟用 PostgreSQL settlement route／scheduler；仍禁止雙寫。~~ **已完成**：`PAYMENT_CAPTURE_RUNTIME` 與 `GROUP_BUY_SETTLEMENT_RUNTIME` 須同為 postgres 才會啟用 `POST /api/admin/group-buy-activities/:activityId/settle` 與 deadline settlement scheduler，並要求完整 postgres 訂單寫入 stack；`LINE_PAY_ENV=production` 時另需明確設定 `PAYMENT_CAPTURE_RUNTIME_ALLOW_PRODUCTION=true`（此設計已滿足原本第 3 項的一致性防護要求）。PostgreSQL HTTP／scheduler restart proof 尚未執行。
 3. 改單／revision、refund 與 pickup 已比照相同模式接入 Backend（`ORDER_REVISION_RUNTIME`／`PAYMENT_REFUND_RUNTIME`／`PICKUP_CREDENTIAL_RUNTIME`，皆要求完整 postgres 訂單寫入 stack；refund 另需 `PAYMENT_CAPTURE_RUNTIME` 也是 postgres），已分別用 `order-revision-postgres:smoke`／`payment-refund-postgres:smoke`／`pickup-credential-postgres:smoke` 驗證；下一步視需要排定 Sandbox／production 啟用時程與 HTTP／restart proof。
 4. 將正式 production 自動請款列為獨立人工核准步驟，不跟 Sandbox 啟用綁在一起；`backend/.env` 的 `LINE_PAY_CAPTURE_SEPARATED=true` 目前僅為本機驗證設定，正式環境仍需獨立評估與設定流程。
-5. 前端新增截止後專用最終結算快照，明確區分招募中預估折扣與結算後不可變折扣／尾差。
+5. ~~前端新增截止後專用最終結算快照，明確區分招募中預估折扣與結算後不可變折扣／尾差。~~ **已完成第一版**：活動 API 的 SQLite／PostgreSQL runtime 均回傳 `settlement`；團購進度頁顯示最終有效杯數、最終每杯折扣、顧客訂單實際應付與未分配尾差。尚待 Android 人工排版 E2E。
 6. 細化訂單、付款失敗、重試與重新付款狀態，避免只顯示通用錯誤。
 7. 商家退款申請與營運審核已補後端第一版；下一步是商家／營運申請審核 UI、核准失敗告警通知與正式 sandbox 人工端對端測試。
 8. 增加附近公里數篩選、正式使用者定位／隱私流程與 Android 地圖實機 E2E；目前第一版先顯示全部營業店家。

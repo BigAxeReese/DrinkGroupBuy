@@ -310,7 +310,7 @@ export function MerchantDashboardScreen({ navigation, appState, actions, memberA
                   <Text style={styles.historyAmount}>{formatCurrency(total)}</Text>
                 </View>
                 <View style={styles.summaryRow}>
-                  <StatusBadge owner="payment" value={order.paymentStatus} />
+                  <StatusBadge owner="merchantPayment" value={order.paymentStatus} />
                   <StatusBadge owner="pickup" value={order.pickupStatus} />
                 </View>
                 <Text style={styles.summary}>訂單狀態：{getOrderStatusLabel(order.status)}</Text>

@@ -54,7 +54,7 @@ function createCustomerOrderWriteRepository(input = {}) {
 }
 
 async function createPostgresCustomerOrder(database, input) {
-  const now = new Date().toISOString();
+  const now = input.now || new Date().toISOString();
   const orderId = `order-${randomUUID()}`;
 
   return database.transaction(async (transaction) => {

@@ -39,12 +39,7 @@
 | `pickup_credentials`                                                | 訂單取貨憑證                   | Order 1:1 credential                                       |
 | `status_history`                                                    | 狀態變更歷程與原因             | Polymorphic resource reference                             |
 | `audit_logs`                                                        | 敏感操作紀錄                   | Polymorphic resource reference                             |
-
-## 尚未建立的候選資料表
-
-| 資料表                  | 用途                               | 重要關係與目前狀態                                                                 |
-| ----------------------- | ---------------------------------- | ---------------------------------------------------------------------------------- |
-| `order_rule_consents`   | 保存顧客付款前同意取餐與逾期規則的歷史證據 | Order 1:N consents、User 1:N consents；欄位定義見 `docs/AI-database-field-spec.md`，目前尚未加入 schema、API 或 App |
+| `order_rule_consents`                                             | 顧客付款前規則同意歷史證據     | Order 1:N consents、User 1:N consents；同一訂單／規則類型／版本只保存一筆不可覆寫快照 |
 
 ## 目前資料保存狀態
 
@@ -55,6 +50,7 @@
 - `payment_authorizations.payment_flow` 用來區分一般 `authorization` 與請款失敗後的 `direct_repayment`，避免重新付款被誤當成新的預授權。
 - `payment_refunds` 用來保存已請款成功後的退款紀錄；尚未請款的預授權取消仍使用 `void`，不寫入退款表。
 - `refund_requests` 保存商家對已請款訂單提出的退款申請（`pending`／`approved`／`rejected`），核准時才由後端呼叫 provider 並寫入一筆 `payment_refunds`；駁回不呼叫 provider。2026-08-04 已完成第一版。
+- `order_rule_consents` 已由 SQLite runtime 與 PostgreSQL `005` migration 支援；Backend 只接受訂單本人對現行版本的明確同意，寫入完整規則快照與真實伺服器時間後才呼叫 LINE Pay。
 - PostgreSQL `003` draft 會在 `activity_settlements` 保存 `discount_per_cup`、`allocated_discount_amount`、`undistributed_discount_amount`、`discount_funder`、`calculation_version`；SQLite runtime 尚未加入這些欄位。
 - `database/test/` 是舊 prototype fixture database，不應視為正式 schema 或目前 mobile 的權威資料來源。
 - 購物車與訂單客製化資料已朝 first normal form 調整：甜度、冰塊、加料與尺寸以 child rows 表示，不以 JSON array 當主要資料結構。
@@ -66,7 +62,7 @@
 - Mobile 不顯示角色選擇，使用者不能自行選顧客、店家或管理員。
 - Backend 驗證 Firebase ID token 後，依 `users.firebase_uid`、`user_roles` 與 `merchant_users` 決定身份。
 - 顧客送出訂單並完成付款預授權後，訂單即納入團購杯數統計；付款 provider 目前有 LINE Pay（主要，分離式請款已核准並完成 Sandbox 驗證）與 ECPay 信用卡（2026-08-05 新增的備援/並行方案），兩者並存，商業規則 provider 中立。
-- 顧客進入正式付款前必須勾選同意「取餐與逾期未取規則」；系統需保存訂單、顧客、規則類型、規則版本、完整內容快照與 Backend 同意時間。保存失敗或版本過期時不得呼叫付款 provider。此規則已確認，但 `order_rule_consents` 尚未實作。
+- 顧客進入 LINE Pay 預授權前必須勾選同意「取餐與逾期未取規則」；系統保存訂單、顧客、規則類型、規則版本、完整內容快照與 Backend 同意時間。保存失敗或版本過期時不得呼叫 LINE Pay。此規則已於 2026-08-15 完成第一版；ECPay UI 目前隱藏，尚未套用同一 gate。
 - 店家不需要逐筆確認接單，也不能任意取消單一已預授權訂單。
 - 顧客可在截止前 30 分鐘以前修改訂單或退出團購；進入截止前 30 分鐘後不可修改或退出。
 - 店家可在截止前 30 分鐘以前取消整個團購；進入截止前 30 分鐘後不可取消。

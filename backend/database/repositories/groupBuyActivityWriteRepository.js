@@ -49,7 +49,7 @@ function createGroupBuyActivityWriteRepository(input = {}) {
 }
 
 async function createPostgresGroupBuyActivity(database, input) {
-  const now = new Date().toISOString();
+  const now = input.now || new Date().toISOString();
   const activityId = `activity-${randomUUID()}`;
   const idempotencyKey = input.idempotencyKey || null;
   let tiers = normalizeWriteTiers(input.tiers);

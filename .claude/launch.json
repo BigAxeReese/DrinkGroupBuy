@@ -14,10 +14,16 @@
       "port": 8083
     },
     {
-      "name": "ai-agent-office-client",
+      "name": "progressmap-client",
       "runtimeExecutable": "npm",
-      "runtimeArgs": ["--prefix", "C:\\vscode\\ai-agent-office\\client", "run", "dev", "--", "--port", "5173", "--strictPort"],
+      "runtimeArgs": ["--prefix", "C:\\vscode\\ProgressMap\\client", "run", "dev", "--", "--port", "5173", "--strictPort"],
       "port": 5173
+    },
+    {
+      "name": "progressmap-server",
+      "runtimeExecutable": "npm",
+      "runtimeArgs": ["--prefix", "C:\\vscode\\ProgressMap\\server", "run", "dev"],
+      "port": 4000
     },
     {
       "name": "tree-demo",

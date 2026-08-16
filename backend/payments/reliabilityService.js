@@ -297,6 +297,7 @@ function serializeError(error) {
 module.exports = {
   backfillLinePayReconciliationJobs,
   enqueueLinePayReconciliationJob,
+  logAlertRequiredJobs,
   reconcileLinePayRequestJob,
   runLinePayReconciliationJobs,
   startLinePayReconciliationScheduler

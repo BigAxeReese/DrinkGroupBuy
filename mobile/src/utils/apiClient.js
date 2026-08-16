@@ -90,6 +90,30 @@ export async function loginWithDevUser(userId) {
   return payload;
 }
 
+export async function getDevBusinessTime() {
+  const controller = new AbortController();
+  const timeoutId = setTimeout(() => controller.abort(), 2500);
+  try {
+    const response = await fetch(`${backendBaseUrl}/api/dev/business-time`, {
+      signal: controller.signal,
+    });
+    const payload = await response.json().catch(() => ({}));
+    if (!response.ok) {
+      const error = new Error(payload.message ?? payload.error ?? "Get dev business time failed");
+      error.payload = payload;
+      throw error;
+    }
+    return payload.businessTime;
+  } catch (error) {
+    if (error?.name === "AbortError") {
+      throw new Error("開發業務時間同步逾時");
+    }
+    throw error;
+  } finally {
+    clearTimeout(timeoutId);
+  }
+}
+
 export async function createGroupBuyActivity(input) {
   const requestKey = `createGroupBuyActivity:${stableStringify(input)}`;
   return dedupeRequest(requestKey, async () => {
@@ -337,6 +361,20 @@ export async function cancelOrder(orderId, input) {
     throw error;
   }
   return payload.order;
+}
+
+export async function getPickupOverdueRule() {
+  const response = await fetch(`${backendBaseUrl}/api/payment-rules/pickup-overdue`, {
+    headers: withAuthHeaders()
+  });
+  const payload = await response.json();
+  if (!response.ok) {
+    const error = new Error(payload.error ?? "Pickup overdue rule load failed");
+    error.status = response.status;
+    error.payload = payload;
+    throw error;
+  }
+  return payload.rule;
 }
 
 export async function requestLinePayAuthorization(input) {

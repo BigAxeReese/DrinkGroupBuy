@@ -17,6 +17,7 @@ const {
   getOrderPaymentContext,
   getOrderRevisionPaymentContext,
   recordLinePayCaptureFailureInDatabase,
+  recordOrderRuleConsentInDatabase,
   recordLinePayVoidFailureInDatabase,
   releaseOperationLock,
   voidLinePayAuthorizationInDatabase
@@ -40,6 +41,10 @@ const {
   OperationLeaseError,
   withOperationLease
 } = require("../reliability/operationLease");
+const {
+  buildOrderRuleConsentRecord,
+  validatePickupOverdueRuleConsent
+} = require("./orderRuleConsent");
 
 const manualRepaymentRequestsInFlight = new Set();
 
@@ -213,6 +218,10 @@ async function requestLinePayAuthorization(input) {
   if (validationError) {
     throw new PaymentServiceError(400, { error: validationError });
   }
+  const consentError = validatePickupOverdueRuleConsent(body.ruleConsent);
+  if (consentError) {
+    throw new PaymentServiceError(consentError.statusCode, consentError.payload);
+  }
   const operation = () => requestLinePayAuthorizationUnlocked(input);
   try {
     if (authorizationRequestRepository?.kind === "postgres") {
@@ -239,7 +248,8 @@ async function requestLinePayAuthorizationUnlocked({
   authUser,
   body,
   authorizationRequestRepository,
-  orderRevisionRepository
+  orderRevisionRepository,
+  requestPayment = requestLinePayPayment
 }) {
   const revision = body.orderRevisionId
     ? await (orderRevisionRepository
@@ -282,7 +292,7 @@ async function requestLinePayAuthorizationUnlocked({
       nextStep: "Create the order in the backend before requesting LINE Pay authorization."
     });
   }
-  if (order.customerUserId !== authUser.id && !authUser.roles.includes("admin")) {
+  if (order.customerUserId !== authUser.id) {
     throw new PaymentServiceError(403, { error: "Order access denied" });
   }
   if (order.originalAmount !== Number(body.amount)) {
@@ -330,7 +340,21 @@ async function requestLinePayAuthorizationUnlocked({
     });
   }
 
-  const payload = await requestLinePayPayment(body);
+  const ruleConsentInput = buildOrderRuleConsentRecord({
+    orderId: order.id,
+    customerUserId: authUser.id
+  });
+  const ruleConsent = authorizationRequestRepository
+    ? await authorizationRequestRepository.recordRuleConsent(ruleConsentInput)
+    : recordOrderRuleConsentInDatabase(ruleConsentInput);
+  if (!isValidPersistedRuleConsent(ruleConsent, ruleConsentInput)) {
+    throw new PaymentServiceError(500, {
+      error: "Failed to persist pickup overdue rule consent",
+      status: "rule_consent_persistence_failed"
+    });
+  }
+
+  const payload = await requestPayment(body);
   const info = payload.info || {};
   const transactionId = info.transactionId ? String(info.transactionId) : null;
   const authorizationInput = {
@@ -367,6 +391,15 @@ async function requestLinePayAuthorizationUnlocked({
     paymentAccessToken: info.paymentAccessToken,
     status: "payment_url_created"
   };
+}
+
+function isValidPersistedRuleConsent(record, expected) {
+  if (!record?.id) return false;
+  return record.orderId === expected.orderId
+    && record.customerUserId === expected.customerUserId
+    && record.ruleType === expected.ruleType
+    && record.ruleVersion === expected.ruleVersion
+    && record.ruleContentSnapshot === expected.ruleContentSnapshot;
 }
 
 async function requestManualLinePayRepayment(input = {}) {
@@ -604,6 +637,7 @@ async function confirmLinePayAuthorization(input) {
 async function confirmLinePayAuthorizationUnlocked({
   transactionId,
   orderId,
+  now,
   authorizationConfirmRepository,
   providerConfirmer,
   providerVoider
@@ -683,7 +717,8 @@ async function confirmLinePayAuthorizationUnlocked({
       providerTransactionId: transactionId,
       amount,
       providerCaptureId: transactionId,
-      providerPayload: payload
+      providerPayload: payload,
+      now
     });
     deletePendingLinePayPayment({ orderId: resolvedOrderId, transactionId });
     return {
@@ -720,7 +755,8 @@ async function confirmLinePayAuthorizationUnlocked({
     orderRevisionId: resolvedOrderRevisionId,
     providerTransactionId: transactionId,
     amount,
-    providerPayload: payload
+    providerPayload: payload,
+    now
   };
   const authorizationResult = authorizationConfirmRepository
     ? await authorizationConfirmRepository.confirmAuthorization(confirmationInput)

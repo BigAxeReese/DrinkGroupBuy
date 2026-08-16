@@ -1,14 +1,16 @@
+import { getBusinessNow } from "./businessTime";
+
 export function createTodayDeadlineIso(timeText) {
   const [hoursText, minutesText] = String(timeText).split(":");
   const hours = Number(hoursText);
   const minutes = Number(minutesText);
-  const deadline = new Date();
+  const deadline = getBusinessNow();
   deadline.setHours(Number.isFinite(hours) ? hours : 15);
   deadline.setMinutes(Number.isFinite(minutes) ? minutes : 30);
   deadline.setSeconds(0);
   deadline.setMilliseconds(0);
 
-  if (deadline.getTime() <= Date.now()) {
+  if (deadline.getTime() <= getBusinessNow().getTime()) {
     deadline.setDate(deadline.getDate() + 1);
   }
 
@@ -46,7 +48,7 @@ export function createDeadlineIsoFromInput(inputText) {
 }
 
 export function getDefaultDeadlineInput(minutesFromNow = 90) {
-  return formatDateTimeInput(new Date(Date.now() + minutesFromNow * 60000));
+  return formatDateTimeInput(new Date(getBusinessNow().getTime() + minutesFromNow * 60000));
 }
 
 export function formatDeadlineLabel(deadlineAt) {
@@ -62,7 +64,7 @@ export function formatDateTimeInput(date) {
   return `${date.getFullYear()}/${pad(date.getMonth() + 1)}/${pad(date.getDate())} ${meridiem} ${pad(hours12)}:${pad(date.getMinutes())}:${pad(date.getSeconds())}`;
 }
 
-export function getMinutesUntilDeadline(groupBuyActivity, now = new Date()) {
+export function getMinutesUntilDeadline(groupBuyActivity, now = getBusinessNow()) {
   const deadlineAt = groupBuyActivity?.deadlineAt ?? groupBuyActivity?.endTime;
   const deadline = new Date(deadlineAt);
   if (Number.isNaN(deadline.getTime())) {
@@ -72,7 +74,7 @@ export function getMinutesUntilDeadline(groupBuyActivity, now = new Date()) {
   return Math.max(0, Math.ceil((deadline.getTime() - now.getTime()) / 60000));
 }
 
-export function isDeadlineReached(groupBuyActivity, now = new Date()) {
+export function isDeadlineReached(groupBuyActivity, now = getBusinessNow()) {
   const minutes = getMinutesUntilDeadline(groupBuyActivity, now);
   return minutes != null && minutes <= 0;
 }

@@ -5,6 +5,7 @@ import { PrimaryButton } from "../components/PrimaryButton";
 import { StatusBadge } from "../components/StatusBadge";
 import { useOrderListSync } from "../hooks/useOrderListSync";
 import { formatCurrency, isWithdrawalLocked } from "../utils/calculations";
+import { getBusinessNow } from "../utils/businessTime";
 import { getGroupBuyActivityProgress } from "../utils/groupBuyActivityProgress";
 import { getGroupBuyActivityStore } from "../utils/groupBuyActivityStores";
 import { getManualRepaymentStateInfo } from "../utils/manualRepayment";
@@ -499,7 +500,7 @@ function isHistoryOrder(order, groupBuyActivities) {
   const groupBuyActivity = groupBuyActivities.find((item) => item.id === order.groupBuyActivityId);
   if (order.paymentStatus === "failed") {
     const pickupEndTime = Date.parse(groupBuyActivity?.pickupEndAt);
-    if (Number.isNaN(pickupEndTime) || Date.now() < pickupEndTime) return false;
+    if (Number.isNaN(pickupEndTime) || getBusinessNow().getTime() < pickupEndTime) return false;
   }
   const historyGroupBuyActivityStatuses = ["cancelled", "failed", "completed"];
   const historyOrderStatuses = ["cancelled", "completed"];

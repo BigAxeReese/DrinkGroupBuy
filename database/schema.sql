@@ -192,6 +192,21 @@ CREATE UNIQUE INDEX idx_orders_one_active_per_customer_activity
 ON orders(activity_id, customer_user_id)
 WHERE status != 'cancelled';
 
+CREATE TABLE order_rule_consents (
+  id TEXT PRIMARY KEY,
+  order_id TEXT NOT NULL REFERENCES orders(id) ON DELETE CASCADE,
+  customer_user_id TEXT NOT NULL REFERENCES users(id),
+  rule_type TEXT NOT NULL CHECK (rule_type IN ('pickup_overdue')),
+  rule_version TEXT NOT NULL,
+  rule_content_snapshot TEXT NOT NULL,
+  consented_at TEXT NOT NULL,
+  UNIQUE (order_id, rule_type, rule_version)
+);
+
+CREATE INDEX idx_order_rule_consents_order ON order_rule_consents(order_id);
+CREATE INDEX idx_order_rule_consents_customer ON order_rule_consents(customer_user_id);
+CREATE INDEX idx_order_rule_consents_consented_at ON order_rule_consents(consented_at);
+
 CREATE TABLE order_action_idempotency (
   idempotency_key TEXT PRIMARY KEY,
   order_id TEXT NOT NULL REFERENCES orders(id) ON DELETE CASCADE,

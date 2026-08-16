@@ -21,6 +21,7 @@ function createPaymentAuthorizationRequestRepository(input = {}) {
       "getOrderPaymentContext",
       "getLatestAuthorizationForOrder",
       "getLatestAuthorizationForOrderRevision",
+      "recordRuleConsent",
       "createPendingAuthorization",
     ]) {
       if (typeof gateway[name] !== "function") {
@@ -36,6 +37,7 @@ function createPaymentAuthorizationRequestRepository(input = {}) {
       getLatestAuthorizationForOrderRevision: async (orderRevisionId) => (
         gateway.getLatestAuthorizationForOrderRevision(orderRevisionId)
       ),
+      recordRuleConsent: async (consentInput) => gateway.recordRuleConsent(consentInput),
       createPendingAuthorization: async (authorizationInput) => (
         gateway.createPendingAuthorization(authorizationInput)
       ),
@@ -58,6 +60,7 @@ function createPaymentAuthorizationRequestRepository(input = {}) {
     getLatestAuthorizationForOrderRevision: (orderRevisionId) => (
       getLatestPostgresAuthorizationForOrderRevision(database, orderRevisionId)
     ),
+    recordRuleConsent: (consentInput) => recordPostgresOrderRuleConsent(database, consentInput),
     createPendingAuthorization: (authorizationInput) => (
       createPostgresPendingAuthorization(database, authorizationInput)
     ),
@@ -145,6 +148,45 @@ async function getLatestPostgresAuthorizationForOrderRevision(database, orderRev
     LIMIT 1
   `, [orderRevisionId]);
   return result.rows[0] ? mapPaymentAuthorization(result.rows[0]) : null;
+}
+
+async function recordPostgresOrderRuleConsent(database, input) {
+  const consentId = `rule-consent-${randomUUID()}`;
+  const insertResult = await database.query(`
+    INSERT INTO order_rule_consents (
+      id,
+      order_id,
+      customer_user_id,
+      rule_type,
+      rule_version,
+      rule_content_snapshot,
+      consented_at
+    )
+    SELECT $1, orders.id, orders.customer_user_id, $2, $3, $4, $5
+    FROM orders
+    WHERE orders.id = $6
+      AND orders.customer_user_id = $7
+    ON CONFLICT (order_id, rule_type, rule_version) DO NOTHING
+    RETURNING *
+  `, [
+    consentId,
+    input.ruleType,
+    input.ruleVersion,
+    input.ruleContentSnapshot,
+    input.consentedAt,
+    input.orderId,
+    input.customerUserId,
+  ]);
+  if (insertResult.rows[0]) return mapOrderRuleConsent(insertResult.rows[0]);
+
+  const existingResult = await database.query(`
+    SELECT *
+    FROM order_rule_consents
+    WHERE order_id = $1
+      AND rule_type = $2
+      AND rule_version = $3
+  `, [input.orderId, input.ruleType, input.ruleVersion]);
+  return existingResult.rows[0] ? mapOrderRuleConsent(existingResult.rows[0]) : null;
 }
 
 async function createPostgresPendingAuthorization(database, input) {
@@ -323,6 +365,18 @@ function mapPaymentAuthorization(row) {
   };
 }
 
+function mapOrderRuleConsent(row) {
+  return {
+    id: row.id,
+    orderId: row.order_id,
+    customerUserId: row.customer_user_id,
+    ruleType: row.rule_type,
+    ruleVersion: row.rule_version,
+    ruleContentSnapshot: row.rule_content_snapshot,
+    consentedAt: toIsoString(row.consented_at),
+  };
+}
+
 function toIsoString(value) {
   return value instanceof Date ? value.toISOString() : value;
 }
@@ -332,6 +386,7 @@ module.exports = {
   createPostgresPendingAuthorization,
   getLatestPostgresAuthorizationForOrder,
   getPostgresOrderPaymentContext,
+  recordPostgresOrderRuleConsent,
   resolvePaymentAuthorizationRequestRuntime,
   withPostgresAuthorizationRequestLock,
 };

@@ -23,6 +23,7 @@ async function verifySqliteDelegation() {
       getOrderPaymentContext: (id) => ({ id }),
       getLatestAuthorizationForOrder: (id) => ({ orderId: id }),
       getLatestAuthorizationForOrderRevision: (id) => ({ orderRevisionId: id }),
+      recordRuleConsent: (input) => ({ id: "consent-sqlite", ...input }),
       createPendingAuthorization: () => expected,
     },
   });
@@ -32,6 +33,7 @@ async function verifySqliteDelegation() {
     await repository.getLatestAuthorizationForOrderRevision("revision-001"),
     { orderRevisionId: "revision-001" }
   );
+  assert.equal((await repository.recordRuleConsent(createConsentInput())).id, "consent-sqlite");
   assert.equal(await repository.createPendingAuthorization({}), expected);
 }
 
@@ -45,6 +47,9 @@ async function verifyPostgresTransaction() {
   const context = await repository.getOrderPaymentContext("order-001");
   assert.equal(context.originalAmount, 75);
   assert.equal((await repository.getLatestAuthorizationForOrder("order-001")), null);
+  const consent = await repository.recordRuleConsent(createConsentInput());
+  assert.equal(consent.orderId, "order-001");
+  assert.equal(consent.customerUserId, "customer-001");
   const result = await repository.createPendingAuthorization({
     orderId: "order-001",
     amount: 75,
@@ -109,6 +114,9 @@ function createFakeDatabase(calls, options = {}) {
         return { rows: [{ lock_key: parameters[0], owner_id: parameters[1] }] };
       }
       if (sql.includes("DELETE FROM operation_locks")) return { rows: [], rowCount: 1 };
+      if (sql.includes("INSERT INTO order_rule_consents")) {
+        return { rows: [consentRow(parameters[0])] };
+      }
       if (sql.includes("FROM orders")) return { rows: [orderRow()] };
       if (sql.includes("FROM payment_authorizations")) return { rows: [] };
       throw new Error(`Unexpected SQL outside transaction: ${sql}`);
@@ -137,6 +145,30 @@ function createFakeDatabase(calls, options = {}) {
     throw new Error(`Unexpected SQL in transaction: ${sql}`);
   }
   return database;
+}
+
+function createConsentInput() {
+  return {
+    orderId: "order-001",
+    customerUserId: "customer-001",
+    ruleType: "pickup_overdue",
+    ruleVersion: "v1.0",
+    ruleContentSnapshot: "rule snapshot",
+    consentedAt: "2026-08-15T00:00:00.000Z",
+  };
+}
+
+function consentRow(id) {
+  const input = createConsentInput();
+  return {
+    id,
+    order_id: input.orderId,
+    customer_user_id: input.customerUserId,
+    rule_type: input.ruleType,
+    rule_version: input.ruleVersion,
+    rule_content_snapshot: input.ruleContentSnapshot,
+    consented_at: new Date(input.consentedAt),
+  };
 }
 
 function orderRow() {

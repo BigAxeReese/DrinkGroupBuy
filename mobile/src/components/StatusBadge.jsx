@@ -1,6 +1,7 @@
 import { StyleSheet, Text, View } from "react-native";
 import {
   groupBuyActivityStatusLabels,
+  merchantPaymentStatusLabels,
   paymentStatusLabels,
   pickupStatusLabels,
   refundRequestStatusLabels
@@ -12,14 +13,18 @@ export function StatusBadge({ owner = "groupBuyActivity", value }) {
   };
   const labelMaps = {
     groupBuyActivity: groupBuyActivityStatusLabels,
+    merchantPayment: merchantPaymentStatusLabels,
     payment: paymentStatusLabels,
     pickup: pickupStatusLabels,
     refundRequest: refundRequestStatusLabels
   };
   const label = labelMaps[owner]?.[value] ?? fallbackLabels[value] ?? value;
+  const styleKey = owner === "merchantPayment" && value === "failed"
+    ? "merchantPaymentFailed"
+    : value;
 
   return (
-    <View style={[styles.badge, styles[value] || styles.default]}>
+    <View style={[styles.badge, styles[styleKey] || styles.default]}>
       <Text style={styles.text}>{label}</Text>
     </View>
   );
@@ -41,6 +46,7 @@ const styles = StyleSheet.create({
   confirmed: { backgroundColor: "#dcfce7" },
   formed: { backgroundColor: "#dcfce7" },
   failed: { backgroundColor: "#fee2e2" },
+  merchantPaymentFailed: { backgroundColor: "#f1f5f9" },
   cancelled: { backgroundColor: "#f1f5f9" },
   full: { backgroundColor: "#fef3c7" },
   pending: { backgroundColor: "#fef3c7" },

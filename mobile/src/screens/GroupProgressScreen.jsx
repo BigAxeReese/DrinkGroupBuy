@@ -6,6 +6,7 @@ import { PrimaryButton } from "../components/PrimaryButton";
 import { ProgressSummary } from "../components/ProgressSummary";
 import { StatusBadge } from "../components/StatusBadge";
 import { getGroupBuyActivityById, formatCurrency } from "../utils/calculations";
+import { getFinalSettlementSnapshot } from "../utils/groupBuyActivityProgress";
 import { formatOrderItemCustomizations } from "../utils/orderItems";
 
 export function GroupProgressScreen({ navigation, route, appState, actions, memberAction, selectedCustomerId }) {
@@ -31,6 +32,7 @@ export function GroupProgressScreen({ navigation, route, appState, actions, memb
   const order = appState.orders.find((item) => item.id === route.params?.orderId && item.customerId === selectedCustomerId)
     ?? appState.orders.find((item) => item.groupBuyActivityId === groupBuyActivity.id && item.customerId === selectedCustomerId);
   const payment = appState.paymentAuthorizations.find((item) => item.orderId === order?.id);
+  const finalSettlement = getFinalSettlementSnapshot(groupBuyActivity, order);
   const authorizedCups = groupBuyActivity.currentCups;
   const tierTargets = (groupBuyActivity.tiers ?? [])
     .map((tier) => Number(tier.cups))
@@ -69,13 +71,47 @@ export function GroupProgressScreen({ navigation, route, appState, actions, memb
         <DiscountSummaryCard groupBuyActivity={groupBuyActivity} />
       </Section>
 
+      {finalSettlement ? (
+        <Section title="最終結算結果">
+          <View style={styles.finalSettlementCard}>
+            <DetailLine label="結算結果" value={finalSettlement.outcomeLabel} />
+            <DetailLine label="最終有效杯數" value={`${finalSettlement.authorizedCups} 杯`} />
+            <AmountLine label="最終每杯折扣" value={finalSettlement.discountPerCup} />
+            {finalSettlement.hasOrder ? (
+              <AmountLine label="我的訂單原價" value={finalSettlement.originalAmount} />
+            ) : null}
+            {finalSettlement.hasOrder ? (
+              <AmountLine
+                label="我的實際應付"
+                value={finalSettlement.finalAmount}
+                emptyLabel="待同步訂單"
+              />
+            ) : null}
+            {finalSettlement.hasOrder ? (
+              <AmountLine
+                label="我的訂單折扣"
+                value={finalSettlement.orderDiscountAmount}
+                emptyLabel="待同步訂單"
+              />
+            ) : null}
+            <AmountLine
+              label="未分配尾差（退回商家）"
+              value={finalSettlement.undistributedDiscountAmount}
+            />
+            <Text style={styles.finalSettlementNotice}>
+              此區使用 Backend 保存的截止結算快照，與截止前的預估折扣不同，結算後不再變動。
+            </Text>
+          </View>
+        </Section>
+      ) : null}
+
       <Section title="我的訂單摘要">
         {order ? (
           <View style={styles.summary}>
             <Text style={styles.title}>{order.itemName} x {order.quantity}</Text>
             <Text style={styles.meta}>{formatOrderItemCustomizations(order)}</Text>
             <Text style={styles.amount}>{formatCurrency(order.subtotal)}</Text>
-            <Text style={styles.meta}>paymentStatus：{order.paymentStatus}</Text>
+            <StatusBadge owner="payment" value={order.paymentStatus} />
             <Text style={styles.meta}>流團偏好：{order.fallbackPurchasePreference === "accept_original_price" ? "接受原價購買" : "不原價購買"}</Text>
           </View>
         ) : (
@@ -85,9 +121,9 @@ export function GroupProgressScreen({ navigation, route, appState, actions, memb
 
       {discountStatus === "qualified" && payment ? (
         <Section title="優惠請款試算">
-          <AmountLine label="finalAmount" value={payment.finalAmount} />
-          <AmountLine label="captureAmount" value={payment.captureAmount} />
-          <AmountLine label="releasedAmount" value={payment.releasedAmount} />
+          <AmountLine label="預估結算金額" value={payment.finalAmount} />
+          <AmountLine label="實際請款金額" value={payment.captureAmount} />
+          <AmountLine label="釋放授權金額" value={payment.releasedAmount} />
         </Section>
       ) : null}
 
@@ -133,6 +169,20 @@ const styles = StyleSheet.create({
     fontWeight: "900",
     lineHeight: 19
   },
+  finalSettlementCard: {
+    gap: 8,
+    borderRadius: 14,
+    borderWidth: 1,
+    borderColor: "#86efac",
+    backgroundColor: "#f0fdf4",
+    padding: 12
+  },
+  finalSettlementNotice: {
+    color: "#047857",
+    fontSize: 12,
+    fontWeight: "700",
+    lineHeight: 18
+  },
   amountLine: {
     minHeight: 42,
     flexDirection: "row",
@@ -154,11 +204,20 @@ const styles = StyleSheet.create({
   }
 });
 
-function AmountLine({ label, value }) {
+function AmountLine({ label, value, emptyLabel = "待計算" }) {
   return (
     <View style={styles.amountLine}>
       <Text style={styles.amountLineLabel}>{label}</Text>
-      <Text style={styles.amountLineValue}>{value == null ? "待計算" : formatCurrency(value)}</Text>
+      <Text style={styles.amountLineValue}>{value == null ? emptyLabel : formatCurrency(value)}</Text>
+    </View>
+  );
+}
+
+function DetailLine({ label, value }) {
+  return (
+    <View style={styles.amountLine}>
+      <Text style={styles.amountLineLabel}>{label}</Text>
+      <Text style={styles.amountLineValue}>{value}</Text>
     </View>
   );
 }

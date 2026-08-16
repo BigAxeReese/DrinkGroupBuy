@@ -25,6 +25,25 @@ function openDatabase() {
 
 function ensureRuntimeSchema(database) {
   database.exec(`
+    CREATE TABLE IF NOT EXISTS order_rule_consents (
+      id TEXT PRIMARY KEY,
+      order_id TEXT NOT NULL REFERENCES orders(id) ON DELETE CASCADE,
+      customer_user_id TEXT NOT NULL REFERENCES users(id),
+      rule_type TEXT NOT NULL CHECK (rule_type IN ('pickup_overdue')),
+      rule_version TEXT NOT NULL,
+      rule_content_snapshot TEXT NOT NULL,
+      consented_at TEXT NOT NULL,
+      UNIQUE (order_id, rule_type, rule_version)
+    );
+
+    CREATE INDEX IF NOT EXISTS idx_order_rule_consents_order
+    ON order_rule_consents(order_id);
+    CREATE INDEX IF NOT EXISTS idx_order_rule_consents_customer
+    ON order_rule_consents(customer_user_id);
+    CREATE INDEX IF NOT EXISTS idx_order_rule_consents_consented_at
+    ON order_rule_consents(consented_at);
+  `);
+  database.exec(`
     CREATE TABLE IF NOT EXISTS order_action_idempotency (
       idempotency_key TEXT PRIMARY KEY,
       order_id TEXT NOT NULL REFERENCES orders(id) ON DELETE CASCADE,
@@ -532,7 +551,7 @@ function listPublicStores() {
 
 function createGroupBuyActivity(input) {
   const database = openDatabase();
-  const now = new Date().toISOString();
+  const now = input.now || new Date().toISOString();
   const activityId = `activity-${randomUUID()}`;
   let tiers = normalizeTiers(input.tiers);
   const idempotencyKey = input.idempotencyKey || null;
@@ -665,7 +684,7 @@ function createGroupBuyActivity(input) {
 
 function cancelGroupBuyActivity(activityId, input = {}) {
   const database = openDatabase();
-  const now = new Date().toISOString();
+  const now = input.now || new Date().toISOString();
   const reason = input.reason || "Deleted by admin prototype action.";
   const requestedActorUserId = input.actorUserId || null;
   let transactionStarted = false;
@@ -1707,7 +1726,7 @@ function saveMerchantMenuItem(input) {
 
 function createOrder(input) {
   const database = openDatabase();
-  const now = new Date().toISOString();
+  const now = input.now || new Date().toISOString();
   const orderId = `order-${randomUUID()}`;
   let transactionStarted = false;
 
@@ -1933,7 +1952,7 @@ function createOrder(input) {
 
 function updatePendingOrder(input) {
   const database = openDatabase();
-  const now = new Date().toISOString();
+  const now = input.now || new Date().toISOString();
   let transactionStarted = false;
 
   try {
@@ -2167,7 +2186,7 @@ function updatePendingOrder(input) {
 
 function createOrderRevision(input) {
   const database = openDatabase();
-  const now = new Date().toISOString();
+  const now = input.now || new Date().toISOString();
   const revisionId = `order-revision-${randomUUID()}`;
   let transactionStarted = false;
 
@@ -2498,6 +2517,59 @@ function getOrderPaymentContext(orderId) {
   }
 }
 
+function recordOrderRuleConsentInDatabase(input) {
+  const database = openDatabase();
+  const consentId = `rule-consent-${randomUUID()}`;
+  try {
+    database.prepare(`
+      INSERT OR IGNORE INTO order_rule_consents (
+        id,
+        order_id,
+        customer_user_id,
+        rule_type,
+        rule_version,
+        rule_content_snapshot,
+        consented_at
+      )
+      SELECT ?, orders.id, orders.customer_user_id, ?, ?, ?, ?
+      FROM orders
+      WHERE orders.id = ?
+        AND orders.customer_user_id = ?
+    `).run(
+      consentId,
+      input.ruleType,
+      input.ruleVersion,
+      input.ruleContentSnapshot,
+      input.consentedAt,
+      input.orderId,
+      input.customerUserId
+    );
+
+    const row = database.prepare(`
+      SELECT *
+      FROM order_rule_consents
+      WHERE order_id = ?
+        AND rule_type = ?
+        AND rule_version = ?
+    `).get(input.orderId, input.ruleType, input.ruleVersion);
+    return row ? mapOrderRuleConsent(row) : null;
+  } finally {
+    database.close();
+  }
+}
+
+function mapOrderRuleConsent(row) {
+  return {
+    id: row.id,
+    orderId: row.order_id,
+    customerUserId: row.customer_user_id,
+    ruleType: row.rule_type,
+    ruleVersion: row.rule_version,
+    ruleContentSnapshot: row.rule_content_snapshot,
+    consentedAt: row.consented_at
+  };
+}
+
 function getOrderRevisionPaymentContext(orderRevisionId) {
   const database = openDatabase();
   try {
@@ -2804,7 +2876,7 @@ function getOrderRevisionById(orderRevisionId) {
   }
 }
 
-function getOrderDetail(orderId) {
+function getOrderDetail(orderId, input = {}) {
   const order = getOrderById(orderId);
   if (!order) return null;
   const latestLinePayAuthorization = getLatestLinePayAuthorizationForOrder(orderId);
@@ -2820,7 +2892,7 @@ function getOrderDetail(orderId) {
       .filter((refund) => refund.status === "refunded")
       .reduce((sum, refund) => sum + refund.refundAmount, 0),
     pendingRevision: getPendingOrderRevisionByOrderId(orderId),
-    manualRepayment: getManualLinePayRepaymentContext(orderId)
+    manualRepayment: getManualLinePayRepaymentContext(orderId, { now: input.now })
   };
 }
 
@@ -6035,6 +6107,7 @@ function mapActivitySettlement(row) {
       0
     ),
     discountFunder: "merchant",
+    calculationVersion: "floor_per_cup_v1",
     settledAt: row.settled_at,
     reason: row.reason
   };
@@ -6754,6 +6827,7 @@ module.exports = {
   listStoreMenu,
   openDatabase,
   recordLinePayCaptureFailureInDatabase,
+  recordOrderRuleConsentInDatabase,
   recordLinePayVoidFailureInDatabase,
   saveMerchantMenuItem,
   toPublicUser,

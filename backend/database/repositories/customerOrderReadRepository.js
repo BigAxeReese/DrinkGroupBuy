@@ -28,7 +28,7 @@ function createCustomerOrderReadRepository(input = {}) {
     }
     return {
       kind: "sqlite",
-      getOrderDetail: async (orderId) => readers.getOrderDetail(orderId),
+      getOrderDetail: async (orderId, query) => readers.getOrderDetail(orderId, query),
       getOrderPaymentContext: async (orderId) => readers.getOrderPaymentContext(orderId),
       listCustomerOrders: async (customerUserId, query) => (
         readers.listCustomerOrders(customerUserId, query)

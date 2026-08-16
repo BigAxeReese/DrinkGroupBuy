@@ -39,7 +39,7 @@ function createGroupBuyActivityReadRepository(input = {}) {
 }
 
 async function listPostgresGroupBuyActivities(database) {
-  const [activitiesResult, tiersResult, progressResult] = await Promise.all([
+  const [activitiesResult, tiersResult, progressResult, settlementsResult] = await Promise.all([
     database.query(`
       SELECT
         activity.id,
@@ -78,10 +78,30 @@ async function listPostgresGroupBuyActivities(database) {
         AND status NOT IN ('cancelled')
       GROUP BY activity_id
     `),
+    database.query(`
+      SELECT
+        id,
+        activity_id,
+        outcome,
+        authorized_cups,
+        applied_tier_id,
+        discount_amount,
+        discount_per_cup,
+        allocated_discount_amount,
+        undistributed_discount_amount,
+        discount_funder,
+        calculation_version,
+        settled_at,
+        reason
+      FROM activity_settlements
+    `),
   ]);
 
   const progressByActivityId = new Map(
     progressResult.rows.map((row) => [row.activity_id, row])
+  );
+  const settlementByActivityId = new Map(
+    settlementsResult.rows.map((row) => [row.activity_id, mapActivitySettlement(row)])
   );
 
   return activitiesResult.rows.map((row) => {
@@ -120,6 +140,7 @@ async function listPostgresGroupBuyActivities(database) {
       authorizedCups,
       participantCount,
       ...discountSummary,
+      settlement: settlementByActivityId.get(row.id) ?? null,
       withdrawalLockMinutes: row.withdrawal_lock_minutes,
       cancellationReason: row.cancellation_reason,
       store: {
@@ -132,6 +153,24 @@ async function listPostgresGroupBuyActivities(database) {
       tiers: activityTiers,
     };
   });
+}
+
+function mapActivitySettlement(row) {
+  return {
+    id: row.id,
+    activityId: row.activity_id,
+    outcome: row.outcome,
+    authorizedCups: Number(row.authorized_cups),
+    appliedTierId: row.applied_tier_id,
+    discountAmount: Number(row.discount_amount),
+    discountPerCup: Number(row.discount_per_cup),
+    allocatedDiscountAmount: Number(row.allocated_discount_amount),
+    undistributedDiscountAmount: Number(row.undistributed_discount_amount),
+    discountFunder: row.discount_funder,
+    calculationVersion: row.calculation_version,
+    settledAt: toIsoString(row.settled_at),
+    reason: row.reason,
+  };
 }
 
 function toIsoString(value) {

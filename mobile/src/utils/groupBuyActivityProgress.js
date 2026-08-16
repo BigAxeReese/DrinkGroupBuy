@@ -121,6 +121,42 @@ export function getGroupBuyActivityDiscountInfo(groupBuyActivity) {
   };
 }
 
+export function getFinalSettlementSnapshot(groupBuyActivity, order) {
+  const settlement = groupBuyActivity?.settlement;
+  if (!settlement) return null;
+
+  const originalAmount = normalizeNullableNonNegativeInteger(
+    order?.originalAmount ?? order?.subtotal
+  );
+  const finalAmount = normalizeNullableNonNegativeInteger(order?.finalAmount);
+  const orderDiscountAmount = originalAmount == null || finalAmount == null
+    ? null
+    : Math.max(originalAmount - finalAmount, 0);
+
+  return {
+    hasOrder: Boolean(order),
+    outcome: settlement.outcome,
+    outcomeLabel: getSettlementOutcomeLabel(settlement.outcome),
+    authorizedCups: normalizeNonNegativeInteger(settlement.authorizedCups),
+    discountPerCup: normalizeNonNegativeInteger(settlement.discountPerCup),
+    allocatedDiscountAmount: normalizeNonNegativeInteger(settlement.allocatedDiscountAmount),
+    undistributedDiscountAmount: normalizeNonNegativeInteger(
+      settlement.undistributedDiscountAmount
+    ),
+    originalAmount,
+    finalAmount,
+    orderDiscountAmount,
+    settledAt: settlement.settledAt ?? null
+  };
+}
+
+function getSettlementOutcomeLabel(outcome) {
+  if (outcome === "qualified") return "已達優惠門檻";
+  if (outcome === "failed") return "未達優惠門檻";
+  if (outcome === "cancelled") return "團購已取消";
+  return "已完成結算";
+}
+
 function normalizeNonNegativeInteger(value) {
   const normalized = Number(value);
   return Number.isInteger(normalized) && normalized >= 0 ? normalized : 0;
@@ -129,4 +165,10 @@ function normalizeNonNegativeInteger(value) {
 function normalizeNullablePositiveInteger(value) {
   const normalized = Number(value);
   return Number.isInteger(normalized) && normalized > 0 ? normalized : null;
+}
+
+function normalizeNullableNonNegativeInteger(value) {
+  if (value == null || value === "") return null;
+  const normalized = Number(value);
+  return Number.isInteger(normalized) && normalized >= 0 ? normalized : null;
 }

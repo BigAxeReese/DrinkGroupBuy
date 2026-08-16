@@ -22,6 +22,9 @@ import { CartScreen } from "../screens/CartScreen";
 import { LiveMapScreen } from "../screens/LiveMapScreen";
 import { StoreMenuScreen } from "../screens/StoreMenuScreen";
 import { StoreGroupBuyActivitiesScreen } from "../screens/StoreGroupBuyActivitiesScreen";
+import { DevBusinessTimeBanner } from "../components/DevBusinessTimeBanner";
+import { useDevBusinessTime } from "../hooks/useDevBusinessTime";
+import { getBusinessNow } from "../utils/businessTime";
 import { formatDeadlineLabel, getMinutesUntilDeadline, isDeadlineReached } from "../utils/deadlineTime";
 import { getGroupBuyActivityCapacityInfo, wouldExceedGroupBuyActivityCapacity } from "../utils/groupBuyActivityProgress";
 import { normalizeOrderItem } from "../utils/orderItems";
@@ -96,6 +99,25 @@ function getStoredArray(storedState, key, legacyKey, fallback) {
   return fallback;
 }
 
+function normalizeBackendSettlement(settlement) {
+  if (!settlement) return null;
+  return {
+    id: settlement.id,
+    activityId: settlement.activityId,
+    outcome: settlement.outcome,
+    authorizedCups: Number(settlement.authorizedCups ?? 0),
+    appliedTierId: settlement.appliedTierId ?? null,
+    discountAmount: Number(settlement.discountAmount ?? 0),
+    discountPerCup: Number(settlement.discountPerCup ?? 0),
+    allocatedDiscountAmount: Number(settlement.allocatedDiscountAmount ?? 0),
+    undistributedDiscountAmount: Number(settlement.undistributedDiscountAmount ?? 0),
+    discountFunder: settlement.discountFunder ?? "merchant",
+    calculationVersion: settlement.calculationVersion ?? null,
+    settledAt: settlement.settledAt ?? null,
+    reason: settlement.reason ?? null
+  };
+}
+
 function normalizeBackendGroupBuyActivity(activity, existingActivity = {}) {
   const tiers = (activity?.tiers ?? existingActivity.tiers ?? []).map((tier) => ({
     id: tier.id ?? null,
@@ -144,6 +166,7 @@ function normalizeBackendGroupBuyActivity(activity, existingActivity = {}) {
     nextTierTargetCups: activity?.nextTierTargetCups ?? null,
     cupsToNextTier: Number(activity?.cupsToNextTier ?? 0),
     discountSummaryAuthorizedCups: currentCups,
+    settlement: normalizeBackendSettlement(activity?.settlement),
     withdrawalLockMinutes: activity?.withdrawalLockMinutes ?? existingActivity.withdrawalLockMinutes ?? 30,
     cancellationReason: activity?.cancellationReason ?? existingActivity.cancellationReason ?? null,
     minutesUntilDeadline,
@@ -332,6 +355,7 @@ function parseLinePayResultDeepLink(rawUrl) {
 }
 
 export function AppNavigator() {
+  const businessTime = useDevBusinessTime();
   const [stack, setStack] = useState([initialRoute]);
   const [currentRole, setCurrentRole] = useState(null);
   const [selectedCustomerId, setSelectedCustomerId] = useState("customer-yinji");
@@ -375,7 +399,7 @@ export function AppNavigator() {
     if (!storageLoaded) return undefined;
 
     function lockExpiredOrders() {
-      const now = new Date();
+      const now = getBusinessNow();
       const expiredGroupBuyActivityIds = new Set(
         groupBuyActivities
           .filter((groupBuyActivity) => isDeadlineReached(groupBuyActivity, now))
@@ -433,7 +457,7 @@ export function AppNavigator() {
     lockExpiredOrders();
     const intervalId = setInterval(lockExpiredOrders, 30000);
     return () => clearInterval(intervalId);
-  }, [groupBuyActivities, storageLoaded]);
+  }, [businessTime.snapshot.version, groupBuyActivities, storageLoaded]);
 
   const navigation = useMemo(() => ({
     selectRole(role, routeName, params = {}) {
@@ -1100,7 +1124,7 @@ export function AppNavigator() {
         remainingTimeText: "剛建立",
         minutesUntilDeadline: getMinutesUntilDeadline({ deadlineAt: form.deadlineAt }) ?? 120,
         withdrawalLockMinutes: 30,
-        startTime: form.startTime || new Date().toISOString(),
+        startTime: form.startTime || getBusinessNow().toISOString(),
         deadlineAt: form.deadlineAt,
         endTime: form.endTime || formatDeadlineLabel(form.deadlineAt),
         pickupTime: form.pickupTime || "今日 16:30 - 17:00",
@@ -1242,6 +1266,7 @@ export function AppNavigator() {
 
   return (
     <View style={styles.container}>
+      <DevBusinessTimeBanner businessTime={businessTime} />
       <View style={styles.screen}>
         {current.name === "roleSelect" && <RoleSelectScreen {...screenProps} />}
         {current.name === "nearby" && <NearbyGroupBuyActivitiesScreen {...screenProps} />}

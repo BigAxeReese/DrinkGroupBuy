@@ -42,9 +42,10 @@ Invoke-RestMethod http://localhost:3000/health
 | `POST` | `/api/orders` | 顧客建立訂單 |
 | `POST` | `/api/orders/:orderId/revisions` | 建立已授權訂單的修改版本 |
 | `GET` | `/api/orders/:orderId` | 讀取訂單明細 |
+| `GET` | `/api/payment-rules/pickup-overdue` | 讀取付款前取餐與逾期未取規則全文／版本 |
 | `DELETE` | `/api/admin/group-buy-activities/:activityId` | 管理員取消團購 |
 | `POST` | `/api/admin/group-buy-activities/:activityId/settle` | 管理員手動觸發單一團購結算 |
-| `POST` | `/api/payments/line-pay/request` | 建立 LINE Pay sandbox 授權請求 |
+| `POST` | `/api/payments/line-pay/request` | 保存訂單本人的現行規則同意後，建立 LINE Pay sandbox 授權請求 |
 | `POST` | `/api/payments/line-pay/repay` | 請款失敗後，以結算金額建立 LINE Pay 直接付款 |
 | `POST` | `/api/payments/line-pay/refund` | 管理員針對已請款交易建立 LINE Pay 退款 |
 | `GET` | `/api/payments/line-pay/confirm` | LINE Pay redirect confirm |

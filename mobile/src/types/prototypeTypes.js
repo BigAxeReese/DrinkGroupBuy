@@ -15,12 +15,18 @@ export const paymentStatusLabels = {
   submitted: "付款回報已送出（舊流程）",
   confirmed: "付款已確認（舊流程）",
   not_required: "無需付款",
-  authorized: "已付款",
+  authorized: "訂單成立",
   captured: "已付款",
   authorization_voided: "授權已取消",
   released: "已釋放授權",
   failed: "扣款失敗",
   refunded: "已退款"
+};
+
+export const merchantPaymentStatusLabels = {
+  ...paymentStatusLabels,
+  authorized: "已付款",
+  failed: "待付款"
 };
 
 export const discountStatusLabels = {

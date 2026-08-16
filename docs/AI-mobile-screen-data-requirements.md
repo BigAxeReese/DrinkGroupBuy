@@ -1,6 +1,6 @@
 # Mobile 畫面資料需求
 
-最後更新：2026-08-04
+最後更新：2026-08-15
 
 ## 文件用途
 
@@ -39,8 +39,8 @@
 | `StoreMenuScreen`           | 瀏覽店家的全部上架飲料菜單                   | 店家摘要、分類、`isAvailable = true` 的品項、說明、價格、客製化選項與選擇上限                                   | 瀏覽店家權威菜單                                                                                            | `GET /api/stores/:storeId/menu`；mobile 已串接後端菜單                                    | Android E2E                                                              |
 | `DrinkSelectionScreen`      | 客製化單杯飲料                                   | 尺寸、甜度、冰塊、可多選加料、店家設定的明確加料上限、數量、小計                                                 | 加入購物車、編輯後儲存                                                                                      | Backend menu API + Mobile cart state；傳送 `customizationOptionIds`                       | 完整裝置 E2E、選項異動後返回購物車的更細 UX                                                           |
 | `CartScreen`                | 檢查購物車並送出訂單                             | 飲料明細、數量、尺寸／甜度／冰塊／加料客製化摘要、金額、是否接受原價購買                                              | 刪除項目、繼續選購、建立訂單、更新 pending 訂單、為已授權訂單建立 revision                                  | Mobile cart state / localStorage；三種 order write API 均使用後端權威菜單驗證與價格重算  | `order_price_changed`／`order_items_invalid` 的逐項修正提示、revision 失敗提示仍需細化                  |
-| `PaymentAuthorizationScreen` | LINE Pay sandbox 預授權 / 重新預授權 / 重新付款 | 原價金額、授權金額、最終金額、請款金額、釋放金額、付款狀態、provider `transactionId`、`paymentUrl`、backend 結果、deep link 返回結果 | 目前畫面只提供 LINE Pay；開啟 sandbox 授權 URL、由 deep link 返回付款畫面、自動／手動刷新 backend 狀態、revision 重新預授權、失敗後重新付款 | Partial backend：Mobile payment state；`POST /api/payments/line-pay/request`；`POST /api/payments/line-pay/repay`；`GET /api/orders/:orderId`；ECPay 處理函式與 backend API 保留但 UI 入口隱藏；provider reconciliation 已完成第一版 | 付款錯誤提示與 LINE Pay sandbox 人工 E2E；refund 是開發 / 補救後端 API，尚未有正式 mobile 操作 UI |
-| `GroupProgressScreen` | 顯示團購與顧客訂單進度 | 團購徽章、目前／下一門檻杯數、預估每杯折扣、預估分配、尾差、參與者、剩餘時間、訂單摘要、活動同步狀態 | 前往付款或取餐資訊、活動同步失敗後重試 | Backend 活動列表／訂單 API + Mobile cache；共用折扣摘要與同步提示已接線 | 截止後專用最終結算快照顯示與 Android E2E |
+| `PaymentAuthorizationScreen` | LINE Pay sandbox 預授權 / 重新預授權 / 重新付款 | 原價金額、授權金額、最終金額、請款金額、釋放金額、付款狀態、provider `transactionId`、`paymentUrl`、backend 結果、deep link 返回結果、Backend 現行取餐與逾期未取規則全文／版本 | 目前畫面只提供 LINE Pay；付款前勾選同意規則、開啟 sandbox 授權 URL、由 deep link 返回付款畫面、自動／手動刷新 backend 狀態、revision 重新預授權、失敗後重新付款 | `GET /api/payment-rules/pickup-overdue` + `POST /api/payments/line-pay/request` 同意 gate；`POST /api/payments/line-pay/repay`；`GET /api/orders/:orderId`；ECPay 處理函式與 backend API 保留但 UI 入口隱藏；provider reconciliation 已完成第一版 | 付款同意畫面與 LINE Pay sandbox Android 人工 E2E；refund 是開發 / 補救後端 API，尚未有正式 mobile 操作 UI；ECPay 尚未套用同意 gate |
+| `GroupProgressScreen` | 顯示團購與顧客訂單進度 | 團購徽章、目前／下一門檻杯數、截止前預估每杯折扣／分配／尾差；截止後顯示 Backend 最終有效杯數、最終每杯折扣、訂單實際應付、訂單折扣與不可變尾差；另含參與者、剩餘時間、訂單摘要、活動同步狀態 | 前往付款或取餐資訊、活動同步失敗後重試 | Backend 活動列表 `settlement` + 訂單 `finalAmount` + Mobile cache；共用折扣摘要與同步提示已接線 | Android 小螢幕排版 E2E |
 | `CustomerOrdersScreen`      | 顧客查看進行中 / 歷史訂單與編輯訂單              | Backend 訂單／活動店家、品項、客製化、品項金額、訂單總額、訂單／付款／取貨狀態、取餐憑證有效期限 | 鎖單前編輯或取消、建立 revision、前往重新授權／重新付款、查看取貨碼與歷史訂單 | Backend `GET /api/customers/me/orders` + 單筆訂單／活動／取貨憑證 API；local state 僅作 cache | revision／付款錯誤提示細化、完整 Android E2E |
 | `PickupInfoScreen`          | 顯示取餐資訊                                     | Backend 訂單／活動店家、地址、取餐時間、取餐憑證有效期限、訂單摘要、取餐狀態 | 查看位置與有效六位取餐碼 | Backend 取貨憑證 API + 訂單／活動 cache；逾期排程已完成；已移除店家 mock fallback | 真實導航入口、完整 Android E2E |
 | `MerchantDashboardScreen` | 商家管理團購與履約 | 進行中團購、即時預估每杯折扣、訂單數、付款數、取餐數、取餐憑證有效期限、退款申請狀態、歷史紀錄 | 建立團購、查看門市有效訂單、標記可取餐、查碼與核銷取餐、針對已請款訂單提出退款申請 | Backend 活動列表 + `GET /api/merchant/stores/:storeId/orders` + pickup APIs；local state 作 cache | 退款申請 API／UI、獨立總覽聚合 API、完整 Android E2E；商家不得直接執行 provider refund |
@@ -51,6 +51,8 @@
 
 ## 共用畫面規則
 
+- 只有開發 build 且 `EXPO_PUBLIC_AUTH_MODE=dev` 時，Mobile 才每 5 秒讀取 `GET /api/dev/business-time`；當 `mode != real` 時，所有畫面上方必須顯示 DEV 模擬時間警示。正式模式不得顯示、不得提供修改入口。
+- 團購截止倒數、Mobile 本機截止鎖定與建立活動預設時間應使用 Backend 同步的業務時間；Firebase、登入 token 與付款服務商簽章時間不得改用模擬時間。
 - Mobile 可點擊區域應盡量維持至少約 44x44 points。
 - 返回動作應優先使用 navigation history；只有沒有上一頁時才使用明確 fallback。
 - 顧客資料必須綁定目前登入的顧客。
@@ -67,6 +69,7 @@
 - 已送出的訂單顯示訂單快照，不因後續菜單修改而改變。
 - 客製化選擇限制由 `menu_item_customization_rules` 提供；店家可為每杯飲品設定明確 `maxSelections`，mobile 與 backend 都必須遵守，以 backend 驗證為準。
 - 每杯預估折扣使用 `floor(目前達成級距總折扣 / 目前有效授權杯數)`；截止前必須顯示「預估」，截止後改顯示 Backend 保存的最終結算快照。
+- 最終結算區只有收到 Backend `settlement` 才能顯示；不能只因 Mobile 判斷時間已截止就自行產生最終金額。顧客實際應付以訂單 `finalAmount` 為準，不以畫面重新計算取代 Backend 結果。
 - 商家建立活動或修改菜單若會讓任何可達級距的每杯折扣變成 0，或高於最低可售單杯金額，畫面必須顯示 Backend 回傳的明確修正提示；不得只在前端自行判斷或偷偷把應付金額截為 0。
 - 商家只能提出退款申請，不能在 Mobile 直接執行 LINE Pay refund；全額退款必須二次確認申請金額與訂單。
 
