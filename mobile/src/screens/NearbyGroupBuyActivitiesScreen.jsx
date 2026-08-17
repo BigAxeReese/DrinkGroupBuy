@@ -1,16 +1,39 @@
+import { useMemo, useState } from "react";
 import { Pressable, StyleSheet, Text, View } from "react-native";
 import { ActivitySyncNotice } from "../components/ActivitySyncNotice";
+import { DistanceRadiusFilter } from "../components/DistanceRadiusFilter";
 import { MobileScreen, Section } from "../components/MobileScreen";
 import { DiscountSummaryCard } from "../components/DiscountSummaryCard";
+import { useDevLocationConfig } from "../hooks/useDevLocationConfig";
 import { customerUsers } from "../mock/customerUsers";
+import { calculateDistanceKm, formatDistanceKm } from "../utils/distance";
 import { getGroupBuyActivityStore } from "../utils/groupBuyActivityStores";
 import { getGroupBuyActivityProgress } from "../utils/groupBuyActivityProgress";
 
-export function NearbyGroupBuyActivitiesScreen({ navigation, appState, actions, memberAction, selectedCustomerId }) {
+export function NearbyGroupBuyActivitiesScreen({ navigation, appState, actions, memberAction, selectedCustomerId, selectedAuthUserId }) {
   const { groupBuyActivities, orders } = appState;
   const activitySyncStatus = appState.groupBuyActivitySyncStatus ?? "idle";
   const currentCustomer = customerUsers.find((user) => user.id === selectedCustomerId) ?? customerUsers[0];
-  const recruitingGroupBuyActivities = groupBuyActivities.filter(isVisibleRecruitingGroupBuyActivity);
+  const [radiusKm, setRadiusKm] = useState(null);
+  const { config: locationConfig } = useDevLocationConfig(selectedAuthUserId);
+  const referencePosition = locationConfig.fixedLocation;
+  const recruitingGroupBuyActivitiesWithDistance = useMemo(() => {
+    const withDistance = groupBuyActivities
+      .filter(isVisibleRecruitingGroupBuyActivity)
+      .map((groupBuyActivity) => {
+        const store = getGroupBuyActivityStore(groupBuyActivity);
+        return { groupBuyActivity, distanceKm: calculateDistanceKm(referencePosition, store) };
+      });
+    withDistance.sort((a, b) => {
+      if (a.distanceKm == null && b.distanceKm == null) return 0;
+      if (a.distanceKm == null) return 1;
+      if (b.distanceKm == null) return -1;
+      return a.distanceKm - b.distanceKm;
+    });
+    return radiusKm == null
+      ? withDistance
+      : withDistance.filter((item) => item.distanceKm != null && item.distanceKm <= radiusKm);
+  }, [groupBuyActivities, radiusKm, referencePosition.latitude, referencePosition.longitude]);
   const joinedGroupBuyActivityIds = new Set(
     (orders ?? [])
       .filter((order) => order.customerId === selectedCustomerId && isActiveJoinedOrder(order))
@@ -90,10 +113,12 @@ export function NearbyGroupBuyActivitiesScreen({ navigation, appState, actions, 
       )}
 
       <Section title="附近熱門活動推薦">
+        <DistanceRadiusFilter onChange={setRadiusKm} value={radiusKm} />
         <View style={styles.recommendList}>
-          {recruitingGroupBuyActivities.map((groupBuyActivity) => {
+          {recruitingGroupBuyActivitiesWithDistance.map(({ groupBuyActivity, distanceKm }) => {
             const store = getGroupBuyActivityStore(groupBuyActivity);
             const progress = getGroupBuyActivityProgress(groupBuyActivity);
+            const distanceText = formatDistanceKm(distanceKm);
             return (
               <Pressable
                 accessibilityRole="button"
@@ -103,13 +128,16 @@ export function NearbyGroupBuyActivitiesScreen({ navigation, appState, actions, 
               >
                 <View style={styles.flex}>
                   <Text style={styles.recommendStore}>{store?.name ?? "店家資料未提供"}</Text>
-                  <Text style={styles.recommendTitle}>{groupBuyActivity.title}</Text>
+                  <Text style={styles.recommendTitle}>
+                    {groupBuyActivity.title}
+                    {distanceText ? ` · ${distanceText}` : ""}
+                  </Text>
                 </View>
                 <Text style={styles.recommendCups}>{progress.currentCups} / {progress.nextTarget} 杯</Text>
               </Pressable>
             );
           })}
-          {recruitingGroupBuyActivities.length === 0 ? (
+          {recruitingGroupBuyActivitiesWithDistance.length === 0 ? (
             <View style={styles.emptyRecommendCard}>
               <Text style={styles.emptyRecommendText}>目前沒有招募中的團購。</Text>
             </View>

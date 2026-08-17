@@ -1,8 +1,10 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import Constants from "expo-constants";
 import { Pressable, StyleSheet, Text, View } from "react-native";
+import { DistanceRadiusFilter } from "../components/DistanceRadiusFilter";
 import { useDevLocationConfig } from "../hooks/useDevLocationConfig";
 import { mapCenter, mapDefaults } from "../mock/mapConfig";
+import { calculateDistanceKm } from "../utils/distance";
 import { reportAppliedDevLocation } from "../utils/devLocationControl";
 import { buildStoreMapStores, getStoreMapDestination } from "../utils/groupBuyActivityStores";
 
@@ -21,20 +23,28 @@ export function LiveMapScreen({ navigation, appState, selectedAuthUserId }) {
     latitude: mapCenter.latitude,
     longitude: mapCenter.longitude
   });
+  const [radiusKm, setRadiusKm] = useState(null);
   const { config, enabled: devControlEnabled, syncError, syncStatus } = useDevLocationConfig(selectedAuthUserId);
 
   const mapStores = useMemo(
     () => buildStoreMapStores(appState?.stores, appState?.groupBuyActivities),
     [appState?.stores, appState?.groupBuyActivities]
   );
+  const visibleMapStores = useMemo(() => {
+    if (radiusKm == null) return mapStores;
+    return mapStores.filter((store) => {
+      const distanceKm = calculateDistanceKm(userPosition, store);
+      return distanceKm != null && distanceKm <= radiusKm;
+    });
+  }, [mapStores, radiusKm, userPosition.latitude, userPosition.longitude]);
 
-  const selectedStore = mapStores.find((store) => store.id === selectedStoreId);
+  const selectedStore = visibleMapStores.find((store) => store.id === selectedStoreId);
   const storeSyncStatus = appState?.storeSyncStatus ?? "idle";
   const storeStatusText = storeSyncStatus === "error"
     ? "店家資料載入失敗"
     : storeSyncStatus === "loading" && mapStores.length === 0
       ? "店家資料載入中..."
-      : `${mapStores.length} 間店家`;
+      : `${visibleMapStores.length} 間店家`;
   const apiKey = (process.env.EXPO_PUBLIC_GOOGLE_MAPS_API_KEY
     || Constants.expoConfig?.extra?.googleMapsWebApiKey
     || Constants.manifest2?.extra?.expoClient?.extra?.googleMapsWebApiKey
@@ -182,7 +192,7 @@ export function LiveMapScreen({ navigation, appState, selectedAuthUserId }) {
     });
     nextMarkers.push(userMarker);
 
-    mapStores.forEach((store) => {
+    visibleMapStores.forEach((store) => {
       const marker = createStoreOverlayMarker({
         googleMaps,
         map,
@@ -206,7 +216,7 @@ export function LiveMapScreen({ navigation, appState, selectedAuthUserId }) {
         markersByStoreIdRef.current.clear();
       }
     };
-  }, [locationName, mapReady, mapStores, userMapCenter]);
+  }, [locationName, mapReady, visibleMapStores, userMapCenter]);
 
   useEffect(() => {
     const mapElement = mapElementRef.current;
@@ -271,6 +281,9 @@ export function LiveMapScreen({ navigation, appState, selectedAuthUserId }) {
         <View style={styles.legendRow}>
           <LegendDot color="#2563eb" label="沒有可加入活動" />
           <LegendDot color="#facc15" label="有可加入活動" />
+        </View>
+        <View style={styles.filterRow} pointerEvents="auto">
+          <DistanceRadiusFilter onChange={setRadiusKm} value={radiusKm} />
         </View>
       </View>
 
@@ -522,6 +535,9 @@ const styles = StyleSheet.create({
     flexDirection: "row",
     gap: 12,
     marginTop: 5
+  },
+  filterRow: {
+    marginTop: 6
   },
   legendItem: {
     flexDirection: "row",
