@@ -6,6 +6,8 @@ DrinkGroupBuy 是仍在開發中的 Android-first 手搖飲團購系統：`mobil
 
 延續現有 `mobile/`、`backend/`、`database/`、`docs/` 架構。除非使用者明確要求，不得恢復已刪除的 root `frontend/`、`server.js`、`src/` 或 `data/`。
 
+跟使用者溝通一律用繁體中文，不要用簡體中文。
+
 ## Source of Truth 與漸進式 Context
 
 實際 implementation、Git diff 與本次驗證證據優先；文件若與程式衝突，先標示不一致或「尚未確認」，不要猜測。不要預設讀完所有 `docs/`，只載入當前任務需要的 Context。
