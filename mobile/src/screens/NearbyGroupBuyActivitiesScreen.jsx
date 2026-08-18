@@ -1,5 +1,5 @@
-import { useMemo, useState } from "react";
-import { Pressable, StyleSheet, Text, View } from "react-native";
+import { useEffect, useMemo, useState } from "react";
+import { Platform, Pressable, StyleSheet, Text, View } from "react-native";
 import { ActivitySyncNotice } from "../components/ActivitySyncNotice";
 import { DistanceRadiusFilter } from "../components/DistanceRadiusFilter";
 import { MobileScreen, Section } from "../components/MobileScreen";
@@ -16,7 +16,48 @@ export function NearbyGroupBuyActivitiesScreen({ navigation, appState, actions, 
   const currentCustomer = customerUsers.find((user) => user.id === selectedCustomerId) ?? customerUsers[0];
   const [radiusKm, setRadiusKm] = useState(null);
   const { config: locationConfig } = useDevLocationConfig(selectedAuthUserId);
-  const referencePosition = locationConfig.fixedLocation;
+  const [userPosition, setUserPosition] = useState(locationConfig.fixedLocation);
+
+  useEffect(() => {
+    const fallbackPosition = locationConfig.fixedLocation;
+    setUserPosition(fallbackPosition);
+    if (locationConfig.locationMode !== "live") return undefined;
+
+    if (Platform.OS === "web") {
+      if (!navigator.geolocation) return undefined;
+      const watchId = navigator.geolocation.watchPosition(
+        (position) => setUserPosition({ latitude: position.coords.latitude, longitude: position.coords.longitude }),
+        () => setUserPosition(fallbackPosition),
+        { enableHighAccuracy: false }
+      );
+      return () => navigator.geolocation.clearWatch(watchId);
+    }
+
+    let active = true;
+    let locationSubscription = null;
+    (async () => {
+      const Location = await import("expo-location");
+      const permission = await Location.requestForegroundPermissionsAsync();
+      if (!active || permission.status !== "granted") return;
+      const currentPosition = await Location.getCurrentPositionAsync({ accuracy: Location.Accuracy.Balanced });
+      if (!active) return;
+      setUserPosition({ latitude: currentPosition.coords.latitude, longitude: currentPosition.coords.longitude });
+      locationSubscription = await Location.watchPositionAsync(
+        { accuracy: Location.Accuracy.Balanced, distanceInterval: 5, timeInterval: 3000 },
+        (nextPosition) => {
+          if (!active) return;
+          setUserPosition({ latitude: nextPosition.coords.latitude, longitude: nextPosition.coords.longitude });
+        }
+      );
+      if (!active) locationSubscription.remove();
+    })().catch(() => setUserPosition(fallbackPosition));
+    return () => {
+      active = false;
+      locationSubscription?.remove();
+    };
+  }, [locationConfig.locationMode, locationConfig.fixedLocation.latitude, locationConfig.fixedLocation.longitude]);
+
+  const referencePosition = userPosition;
   const recruitingGroupBuyActivitiesWithDistance = useMemo(() => {
     const withDistance = groupBuyActivities
       .filter(isVisibleRecruitingGroupBuyActivity)

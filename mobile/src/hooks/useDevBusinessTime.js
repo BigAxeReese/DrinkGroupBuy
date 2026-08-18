@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { AppState } from "react-native";
 import { getAuthMode, getDevBusinessTime } from "../utils/apiClient";
 import {
@@ -14,9 +14,11 @@ export function useDevBusinessTime() {
   const [snapshot, setSnapshot] = useState(getBusinessTimeSnapshot());
   const [syncStatus, setSyncStatus] = useState(enabled ? "loading" : "disabled");
   const [syncError, setSyncError] = useState("");
+  const requestInFlightRef = useRef(false);
 
   const refresh = useCallback(async () => {
-    if (!enabled) return null;
+    if (!enabled || requestInFlightRef.current) return null;
+    requestInFlightRef.current = true;
     try {
       const nextSnapshot = applyBusinessTimeSnapshot(await getDevBusinessTime());
       setSnapshot(nextSnapshot);
@@ -27,6 +29,8 @@ export function useDevBusinessTime() {
       setSyncStatus("error");
       setSyncError(error?.message || "無法讀取開發業務時間");
       return null;
+    } finally {
+      requestInFlightRef.current = false;
     }
   }, [enabled]);
 

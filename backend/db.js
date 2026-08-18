@@ -3064,6 +3064,9 @@ function evaluateMerchantOrderCancellation(database, input) {
   if (order.payment_status === "authorized") {
     return { error: "authorization_void_required", paymentStatus: order.payment_status };
   }
+  // Defensive: payment_status is CHECK-constrained to {pending, authorized, captured,
+  // authorization_voided, failed, refunded}, so this currently can't trigger against real data —
+  // kept as a safety net against future schema changes rather than trusting the guards above alone.
   if (!["pending", "authorization_voided", "failed"].includes(order.payment_status)) {
     return { error: "order_not_cancellable", paymentStatus: order.payment_status };
   }
@@ -3088,13 +3091,13 @@ function cancelMerchantOrderInDatabase(input) {
         return { error: "idempotency_key_conflict" };
       }
       const storedResult = JSON.parse(existingAction.result_json);
-      return { ...storedResult, order: getOrderDetail(storedResult.orderId), idempotent: true };
+      return { ...storedResult, idempotent: true };
     }
 
     const eligibility = evaluateMerchantOrderCancellation(database, input);
     if (eligibility.error) return eligibility;
     const order = eligibility.order;
-    if (eligibility.alreadyCancelled) return { order: getOrderDetail(order.id), idempotent: true };
+    if (eligibility.alreadyCancelled) return { orderId: order.id, status: "cancelled", idempotent: true };
 
     database.exec("BEGIN IMMEDIATE;");
     transactionStarted = true;
@@ -3110,13 +3113,16 @@ function cancelMerchantOrderInDatabase(input) {
       database.exec("ROLLBACK;");
       transactionStarted = false;
       if (currentOrder?.status === "cancelled") {
-        return { order: getOrderDetail(order.id), idempotent: true };
+        return { orderId: order.id, status: "cancelled", idempotent: true };
       }
       if (["captured", "refunded"].includes(currentOrder?.payment_status)) {
         return { error: "captured_order_cannot_be_cancelled" };
       }
       return { error: "order_state_changed", status: currentOrder?.status, paymentStatus: currentOrder?.payment_status };
     }
+    const pendingAuthorizations = database.prepare(`
+      SELECT id, status FROM payment_authorizations WHERE order_id = ? AND status = 'pending'
+    `).all(order.id);
     database.prepare(`
       UPDATE payment_authorizations SET status = 'failed', failure_reason = 'merchant_cancelled_group_buy_activity', updated_at = ?
       WHERE order_id = ? AND status = 'pending'
@@ -3126,6 +3132,20 @@ function cancelMerchantOrderInDatabase(input) {
         cancelled_at = ?, updated_at = ?
       WHERE order_id = ? AND status = 'pending_authorization'
     `).run(now, now, order.id);
+    for (const authorization of pendingAuthorizations) {
+      database.prepare(`
+        INSERT INTO status_history (id, resource_type, resource_id, from_status, to_status, reason, actor_user_id, created_at)
+        VALUES (?, 'payment_authorization', ?, ?, 'failed', 'merchant_cancelled_group_buy_activity', ?, ?)
+      `).run(`status-history-${randomUUID()}`, authorization.id, authorization.status, input.actorUserId, now);
+      database.prepare(`
+        UPDATE payment_reliability_jobs
+        SET status = 'cancelled', locked_by = NULL, locked_until = NULL, updated_at = ?, completed_at = ?
+        WHERE job_type = 'reconcile_line_pay_request'
+          AND resource_type = 'payment_authorization'
+          AND resource_id = ?
+          AND status IN ('queued', 'running', 'retry_wait')
+      `).run(now, now, authorization.id);
+    }
     database.prepare(`
       INSERT INTO status_history (id, resource_type, resource_id, from_status, to_status, reason, actor_user_id, created_at)
       VALUES (?, 'order', ?, ?, 'cancelled', ?, ?, ?)
@@ -3147,7 +3167,7 @@ function cancelMerchantOrderInDatabase(input) {
   } finally {
     database.close();
   }
-  return { ...result, order: getOrderDetail(input.orderId) };
+  return result;
 }
 
 function listCustomerOrders(customerUserId, input = {}) {

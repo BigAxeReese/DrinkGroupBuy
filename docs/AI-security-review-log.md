@@ -117,6 +117,30 @@
 
 ---
 
+## 2026-08-18 — 商家自助取消團購 code review 修正批次
+
+**呼應**：2026-08-17 那筆（商家自助取消團購新功能）——這次是針對 `/code-review` 抓出的問題做修正後的複查，不是全新功能，範圍聚焦在這批修正本身有沒有新增漏洞
+**範圍**：`backend/database/repositories/merchantGroupBuyActivityCancelRepository.js`（新增 `cancelPostgresActivityStatus`、`withOperationLock`）、`backend/payments/merchantActivityCancelService.js`（活動狀態改走 repository、per-order lock 改由 repository 內部決定、取消迴圈改成 `Promise.allSettled` 平行處理）、`backend/db.js`（`cancelMerchantOrderInDatabase` 補上逐筆 `status_history`／`payment_reliability_jobs` 清理）、`backend/server.js`（Postgres 全面切換一致性檢查加入新 repository）、`mobile/src/utils/fetchWithTimeout.js`（新檔案，取代原本會導致當機的 `AbortController` 逾時寫法）、`mobile/src/screens/MerchantDashboardScreen.jsx`（取消按鈕加同步防連點）、`mobile/src/screens/PaymentAuthorizationScreen.jsx`（取餐規則同意加「必須展開閱讀過」的檢查）
+**觸發原因**：CLAUDE.md 規則自動觸發——這批修正動到付款授權撤銷與訂單取消的鎖定機制，屬於高風險區域
+
+### 發現
+
+沒有找到信心度達到門檻（8/10 以上）的問題。
+
+### 沒發現問題的部分（已交叉驗證）
+
+| 面向 | 檢查結果 |
+|------|----------|
+| `cancelPostgresActivityStatus` 有沒有重新做歸屬檢查、會不會被繞過 | 沒有在函式內重做，但確認唯一呼叫者（service 層）在任何寫入動作前就已經用同一個 `activityId` 做過 `canManageStore` 檢查，中間沒有客戶端可操控、會讓兩處 `activityId` 不一致的路徑 |
+| repository 內部決定 lock 機制（原本是 service 層依 `paymentAuthorizationCancelRepository.kind` 分支）會不會讓兩個 repository 的 runtime 不一致、鎖不到同一把鎖 | `backend/server.js` 的 Postgres 全面切換一致性檢查已把新 repository 納入，任一 repository 切到 postgres 就強制全部都要是 postgres，不可能出現兩邊 runtime 不同步的狀態 |
+| `fetchWithTimeout.js` 用 URL 當 key 做 in-flight 去重，會不會讓不同使用者的回應被互相搭到 | 兩個呼叫點分別是固定 URL（無使用者資料）跟帶 `userId` 查詢參數的 URL，不同使用者天生產生不同 key；且這個快取只存在單一 client 自己的 JS runtime，不是伺服端共享狀態 |
+| 取消迴圈改成平行處理（`Promise.allSettled`）會不會讓原本序列處理下不會發生的跨訂單互相干擾冒出來 | 每筆訂單各自有獨立的 per-order lock 與 idempotency key，彼此沒有共用可變狀態；活動層級的最終狀態寫入本身是原子、冪等的，平行處理前後結果一致 |
+| `cancelMerchantOrderInDatabase` 新增的逐筆 `status_history`／`payment_reliability_jobs` 寫入 SQL | 全部走 `?` 綁定參數，沒有字串拼接 |
+
+**這次沒審查到的部分**：沒有重新審查 2026-08-17 那次已經涵蓋的範圍（角色檢查、`reason` 驗證、撤銷授權的訂單歸屬等），只聚焦在這批新增/修改的程式碼本身。
+
+---
+
 ## 2026-08-15 — dev-only 全域業務時間與付款／取餐時限串接
 
 **範圍**：`backend/time/businessClock.js`、`backend/server.js`、`backend/db.js`、`backend/payments/linePayService.js`、`backend/payments/settlementService.js`、`backend/pickup/credentialService.js`、`backend/pickup/expirationService.js`、受影響 activity/order repositories，以及本機 `local-dev-console/` 修改入口

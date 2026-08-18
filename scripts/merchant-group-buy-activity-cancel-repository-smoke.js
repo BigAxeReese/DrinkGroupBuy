@@ -14,6 +14,8 @@ async function main() {
   await verifyUnrecognizedPaymentStatusRejected();
   await verifyOwnershipMismatchRejected();
   await verifyAlreadyCancelledIsIdempotent();
+  await verifyPostgresActivityStatusCancellation();
+  await verifyPostgresActivityStatusAlreadyCancelledIsIdempotent();
   verifyRuntimeValidation();
   console.log("Merchant group-buy activity cancel repository smoke test passed.");
 }
@@ -25,6 +27,7 @@ async function verifySqliteDelegation() {
       getActivityForCancellation: (activityId) => ({ activityId }),
       listEligibleOrders: (activityId) => [{ activityId }],
       cancelOrder: (value) => value,
+      cancelActivityStatus: (activityId) => ({ activityId }),
     },
   });
   assert.equal(repository.kind, "sqlite");
@@ -36,6 +39,11 @@ async function verifySqliteDelegation() {
     await repository.listEligibleOrders({ activityId: "activity-001" }),
     [{ activityId: "activity-001" }]
   );
+  assert.deepEqual(
+    await repository.cancelActivityStatus({ activityId: "activity-001" }),
+    { activityId: "activity-001" }
+  );
+  assert.equal(typeof repository.withOperationLock, "function");
 }
 
 async function verifyPostgresActivityAndOrderLookups() {
@@ -117,6 +125,52 @@ async function verifyAlreadyCancelledIsIdempotent() {
   assert.equal(result.status, "cancelled");
   assert.equal(result.idempotent, true);
   assert.equal(calls.some((call) => call.sql.includes("UPDATE orders SET status = 'cancelled'")), false);
+}
+
+async function verifyPostgresActivityStatusCancellation() {
+  const calls = [];
+  const repository = createActivityStatusRepository(calls, { status: "recruiting" });
+  const result = await repository.cancelActivityStatus({
+    activityId: "activity-001",
+    reason: "merchant requested",
+    actorUserId: "user-001",
+  });
+  assert.equal(result.status, "cancelled");
+  assert.equal(result.idempotent, false);
+  assert.ok(calls.some((call) => call.sql.includes("UPDATE group_buy_activities")));
+  assert.ok(calls.some((call) => (
+    call.sql.includes("INSERT INTO status_history") && call.sql.includes("'activity'")
+  )));
+  assert.ok(calls.some((call) => (
+    call.sql.includes("INSERT INTO audit_logs") && call.parameters.includes("merchant_cancel_group_buy_activity")
+  )));
+}
+
+async function verifyPostgresActivityStatusAlreadyCancelledIsIdempotent() {
+  const calls = [];
+  const repository = createActivityStatusRepository(calls, { status: "cancelled" });
+  const result = await repository.cancelActivityStatus({ activityId: "activity-001" });
+  assert.equal(result.status, "cancelled");
+  assert.equal(result.idempotent, true);
+  assert.equal(calls.some((call) => call.sql.includes("UPDATE group_buy_activities")), false);
+}
+
+function createActivityStatusRepository(calls, options = {}) {
+  const status = options.status || "recruiting";
+  const database = {
+    async transaction(operation) {
+      return operation({ query });
+    },
+  };
+  async function query(sql, parameters = []) {
+    calls.push({ sql, parameters });
+    if (sql.includes("FROM group_buy_activities") && sql.includes("FOR UPDATE")) {
+      return { rows: [{ id: "activity-001", status }] };
+    }
+    if (sql.includes("UPDATE") || sql.includes("INSERT INTO")) return { rows: [], rowCount: 1 };
+    throw new Error(`Unexpected SQL in transaction: ${sql}`);
+  }
+  return createMerchantGroupBuyActivityCancelRepository({ runtime: "postgres", database });
 }
 
 function createRepository(calls, options = {}) {

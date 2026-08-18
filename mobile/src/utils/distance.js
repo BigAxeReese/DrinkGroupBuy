@@ -17,7 +17,8 @@ export function calculateDistanceKm(pointA, pointB) {
 
 export function formatDistanceKm(km) {
   if (!Number.isFinite(km)) return null;
-  if (km < 1) return `${Math.round(km * 1000)} 公尺`;
+  const meters = Math.round(km * 1000);
+  if (meters < 1000) return `${meters} 公尺`;
   return `${Math.round(km * 10) / 10} 公里`;
 }
 

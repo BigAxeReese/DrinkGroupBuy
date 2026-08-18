@@ -37,6 +37,7 @@ export function PaymentAuthorizationScreen({ navigation, route, appState, action
   const [pickupRuleAccepted, setPickupRuleAccepted] = useState(false);
   const [pickupRuleReloadKey, setPickupRuleReloadKey] = useState(0);
   const [pickupRuleContentExpanded, setPickupRuleContentExpanded] = useState(false);
+  const [pickupRuleContentViewed, setPickupRuleContentViewed] = useState(false);
   const pollIntervalRef = useRef(null);
   const pollTimeoutRef = useRef(null);
   const pollInFlightRef = useRef(false);
@@ -232,7 +233,11 @@ export function PaymentAuthorizationScreen({ navigation, route, appState, action
               <Pressable
                 accessibilityRole="button"
                 accessibilityLabel={pickupRuleContentExpanded ? "收合規則全文" : "展開閱讀規則全文"}
-                onPress={() => setPickupRuleContentExpanded((value) => !value)}
+                onPress={() => setPickupRuleContentExpanded((value) => {
+                  const next = !value;
+                  if (next) setPickupRuleContentViewed(true);
+                  return next;
+                })}
                 style={({ pressed }) => [styles.ruleConsentToggleRow, pressed && styles.pressed]}
               >
                 <Text style={styles.ruleConsentToggleText}>
@@ -244,6 +249,9 @@ export function PaymentAuthorizationScreen({ navigation, route, appState, action
                   <Text style={styles.ruleConsentContent}>{pickupRule.content}</Text>
                   <Text style={styles.ruleVersion}>規則版本：{pickupRule.ruleVersion}</Text>
                 </View>
+              ) : null}
+              {pickupRuleAccepted && !pickupRuleContentViewed ? (
+                <Text style={styles.ruleConsentHint}>請先展開閱讀規則全文，再進行付款。</Text>
               ) : null}
             </View>
           ) : null}
@@ -281,13 +289,13 @@ export function PaymentAuthorizationScreen({ navigation, route, appState, action
                   : "前往 LINE Pay 預授權"}
           disabled={Boolean(
             repaymentState?.disabled
-            || (needsPickupRuleConsent && (pickupRuleStatus !== "ready" || !pickupRuleAccepted))
+            || (needsPickupRuleConsent && (pickupRuleStatus !== "ready" || !pickupRuleAccepted || !pickupRuleContentViewed))
           )}
           onPress={() => {
             if (
               linePayStatus === "loading"
               || repaymentState?.disabled
-              || (needsPickupRuleConsent && (pickupRuleStatus !== "ready" || !pickupRuleAccepted))
+              || (needsPickupRuleConsent && (pickupRuleStatus !== "ready" || !pickupRuleAccepted || !pickupRuleContentViewed))
             ) return;
             const startPayment = isManualRepayment ? startLinePayRepayment : startPaymentAuthorization;
             startPayment({
@@ -858,6 +866,11 @@ const styles = StyleSheet.create({
   ruleVersion: {
     color: "#64748b",
     fontSize: 10,
+    fontWeight: "700"
+  },
+  ruleConsentHint: {
+    color: "#b45309",
+    fontSize: 11,
     fontWeight: "700"
   },
   pressed: {

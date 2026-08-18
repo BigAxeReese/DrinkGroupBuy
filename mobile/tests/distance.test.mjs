@@ -38,6 +38,11 @@ test("formatDistanceKm shows meters under 1km and rounded km otherwise", () => {
   assert.equal(formatDistanceKm(4.94), "4.9 公里");
 });
 
+test("formatDistanceKm rounds the 1km boundary up to km, not 1000 公尺", () => {
+  assert.equal(formatDistanceKm(0.9996), "1 公里");
+  assert.equal(formatDistanceKm(0.9994), "999 公尺");
+});
+
 test("formatDistanceKm returns null for non-finite input", () => {
   assert.equal(formatDistanceKm(null), null);
   assert.equal(formatDistanceKm(NaN), null);

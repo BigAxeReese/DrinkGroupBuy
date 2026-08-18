@@ -38,7 +38,7 @@ export function LiveMapScreen({ navigation, appState, selectedAuthUserId }) {
     });
   }, [mapStores, radiusKm, userPosition.latitude, userPosition.longitude]);
 
-  const selectedStore = visibleMapStores.find((store) => store.id === selectedStoreId);
+  const selectedStore = mapStores.find((store) => store.id === selectedStoreId);
   const storeSyncStatus = appState?.storeSyncStatus ?? "idle";
   const storeStatusText = storeSyncStatus === "error"
     ? "店家資料載入失敗"

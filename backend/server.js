@@ -222,6 +222,7 @@ const merchantGroupBuyActivityCancelRepository = createMerchantGroupBuyActivityC
     getActivityForCancellation: getMerchantGroupBuyActivityForCancellation,
     listEligibleOrders: listEligibleOrdersForMerchantCancellation,
     cancelOrder: cancelMerchantOrderInDatabase,
+    cancelActivityStatus: cancelGroupBuyActivity,
   },
 });
 const paymentCaptureRepository = createPaymentCaptureRepository({
@@ -285,6 +286,7 @@ if (
   || paymentAuthorizationConfirmRepository.kind === "postgres"
   || paymentAuthorizationCancelRepository.kind === "postgres"
   || customerOrderCancelRepository.kind === "postgres"
+  || merchantGroupBuyActivityCancelRepository.kind === "postgres"
 ) {
   const requiredPostgresRepositories = [
     authProfileReadRepository,
@@ -298,6 +300,7 @@ if (
     paymentAuthorizationConfirmRepository,
     paymentAuthorizationCancelRepository,
     customerOrderCancelRepository,
+    merchantGroupBuyActivityCancelRepository,
   ];
   if (requiredPostgresRepositories.some((repository) => repository.kind !== "postgres")) {
     throw new Error(
@@ -306,7 +309,8 @@ if (
       + "GROUP_BUY_ACTIVITY_WRITE_RUNTIME, MERCHANT_MENU_RUNTIME, "
       + "CUSTOMER_ORDER_WRITE_RUNTIME, CUSTOMER_ORDER_READ_RUNTIME, "
       + "PAYMENT_AUTHORIZATION_REQUEST_RUNTIME, PAYMENT_AUTHORIZATION_CONFIRM_RUNTIME, "
-      + "PAYMENT_AUTHORIZATION_CANCEL_RUNTIME, and CUSTOMER_ORDER_CANCEL_RUNTIME to be postgres"
+      + "PAYMENT_AUTHORIZATION_CANCEL_RUNTIME, CUSTOMER_ORDER_CANCEL_RUNTIME, "
+      + "and MERCHANT_ACTIVITY_CANCEL_RUNTIME to be postgres"
     );
   }
 }

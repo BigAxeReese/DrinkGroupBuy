@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { AppState } from "react-native";
 import {
   fallbackDevLocationConfig,
@@ -13,9 +13,11 @@ export function useDevLocationConfig(authUserId) {
   const [config, setConfig] = useState(fallbackDevLocationConfig);
   const [syncStatus, setSyncStatus] = useState(enabled ? "loading" : "disabled");
   const [syncError, setSyncError] = useState("");
+  const requestInFlightRef = useRef(false);
 
   const refreshConfig = useCallback(async () => {
-    if (!enabled) return null;
+    if (!enabled || requestInFlightRef.current) return null;
+    requestInFlightRef.current = true;
     try {
       const nextConfig = await fetchDevLocationConfig(authUserId);
       if (nextConfig) setConfig(nextConfig);
@@ -26,6 +28,8 @@ export function useDevLocationConfig(authUserId) {
       setSyncStatus("error");
       setSyncError(error?.message || "無法讀取開發定位設定");
       return null;
+    } finally {
+      requestInFlightRef.current = false;
     }
   }, [authUserId, enabled]);
 

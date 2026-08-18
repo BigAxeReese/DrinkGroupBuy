@@ -2,6 +2,8 @@
 
 const { randomUUID } = require("node:crypto");
 const { createRuntimeDatabaseAdapter } = require("..");
+const { withOperationLease } = require("../../reliability/operationLease");
+const { withPostgresPaymentOperationLock } = require("./paymentAuthorizationCancelRepository");
 
 function resolveMerchantActivityCancelRuntime(input = {}) {
   const env = input.env || process.env;
@@ -22,11 +24,19 @@ function createMerchantGroupBuyActivityCancelRepository(input = {}) {
         throw new Error(`${name} is required when MERCHANT_ACTIVITY_CANCEL_RUNTIME=sqlite`);
       }
     }
+    if (typeof gateway.cancelActivityStatus !== "function") {
+      throw new Error("cancelActivityStatus is required when MERCHANT_ACTIVITY_CANCEL_RUNTIME=sqlite");
+    }
     return {
       kind: "sqlite",
       getActivityForCancellation: async (value) => gateway.getActivityForCancellation(value.activityId),
       listEligibleOrders: async (value) => gateway.listEligibleOrders(value.activityId),
       cancelOrder: async (value) => gateway.cancelOrder(value),
+      cancelActivityStatus: async (value) => gateway.cancelActivityStatus(value.activityId, value),
+      withOperationLock: (value, operation) => withOperationLease(
+        { lockKey: `order:${value.orderId}:payment-lifecycle`, leaseMs: value.leaseMs, now: value.now },
+        operation
+      ),
       close: async () => {},
     };
   }
@@ -38,6 +48,8 @@ function createMerchantGroupBuyActivityCancelRepository(input = {}) {
     getActivityForCancellation: (value) => getPostgresActivityForCancellation(database, value),
     listEligibleOrders: (value) => listPostgresEligibleOrders(database, value),
     cancelOrder: (value) => cancelPostgresMerchantOrder(database, value),
+    cancelActivityStatus: (value) => cancelPostgresActivityStatus(database, value),
+    withOperationLock: (value, operation) => withPostgresPaymentOperationLock(database, value, operation),
     close: async () => {
       if (ownsDatabase) await database.close();
     },
@@ -116,6 +128,9 @@ async function cancelPostgresMerchantOrder(database, input = {}) {
     if (order.payment_status === "authorized") {
       return { error: "authorization_void_required", paymentStatus: order.payment_status };
     }
+    // Defensive: payment_status is CHECK-constrained to {pending, authorized, captured,
+    // authorization_voided, failed, refunded}, so this currently can't trigger against real data —
+    // kept as a safety net against future schema changes rather than trusting the guards above alone.
     if (!["pending", "authorization_voided", "failed"].includes(order.payment_status)) {
       return { error: "order_not_cancellable", paymentStatus: order.payment_status };
     }
@@ -191,7 +206,47 @@ async function cancelPostgresMerchantOrder(database, input = {}) {
   });
 }
 
+async function cancelPostgresActivityStatus(database, input = {}) {
+  const now = input.now || new Date().toISOString();
+  const reason = input.reason || "Cancelled by merchant.";
+  const actionType = input.actionType || "merchant_cancel_group_buy_activity";
+
+  return database.transaction(async (transaction) => {
+    const activityResult = await transaction.query(`
+      SELECT id, status FROM group_buy_activities WHERE id = $1 FOR UPDATE
+    `, [input.activityId]);
+    const activity = activityResult.rows[0];
+    if (!activity) return null;
+    if (activity.status === "cancelled") {
+      return { id: activity.id, status: "cancelled", cancellationReason: null, idempotent: true };
+    }
+
+    await transaction.query(`
+      UPDATE group_buy_activities
+      SET status = 'cancelled', cancellation_reason = $1, updated_at = $2
+      WHERE id = $3
+    `, [reason, now, input.activityId]);
+
+    await transaction.query(`
+      INSERT INTO status_history (
+        id, resource_type, resource_id, from_status, to_status, reason, actor_user_id, created_at
+      ) VALUES ($1, 'activity', $2, $3, 'cancelled', $4, $5, $6)
+    `, [`status-history-${randomUUID()}`, input.activityId, activity.status,
+      reason, input.actorUserId || null, now]);
+
+    await transaction.query(`
+      INSERT INTO audit_logs (
+        id, actor_user_id, action_type, resource_type, resource_id, metadata_json, created_at
+      ) VALUES ($1, $2, $3, 'activity', $4, $5::jsonb, $6)
+    `, [`audit-log-${randomUUID()}`, input.actorUserId || null, actionType,
+      input.activityId, JSON.stringify({ reason }), now]);
+
+    return { id: input.activityId, status: "cancelled", cancellationReason: reason, idempotent: false };
+  });
+}
+
 module.exports = {
+  cancelPostgresActivityStatus,
   cancelPostgresMerchantOrder,
   createMerchantGroupBuyActivityCancelRepository,
   getPostgresActivityForCancellation,

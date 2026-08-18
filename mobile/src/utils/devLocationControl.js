@@ -1,6 +1,7 @@
 import Constants from "expo-constants";
 import { Platform } from "react-native";
 import { mapCenter } from "../mock/mapConfig";
+import { fetchWithTimeout } from "./fetchWithTimeout";
 
 const REQUEST_TIMEOUT_MS = 2500;
 
@@ -21,24 +22,14 @@ export function isDevLocationControlEnabled() {
 export async function fetchDevLocationConfig(userId) {
   if (!isDevLocationControlEnabled() || !isValidUserId(userId)) return null;
 
-  const controller = new AbortController();
-  const timeoutId = setTimeout(() => controller.abort(), REQUEST_TIMEOUT_MS);
-  try {
-    const query = new URLSearchParams({ userId });
-    const response = await fetch(`${getDevConsoleBaseUrl()}/api/app/config?${query}`, {
-      signal: controller.signal
-    });
-    const payload = await response.json().catch(() => ({}));
-    if (!response.ok) throw new Error(payload.error || `HTTP ${response.status}`);
-    return normalizeLocationConfig(payload.config);
-  } catch (error) {
-    if (error?.name === "AbortError") {
-      throw new Error("開發控制台連線逾時");
-    }
-    throw error;
-  } finally {
-    clearTimeout(timeoutId);
-  }
+  const query = new URLSearchParams({ userId });
+  const response = await fetchWithTimeout(`${getDevConsoleBaseUrl()}/api/app/config?${query}`, {
+    timeoutMs: REQUEST_TIMEOUT_MS,
+    timeoutMessage: "開發控制台連線逾時"
+  });
+  const payload = await response.json().catch(() => ({}));
+  if (!response.ok) throw new Error(payload.error || `HTTP ${response.status}`);
+  return normalizeLocationConfig(payload.config);
 }
 
 export async function reportAppliedDevLocation({ userId, config, locationPermission }) {

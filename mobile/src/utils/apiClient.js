@@ -1,4 +1,5 @@
 import Constants from "expo-constants";
+import { fetchWithTimeout } from "./fetchWithTimeout";
 
 const backendBaseUrl = process.env.EXPO_PUBLIC_BACKEND_URL
   || Constants.expoConfig?.extra?.backendBaseUrl
@@ -91,27 +92,17 @@ export async function loginWithDevUser(userId) {
 }
 
 export async function getDevBusinessTime() {
-  const controller = new AbortController();
-  const timeoutId = setTimeout(() => controller.abort(), 2500);
-  try {
-    const response = await fetch(`${backendBaseUrl}/api/dev/business-time`, {
-      signal: controller.signal,
-    });
-    const payload = await response.json().catch(() => ({}));
-    if (!response.ok) {
-      const error = new Error(payload.message ?? payload.error ?? "Get dev business time failed");
-      error.payload = payload;
-      throw error;
-    }
-    return payload.businessTime;
-  } catch (error) {
-    if (error?.name === "AbortError") {
-      throw new Error("開發業務時間同步逾時");
-    }
+  const response = await fetchWithTimeout(`${backendBaseUrl}/api/dev/business-time`, {
+    timeoutMs: 2500,
+    timeoutMessage: "開發業務時間同步逾時"
+  });
+  const payload = await response.json().catch(() => ({}));
+  if (!response.ok) {
+    const error = new Error(payload.message ?? payload.error ?? "Get dev business time failed");
+    error.payload = payload;
     throw error;
-  } finally {
-    clearTimeout(timeoutId);
   }
+  return payload.businessTime;
 }
 
 export async function createGroupBuyActivity(input) {

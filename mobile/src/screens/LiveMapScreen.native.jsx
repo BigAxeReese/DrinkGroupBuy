@@ -32,7 +32,7 @@ export function LiveMapScreen({ navigation, appState, selectedAuthUserId }) {
       return distanceKm != null && distanceKm <= radiusKm;
     });
   }, [mapStores, radiusKm, userPosition.latitude, userPosition.longitude]);
-  const selectedStore = visibleMapStores.find((store) => store.id === selectedStoreId);
+  const selectedStore = mapStores.find((store) => store.id === selectedStoreId);
   const storeSyncStatus = appState?.storeSyncStatus ?? "idle";
   const storeStatusText = storeSyncStatus === "error"
     ? "店家資料載入失敗"
@@ -155,7 +155,7 @@ export function LiveMapScreen({ navigation, appState, selectedAuthUserId }) {
           coordinate={userPosition}
           title={locationName}
           description={config.locationMode === "live" ? "顧客即時 GPS；失敗時使用固定備援位置" : "控制台指定的顧客固定位置"}
-          pinColor="#2563eb"
+          pinColor="#7c3aed"
         />
         {visibleMapStores.map((store) => {
           const hasRecruitingGroupBuyActivity = store.hasRecruitingGroupBuyActivity;
@@ -166,24 +166,8 @@ export function LiveMapScreen({ navigation, appState, selectedAuthUserId }) {
               title={store.name}
               description={hasRecruitingGroupBuyActivity ? "有招募中的團購" : "目前沒有招募中團購"}
               onPress={() => setSelectedStoreId(store.id)}
-            >
-              <View style={styles.storeMarkerWrap}>
-                <View
-                  style={[
-                    styles.storeMarker,
-                    { backgroundColor: hasRecruitingGroupBuyActivity ? "#facc15" : "#2563eb" }
-                  ]}
-                >
-                  <Text style={[styles.storeMarkerText, hasRecruitingGroupBuyActivity && styles.activeStoreMarkerText]}>店</Text>
-                </View>
-                <View style={styles.storeMarkerLabel}>
-                  <Text numberOfLines={1} style={styles.storeMarkerLabelText}>{store.name}</Text>
-                  {hasRecruitingGroupBuyActivity && store.progressText ? (
-                    <Text numberOfLines={1} style={styles.storeMarkerProgressText}>{store.progressText}</Text>
-                  ) : null}
-                </View>
-              </View>
-            </Marker>
+              pinColor={hasRecruitingGroupBuyActivity ? "#facc15" : "#2563eb"}
+            />
           );
         })}
       </MapView>
@@ -300,49 +284,6 @@ const styles = StyleSheet.create({
     color: "#475569",
     fontSize: 10,
     fontWeight: "800"
-  },
-  storeMarker: {
-    width: 28,
-    height: 28,
-    borderRadius: 14,
-    alignItems: "center",
-    justifyContent: "center",
-    borderWidth: 2,
-    borderColor: "#ffffff",
-    elevation: 4
-  },
-  storeMarkerWrap: {
-    width: 116,
-    alignItems: "center"
-  },
-  storeMarkerText: {
-    color: "#ffffff",
-    fontSize: 11,
-    fontWeight: "900"
-  },
-  activeStoreMarkerText: {
-    color: "#713f12"
-  },
-  storeMarkerLabel: {
-    maxWidth: 116,
-    marginTop: 3,
-    borderRadius: 6,
-    backgroundColor: "rgba(255,255,255,0.94)",
-    paddingHorizontal: 5,
-    paddingVertical: 2,
-    elevation: 3
-  },
-  storeMarkerLabelText: {
-    color: "#1f2937",
-    fontSize: 9,
-    fontWeight: "800",
-    textAlign: "center"
-  },
-  storeMarkerProgressText: {
-    color: "#b45309",
-    fontSize: 8,
-    fontWeight: "900",
-    textAlign: "center"
   },
   zoomControls: {
     position: "absolute",

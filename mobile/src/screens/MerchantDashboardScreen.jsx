@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useRef, useState } from "react";
 import { Pressable, StyleSheet, Text, TextInput, View } from "react-native";
 import { ActivitySyncNotice } from "../components/ActivitySyncNotice";
 import { MobileScreen, Section } from "../components/MobileScreen";
@@ -18,6 +18,7 @@ export function MerchantDashboardScreen({ navigation, appState, actions, memberA
   const [cancelFormActivityId, setCancelFormActivityId] = useState(null);
   const [cancelReason, setCancelReason] = useState("");
   const [cancelAction, setCancelAction] = useState(null);
+  const cancelActionInFlightRef = useRef(false);
   const [tab, setTab] = useState("active");
   const { syncStatus, refreshOrders } = useOrderListSync(
     actions.syncMerchantOrderList,
@@ -123,10 +124,12 @@ export function MerchantDashboardScreen({ navigation, appState, actions, memberA
   }
 
   async function handleCancelActivity(groupBuyActivityId) {
+    if (cancelActionInFlightRef.current) return;
     if (!cancelReason.trim()) {
       setCancelAction({ activityId: groupBuyActivityId, busy: false, type: "error", text: "請填寫取消原因。" });
       return;
     }
+    cancelActionInFlightRef.current = true;
     setCancelAction({ activityId: groupBuyActivityId, busy: true, text: null, type: null });
     try {
       const result = await actions.cancelMerchantGroupBuyActivity(groupBuyActivityId, cancelReason.trim());
@@ -148,6 +151,8 @@ export function MerchantDashboardScreen({ navigation, appState, actions, memberA
         type: "error",
         text: getCancelErrorMessage(error)
       });
+    } finally {
+      cancelActionInFlightRef.current = false;
     }
   }
 

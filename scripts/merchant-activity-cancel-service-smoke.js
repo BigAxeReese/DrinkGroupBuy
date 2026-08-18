@@ -11,6 +11,7 @@ const {
   createPaymentAuthorizationCancelRepository
 } = require("../backend/database/repositories/paymentAuthorizationCancelRepository");
 const {
+  cancelGroupBuyActivity,
   cancelMerchantOrderInDatabase,
   cancelPendingLinePayAuthorizationInDatabase,
   getLinePayAuthorizationContext,
@@ -151,7 +152,8 @@ function createRepositories() {
     sqliteGateway: {
       getActivityForCancellation: getMerchantGroupBuyActivityForCancellation,
       listEligibleOrders: listEligibleOrdersForMerchantCancellation,
-      cancelOrder: cancelMerchantOrderInDatabase
+      cancelOrder: cancelMerchantOrderInDatabase,
+      cancelActivityStatus: cancelGroupBuyActivity
     }
   });
   const paymentAuthorizationCancelRepository = createPaymentAuthorizationCancelRepository({
@@ -189,9 +191,9 @@ async function main() {
   }
 
   fs.copyFileSync(databasePath, backupPath);
-  resetDatabaseForSmoke();
 
   try {
+    resetDatabaseForSmoke();
     const { merchantGroupBuyActivityCancelRepository, paymentAuthorizationCancelRepository } = createRepositories();
     const alwaysAllow = () => true;
     const alwaysDeny = () => false;
