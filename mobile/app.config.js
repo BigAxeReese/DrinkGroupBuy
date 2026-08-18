@@ -16,6 +16,7 @@ module.exports = {
   name: "DrinkGroupBuy Prototype",
   slug: "drink-group-buy-mobile-prototype",
   version: "0.1.0",
+  newArchEnabled: true,
   scheme: appScheme,
   orientation: "portrait",
   userInterfaceStyle: "light",
