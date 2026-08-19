@@ -1,10 +1,15 @@
 import Constants from "expo-constants";
+import { Platform } from "react-native";
 import { fetchWithTimeout } from "./fetchWithTimeout";
 
+// 10.0.2.2 is the Android emulator's alias for the host machine's localhost;
+// it only resolves inside the emulator's virtual network, so web/browser
+// contexts need a plain localhost default instead.
+const defaultBackendUrl = Platform.OS === "web" ? "http://localhost:3001" : "http://10.0.2.2:3001";
 const backendBaseUrl = process.env.EXPO_PUBLIC_BACKEND_URL
   || Constants.expoConfig?.extra?.backendBaseUrl
   || Constants.manifest2?.extra?.expoClient?.extra?.backendBaseUrl
-  || "http://localhost:3000";
+  || defaultBackendUrl;
 const authMode = process.env.EXPO_PUBLIC_AUTH_MODE
   || Constants.expoConfig?.extra?.authMode
   || Constants.manifest2?.extra?.expoClient?.extra?.authMode
