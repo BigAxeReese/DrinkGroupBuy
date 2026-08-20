@@ -17,7 +17,10 @@ const NativeDateTimePicker = Platform.OS === "web"
 const MAX_ACTIVITY_DEADLINE_MS = 24 * 60 * 60 * 1000;
 const MIN_PICKUP_AFTER_DEADLINE_MS = 30 * 60 * 1000;
 const DEFAULT_PICKUP_AFTER_DEADLINE_MS = 30 * 60 * 1000;
-const DEFAULT_PICKUP_WINDOW_MS = 30 * 60 * 1000;
+// Pickup end time is not merchant-configurable -- it's always exactly 3 hours after pickup
+// start (backend/server.js's computeActivityPickupEndAt is the source of truth; this constant
+// is only used to show the merchant a preview of the resulting pickup window).
+const PICKUP_WINDOW_MS = 3 * 60 * 60 * 1000;
 
 export function MerchantGroupBuyActivityCreateScreen({ navigation, actions, memberAction, selectedMerchantStoreId }) {
   const initialDeadlineDate = new Date(createDeadlineIsoFromInput(getDefaultDeadlineInput()));
@@ -27,7 +30,6 @@ export function MerchantGroupBuyActivityCreateScreen({ navigation, actions, memb
   ]);
   const [deadlineDate, setDeadlineDate] = useState(initialDeadlineDate);
   const [pickupStartDate, setPickupStartDate] = useState(() => getDefaultPickupStartDate(initialDeadlineDate));
-  const [pickupEndDate, setPickupEndDate] = useState(() => getDefaultPickupEndDate(initialDeadlineDate));
   const [notices, setNotices] = useState("截止前可修改或退出");
   const [created, setCreated] = useState(false);
   const [submitMessage, setSubmitMessage] = useState("");
@@ -39,7 +41,6 @@ export function MerchantGroupBuyActivityCreateScreen({ navigation, actions, memb
   const handleDeadlineChange = (nextDate) => {
     setDeadlineDate(nextDate);
     setPickupStartDate(getDefaultPickupStartDate(nextDate));
-    setPickupEndDate(getDefaultPickupEndDate(nextDate));
   };
 
   const updateTier = (tierId, field, value) => {
@@ -102,7 +103,7 @@ export function MerchantGroupBuyActivityCreateScreen({ navigation, actions, memb
       setSubmitting(false);
       return;
     }
-    const pickupError = getPickupValidationError(deadlineDate, pickupStartDate, pickupEndDate);
+    const pickupError = getPickupValidationError(deadlineDate, pickupStartDate);
     if (pickupError) {
       setSubmitMessageKind("error");
       setSubmitMessage(pickupError);
@@ -113,6 +114,10 @@ export function MerchantGroupBuyActivityCreateScreen({ navigation, actions, memb
     const startTime = startDate.toISOString();
     const deadlineAt = deadlineDate.toISOString();
     const pickupStartAt = pickupStartDate.toISOString();
+    // Pickup end time is computed by the backend (fixed 3-hour window, capped by the store's
+    // closing time) -- not sent here. The local value below is only for the offline
+    // prototype-fallback branch's own mock data, since it never reaches the real backend.
+    const pickupEndDate = new Date(pickupStartDate.getTime() + PICKUP_WINDOW_MS);
     const pickupEndAt = pickupEndDate.toISOString();
     const pickupTime = `${formatDeadlineWithoutYear(pickupStartDate)} - ${formatDeadlineWithoutYear(pickupEndDate)}`;
     let groupBuyActivityId;
@@ -124,7 +129,6 @@ export function MerchantGroupBuyActivityCreateScreen({ navigation, actions, memb
         startAt: startTime,
         deadlineAt,
         pickupStartAt,
-        pickupEndAt,
         tiers: tiers.map((tier) => ({
           targetCups: Number(tier.cups),
           discountAmount: Number(tier.discountAmount)
@@ -187,13 +191,8 @@ export function MerchantGroupBuyActivityCreateScreen({ navigation, actions, memb
           value={pickupStartDate}
           onChange={setPickupStartDate}
         />
-        <DateTimeInput
-          label="取餐結束"
-          value={pickupEndDate}
-          onChange={setPickupEndDate}
-        />
         <Text style={styles.helperText}>
-          取餐開始至少需晚於結束時間 30 分鐘，預設為結束後 30 分鐘。
+          取餐開始至少需晚於上方「結束時間」（團購截止時間）30 分鐘，預設為截止後 30 分鐘。取餐結束時間固定為取餐開始後 3 小時，由系統自動計算，店家不能自行設定；若店家設有打烊時間，還會確保這 3 小時完全在打烊前。
         </Text>
         <MobileInput label="備註" value={notices} onChangeText={setNotices} />
       </Section>
@@ -432,10 +431,6 @@ function getDefaultPickupStartDate(deadlineDate) {
   return new Date(baseTime + DEFAULT_PICKUP_AFTER_DEADLINE_MS);
 }
 
-function getDefaultPickupEndDate(deadlineDate) {
-  return new Date(getDefaultPickupStartDate(deadlineDate).getTime() + DEFAULT_PICKUP_WINDOW_MS);
-}
-
 function getDeadlineValidationError(startDate, deadlineDate) {
   if (!(deadlineDate instanceof Date) || Number.isNaN(deadlineDate.getTime())) {
     return "請選擇有效的結束時間。";
@@ -452,18 +447,12 @@ function getDeadlineValidationError(startDate, deadlineDate) {
   return "";
 }
 
-function getPickupValidationError(deadlineDate, pickupStartDate, pickupEndDate) {
+function getPickupValidationError(deadlineDate, pickupStartDate) {
   if (!(pickupStartDate instanceof Date) || Number.isNaN(pickupStartDate.getTime())) {
     return "請選擇有效的取餐開始時間。";
   }
-  if (!(pickupEndDate instanceof Date) || Number.isNaN(pickupEndDate.getTime())) {
-    return "請選擇有效的取餐結束時間。";
-  }
   if (pickupStartDate.getTime() - deadlineDate.getTime() < MIN_PICKUP_AFTER_DEADLINE_MS) {
-    return "取餐開始時間至少要晚於結束時間 30 分鐘。";
-  }
-  if (pickupEndDate.getTime() <= pickupStartDate.getTime()) {
-    return "取餐結束時間必須晚於取餐開始時間。";
+    return "取餐開始時間至少要晚於團購截止時間 30 分鐘。";
   }
   return "";
 }

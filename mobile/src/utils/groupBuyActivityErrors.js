@@ -51,6 +51,16 @@ export function mapGroupBuyActivityCreateError(error, tiers = []) {
     return message;
   };
 
+  if (payload.error === "pickup_start_too_late_for_store_hours") {
+    const latestTime = payload.latestPickupStartAt
+      ? new Date(payload.latestPickupStartAt).toLocaleTimeString("zh-TW", { hour: "2-digit", minute: "2-digit" })
+      : null;
+    const message = latestTime
+      ? `取餐開始時間太晚：店家 ${payload.closingTime} 打烊，取餐需要完整 3 小時，取餐開始最晚要設在 ${latestTime}。`
+      : `取餐開始時間太晚，超過店家 ${payload.closingTime} 打烊前預留的 3 小時取餐時段。`;
+    return { message, tierErrors };
+  }
+
   if (payload.error === "discount_menu_invalid") {
     if (payload.reason === "store_menu_empty") {
       return {

@@ -148,9 +148,10 @@ LINE Pay 相關程式目前集中在：
 | `backend/payments/reliabilityService.js` | provider reconciliation、持久化 retry job 與 worker lease |
 | `backend/payments/settlementService.js` | 單一團購結算流程，依結果批次 capture / void |
 | `backend/pickup/expirationService.js` | 掃描取餐期限並完成活動、標記逾期未取與寫入歷程 |
+| `backend/pickup/pickupWindow.js` | 純計算：驗證取餐開始時間是否讓固定 3 小時取餐時段超過店家打烊時間 |
 | `backend/linePayClient.js` | 舊路徑相容匯出 |
 
-商家建立團購時，`deadlineAt` 必須晚於 `startAt`，且不得超過 `startAt` 後 24 小時。`pickupStartAt` 至少要晚於 `deadlineAt` 30 分鐘，`pickupEndAt` 必須晚於 `pickupStartAt`。
+商家建立團購時，`deadlineAt` 必須晚於 `startAt`，且不得超過 `startAt` 後 24 小時。`pickupStartAt` 至少要晚於 `deadlineAt` 30 分鐘。`pickupEndAt` 不接受店家輸入，由後端固定算為 `pickupStartAt + 3 小時`（`backend/server.js` 的 `computeActivityPickupEndAt`）；若該店家 `stores.pickup_closing_time` 有設定，`pickupStartAt` 還不得晚於「打烊時間 − 3 小時」，否則回傳 409 `pickup_start_too_late_for_store_hours`（驗證邏輯見 `backend/pickup/pickupWindow.js`，SQLite 與 PostgreSQL 兩條路徑都會檢查）。
 
 本機可用 smoke script 驗證截止結算：
 

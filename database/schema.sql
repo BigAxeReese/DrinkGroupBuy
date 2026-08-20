@@ -54,6 +54,10 @@ CREATE TABLE stores (
   business_status TEXT NOT NULL DEFAULT 'open' CHECK (business_status IN ('open', 'closed', 'temporarily_closed')),
   latitude REAL NOT NULL,
   longitude REAL NOT NULL,
+  -- Daily closing time as "HH:MM" (24-hour), NULL = 24-hour store / not configured yet.
+  -- Caps how late a merchant can set a group-buy's pickup start time -- the 3-hour pickup
+  -- window (backend/pickup/pickupWindow.js) must fit entirely before closing.
+  pickup_closing_time TEXT CHECK (pickup_closing_time IS NULL OR pickup_closing_time GLOB '[0-2][0-9]:[0-5][0-9]'),
   created_at TEXT NOT NULL,
   updated_at TEXT NOT NULL
 );

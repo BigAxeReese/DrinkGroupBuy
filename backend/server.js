@@ -854,6 +854,7 @@ const server = http.createServer(async (request, response) => {
 
       const activity = await groupBuyActivityWriteRepository.createActivity({
         ...body,
+        pickupEndAt: computeActivityPickupEndAt(body.pickupStartAt),
         createdByUserId: authUser.id,
         now: businessClock.nowIso()
       });
@@ -2071,8 +2072,7 @@ function validateCreateActivity(body) {
     "title",
     "startAt",
     "deadlineAt",
-    "pickupStartAt",
-    "pickupEndAt"
+    "pickupStartAt"
   ];
   const missingField = requiredFields.find((field) => !body[field]);
   if (missingField) return `Missing required field: ${missingField}`;
@@ -2080,11 +2080,9 @@ function validateCreateActivity(body) {
   const startTime = Date.parse(body.startAt);
   const deadlineTime = Date.parse(body.deadlineAt);
   const pickupStartTime = Date.parse(body.pickupStartAt);
-  const pickupEndTime = Date.parse(body.pickupEndAt);
   if (Number.isNaN(startTime)) return "startAt must be a valid datetime";
   if (Number.isNaN(deadlineTime)) return "deadlineAt must be a valid datetime";
   if (Number.isNaN(pickupStartTime)) return "pickupStartAt must be a valid datetime";
-  if (Number.isNaN(pickupEndTime)) return "pickupEndAt must be a valid datetime";
   if (deadlineTime <= startTime) return "deadlineAt must be after startAt";
   if (deadlineTime - startTime > 24 * 60 * 60 * 1000) {
     return "deadlineAt must be within 24 hours of startAt";
@@ -2092,15 +2090,21 @@ function validateCreateActivity(body) {
   if (pickupStartTime - deadlineTime < 30 * 60 * 1000) {
     return "pickupStartAt must be at least 30 minutes after deadlineAt";
   }
-  if (pickupEndTime <= pickupStartTime) {
-    return "pickupEndAt must be after pickupStartAt";
-  }
 
   if (body.tiers != null && !Array.isArray(body.tiers)) {
     return "tiers must be an array";
   }
 
   return null;
+}
+
+// Pickup end time is not merchant-configurable: it's fixed to 3 hours after pickup start,
+// matching the pickup-credential validity window (backend/db.js's calculatePickupExpirationAt).
+// TODO: once store business hours exist in the schema, cap this at the store's closing time
+// too (see docs/open-questions.md's pickup-credential-expiry entry -- that half of the rule
+// was decided but never had data to back it, so it was never actually enforced anywhere).
+function computeActivityPickupEndAt(pickupStartAt) {
+  return new Date(Date.parse(pickupStartAt) + 3 * 60 * 60 * 1000).toISOString();
 }
 
 function validateCreateOrder(body) {

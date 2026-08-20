@@ -8,6 +8,7 @@ const {
   normalizeDiscountTiers,
   validateDiscountTierConfiguration,
 } = require("../../pricing/groupBuyDiscount");
+const { validatePickupWindowAgainstClosingTime } = require("../../pickup/pickupWindow");
 
 function resolveGroupBuyActivityWriteRuntime(input = {}) {
   const env = input.env || process.env;
@@ -56,7 +57,7 @@ async function createPostgresGroupBuyActivity(database, input) {
 
   return database.transaction(async (transaction) => {
     const storeResult = await transaction.query(`
-      SELECT id, merchant_id, name, address, latitude, longitude
+      SELECT id, merchant_id, name, address, latitude, longitude, pickup_closing_time
       FROM stores
       WHERE id = $1
       FOR UPDATE
@@ -65,6 +66,12 @@ async function createPostgresGroupBuyActivity(database, input) {
     if (!store) {
       return { error: "store_access_denied", storeId: input.storeId };
     }
+
+    const pickupWindowError = validatePickupWindowAgainstClosingTime(
+      input.pickupStartAt,
+      store.pickup_closing_time
+    );
+    if (pickupWindowError) return { ...pickupWindowError, storeId: input.storeId };
 
     const accessResult = await transaction.query(`
       SELECT merchant_user.id

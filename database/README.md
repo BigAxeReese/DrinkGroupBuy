@@ -155,6 +155,7 @@ npm run postgres-reliability:multiprocess
 ## 注意事項
 
 - `drink-group-buy-dev.sqlite` 是本機產物，不要上傳 GitHub。
+- **`drink-group-buy-dev.sqlite` 目前資料已過期，跟現在的 `seed-dev.sql` 對不上**（2026-08-20 用 `scripts/order-api-smoke.js` 測試時發現 `store-001` 查不到）。日常開發已永久切到 PostgreSQL，這個檔案主要只影響還在用 SQLite 的獨立 smoke test 腳本；要修好需要重新用 `db:init` + `db:seed` 重建這個檔案（會整個重建、不是增量修正），屬於會改變本機檔案狀態的操作，先記錄、待確認後再處理。
 - `database/test/` 是展示/測試資料，不是正式資料庫規格。
 - LINE Pay 真正上線前，付款狀態、webhook、capture、void、refund 都需要更完整的記錄與測試。
 
@@ -168,3 +169,9 @@ npm run postgres-reliability:multiprocess
 - 詳細的程式碼修正內容（含另外修正的 3 個既有已知缺口）記錄於 `docs/AI-security-review-log.md`（2026-08-20 條目）與 `PROGRESS.md`。
 - 驗證前後資料庫內容一致（7 merchants、7 stores、8 menu_items、96 customization_options、12 users 維持不變，其餘業務資料表歸零），測試資料均已清除。
 - **後續更新**：一開始驗證完是切回 SQLite（因為發現 `backend/.env` 是全域生效，任何獨立腳本沒有明確隔離 runtime 就會被悄悄導去查 PostgreSQL）。已找出並修正唯一受影響的腳本（`scripts/merchant-activity-cancel-service-smoke.js`，其餘 10 支同類型腳本本來就已經用 `env: {}` 隔離），修好後重新把 `backend/.env` 永久切成 PostgreSQL——**現在本機開發 backend 預設就是跑在 PostgreSQL 上，不是暫時測試**。所有原本受影響的 11 支 repository smoke test 與主要 HTTP proof 皆已在永久切換後的狀態下重新驗證通過。
+
+## 2026-08-20 新增 `stores.pickup_closing_time`，並補一支同類型受影響的 smoke test
+
+延續上一筆記錄的「`backend/.env` 全域生效」現象，這次又在 `scripts/order-api-smoke.js` 發現同一類問題：它用子行程（`spawn`）啟動自己的 backend 並只明確指定 2 個 `*_RUNTIME` 為 `sqlite`，其餘變數（含 `DATABASE_URL`）沿用 `...process.env`，於是被 `backend/.env` 悄悄補上其餘變數為 `postgres`，兩邊混用觸發啟動期的一致性檢查而直接噴錯。已比照 `merchant-activity-cancel-service-smoke.js` 的做法，在這支腳本的子行程 env 明確列出全部 21 個 `*_RUNTIME` 為 `sqlite`、`DATABASE_URL` 明確清空。修好後這支腳本本身還有另一個無關的既有問題——`database/drink-group-buy-dev.sqlite` 這份本機檔案的資料已經跟目前 `seed-dev.sql` 對不上（`store-001` 查不到），屬於本機檔案過期，不是這次改動造成，未在這次範圍內處理。
+
+新增欄位本身：`stores` 增加 `pickup_closing_time`（`HH:MM` 24 小時制文字，可為 NULL）——`database/migrations/006_store_pickup_closing_time_postgres.sql` 已套用到本機 PostgreSQL；`database/schema.sql` 已同步更新供未來全新建立的 SQLite 資料庫使用。目前所有既有種子店家維持 NULL（等同 24 小時營業、不設取餐時段上限），避免影響既有測試對「取餐時間沒有上限」的假設；已用真實 API 呼叫暫時把 `store-001` 設成 `22:00` 驗證「允許」「拒絕」「剛好卡在邊界」三種情境皆正確後，改回 NULL。詳見 `backend/pickup/pickupWindow.js`（含對應 `backend/pickup/pickupWindow.test.js`）。

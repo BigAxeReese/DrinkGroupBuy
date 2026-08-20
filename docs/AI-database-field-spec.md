@@ -112,8 +112,9 @@ PostgreSQL draft 另有 `phone_verified_at`、`email_verified_at`、`last_login_
 | 6   | `business_status` | 營業狀態     | TEXT |            | `open`, `closed`, `temporarily_closed` | `open`                      |
 | 7   | `latitude`        | 緯度         | REAL | INDEX pair | 必填；地圖座標                         | `24.1505`                   |
 | 8   | `longitude`       | 經度         | REAL | INDEX pair | 必填；地圖座標                         | `120.6839`                  |
-| 9   | `created_at`      | 建立時間     | TEXT |            | ISO datetime string                    | `2026-06-25T10:00:00+08:00` |
-| 10  | `updated_at`      | 更新時間     | TEXT |            | ISO datetime string                    | `2026-06-25T10:30:00+08:00` |
+| 9   | `pickup_closing_time` | 每日打烊時間 | TEXT |        | 可為 NULL（24 小時營業或尚未設定）；格式 `HH:MM`（24 小時制），以伺服器本機時區解讀；用於限制團購取餐開始時間不得晚到讓 3 小時取餐時段超過打烊 | `22:00`                     |
+| 10  | `created_at`      | 建立時間     | TEXT |            | ISO datetime string                    | `2026-06-25T10:00:00+08:00` |
+| 11  | `updated_at`      | 更新時間     | TEXT |            | ISO datetime string                    | `2026-06-25T10:30:00+08:00` |
 
 ## `menu_items`
 
