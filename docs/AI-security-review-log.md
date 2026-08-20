@@ -141,6 +141,122 @@
 
 ---
 
+## 2026-08-20 — PostgreSQL 遷移三個新切片（店家清單／訂單編輯／LINE Pay 人工重新請款）
+
+**範圍**：`backend/database/repositories/storeDirectoryReadRepository.js`（新檔案，唯讀）、`backend/database/repositories/customerOrderWriteRepository.js`（新增 `updateOrder`／`updatePostgresPendingOrder`）、`backend/database/repositories/manualLinePayRepaymentRepository.js`（新檔案，含 `getPostgresRepaymentContext`、`completePostgresRepayment`）、`backend/payments/linePayService.js`（`requestManualLinePayRepayment`／`requestManualLinePayRepaymentUnlocked`／`confirmLinePayAuthorizationUnlocked` 改為接受並使用注入的 repository）、`backend/server.js`（建構三個新/擴充的 repository、路由改走 repository、新增兩處 Postgres 全面切換一致性檢查、`isSqliteOrderDependentRoute` 白名單新增 `PATCH /api/orders/:orderId`）
+**觸發原因**：CLAUDE.md 規則自動觸發——這批動到訂單金額重算、付款預授權作廢與人工重新請款的請款/確認邏輯，屬於高風險區域
+**方法**：讀完整 diff 與兩個新檔案全文（不只看 diff 片段），交叉比對既有 repository（`paymentAuthorizationCancelRepository.js`、`customerOrderReadRepository.js`）已經確立的 row lock／冪等／授權檢查慣例，追查所有新 SQL 的參數化與 HTTP request body 到 SQL 的資料流
+
+### 發現
+
+沒有找到信心度達到門檻（8/10 以上）的問題。
+
+### 沒發現問題的部分（已交叉驗證）
+
+| 面向 | 檢查結果 |
+|------|----------|
+| 新 SQL 有沒有字串拼接、繞過參數化 | 全部走 `$1/$2...` 參數化；唯一出現在 SQL 文字裡的 `${...}` 樣板字串都是綁進參數的 `randomUUID()` 產生的 ID，不是拼進 SQL 語法本身 |
+| `updatePostgresPendingOrder` 會不會被拿去改別人的訂單 | 寫入前檢查 `order.customer_user_id === input.customerUserId`，且用 `FOR UPDATE` 鎖住 `orders`／`group_buy_activities` 兩張表，跟 `createPostgresCustomerOrder` 用同一把活動列鎖，容量檢查不會跟建單流程互相搶跑 |
+| 訂單編輯會不會繞過重新計價／折扣／容量驗證 | 重用既有 `pricePostgresOrderItems`／`validatePostgresOrderDiscount`，任何價格不符、折扣衝突、超過容量都回結構化錯誤、不寫入 |
+| `completePostgresRepayment` 會不會被重複觸發、造成重複請款 | 鎖住 authorization 列（`FOR UPDATE`），只接受 `direct_repayment`＋`pending` 狀態；用 `UPDATE ... WHERE status = 'pending'` 搭配 `rowCount` 檢查達成冪等，`payment_provider_events` 另外用 `ON CONFLICT (idempotency_key) DO NOTHING` |
+| 請款金額能不能被竄改 | 嚴格比對 `amount === authorization.original_amount`，不接受任何容差或前端自報的覆寫值 |
+| 新的一致性檢查（`manualRepaymentPostgresReady`）會不會讓人工重新請款用 postgres、但確認/取消還在 sqlite，造成兩邊資料不同步 | 這個檢查要求 `customerOrderWriteRepository` 也必須是 postgres，而既有的全面切換檢查已經把 `paymentAuthorizationConfirmRepository`／`paymentAuthorizationCancelRepository` 綁進同一組，不可能出現人工重新請款走 postgres、但確認／取消還在 sqlite 的分裂狀態 |
+| `storeDirectoryReadRepository` 的 postgres 版本會不會洩漏比原本 SQLite 版本更多的欄位 | 回傳欄位（`id, name, address, phone, business_status, latitude, longitude`）跟既有 SQLite `listPublicStores()` 完全一致 |
+| `isSqliteOrderDependentRoute` 這次的白名單異動，會不會不小心放行了還沒真正接上 postgres 的路由 | 這次只放行了確實已經完整改走 repository 的 `PATCH /api/orders/:orderId`；`POST /api/payments/line-pay/repay`（發起新的人工重新請款）內部還有 3 處未接上 repository 的直接呼叫，維持原本的擋停，沒有放行 |
+
+**這次沒審查到的部分**：`POST /api/payments/line-pay/repay` 內部尚未接上 repository 的三處直接呼叫（已請款和解、建立新預授權、對帳排程）本身不在這次改動範圍內，維持原樣未動，等下一輪處理時再審查。
+
+---
+
+## 2026-08-20 — LINE Pay 對帳背景排程 PostgreSQL 支援（呼應上一筆「這次沒審查到的部分」）
+
+**呼應**：同一天稍早那筆（PostgreSQL 遷移三個新切片）——那筆結尾明講「`POST /api/payments/line-pay/repay` 內部三處未接上 repository 的直接呼叫...等下一輪處理時再審查」，這筆就是那個下一輪
+**範圍**：`backend/database/repositories/paymentReliabilityJobRepository.js`（新檔案，重用 `groupBuySettlementRepository.js` 已審查過的通用 job-queue 函式）、`backend/database/repositories/groupBuySettlementRepository.js`（新增匯出 `completePostgresSettlementJob`／`mapJob`，函式本身不變）、`backend/payments/reliabilityService.js`（整支改寫成接受注入 repository）、`backend/payments/linePayService.js`（`requestManualLinePayRepaymentUnlocked` 補上三個 repository 注入、`requestLinePayAuthorizationUnlocked` 移除舊有「postgres 模式下跳過排入對帳工作」的防呆）、`backend/server.js`（建構新 repository、路由改走 repository、新增一致性檢查、排程啟動條件改為動態判斷）
+**觸發原因**：CLAUDE.md 規則自動觸發——這批動到付款確認/取消/請款的背景重試與人工重新請款發起流程，屬於高風險區域
+
+### 發現
+
+用一個 sub-task 找候選漏洞，人工複查每一個候選（未额外拆分平行 false-positive sub-task，因為兩個候選都已經用 grep／實際讀取程式碼直接證實為真，不是需要額外驗證才能判斷的推測性問題）：
+
+| 嚴重度 | 位置 | 問題 | 建議修法 | 狀態 |
+|--------|------|------|----------|------|
+| 高 | `backend/server.js`（`POST /api/payments/line-pay/request` route） | 移除舊防呆（`if (kind !== "postgres") { enqueue }`）改成一律呼叫 `enqueuePendingAuthorizationReconciliation`，但這個主要付款請求路由的呼叫沒有把新的 `reliabilityJobRepository` 傳進去；沒收到就會走 `undefined ? ... : 直接呼叫 SQLite`的 fallback，等於所有主流程建立的授權，對帳保護工作都固定寫進 SQLite，就算全站已經切到 PostgreSQL 也一樣，而且不會有任何錯誤或警告 | 在該路由呼叫 `requestLinePayAuthorization({...})` 時比照 `/repay` 路由，補上 `reliabilityJobRepository` | 已修 |
+| 中 | `backend/server.js`（新的 `reconciliationPostgresReady` 一致性檢查） | 原本的檢查只往一個方向驗證（`reliabilityJobRepository` 是 postgres、但其他三個不是才會擋），沒有驗證反過來的狀況：其他三個都切到 postgres、但忘記設定新的 `PAYMENT_RELIABILITY_JOB_RUNTIME`——這種情況伺服器會正常啟動，只是背景排程被靜默停用，沒有任何啟動錯誤提示 | 把觸發條件改成「四個裡面只要有任何一個是 postgres、但沒有全部都是 postgres」就擋停 | 已修 |
+
+### 沒發現問題的部分（已交叉驗證）
+
+| 面向 | 檢查結果 |
+|------|----------|
+| 對帳背景工作（沒有登入使用者、代表系統執行）會不會確認/請款/作廢到錯誤訂單、或金額被竄改 | job payload 裡的 `orderId`／`amount` 只用來查詢，實際寫入金額一律重新從資料庫查出的權威 context 取得，不採信 payload 裡的值 |
+| 重用「團購結算」排程的通用 job-queue 函式，會不會讓不同 job_type 搶到／完成／重排到彼此的工作 | claim 用 `FOR UPDATE SKIP LOCKED` 且 `WHERE job_type = $1` 限定範圍；complete／reschedule 用 `id + locked_by = workerId` 精確鎖定單一列，`id` 是 claim 時產生的全域唯一值，不會跨 job_type 誤觸 |
+| `paymentReliabilityJobRepository.js` 兩個新查詢（`listPostgresPendingLinePayAuthorizations`、`listPostgresPaymentReliabilityAlerts`）的 SQL injection | 全部走 `$1/$2/$3` 參數化 |
+| 監控告警端點（`GET /api/admin/payment-reliability/alerts`）改走 repository 後，權限檢查有沒有被繞過 | admin 角色檢查邏輯完全沒動，只有資料來源從直接呼叫改成透過 repository |
+
+**這次沒審查到的部分**：`confirmLinePayAuthorizationUnlocked` 裡處理訂單修改（revision）替換舊授權時呼叫 `voidLinePayAuthorization` 沒有傳入 `authorizationCancelRepository`，會一律走 SQLite——但這是這次改動之前就存在的既有程式碼（沒有被這次 diff 動到），不算這次改動新增的問題，記錄下來留給之後處理 revision 相關 PostgreSQL 支援時一併處理。
+
+---
+
+## 2026-08-20 — ECPay 核心付款流程 PostgreSQL 支援
+
+**範圍**：`backend/database/repositories/ecpayAuthorizationRepository.js`（新檔案，含 `getLatestPostgresEcpayAuthorizationForOrder`、`createPostgresPendingEcpayAuthorization`、`withPostgresEcpayOperationLock`；請款/作廢/確認回跳的核心邏輯改為交叉重用既有 `paymentCaptureRepository.js`／`paymentAuthorizationCancelRepository.js`／`paymentAuthorizationConfirmRepository.js`／`paymentRefundRepository.js` 已審查過的函式）、`backend/payments/ecpayService.js`（`requestEcpayAuthorization`／`renderEcpayCheckoutRedirectHtml`／`handleEcpayReturnWebhook`／`captureEcpayAuthorization`／`voidEcpayAuthorization`／`withEcpayOperationLock` 改為接受並使用注入的 repository）、`backend/payments/settlementService.js`／`backend/payments/merchantActivityCancelService.js`（結算與商家取消團購呼叫 ECPay 請款/作廢時，新增三個相依 repository 是否同時切齊 postgres 的執行期防呆）、`backend/server.js`（建構新 repository、四個路由改走 repository、新增一致性檢查 `ecpayPostgresReady`、路由白名單新增 `client-back`／有條件放行 `request`／`checkout-redirect`／`return`）、`backend/database/repositories/paymentAuthorizationRequestRepository.js`（修正一個既有 LINE Pay Postgres 缺陷）、`backend/database/repositories/paymentRefundRepository.js`（新增匯出 `getLatestProviderEventPayloadPostgres`，函式本身不變）
+**觸發原因**：CLAUDE.md 規則自動觸發——這批動到信用卡請款、作廢授權、webhook 確認回跳的核心付款邏輯，屬於高風險區域
+**方法**：用一個 sub-task 找候選漏洞（給完整 diff、四個核心檔案全文、以及本次重用函式的來源檔案全文），該候選未額外拆分平行 false-positive sub-task驗證——因為候選本身已經透過直接讀取 `backend/db.js` 源頭邏輯、比對既有 LINE Pay Postgres 對應函式、寫一個能重現問題的 repository 層 regression test 三種方式交叉證實為真，不是需要額外驗證才能判斷的推測性問題
+
+### 發現
+
+| 嚴重度 | 位置 | 問題 | 建議修法 | 狀態 |
+|--------|------|------|----------|------|
+| 高 | `backend/database/repositories/ecpayAuthorizationRepository.js`（`createPostgresPendingEcpayAuthorization`） | 建立待確認授權時有對 `orders` 資料表下 `FOR UPDATE` 鎖，但鎖到之後沒有拿鎖到的 `original_amount` 跟請款金額比對，就直接把請款金額寫進新的 `payment_authorizations` 列——如果在「`ecpayService.js` 檢查金額」跟「這個交易真正鎖住訂單」中間，剛好有一次訂單編輯（`PATCH /api/orders/:orderId`）改了金額，就會留下一筆金額跟訂單當下實際金額不一致的授權紀錄；`backend/db.js` 的 SQLite 版本本來就沒有這個檢查（甚至訂單讀取根本不在交易內），但既有 LINE Pay Postgres 對應函式（`createPostgresPendingAuthorization`）確實有做這個檢查，這次新寫的 ECPay 版本一開始因為「忠實比照 SQLite 原始邏輯」而漏掉了 | 在拿到 `FOR UPDATE` 鎖之後、寫入前，比照既有 LINE Pay Postgres 版本補上金額比對，不符就回傳 `null`；呼叫方（`ecpayService.js`）原本收到 `null` 會靜默回傳「成功」但 `authorization: null`，一併補上明確的 409 錯誤，不管 SQLite 或 PostgreSQL 路徑都適用 | 已修，並新增 repository 層 regression test（`verifyPostgresCreatePendingAuthorizationRejectsStaleAmount`）覆蓋這個情境 |
+
+### 沒發現問題的部分（已交叉驗證）
+
+| 面向 | 檢查結果 |
+|------|----------|
+| 新 SQL 有沒有 SQL injection | `ecpayAuthorizationRepository.js` 全部新 SQL，以及這次重用的既有 Postgres 函式，全部走 `$1/$2...` 參數化，沒有字串拼接 |
+| 訂單歸屬與角色檢查 | `requestEcpayAuthorizationUnlocked` 的 `order.customerUserId !== authUser.id && !admin` 檢查，SQLite／PostgreSQL 兩條路徑完全相同，沒有被這次改動弱化 |
+| 請款／作廢／確認回跳會不會用錯 provider 或錯的授權列 | 重用的 `getPostgresAuthorizationContext`／`capturePostgresAuthorization`／`voidPostgresAuthorization` 一律用明確傳入的 `provider` 參數 + `FOR UPDATE` 精確鎖定，這次新增的 ECPay 呼叫方沒有弱化這些檢查 |
+| `ECPAY_AUTHORIZATION_RUNTIME`／`PAYMENT_CAPTURE_RUNTIME`／`PAYMENT_AUTHORIZATION_CANCEL_RUNTIME` 三個獨立開關沒切齊時，會不會讓請款/作廢悄悄查到錯的 runtime、查無資料被當成沒事 | `server.js` 開機時擋停「`ecpayAuthorizationRepository` 是 postgres、但另外兩個不是」的組合；`settlementService.js`／`merchantActivityCancelService.js` 在每次實際呼叫請款/作廢前，另外重新核對三者是否同時為 postgres，沒有同時切齊就整批退回 SQLite（而不是只退回其中一兩個），逐一追過所有呼叫點沒有找到會悄悄查錯 runtime 的組合 |
+| webhook（`handleEcpayReturnWebhook`）能不能被重放造成重複請款/授權 | `verifyEcpayCheckMacValue` 簽章驗證與重用的 `confirmPostgresAuthorization` 內建 `status !== 'pending'` 提早回傳（不是靠 idempotency key），兩層防護都沒有被這次改動動到 |
+| 機密與硬式編碼憑證 | 沒有新增任何硬式編碼金鑰、密碼或簽章繞過 |
+
+**這次額外發現、但不屬於本次 diff 範圍的既有問題**：`linePayService.js` 的 `requestLinePayAuthorizationUnlocked`（LINE Pay 主要請款流程本身）呼叫 `createPendingAuthorization` 後沒有檢查回傳是否為 `null`，跟這次修正前的 ECPay 版本是同一種缺口；同檔案的人工重新請款流程（`requestManualLinePayRepaymentUnlocked`）則已經有做這個檢查。這次沒有動 `linePayService.js` 的這段邏輯，記錄下來留給之後處理 LINE Pay 請款流程時一併評估是否要補上。
+
+---
+
+## 2026-08-20 — 三個已知缺口修正＋本機全面切換 PostgreSQL 過程中發現的問題
+
+**呼應**：同一天稍早三筆記錄裡各自標記「待處理」的既有缺口——「改單替換舊授權未接上 PostgreSQL repository」「主要請款流程缺少建立失敗檢查」「管理員舊版取消團購工具資料不完整」，這筆是修正這三個
+**範圍**：`backend/payments/linePayService.js`（`voidReplacedAuthorizationIfNeeded` 補上 `authorizationCancelRepository` 注入；`requestLinePayAuthorizationUnlocked` 對 `createPendingAuthorization` 回傳 `null` 補上明確錯誤）、`backend/payments/merchantActivityCancelService.js`（`cancelMerchantGroupBuyActivity` 的 `actionType` 改為可由呼叫方指定）、`backend/server.js`（管理員 `DELETE /api/admin/group-buy-activities/:id` 改為重用 `cancelMerchantGroupBuyActivity` 而非直接呼叫只改活動狀態的舊函式；回應改為轉發完整結果而非只回傳 `activity`）、`backend/database/repositories/paymentReliabilityJobRepository.js`／`manualLinePayRepaymentRepository.js`／`merchantGroupBuyActivityCancelRepository.js`（修正 `authorization` 這個 PostgreSQL 保留字被當作裸 SQL別名的問題）
+**觸發原因**：CLAUDE.md 規則自動觸發——這批動到付款作廢、訂單取消層級的核心邏輯，屬於高風險區域；同時本機首次把 backend 所有 21 個 `*_RUNTIME` 開關一次切到 PostgreSQL 做完整驗證時，額外發現了下面幾個問題
+
+### 發現（本次修正的既有缺口 + 這次改動本身的審查）
+
+用一個 sub-task 找候選漏洞，人工複查每一個候選：
+
+| 嚴重度 | 位置 | 問題 | 建議修法 | 狀態 |
+|--------|------|------|----------|------|
+| 中 | `backend/server.js`（管理員取消團購路由） | 改用 `cancelMerchantGroupBuyActivity` 後，回應只回傳 `{ activity: result.activity }`，把 `cancelledOrderIds`／`cancelledOrderCount`／`failedOrderIds` 都丟掉了——如果底下某張訂單的作廢呼叫失敗（例如 provider 端暫時打不通），活動本身還是會被標記取消，但管理員收到的回應是普通的 200，跟全部成功時看起來一模一樣，等於重新製造了一個範圍更小、但性質相同的「看起來成功、實際上資料沒對齊」問題 | 改成直接轉發 `cancelMerchantGroupBuyActivity` 的完整回傳結果 | 已修 |
+| 中 | `backend/payments/merchantActivityCancelService.js`（`cancelMerchantGroupBuyActivity`，未修改既有邏輯，重新被管理員路由呼叫後才顯現） | 這個函式原本只給商家自助取消用，內建兩條商家專屬限制（活動必須是 `recruiting` 狀態；截止前 30 分鐘鎖定視窗）。管理員舊工具原本沒有這兩條限制、可以無條件取消。改用這個函式後，管理員取消團購也會被這兩條擋下來——已知且刻意接受的取捨：新行為換來的是正確的訂單/授權連動處理，舊行為（無條件改狀態、完全不處理訂單付款）本身就是這份記錄從一開始要修的問題根源，繼續保留「無條件」等於保留原本的資料不一致風險。沒有另外做管理員專屬的略過選項 | 目前維持這個限制，不做略過選項；如果之後確定管理員需要在非 `recruiting` 狀態或截止前 30 分鐘內強制取消，需要另外設計一個明確的管理員覆蓋機制（同時仍要跑訂單/授權連動），不是恢復舊的無條件行為 | 已記錄為已知取捨，未修改（刻意維持） |
+
+### 過程中發現、不屬於這批程式改動本身、但同樣重要的基礎設施問題
+
+這兩個不是「程式邏輯」的安全漏洞，是本機第一次把所有切片同時打開、對一個真的在跑的 PostgreSQL 執行時才會現形的問題，值得記錄避免以後重複踩到：
+
+1. **`authorization` 是 PostgreSQL 保留字，不能當裸別名**：`SELECT authorization.id FROM payment_authorizations authorization` 這種寫法在真的 PostgreSQL 上會直接噴 `syntax error at or near "."`；先前這幾支查詢只被套過假的 mock 資料庫測試（只比對 SQL 文字，不會真的解析執行），從沒被真的 PostgreSQL 解析過，所以這個問題一直沒被抓到。影響到 `paymentReliabilityJobRepository.js`（`listPostgresPendingLinePayAuthorizations`）、`manualLinePayRepaymentRepository.js`（`getPostgresRepaymentContext`，改名 `original_payment_auth`）、`merchantGroupBuyActivityCancelRepository.js`（`listPostgresEligibleOrders`，改名 `payment_auth`）三支既有檔案裡的查詢，全部已改用不會撞保留字的別名並重新驗證通過。
+2. **`005_order_rule_consents_postgres.sql` 從沒被真的套用到本機開發資料庫**：只有 migration runner 自己的獨立 smoke test（用完即丟的 throwaway schema）驗證過套用結果，`schema_migrations` 實際只記錄到 `004`。已執行 `npm run postgres:migrate` 補上。
+
+### 驗證方式
+
+- 修正後 `npm test` 59/59、既有 repository/service smoke test 全數重跑通過。
+- 三個管理員取消路由的修正，直接對本機真實 PostgreSQL 16 用真實 HTTP 流程驗證：建立真的活動與訂單、模擬已授權付款、呼叫真的管理員取消 API、直接查資料庫確認訂單被取消、付款預授權被作廢、audit log 正確記錄 `admin_cancel_group_buy_activity`（先用真實 LINE Pay provider 驗證到「作廢呼叫真的有觸發、失敗時正確回報 `failedOrderIds`」；再用 `mock_line_pay` provider 驗證完整成功路徑）。
+- 把本機 backend 全部 21 個 `*_RUNTIME` 開關切到 `postgres`，跑過完整寫入流程（建團、建單、LINE Pay 請款、商家菜單、改單）與既有 `*-postgres-http-smoke` 系列，過程中資料庫內容執行前後一致，測試資料均已清除。
+
+**這次沒完全查清楚、記錄下來的觀察**：測試過程中曾在一次 LINE Pay 作廢呼叫失敗（provider 回傳「Transaction record not found」，這是測試手法本身的產物——手動把訂單狀態直接改成已授權、沒有真的走過 LINE Pay confirm）時，看到一次 `pg` 套件的 deprecation warning：「Calling client.query() when the client is already executing a query」。後續重跑同樣情境與大量其他測試都沒有再出現，懷疑是跟背景對帳排程（每 15 秒一次）在時間點上的巧合，還沒有辦法穩定重現、也還沒找到確切原因。目前是 deprecation warning、不是硬性錯誤，但未來 `pg` 主版本升級後可能變成真的錯誤，值得之後有人重現時再深入排查。
+
+**後續補充（同日）**：原本驗證完把 `backend/.env` 切回 SQLite；使用者確認要把本機開發環境永久改成跑在 PostgreSQL 上。永久切換前，找出 `backend/.env` 是全域生效（透過 `backend/auth.js` 的 `loadLocalEnv`，任何間接用到登入相關程式碼的獨立腳本都會載入，不只 backend 伺服器本身），逐一檢查所有用 `sqliteGateway` 建構 repository 的獨立測試腳本（11 支），確認只有 `scripts/merchant-activity-cancel-service-smoke.js` 沒有明確用 `env: {}` 隔離、會被悄悄導去查真實 PostgreSQL（其餘 10 支本來就已經隔離），已修正並重新驗證。這不是這次改動本身新增的安全漏洞（純粹是測試環境隔離問題，不影響正式程式邏輯），記錄在這裡是為了跟上面同一批工作的脈絡銜接完整。永久切換後，`npm test` 與全部相關 smoke test／HTTP proof 已重新驗證通過。
+
+---
+
 ## 2026-08-15 — dev-only 全域業務時間與付款／取餐時限串接
 
 **範圍**：`backend/time/businessClock.js`、`backend/server.js`、`backend/db.js`、`backend/payments/linePayService.js`、`backend/payments/settlementService.js`、`backend/pickup/credentialService.js`、`backend/pickup/expirationService.js`、受影響 activity/order repositories，以及本機 `local-dev-console/` 修改入口

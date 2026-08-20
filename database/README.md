@@ -77,6 +77,15 @@ postgres://drink_group_buy:drink_group_buy_dev_password@localhost:5432/drink_gro
 
 注意：這是本機開發用預設值，不可用於正式環境。
 
+跨執行個體併發鎖定驗收（不只是驗證 SQL 語法本身，是用真正獨立的 OS 程序去搶同一筆 job／同一把 lock，對一個真的在跑的 PostgreSQL 執行）：
+
+```powershell
+$env:DATABASE_URL='postgres://...'
+npm run postgres-reliability:multiprocess
+```
+
+這個測試會自己建立、清除測試用的 `payment_reliability_jobs`／`operation_locks` 列，執行前後資料庫其餘內容不受影響。
+
 目前驗證狀態：
 
 - 2026-07-02：`001_initial_postgres.sql` 已成功在 Docker PostgreSQL dev container 執行。
@@ -95,6 +104,7 @@ postgres://drink_group_buy:drink_group_buy_dev_password@localhost:5432/drink_gro
 - 2026-07-31：結算 proof 已驗證折扣快照、持久化 job retry／complete、`FOR UPDATE SKIP LOCKED`、跨執行個體 lock、mock capture 與清理歸零。
 - 驗證後 runtime 資料仍為 0 group_buy_activities、0 promotion_tiers、0 orders、0 payment_authorizations、0 payment_captures、0 pickup_credentials。
 - 2026-08-12：新增統一 PostgreSQL migration runner `database/migrate.js`（`npm run postgres:migrate`），取代已刪除的 `database/apply-postgres-settlement-snapshot.js`（原 `npm run postgres-settlement-snapshot:apply`）與 `database/apply-postgres-order-revision-refund-pickup-tables.js`（原 `npm run postgres-order-revision-refund-pickup-tables:apply`）；`001`／`002` 先前沒有專屬 apply 腳本，只能用手動 `psql` 指令套用，新 runner 已統一涵蓋全部四個 migration 檔案。已在全新 throwaway PostgreSQL schema 驗證：依序成功套用 4 個 migration、建立 35 個資料表，`schema_migrations` 正確記錄全部 4 個版本；重跑會正確偵測無待套用項目。本機開發資料庫已一次性直接 bootstrap `schema_migrations`（非 checked-in 腳本，先確認各 migration 預期資料表／欄位已存在），之後執行 `npm run postgres:migrate` 正確回報已是最新狀態、未重複套用。
+- 2026-08-20：本機改用原生安裝的 PostgreSQL 16 Windows 服務（環境沒有 Docker 可用），連線設定與帳號密碼跟 `docker-compose.postgres.yml` 的預設值相同，`001`～`004` migration 均已套用（`schema_migrations` 記錄 4 筆），共 35 張表；baseline 資料維持 12 users、7 merchants、7 stores，其餘業務資料表皆為 0 筆。（注意：這筆記錄原本誤寫成「`001`～`005` 均已套用」，誤把 `postgres-migration-runner:smoke` 自己獨立 throwaway schema 的驗證，當成主資料庫也套用過；實際上 `005_order_rule_consents_postgres.sql` 當時還沒套到這個資料庫，已於同日稍晚發現並修正，見下一筆記錄。）重新對這個真實 PostgreSQL 執行既有唯讀／寫入 proof（`postgres-runtime`、`payment-capture-postgres`、`payment-refund-postgres`、`pickup-credential-postgres`、`order-revision-postgres`、`group-buy-settlement-postgres`、`group-buy-activity-postgres-http`、`auth-profile-postgres-http`）全數通過，執行前後資料庫內容一致，確認先前這幾份 proof 的結論在這台實際服務上依然成立。新增 `npm run postgres-reliability:multiprocess`（`scripts/postgres-reliability-multiprocess-smoke.js` + `scripts/helpers/postgres-reliability-process-worker.js`），是 `payment-reliability:multiprocess`（SQLite 版）的 PostgreSQL 對應版本：用兩個真正獨立的 OS 程序（不是同一個程序裡開兩條連線）搶同一筆 `reconcile_line_pay_request` job、搶同一把 `order:{id}:payment-lifecycle` lock，驗證「只有一個程序搶得到」「租約還沒到期會被擋」「租約過期或明確 release 後可以被接手」「非持有者不能 release」——全部針對這個真的在跑的 PostgreSQL 執行，不是只驗證 SQL 語法或用假的 database mock；跑了兩次確認結果穩定，測試自己清乾淨、執行前後 `payment_reliability_jobs`／`operation_locks` 資料表歸零。`group-buy-settlement-postgres:smoke` 先前已經用「同程序兩條連線」的方式驗證過 `settlement:activity:*` 這把鎖，這次是用真正分開的 OS 程序，把驗證方式補齊到跟 SQLite 版本一致的嚴謹度，同時涵蓋另一組更廣泛共用的 `order:*:payment-lifecycle` lock key（LINE Pay 請款/取消/人工重新請款與 ECPay 共用的鎖）。
 
 ## 目前主要資料表
 
@@ -147,3 +157,14 @@ postgres://drink_group_buy:drink_group_buy_dev_password@localhost:5432/drink_gro
 - `drink-group-buy-dev.sqlite` 是本機產物，不要上傳 GitHub。
 - `database/test/` 是展示/測試資料，不是正式資料庫規格。
 - LINE Pay 真正上線前，付款狀態、webhook、capture、void、refund 都需要更完整的記錄與測試。
+
+## 2026-08-20 本機 backend 完整切換到 PostgreSQL 運作的驗證記錄
+
+把 `backend/.env` 內全部 21 個 `*_RUNTIME` 環境變數一次設為 `postgres`（透過既有 `backend/auth.js` 的 `loadLocalEnv` 自動載入，不需額外指令或旗標），讓本機開發 backend 第一次真的整個以 PostgreSQL 運作，不再是各切片各自獨立測試：
+
+- 補套用先前一直沒被套用到這個主資料庫的 `005_order_rule_consents_postgres.sql`（見上一筆記錄的更正說明）。
+- 過程中發現 `authorization` 是 PostgreSQL 保留字，不能當裸 SQL 別名使用（`SELECT authorization.id FROM payment_authorizations authorization` 會直接噴 `syntax error at or near "."`，已對這個真實 PostgreSQL 16 服務直接驗證確認）；`paymentReliabilityJobRepository.js`、`manualLinePayRepaymentRepository.js`、`merchantGroupBuyActivityCancelRepository.js` 三支既有檔案裡的查詢有這個問題，先前只被假資料庫模擬測試驗證過（只比對 SQL 文字，不會真的解析執行），從未被真的 PostgreSQL 解析過，這次才現形，已全部修正並重新驗證。
+- 完整重跑一輪真實寫入流程：透過真實 HTTP API 建立團購活動、送出訂單、發起 LINE Pay 請款、呼叫管理員取消團購 API，直接查資料庫確認訂單狀態、付款預授權狀態、audit log 皆正確；既有 `group-buy-activity-postgres-write-http`、`merchant-menu-postgres-http`、`customer-order-postgres-http`、`payment-capture-postgres`、`payment-refund-postgres`、`pickup-credential-postgres`、`order-revision-postgres`、`group-buy-settlement-postgres` 全數重新對這個真實服務驗證通過。
+- 詳細的程式碼修正內容（含另外修正的 3 個既有已知缺口）記錄於 `docs/AI-security-review-log.md`（2026-08-20 條目）與 `PROGRESS.md`。
+- 驗證前後資料庫內容一致（7 merchants、7 stores、8 menu_items、96 customization_options、12 users 維持不變，其餘業務資料表歸零），測試資料均已清除。
+- **後續更新**：一開始驗證完是切回 SQLite（因為發現 `backend/.env` 是全域生效，任何獨立腳本沒有明確隔離 runtime 就會被悄悄導去查 PostgreSQL）。已找出並修正唯一受影響的腳本（`scripts/merchant-activity-cancel-service-smoke.js`，其餘 10 支同類型腳本本來就已經用 `env: {}` 隔離），修好後重新把 `backend/.env` 永久切成 PostgreSQL——**現在本機開發 backend 預設就是跑在 PostgreSQL 上，不是暫時測試**。所有原本受影響的 11 支 repository smoke test 與主要 HTTP proof 皆已在永久切換後的狀態下重新驗證通過。

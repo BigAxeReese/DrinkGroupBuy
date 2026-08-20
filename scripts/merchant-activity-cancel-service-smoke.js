@@ -148,7 +148,14 @@ function insertScenario(database, scenario) {
 }
 
 function createRepositories() {
+  // env: {} pins these to SQLite regardless of backend/.env's ambient *_RUNTIME flags (loaded
+  // globally into process.env by backend/auth.js's loadLocalEnv, not just backend/server.js) --
+  // matches the pattern already used by every other *-repository-smoke.js script. Without this,
+  // running with backend/.env set to postgres silently redirects this test's sqliteGateway-based
+  // repositories to query the real PostgreSQL database instead of the isolated SQLite fixture
+  // this test builds, producing misleading "not found" failures.
   const merchantGroupBuyActivityCancelRepository = createMerchantGroupBuyActivityCancelRepository({
+    env: {},
     sqliteGateway: {
       getActivityForCancellation: getMerchantGroupBuyActivityForCancellation,
       listEligibleOrders: listEligibleOrdersForMerchantCancellation,
@@ -157,6 +164,7 @@ function createRepositories() {
     }
   });
   const paymentAuthorizationCancelRepository = createPaymentAuthorizationCancelRepository({
+    env: {},
     sqliteGateway: {
       getAuthorizationContext: getLinePayAuthorizationContext,
       cancelPendingAuthorization: cancelPendingLinePayAuthorizationInDatabase,

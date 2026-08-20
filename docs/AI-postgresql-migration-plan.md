@@ -380,6 +380,65 @@ PostgreSQL 遷移後，以下流程需要 transaction：
 - 不一致快照會被 PostgreSQL `CHECK` constraint 拒絕。
 - `npm run postgres-settlement-snapshot:apply` 已將 `003` 永久套用本機開發資料庫並驗證 schema／backfill；Backend runtime 仍預設 SQLite，沒有雙寫。
 
+## 2026-08-20 正式環境部署與真實資料起始方案
+
+決策（已與使用者確認）：
+
+1. **正式環境 PostgreSQL 主機**：自架伺服器（不是代管服務）。代管服務（Supabase/Neon/Railway 這類）原本可以把備份/還原變成內建功能；自架代表備份、監控、資安更新、故障復原都要自己顧，以下方案是基於這個前提設計。
+2. **正式起始資料**：確認過開發資料庫裡的 7 個商家／門市／8 個菜單品項，其實就是 `database/migrations/002_seed_dev_postgres.sql` 裡本來就有的開發示範資料（ID 為依序編號的 `merchant-00X`／`store-00X`／`drink-00X`，電話為依序生成的假號碼），不是另外接洽、超出這個範圍的真實商家。使用者確認直接沿用這組資料當正式起始資料即可，不需要另外寫 SQLite→PostgreSQL 的資料匯出工具。
+
+### 為什麼不能直接套用 `002_seed_dev_postgres.sql` 到正式環境
+
+那個檔案除了商家/門市/菜單資料，還混了 4 個顧客帳號＋7 個商家帳號＋1 個管理員帳號，這些帳號全部使用**密碼登入**（`password_hash` 欄位），只有本機開發用的 `AUTH_DEV_MODE` 才會用密碼登入這個機制；正式環境的登入方式是 Firebase Auth + Google 登入（見 `docs/project-direction.md`），跟密碼登入完全是兩條不同機制，不能直接沿用假密碼帳號。因此拆出一份新檔案：
+
+- **`database/production-reference-seed-postgres.sql`**（新檔案，只包含 `merchants`／`stores`／`menu_items`／`customization_options`／`menu_item_customization_rules`，內容跟 `002` 對應段落逐字相同，已在真實 PostgreSQL 16 用一個一次性的 throwaway schema 完整驗證過套用結果，套用後即刪除該 schema）
+- 刻意排除 `users`／`user_private_profiles`／`user_public_profiles`／`user_roles`／`merchant_users`（帳號與登入身份相關的部分）
+- **刻意不放進 `database/migrations/`**：`database/migrate.js` 會自動依序套用該資料夾裡所有帶編號的 `.sql` 檔案，如果放進去，任何人在任何環境執行 `npm run postgres:migrate` 都會被自動套用——這對正式環境是危險的（例如不小心把 `002` 的假帳號也一起套用進正式環境），所以這份檔案要用 `psql -f` 手動、單次執行，不掛進自動 migration 鏈。
+
+### 正式商家帳號要怎麼接上
+
+因為上面刻意排除了帳號資料，商家要能用自己的 Google 帳號登入、管理自己的門市，需要手動連結。現有專案裡已經有對應的本機開發工具可以參考做法——`scripts/map-firebase-user.js`（`npm run auth:map:merchant` 等指令）：邏輯是「把某個已存在的使用者列的 `firebase_uid` 欄位，更新成商家真的用 Google 登入後拿到的 Firebase UID」，不是重新建立一筆新的使用者資料。這個腳本目前寫死只認本機 SQLite，正式環境要用等效的手動 SQL 完成（对每個真實商家各執行一次）：
+
+```sql
+UPDATE users SET firebase_uid = '<商家用 Google 登入後的真實 UID>' WHERE id = 'user-merchant-001';
+```
+
+但這只解決 `users.firebase_uid`——`production-reference-seed-postgres.sql` 並沒有建立 `user-merchant-001` 這筆使用者列本身（因為那屬於排除的帳號資料）。實際上線前，這部分需要額外決定：是要幫這 7 個商家各自建立一筆對應的 `users`／`user_private_profiles`／`user_public_profiles`／`user_roles`（role=`merchant`）／`merchant_users`（連到對應 `store_id`）列，再用上面的 UPDATE 把 `firebase_uid` 接上；目前沒有任何後台介面可以做這件事，只能手動寫 SQL 或另外做一支管理工具——這是目前唯一還沒有具體方案、需要另外決定的缺口，先記錄在這裡。
+
+### 備份策略（自架伺服器）
+
+自架沒有內建自動備份，需要自己架設：
+
+1. **每日自動備份**：伺服器上排一個 cron job，定期執行 `pg_dump`，把整個資料庫匯出成一個檔案。
+2. **備份檔案不能只放在同一台機器上**：這是最容易被忽略、但最重要的一點——如果備份檔案跟正式資料庫放在同一顆硬碟，硬碟壞掉或整台機器出問題時，備份會跟資料一起消失，等於沒有備份。備份檔案需要另外傳到別的地方保存（例如另一個雲端儲存空間），才算真正安全。
+3. **保留天數**：建議至少保留 7 天內每天的備份，避免「發現問題時最近幾天的備份都已經被覆蓋」的情況。
+4. **定期驗證還原真的可行**：沒有實際「還原」測試過的備份，不能保證真的救得回來——建議定期（例如每季）真的拿一份備份還原到一台測試機器，確認資料完整。
+
+以上 1-3 點屬於「架好伺服器、開通服務前」就應該就緒的基礎設施工作，不是程式碼變更，需要在實際租用伺服器時另外執行；如果之後想把這幾步寫成腳本，可以再回來規劃。
+
+### Staging（正式環境的縮小版驗證環境）
+
+因為這是**第一次上線**、不是「已經有真實使用者在用的正式環境要換掉」，嚴格意義的 staging 必要性沒有那麼高——這幾週在本機對真實 PostgreSQL 16 做的各項驗收（見上方各段落與 `database/README.md`），某種程度上已經扮演了這個角色。但正式開通真金流（LINE Pay／ECPay 的正式商用憑證，不是現在的 sandbox 測試憑證）之前，建議完整跑一次全流程，確認沒有問題再開通。
+
+### Rollback 計畫
+
+好消息：這幾週的做法——每個功能都用一個獨立的 `*_RUNTIME` 環境變數開關分開控制 SQLite／PostgreSQL——本身就是一種內建的 rollback 機制。但這個機制的安全性，會隨著「有沒有真實資料只存在 PostgreSQL」而改變：
+
+- **上線初期、還沒有真實訂單/付款資料時**：把某個開關切回 `sqlite` 幾乎零風險。
+- **累積了真實訂單/付款資料之後**：這些資料只寫在 PostgreSQL，SQLite 完全看不到；這時候把開關切回 SQLite，等於讓系統「看不到」這些真實資料，是會出事的操作，不能再當成一般的 rollback 手段。此時的「rollback」意義會變成「PostgreSQL 本身出問題時，怎麼從備份復原」，而不是切換資料庫。
+
+建議：一旦正式環境開始累積真實資料，就應該把這個轉變明確記錄下來（例如更新這份文件），避免之後有人誤用開關切換當成救援手段。
+
+### 正式上線檢查清單（延伸既有「驗收清單」）
+
+1. 伺服器就緒：PostgreSQL 已安裝、防火牆規則已設定（只允許需要連線的來源）、備份 cron job 已設定並驗證過至少一次還原。
+2. 執行 `npm run postgres:migrate`（套用全部 schema migrations）。
+3. 手動執行 `psql "$DATABASE_URL" -f database/production-reference-seed-postgres.sql`（只執行一次）。
+4. 決定並執行「正式商家帳號要怎麼接上」段落裡待決定的方案。
+5. 確認所有 `*_RUNTIME` 環境變數、`PAYMENT_CAPTURE_RUNTIME_ALLOW_PRODUCTION` 等 production-only opt-in flag 的目標狀態。
+6. 沿用既有「驗收清單」（Google 登入、店家權限、LINE Pay sandbox/正式流程等）跑過一次。
+7. 開通真金流商用憑證前，確認上面「Staging」段落的全流程驗證已完成。
+
 ## 2026-08-12 統一 migration runner
 
 - 新增 `database/migrate.js`，取代個別 migration 各自的 ad hoc apply 腳本，統一以 `npm run postgres:migrate` 套用。Runner 會讀取 `database/migrations/` 內所有 `.sql` 檔，依檔名數字前綴順序執行，並用自動建立的 `schema_migrations` 資料表（`version text PRIMARY KEY`、`name text`、`applied_at timestamptz`）追蹤已套用版本，只套用尚未記錄的檔案，每個檔案各自包在一個 transaction 內。
