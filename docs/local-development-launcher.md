@@ -156,6 +156,16 @@ powershell -NoProfile -ExecutionPolicy Bypass -File scripts\start-dev.ps1 `
 
 確認 `mobile/.env` 的 `EXPO_PUBLIC_BACKEND_URL` 與 `backend/.env` 的 `PORT` 一致。Android Emulator 使用電腦主機服務時應使用 `10.0.2.2`，不能使用 `localhost`。
 
+### 網頁版顯示「Failed to fetch」，瀏覽器 Console 出現 `10.0.2.2`
+
+網頁版（`http://127.0.0.1:8083`）在真實瀏覽器裡永遠連不到 `10.0.2.2`——那個位址只在 Android 模擬器的虛擬網路裡有意義。會出現這個狀況，通常是因為 `mobile/.env` 的 `EXPO_PUBLIC_BACKEND_URL` 依本文件建議設成 Android 用的 `http://10.0.2.2:<port>`（見上方「每位組員首次使用前」），但啟動網頁版時沒有經過 `03-start-web.cmd`（它會在啟動當下用 `127.0.0.1` 覆寫這個值，見 `scripts/start-dev.ps1` 的 `Start-ServiceWindow -ServiceName "web"`），而是直接執行了 `npm --prefix mobile run web`，於是網頁版也套用了 Android 專用的位址。
+
+排除步驟：
+
+1. 開瀏覽器開發者工具（`F12`）→ Console，確認失敗的請求網址是不是 `10.0.2.2`。
+2. 是的話，改用 `03-start-web.cmd` 啟動網頁版（不要直接執行 `npm run mobile:web`）；或執行 `npm run mobile:web:preview`，這個指令會在啟動前先把 `EXPO_PUBLIC_BACKEND_URL` 覆寫成 `http://127.0.0.1:3001`，效果跟 `03-start-web.cmd` 一致。
+3. `.claude/launch.json`（Claude Code 用來啟動網頁版預覽的設定）已經改成呼叫 `mobile:web:preview`，所以透過 Claude Code 啟動不會再遇到這個問題；`mobile/src/utils/apiClient.js` 與 `mobile/src/utils/devLocationControl.js` 也各自加了一層防護，網頁版一律忽略指向 `10.0.2.2` 的覆寫值，即使環境變數設錯也不會整個打不通，但畫面上仍可能因為改連到別的位址而暫時看不到本機控制台資料，最好還是照上面兩步驟修正根本設定。
+
 ### 找不到模擬器
 
 請在 Android Studio Device Manager 建立 AVD，並確認 Android SDK 位於 `ANDROID_HOME`、`ANDROID_SDK_ROOT` 或預設的 `%LOCALAPPDATA%\Android\Sdk`。

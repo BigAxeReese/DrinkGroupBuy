@@ -4,12 +4,26 @@ import { fetchWithTimeout } from "./fetchWithTimeout";
 
 // 10.0.2.2 is the Android emulator's alias for the host machine's localhost;
 // it only resolves inside the emulator's virtual network, so web/browser
-// contexts need a plain localhost default instead.
-const defaultBackendUrl = Platform.OS === "web" ? "http://localhost:3001" : "http://10.0.2.2:3001";
-const backendBaseUrl = process.env.EXPO_PUBLIC_BACKEND_URL
-  || Constants.expoConfig?.extra?.backendBaseUrl
-  || Constants.manifest2?.extra?.expoClient?.extra?.backendBaseUrl
-  || defaultBackendUrl;
+// contexts need a real host instead. Using the page's own hostname (rather
+// than hardcoding "localhost") keeps the API call same-origin with however
+// the page was actually opened -- e.g. http://127.0.0.1:8083 -- otherwise
+// the browser treats "localhost" and "127.0.0.1" as different origins even
+// though they're the same machine, and the request can fail as a real
+// network/CORS mismatch instead of a same-origin call.
+const defaultBackendUrl = Platform.OS === "web"
+  ? `http://${typeof window !== "undefined" && window.location?.hostname ? window.location.hostname : "localhost"}:3001`
+  : "http://10.0.2.2:3001";
+// EXPO_PUBLIC_BACKEND_URL (and its app.config.js extra.backendBaseUrl mirror) is a single,
+// non-platform-scoped override -- if it's set to the Android-emulator-only 10.0.2.2 alias
+// (e.g. left over from testing on an emulator), it would otherwise silently poison the web
+// build too, since it's checked before defaultBackendUrl. On web, an override pointing at
+// 10.0.2.2 can never be correct, so it's ignored there in favor of defaultBackendUrl.
+const isAndroidOnlyOverride = (url) => Platform.OS === "web" && typeof url === "string" && url.includes("10.0.2.2");
+const backendBaseUrl = [
+  process.env.EXPO_PUBLIC_BACKEND_URL,
+  Constants.expoConfig?.extra?.backendBaseUrl,
+  Constants.manifest2?.extra?.expoClient?.extra?.backendBaseUrl
+].find((url) => url && !isAndroidOnlyOverride(url)) || defaultBackendUrl;
 const authMode = process.env.EXPO_PUBLIC_AUTH_MODE
   || Constants.expoConfig?.extra?.authMode
   || Constants.manifest2?.extra?.expoClient?.extra?.authMode

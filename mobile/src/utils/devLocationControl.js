@@ -54,9 +54,16 @@ export async function reportAppliedDevLocation({ userId, config, locationPermiss
 }
 
 export function getDevConsoleBaseUrl() {
-  const configuredUrl = process.env.EXPO_PUBLIC_DEV_CONSOLE_URL
-    || Constants.expoConfig?.extra?.devConsoleBaseUrl
-    || Constants.manifest2?.extra?.expoClient?.extra?.devConsoleBaseUrl;
+  // EXPO_PUBLIC_DEV_CONSOLE_URL (and its app.config.js extra.devConsoleBaseUrl mirror) is a
+  // single, non-platform-scoped override -- same class of issue as apiClient.js's
+  // backendBaseUrl: a value set for the Android emulator (10.0.2.2) would otherwise silently
+  // apply to the web build too, since it's checked before the platform-aware fallback below.
+  const isAndroidOnlyOverride = (url) => Platform.OS !== "android" && typeof url === "string" && url.includes("10.0.2.2");
+  const configuredUrl = [
+    process.env.EXPO_PUBLIC_DEV_CONSOLE_URL,
+    Constants.expoConfig?.extra?.devConsoleBaseUrl,
+    Constants.manifest2?.extra?.expoClient?.extra?.devConsoleBaseUrl
+  ].find((url) => url && !isAndroidOnlyOverride(url));
   const fallbackUrl = Platform.OS === "android"
     ? "http://10.0.2.2:3100"
     : "http://127.0.0.1:3100";

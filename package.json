@@ -7,6 +7,7 @@
     "test": "node --test backend/**/*.test.js mobile/tests/*.test.mjs",
     "backend:start": "node backend/server.js",
     "mobile:web": "npm --prefix mobile run web",
+    "mobile:web:preview": "set EXPO_PUBLIC_BACKEND_URL=http://127.0.0.1:3001&& npm --prefix mobile run web",
     "mobile:android": "npm --prefix mobile run android",
     "db:init": "node database/init-dev-db.js",
     "db:seed": "node database/seed-dev-db.js",

@@ -10,7 +10,7 @@
     {
       "name": "mobile-web",
       "runtimeExecutable": "npm",
-      "runtimeArgs": ["run", "mobile:web"],
+      "runtimeArgs": ["run", "mobile:web:preview"],
       "port": 8083
     },
     {

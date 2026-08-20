@@ -39,6 +39,7 @@ function RoleSelectContent({ navigation, isDevAuthMode, googleLogin = null }) {
   const [selectedDevUserId, setSelectedDevUserId] = useState("");
   const [isDevDropdownOpen, setIsDevDropdownOpen] = useState(false);
   const [isLoadingDevUsers, setIsLoadingDevUsers] = useState(false);
+  const [devUsersRetryToken, setDevUsersRetryToken] = useState(0);
 
   useEffect(() => {
     if (!isDevAuthMode) return undefined;
@@ -66,7 +67,7 @@ function RoleSelectContent({ navigation, isDevAuthMode, googleLogin = null }) {
     return () => {
       isMounted = false;
     };
-  }, [isDevAuthMode]);
+  }, [isDevAuthMode, devUsersRetryToken]);
 
   const login = async () => {
     try {
@@ -125,6 +126,16 @@ function RoleSelectContent({ navigation, isDevAuthMode, googleLogin = null }) {
 
       <View style={styles.actionStack}>
         {loginError ? <Text style={styles.errorText}>{loginError}</Text> : null}
+
+        {isDevAuthMode && loginError && !isLoadingDevUsers && devUsers.length === 0 ? (
+          <Pressable
+            accessibilityRole="button"
+            onPress={() => setDevUsersRetryToken((value) => value + 1)}
+            style={({ pressed }) => [styles.textButton, pressed && styles.pressed]}
+          >
+            <Text style={styles.textButtonLabel}>重試</Text>
+          </Pressable>
+        ) : null}
 
         {!isDevAuthMode ? (
           <LoginOptionButton
