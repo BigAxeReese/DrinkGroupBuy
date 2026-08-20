@@ -20,8 +20,8 @@ const { confirmLinePayAuthorization, inferLinePayPaymentState } = require("./lin
 
 const RECONCILIATION_JOB_TYPE = "reconcile_line_pay_request";
 
-function enqueueLinePayReconciliationJob(input) {
-  return enqueuePaymentReliabilityJob({
+async function enqueueLinePayReconciliationJob(input, repositories = {}) {
+  const jobInput = {
     jobType: RECONCILIATION_JOB_TYPE,
     resourceType: "payment_authorization",
     resourceId: input.authorizationId,
@@ -34,11 +34,17 @@ function enqueueLinePayReconciliationJob(input) {
     maxAttempts: input.maxAttempts || 40,
     runAfter: input.runAfter,
     now: input.now
-  });
+  };
+  return repositories.reliabilityJobRepository
+    ? repositories.reliabilityJobRepository.enqueueJob(jobInput)
+    : enqueuePaymentReliabilityJob(jobInput);
 }
 
-function backfillLinePayReconciliationJobs(input = {}) {
-  return listPendingLinePayAuthorizations({ limit: input.limit || 100 }).map((authorization) => (
+async function backfillLinePayReconciliationJobs(input = {}, repositories = {}) {
+  const authorizations = repositories.reliabilityJobRepository
+    ? await repositories.reliabilityJobRepository.listPendingLinePayAuthorizations({ limit: input.limit || 100 })
+    : listPendingLinePayAuthorizations({ limit: input.limit || 100 });
+  return Promise.all(authorizations.map((authorization) => (
     enqueueLinePayReconciliationJob({
       authorizationId: authorization.id,
       orderId: authorization.orderId,
@@ -48,47 +54,62 @@ function backfillLinePayReconciliationJobs(input = {}) {
       maxAttempts: input.maxAttempts,
       runAfter: input.now,
       now: input.now
-    })
-  ));
+    }, repositories)
+  )));
 }
 
 async function runLinePayReconciliationJobs(input = {}) {
+  const repositories = {
+    reliabilityJobRepository: input.reliabilityJobRepository,
+    authorizationConfirmRepository: input.authorizationConfirmRepository,
+    authorizationCancelRepository: input.authorizationCancelRepository,
+    manualRepaymentRepository: input.manualRepaymentRepository
+  };
   const now = input.now || new Date().toISOString();
   const workerId = input.workerId || `line-pay-reconcile-${process.pid}-${randomUUID()}`;
   const retryIntervalMs = positiveInteger(input.retryIntervalMs, 30_000);
-  backfillLinePayReconciliationJobs({
+  await backfillLinePayReconciliationJobs({
     limit: input.backfillLimit || 100,
     maxAttempts: input.maxAttempts,
     now
-  });
-  const jobs = claimPaymentReliabilityJobs({
-    jobType: RECONCILIATION_JOB_TYPE,
-    workerId,
-    limit: input.limit || 10,
-    leaseMs: input.leaseMs || 120_000,
-    now
-  });
+  }, repositories);
+  const jobs = repositories.reliabilityJobRepository
+    ? await repositories.reliabilityJobRepository.claimJobs({
+        jobType: RECONCILIATION_JOB_TYPE,
+        workerId,
+        limit: input.limit || 10,
+        leaseMs: input.leaseMs || 120_000,
+        now
+      })
+    : claimPaymentReliabilityJobs({
+        jobType: RECONCILIATION_JOB_TYPE,
+        workerId,
+        limit: input.limit || 10,
+        leaseMs: input.leaseMs || 120_000,
+        now
+      });
   const dependencies = {
     checker: input.checker || checkLinePayPaymentRequestStatus,
     detailsRetriever: input.detailsRetriever || retrieveLinePayPaymentDetails,
-    confirmer: input.confirmer || confirmLinePayAuthorization
+    confirmer: input.confirmer || confirmLinePayAuthorization,
+    repositories
   };
   const results = [];
   for (const job of jobs) {
     try {
       const result = await reconcileLinePayRequestJob(job, dependencies);
       const persisted = result.outcome === "retry"
-        ? reschedulePaymentReliabilityJob({
+        ? await rescheduleJob(repositories, {
             jobId: job.id,
             workerId,
             runAfter: new Date(Date.parse(now) + retryIntervalMs).toISOString(),
             error: result.error,
             now
           })
-        : completePaymentReliabilityJob({ jobId: job.id, workerId, now });
+        : await completeJob(repositories, { jobId: job.id, workerId, now });
       results.push({ job: persisted, result });
     } catch (error) {
-      const persisted = reschedulePaymentReliabilityJob({
+      const persisted = await rescheduleJob(repositories, {
         jobId: job.id,
         workerId,
         runAfter: new Date(Date.parse(now) + retryIntervalMs).toISOString(),
@@ -102,12 +123,28 @@ async function runLinePayReconciliationJobs(input = {}) {
   return { workerId, claimed: jobs.length, results };
 }
 
+function completeJob(repositories, input) {
+  return repositories.reliabilityJobRepository
+    ? repositories.reliabilityJobRepository.completeJob(input)
+    : completePaymentReliabilityJob(input);
+}
+
+function rescheduleJob(repositories, input) {
+  return repositories.reliabilityJobRepository
+    ? repositories.reliabilityJobRepository.rescheduleJob(input)
+    : reschedulePaymentReliabilityJob(input);
+}
+
 async function reconcileLinePayRequestJob(job, dependencies) {
-  const context = getLinePayAuthorizationContext({
+  const repositories = dependencies.repositories || {};
+  const contextQuery = {
     orderId: job.payload.orderId,
     providerTransactionId: job.payload.providerTransactionId,
     provider: "line_pay"
-  });
+  };
+  const context = repositories.authorizationConfirmRepository
+    ? await repositories.authorizationConfirmRepository.getAuthorizationContext(contextQuery)
+    : getLinePayAuthorizationContext(contextQuery);
   if (!context) return { outcome: "complete", status: "authorization_missing" };
   if (context.authorization.status !== "pending") {
     return { outcome: "complete", status: context.authorization.status };
@@ -126,23 +163,29 @@ async function reconcileLinePayRequestJob(job, dependencies) {
   if (returnCode === "0110") {
     const result = await dependencies.confirmer({
       transactionId,
-      orderId: context.authorization.orderId
+      orderId: context.authorization.orderId,
+      authorizationConfirmRepository: repositories.authorizationConfirmRepository,
+      authorizationCancelRepository: repositories.authorizationCancelRepository,
+      manualRepaymentRepository: repositories.manualRepaymentRepository
     });
     return { outcome: "complete", status: "confirmed", result };
   }
   if (returnCode === "0121" || returnCode === "0122") {
-    const failed = cancelPendingLinePayAuthorizationInDatabase({
+    const cancelInput = {
       orderId: context.authorization.orderId,
       providerTransactionId: transactionId,
       reason: returnCode === "0121"
         ? "line_pay_request_cancelled_or_expired"
         : "line_pay_request_failed"
-    });
+    };
+    const failed = repositories.authorizationCancelRepository
+      ? await repositories.authorizationCancelRepository.cancelPendingAuthorization(cancelInput)
+      : cancelPendingLinePayAuthorizationInDatabase(cancelInput);
     return { outcome: "complete", status: failed?.status || "failed", returnCode };
   }
   if (returnCode === "0123") {
     const details = await dependencies.detailsRetriever(transactionId);
-    return reconcileCompletedPayment(context, transactionId, details);
+    return reconcileCompletedPayment(context, transactionId, details, repositories);
   }
 
   const error = new Error(`Unexpected LINE Pay request status: ${returnCode || "missing"}`);
@@ -150,7 +193,7 @@ async function reconcileLinePayRequestJob(job, dependencies) {
   throw error;
 }
 
-function reconcileCompletedPayment(context, transactionId, providerPayload) {
+async function reconcileCompletedPayment(context, transactionId, providerPayload, repositories = {}) {
   const providerState = inferLinePayPaymentState(providerPayload);
   if (context.authorization.paymentFlow === "direct_repayment") {
     if (providerState !== "captured") {
@@ -160,23 +203,29 @@ function reconcileCompletedPayment(context, transactionId, providerPayload) {
         error: { providerState }
       };
     }
-    const result = completeManualLinePayRepaymentInDatabase({
+    const completeInput = {
       orderId: context.authorization.orderId,
       providerTransactionId: transactionId,
       amount: context.amount,
       providerCaptureId: transactionId,
       providerPayload
-    });
+    };
+    const result = repositories.manualRepaymentRepository
+      ? await repositories.manualRepaymentRepository.completeRepayment(completeInput)
+      : completeManualLinePayRepaymentInDatabase(completeInput);
     return { outcome: "complete", status: "captured", result };
   }
   if (providerState === "authorized") {
-    const result = authorizeLinePayPaymentInDatabase({
+    const confirmInput = {
       orderId: context.authorization.orderId,
       orderRevisionId: context.authorization.orderRevisionId || null,
       providerTransactionId: transactionId,
       amount: context.amount,
       providerPayload
-    });
+    };
+    const result = repositories.authorizationConfirmRepository
+      ? await repositories.authorizationConfirmRepository.confirmAuthorization(confirmInput)
+      : authorizeLinePayPaymentInDatabase(confirmInput);
     return { outcome: "complete", status: "authorized", result };
   }
   if (providerState === "captured") {
@@ -231,7 +280,11 @@ function startLinePayReconciliationScheduler(input = {}) {
         retryIntervalMs: positiveInteger(
           process.env.PAYMENT_RECONCILIATION_RETRY_INTERVAL_MS || input.retryIntervalMs,
           30_000
-        )
+        ),
+        reliabilityJobRepository: input.reliabilityJobRepository,
+        authorizationConfirmRepository: input.authorizationConfirmRepository,
+        authorizationCancelRepository: input.authorizationCancelRepository,
+        manualRepaymentRepository: input.manualRepaymentRepository
       });
       logAlertRequiredJobs(summary.results, logger, "line_pay_reconciliation");
       return summary;

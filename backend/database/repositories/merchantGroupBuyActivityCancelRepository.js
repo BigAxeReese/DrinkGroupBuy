@@ -70,10 +70,12 @@ async function listPostgresEligibleOrders(database, input = {}) {
     SELECT
       orders.id,
       orders.payment_status,
-      authorization.provider AS payment_provider
+      payment_auth.provider AS payment_provider
     FROM orders
-    LEFT JOIN payment_authorizations authorization
-      ON authorization.id = (
+    -- "authorization" is a reserved word in PostgreSQL and cannot be used as a bare table
+    -- alias (confirmed against a real PostgreSQL 16 server).
+    LEFT JOIN payment_authorizations payment_auth
+      ON payment_auth.id = (
         SELECT id
         FROM payment_authorizations
         WHERE order_id = orders.id

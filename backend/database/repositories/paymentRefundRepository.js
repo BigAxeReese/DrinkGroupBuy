@@ -830,5 +830,6 @@ function toIsoString(value) {
 
 module.exports = {
   createPaymentRefundRepository,
+  getLatestProviderEventPayloadPostgres,
   resolvePaymentRefundRuntime,
 };

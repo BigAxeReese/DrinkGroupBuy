@@ -56,7 +56,10 @@ const {
   approveRefundRequestInDatabase,
   createRefundRequestInDatabase,
   getRefundRequestById,
-  rejectRefundRequestInDatabase
+  rejectRefundRequestInDatabase,
+  getManualLinePayRepaymentContext,
+  completeManualLinePayRepaymentInDatabase,
+  listPendingLinePayAuthorizations
 } = require("./db");
 const { createAuthToken, getBearerToken, verifyAuthToken, verifyPassword } = require("./auth");
 const { verifyFirebaseIdToken } = require("./firebaseAuth");
@@ -73,10 +76,8 @@ const {
 const { getPickupOverdueRule } = require("./payments/orderRuleConsent");
 const {
   handleEcpayReturnWebhook,
-  isEcpayProvider,
   renderEcpayCheckoutRedirectHtml,
-  requestEcpayAuthorization,
-  voidEcpayAuthorization
+  requestEcpayAuthorization
 } = require("./payments/ecpayService");
 const {
   approveRefundRequest,
@@ -107,6 +108,9 @@ const { startPickupExpirationScheduler } = require("./pickup/expirationService")
 const {
   createStoreMenuReadRepository
 } = require("./database/repositories/storeMenuReadRepository");
+const {
+  createStoreDirectoryReadRepository
+} = require("./database/repositories/storeDirectoryReadRepository");
 const {
   createGroupBuyActivityReadRepository
 } = require("./database/repositories/groupBuyActivityReadRepository");
@@ -155,10 +159,22 @@ const {
 const {
   createOrderRevisionRepository
 } = require("./database/repositories/orderRevisionRepository");
+const {
+  createManualLinePayRepaymentRepository
+} = require("./database/repositories/manualLinePayRepaymentRepository");
+const {
+  createPaymentReliabilityJobRepository
+} = require("./database/repositories/paymentReliabilityJobRepository");
+const {
+  createEcpayAuthorizationRepository
+} = require("./database/repositories/ecpayAuthorizationRepository");
 const { businessClock } = require("./time/businessClock");
 
 const port = Number(process.env.PORT ?? 3000);
 const storeMenuReadRepository = createStoreMenuReadRepository({ sqliteReader: listStoreMenu });
+const storeDirectoryReadRepository = createStoreDirectoryReadRepository({
+  sqliteReader: listPublicStores,
+});
 const groupBuyActivityReadRepository = createGroupBuyActivityReadRepository({
   sqliteReader: listGroupBuyActivities,
 });
@@ -179,6 +195,7 @@ const merchantMenuRepository = createMerchantMenuRepository({
 });
 const customerOrderWriteRepository = createCustomerOrderWriteRepository({
   sqliteWriter: createOrder,
+  sqliteUpdater: updatePendingOrder,
 });
 const customerOrderReadRepository = createCustomerOrderReadRepository({
   sqliteReaders: {
@@ -275,6 +292,32 @@ const orderRevisionRepository = createOrderRevisionRepository({
     createRevision: (value) => createOrderRevision(value),
     getRevisionById: (value) => getOrderRevisionById(value.orderRevisionId),
     getRevisionPaymentContext: (value) => getOrderRevisionPaymentContext(value.orderRevisionId),
+  },
+});
+const manualRepaymentRepository = createManualLinePayRepaymentRepository({
+  sqliteGateway: {
+    getRepaymentContext: (orderId, query) => getManualLinePayRepaymentContext(orderId, query),
+    completeRepayment: (value) => completeManualLinePayRepaymentInDatabase(value),
+  },
+});
+const reliabilityJobRepository = createPaymentReliabilityJobRepository({
+  sqliteGateway: {
+    enqueueJob: (value) => enqueuePaymentReliabilityJob(value),
+    claimJobs: (value) => claimPaymentReliabilityJobs(value),
+    completeJob: (value) => completePaymentReliabilityJob(value),
+    rescheduleJob: (value) => reschedulePaymentReliabilityJob(value),
+    listPendingLinePayAuthorizations: (value) => listPendingLinePayAuthorizations(value),
+    listAlerts: (value) => listPaymentReliabilityAlerts(value),
+  },
+});
+const ecpayAuthorizationRepository = createEcpayAuthorizationRepository({
+  sqliteGateway: {
+    getOrderPaymentContext: (orderId) => getOrderPaymentContext(orderId),
+    getLatestAuthorizationForOrder: (orderId) => getLatestLinePayAuthorizationForOrder(orderId),
+    getAuthorizationContext: (query) => getLinePayAuthorizationContext(query),
+    createPendingAuthorization: (value) => createPendingLinePayAuthorization(value),
+    authorizeAuthorization: (value) => authorizeLinePayPaymentInDatabase(value),
+    getLatestProviderEventPayload: (value) => getLatestPaymentProviderEventPayload(value),
   },
 });
 if (
@@ -411,6 +454,97 @@ if (orderRevisionPostgresReady && customerOrderWriteRepository.kind !== "postgre
     "PostgreSQL order revisions require the full PostgreSQL order-write stack "
     + "(CUSTOMER_ORDER_WRITE_RUNTIME and its dependent *_RUNTIME flags) to be postgres too, "
     + "since revisions read and write the same orders/order_items rows."
+  );
+}
+
+// Manual LINE Pay repayment directly captures a payment (writes payment_captures/orders, the
+// same rows PAYMENT_CAPTURE_RUNTIME writes), so it needs the same order-write stack and the
+// same explicit production opt-in as capture/settlement above.
+const manualRepaymentPostgresReady = manualRepaymentRepository.kind === "postgres";
+if (manualRepaymentPostgresReady) {
+  if (customerOrderWriteRepository.kind !== "postgres") {
+    throw new Error(
+      "PostgreSQL manual LINE Pay repayment requires the full PostgreSQL order-write stack "
+      + "(CUSTOMER_ORDER_WRITE_RUNTIME and its dependent *_RUNTIME flags) to be postgres too, "
+      + "since manual repayment reads and writes the same orders/payment_authorizations rows."
+    );
+  }
+  const manualRepaymentLinePayEnv = String(process.env.LINE_PAY_ENV || "sandbox").toLowerCase();
+  const allowPostgresManualRepaymentInProduction = readBooleanEnv(
+    process.env.PAYMENT_CAPTURE_RUNTIME_ALLOW_PRODUCTION,
+    false
+  );
+  if (manualRepaymentLinePayEnv === "production" && !allowPostgresManualRepaymentInProduction) {
+    throw new Error(
+      "PostgreSQL manual LINE Pay repayment in production requires an explicit, separate opt-in: "
+      + "set PAYMENT_CAPTURE_RUNTIME_ALLOW_PRODUCTION=true."
+    );
+  }
+}
+
+// ECPay capture/void reuse the same PAYMENT_CAPTURE_RUNTIME / PAYMENT_AUTHORIZATION_CANCEL_
+// RUNTIME repositories LINE Pay already uses (payment_authorizations/payment_captures are
+// shared, provider-generic tables), so those two must already be postgres. ECPAY_
+// AUTHORIZATION_RUNTIME is its own separate flag gating the request/webhook steps that are
+// unique to ECPay and can't reuse LINE Pay's request/confirm repositories as-is (see
+// ecpayAuthorizationRepository.js) -- settlementService.js and merchantActivityCancelService.js
+// additionally re-check all three repositories' `.kind` together before every capture/void
+// call, so leaving this flag on sqlite while the other two are postgres degrades safely
+// (ECPay falls back to SQLite) rather than silently missing rows that only exist in SQLite.
+const ecpayPostgresReady = ecpayAuthorizationRepository.kind === "postgres"
+  && paymentCaptureRepository.kind === "postgres"
+  && paymentAuthorizationCancelRepository.kind === "postgres";
+if (ecpayAuthorizationRepository.kind === "postgres" && !ecpayPostgresReady) {
+  throw new Error(
+    "PostgreSQL ECPay support requires PAYMENT_CAPTURE_RUNTIME and "
+    + "PAYMENT_AUTHORIZATION_CANCEL_RUNTIME to be postgres too, since ECPay capture/void "
+    + "write the same payment_authorizations/payment_captures rows."
+  );
+}
+if (ecpayPostgresReady) {
+  if (customerOrderWriteRepository.kind !== "postgres") {
+    throw new Error(
+      "PostgreSQL ECPay support requires the full PostgreSQL order-write stack "
+      + "(CUSTOMER_ORDER_WRITE_RUNTIME and its dependent *_RUNTIME flags) to be postgres too, "
+      + "since ECPay reads and writes the same orders rows."
+    );
+  }
+  // ECPay capture/void move money just like LINE Pay capture, so they share the same
+  // explicit production opt-in rather than getting their own.
+  const ecpayLinePayEnv = String(process.env.LINE_PAY_ENV || "sandbox").toLowerCase();
+  const allowPostgresEcpayInProduction = readBooleanEnv(
+    process.env.PAYMENT_CAPTURE_RUNTIME_ALLOW_PRODUCTION,
+    false
+  );
+  if (ecpayLinePayEnv === "production" && !allowPostgresEcpayInProduction) {
+    throw new Error(
+      "PostgreSQL ECPay support in production requires an explicit, separate opt-in: "
+      + "set PAYMENT_CAPTURE_RUNTIME_ALLOW_PRODUCTION=true."
+    );
+  }
+}
+
+// The LINE Pay reconciliation background scheduler reads/writes authorizations, cancels stale
+// ones, and completes manual repayments -- it can only run against PostgreSQL once every
+// repository it touches is also PostgreSQL, or it would silently read one runtime and write
+// another. Checked both directions: reliabilityJobRepository=postgres with a dependency still on
+// sqlite, and a dependency=postgres with reliabilityJobRepository left on sqlite (the latter
+// doesn't throw on its own -- it just silently disables the scheduler -- so it's easy to miss
+// when migrating the other flags but forgetting PAYMENT_RELIABILITY_JOB_RUNTIME).
+const reconciliationRepositoriesAnyPostgres = reliabilityJobRepository.kind === "postgres"
+  || paymentAuthorizationConfirmRepository.kind === "postgres"
+  || paymentAuthorizationCancelRepository.kind === "postgres"
+  || manualRepaymentPostgresReady;
+const reconciliationPostgresReady = reliabilityJobRepository.kind === "postgres"
+  && paymentAuthorizationConfirmRepository.kind === "postgres"
+  && paymentAuthorizationCancelRepository.kind === "postgres"
+  && manualRepaymentPostgresReady;
+if (reconciliationRepositoriesAnyPostgres && !reconciliationPostgresReady) {
+  throw new Error(
+    "PostgreSQL payment reliability jobs require PAYMENT_RELIABILITY_JOB_RUNTIME, "
+    + "PAYMENT_AUTHORIZATION_CONFIRM_RUNTIME, PAYMENT_AUTHORIZATION_CANCEL_RUNTIME, and "
+    + "MANUAL_LINE_PAY_REPAYMENT_RUNTIME to all be postgres too, since reconciliation reads and "
+    + "writes the same payment_authorizations rows."
   );
 }
 
@@ -585,7 +719,7 @@ const server = http.createServer(async (request, response) => {
       return;
     }
     if (request.method === "GET" && url.pathname === "/api/stores") {
-      sendJson(response, 200, { stores: listPublicStores() });
+      sendJson(response, 200, { stores: await storeDirectoryReadRepository.listPublicStores() });
       return;
     }
 
@@ -789,7 +923,8 @@ const server = http.createServer(async (request, response) => {
           now: businessClock.nowIso(),
           canManageStore: (storeId) => canManageStore(authUser, storeId),
           merchantGroupBuyActivityCancelRepository,
-          paymentAuthorizationCancelRepository
+          paymentAuthorizationCancelRepository,
+          ecpayAuthorizationRepository: ecpayPostgresReady ? ecpayAuthorizationRepository : undefined
         });
         if (result.error) {
           const statusByError = {
@@ -1208,7 +1343,7 @@ const server = http.createServer(async (request, response) => {
         return;
       }
 
-      const result = updatePendingOrder({
+      const result = await customerOrderWriteRepository.updateOrder({
         ...body,
         orderId: orderMatch[1],
         customerUserId: authUser.id,
@@ -1295,7 +1430,8 @@ const server = http.createServer(async (request, response) => {
           authUser,
           body,
           authorizationRequestRepository: paymentAuthorizationRequestRepository,
-          orderRevisionRepository
+          orderRevisionRepository,
+          reliabilityJobRepository
         });
         sendJson(response, 201, result);
       } catch (error) {
@@ -1320,7 +1456,12 @@ const server = http.createServer(async (request, response) => {
         const result = await requestManualLinePayRepayment({
           authUser,
           body,
-          now: businessClock.nowIso()
+          now: businessClock.nowIso(),
+          manualRepaymentRepository,
+          paymentCaptureRepository,
+          authorizationCancelRepository: paymentAuthorizationCancelRepository,
+          authorizationRequestRepository: paymentAuthorizationRequestRepository,
+          reliabilityJobRepository
         });
         sendJson(response, 201, result);
       } catch (error) {
@@ -1365,7 +1506,9 @@ const server = http.createServer(async (request, response) => {
         transactionId,
         orderId,
         now: businessClock.nowIso(),
-        authorizationConfirmRepository: paymentAuthorizationConfirmRepository
+        authorizationConfirmRepository: paymentAuthorizationConfirmRepository,
+        authorizationCancelRepository: paymentAuthorizationCancelRepository,
+        manualRepaymentRepository
       });
 
       if (result?.error === "capacity_exceeded") {
@@ -1472,7 +1615,11 @@ const server = http.createServer(async (request, response) => {
 
       const body = await readJsonBody(request);
       try {
-        const result = await requestEcpayAuthorization({ authUser, body });
+        const result = await requestEcpayAuthorization({
+          authUser,
+          body,
+          ecpayAuthorizationRepository: ecpayPostgresReady ? ecpayAuthorizationRepository : undefined
+        });
         sendJson(response, 201, result);
       } catch (error) {
         if (error instanceof PaymentServiceError) {
@@ -1486,7 +1633,12 @@ const server = http.createServer(async (request, response) => {
 
     if (request.method === "GET" && url.pathname === "/api/payments/ecpay/checkout-redirect") {
       const orderId = url.searchParams.get("orderId");
-      const html = orderId ? renderEcpayCheckoutRedirectHtml(orderId) : null;
+      const html = orderId
+        ? await renderEcpayCheckoutRedirectHtml(
+            orderId,
+            ecpayPostgresReady ? ecpayAuthorizationRepository : undefined
+          )
+        : null;
       if (!html) {
         sendHtml(response, 404, buildLinePayResultPage({
           title: "找不到待付款的信用卡預授權",
@@ -1510,7 +1662,11 @@ const server = http.createServer(async (request, response) => {
         return;
       }
 
-      const result = await handleEcpayReturnWebhook({ orderId, formFields });
+      const result = await handleEcpayReturnWebhook({
+        orderId,
+        formFields,
+        ecpayAuthorizationRepository: ecpayPostgresReady ? ecpayAuthorizationRepository : undefined
+      });
       if (result?.error === "invalid_check_mac_value") {
         sendText(response, 400, "0|CheckMacValue invalid");
         return;
@@ -1556,7 +1712,7 @@ const server = http.createServer(async (request, response) => {
         sendJson(response, 400, { error: "Invalid status or limit filter" });
         return;
       }
-      const alerts = listPaymentReliabilityAlerts({
+      const alerts = await reliabilityJobRepository.listAlerts({
         jobType,
         status,
         limit
@@ -1591,7 +1747,10 @@ const server = http.createServer(async (request, response) => {
         now: businessClock.nowIso(),
         settlementRepository: settlementPostgresReady ? groupBuySettlementRepository : undefined,
         paymentCaptureRepository: settlementPostgresReady ? paymentCaptureRepository : undefined,
-        authorizationCancelRepository: settlementPostgresReady ? paymentAuthorizationCancelRepository : undefined
+        authorizationCancelRepository: settlementPostgresReady ? paymentAuthorizationCancelRepository : undefined,
+        ecpayAuthorizationRepository: settlementPostgresReady && ecpayPostgresReady
+          ? ecpayAuthorizationRepository
+          : undefined
       });
 
       if (!result) {
@@ -1683,17 +1842,46 @@ const server = http.createServer(async (request, response) => {
       }
 
       const body = await readJsonBody(request);
-      const activity = cancelGroupBuyActivity(adminActivityMatch[1], {
-        reason: body.reason,
-        actorUserId: authUser.id,
-        now: businessClock.nowIso()
-      });
-      if (!activity) {
-        sendJson(response, 404, { error: "Group-buy activity not found" });
-        return;
+      // Reuses the same validated cascade logic as merchant self-cancel (2026-08-20 --
+      // the direct cancelGroupBuyActivity() call used here previously only flipped the
+      // activity's own status and left its orders/payment authorizations dangling, a known
+      // data-integrity gap logged in docs/AI-security-review-log.md on 2026-08-17).
+      // canManageStore always returns true: admin can cancel any store's activity, not just
+      // ones they personally manage. actionType is passed through to preserve this route's
+      // original, distinct audit-log action type.
+      try {
+        const result = await cancelMerchantGroupBuyActivity({
+          activityId: adminActivityMatch[1],
+          reason: (body.reason && String(body.reason).trim()) || "Cancelled by admin action.",
+          actorUserId: authUser.id,
+          now: businessClock.nowIso(),
+          canManageStore: () => true,
+          actionType: "admin_cancel_group_buy_activity",
+          merchantGroupBuyActivityCancelRepository,
+          paymentAuthorizationCancelRepository,
+          ecpayAuthorizationRepository: ecpayPostgresReady ? ecpayAuthorizationRepository : undefined
+        });
+        if (result.error) {
+          const statusByError = {
+            activity_not_found: 404,
+            activity_locked_by_deadline: 409,
+            activity_not_cancellable: 409
+          };
+          sendJson(response, statusByError[result.error] || 409, result);
+          return;
+        }
+        // Forward the full cascade result (not just { activity }) -- a partial failure (e.g.
+        // one order's provider void call fails) still leaves the activity itself cancelled,
+        // and the admin needs cancelledOrderCount/failedOrderIds to know follow-up is needed
+        // instead of seeing an indistinguishable-from-success 200.
+        sendJson(response, 200, result);
+      } catch (error) {
+        if (error instanceof PaymentServiceError) {
+          sendJson(response, error.statusCode, error.payload);
+          return;
+        }
+        throw error;
       }
-
-      sendJson(response, 200, { activity });
       return;
     }
 
@@ -1727,7 +1915,11 @@ const schedulerEnvironment = {
 server.listen(port, () => {
   console.log(`DrinkGroupBuy backend listening on http://localhost:${port}`);
   linePayReconciliationScheduler = startLinePayReconciliationScheduler({
-    enabled: controlledPostgresOrderRuntime ? false : undefined
+    enabled: controlledPostgresOrderRuntime && !reconciliationPostgresReady ? false : undefined,
+    reliabilityJobRepository,
+    authorizationConfirmRepository: paymentAuthorizationConfirmRepository,
+    authorizationCancelRepository: paymentAuthorizationCancelRepository,
+    manualRepaymentRepository
   });
   if (linePayReconciliationScheduler.enabled) {
     console.log(
@@ -1745,7 +1937,10 @@ server.listen(port, () => {
     nowProvider: () => businessClock.nowIso(),
     settlementRepository: settlementPostgresReady ? groupBuySettlementRepository : undefined,
     paymentCaptureRepository: settlementPostgresReady ? paymentCaptureRepository : undefined,
-    authorizationCancelRepository: settlementPostgresReady ? paymentAuthorizationCancelRepository : undefined
+    authorizationCancelRepository: settlementPostgresReady ? paymentAuthorizationCancelRepository : undefined,
+    ecpayAuthorizationRepository: settlementPostgresReady && ecpayPostgresReady
+      ? ecpayAuthorizationRepository
+      : undefined
   });
   if (deadlineSettlementScheduler.enabled) {
     console.log(`Deadline settlement scheduler enabled (${deadlineSettlementScheduler.intervalMs}ms interval)`);
@@ -2020,6 +2215,7 @@ function canManageStore(user, storeId) {
 
 function isSqliteOrderDependentRoute(method, pathname) {
   if (method === "POST" && pathname === "/api/orders") return false;
+  if (method === "PATCH" && /^\/api\/orders\/[^/]+$/.test(pathname)) return false;
   if (method === "GET" && pathname === "/api/customers/me/orders") return false;
   if (method === "GET" && /^\/api\/merchant\/stores\/[^/]+\/orders$/.test(pathname)) return false;
   if (method === "GET" && /^\/api\/orders\/[^/]+$/.test(pathname)) return false;
@@ -2027,6 +2223,8 @@ function isSqliteOrderDependentRoute(method, pathname) {
   if (method === "GET" && pathname === "/api/payments/line-pay/confirm") return false;
   if (method === "GET" && pathname === "/api/payments/line-pay/cancel") return false;
   if (method === "POST" && /^\/api\/orders\/[^/]+\/cancel$/.test(pathname)) return false;
+  // No DB read/write at all -- just renders a static "processing" page from query params.
+  if (method === "GET" && pathname === "/api/payments/ecpay/client-back") return false;
   return pathname.startsWith("/api/orders/")
     || pathname.startsWith("/api/payments/")
     || pathname.startsWith("/api/pickup-credentials/")
@@ -2076,6 +2274,27 @@ function isSettlementRouteReadyForPostgres(method, pathname) {
     orderRevisionRepository.kind === "postgres"
     && method === "POST"
     && /^\/api\/orders\/[^/]+\/revisions$/.test(pathname)
+  ) {
+    return true;
+  }
+  if (
+    method === "POST"
+    && pathname === "/api/payments/line-pay/repay"
+    && manualRepaymentRepository.kind === "postgres"
+    && paymentCaptureRepository.kind === "postgres"
+    && paymentAuthorizationCancelRepository.kind === "postgres"
+    && paymentAuthorizationRequestRepository.kind === "postgres"
+    && reliabilityJobRepository.kind === "postgres"
+  ) {
+    return true;
+  }
+  if (
+    ecpayPostgresReady
+    && (
+      (method === "POST" && pathname === "/api/payments/ecpay/request")
+      || (method === "GET" && pathname === "/api/payments/ecpay/checkout-redirect")
+      || (method === "POST" && pathname === "/api/payments/ecpay/return")
+    )
   ) {
     return true;
   }

@@ -192,10 +192,10 @@ function inferLinePayPaymentState(payload) {
   return infoItems.length === 0 ? "missing" : "unknown";
 }
 
-function enqueuePendingAuthorizationReconciliation(authorization, input = {}) {
+async function enqueuePendingAuthorizationReconciliation(authorization, input = {}, dependencies = {}) {
   if (!authorization?.id || !authorization.providerAuthorizationId) return null;
   const now = input.now || new Date().toISOString();
-  return enqueuePaymentReliabilityJob({
+  const jobInput = {
     jobType: "reconcile_line_pay_request",
     resourceType: "payment_authorization",
     resourceId: authorization.id,
@@ -208,7 +208,10 @@ function enqueuePendingAuthorizationReconciliation(authorization, input = {}) {
     maxAttempts: 40,
     runAfter: new Date(Date.parse(now) + 30_000).toISOString(),
     now
-  });
+  };
+  return dependencies.reliabilityJobRepository
+    ? dependencies.reliabilityJobRepository.enqueueJob(jobInput)
+    : enqueuePaymentReliabilityJob(jobInput);
 }
 
 
@@ -249,6 +252,7 @@ async function requestLinePayAuthorizationUnlocked({
   body,
   authorizationRequestRepository,
   orderRevisionRepository,
+  reliabilityJobRepository,
   requestPayment = requestLinePayPayment
 }) {
   const revision = body.orderRevisionId
@@ -366,9 +370,23 @@ async function requestLinePayAuthorizationUnlocked({
   const authorization = authorizationRequestRepository
     ? await authorizationRequestRepository.createPendingAuthorization(authorizationInput)
     : createPendingLinePayAuthorization(authorizationInput);
-  if (authorizationRequestRepository?.kind !== "postgres") {
-    enqueuePendingAuthorizationReconciliation(authorization, { amount: Number(body.amount) });
+  if (!authorization) {
+    // The order changed (e.g. a concurrent PATCH /api/orders/:orderId edit) between the
+    // earlier amount check and this persist attempt -- requestPayment() above already asked
+    // LINE Pay for a real transactionId, so this leaves an orphaned provider-side payment
+    // request with no local record. Surfacing a clear error (instead of silently returning
+    // "success" with authorization: null) is the immediate fix; voiding the orphaned LINE Pay
+    // request as a compensating action would close the gap further but is out of scope here.
+    throw new PaymentServiceError(409, {
+      error: "Order changed before the LINE Pay authorization could be persisted",
+      status: "order_changed_retry"
+    });
   }
+  await enqueuePendingAuthorizationReconciliation(
+    authorization,
+    { amount: Number(body.amount) },
+    { reliabilityJobRepository }
+  );
   const pendingPayment = {
     orderId: body.orderId,
     orderRevisionId: revision?.id || null,
@@ -404,27 +422,41 @@ function isValidPersistedRuleConsent(record, expected) {
 
 async function requestManualLinePayRepayment(input = {}) {
   const orderId = input.body?.orderId;
+  const repository = input.manualRepaymentRepository;
   if (!orderId) return requestManualLinePayRepaymentUnlocked(input);
+  const operation = () => requestManualLinePayRepaymentUnlocked(input);
   try {
+    if (repository?.kind === "postgres") {
+      return await repository.withOperationLock({ orderId, now: input.now }, operation);
+    }
     return await withOperationLease({
       lockKey: `order:${orderId}:payment-lifecycle`,
       leaseMs: 300_000,
       now: input.now
-    }, () => requestManualLinePayRepaymentUnlocked(input));
+    }, operation);
   } catch (error) {
-    if (error instanceof OperationLeaseError) {
+    if (error instanceof OperationLeaseError || error?.code === "operation_locked") {
       throw new PaymentServiceError(409, {
         error: "payment_operation_locked",
         status: "retry_later",
-        lockKey: error.lock.lockKey,
-        lockedUntil: error.lock.lockedUntil
+        lockKey: error.lock?.lockKey || null,
+        lockedUntil: error.lock?.lockedUntil || null
       });
     }
     throw error;
   }
 }
 
-async function requestManualLinePayRepaymentUnlocked({ authUser, body, now } = {}) {
+async function requestManualLinePayRepaymentUnlocked({
+  authUser,
+  body,
+  now,
+  manualRepaymentRepository,
+  paymentCaptureRepository,
+  authorizationCancelRepository,
+  authorizationRequestRepository,
+  reliabilityJobRepository
+} = {}) {
   if (!body?.orderId) {
     throw new PaymentServiceError(400, { error: "Missing required field: orderId" });
   }
@@ -440,7 +472,9 @@ async function requestManualLinePayRepaymentUnlocked({ authUser, body, now } = {
 
   manualRepaymentRequestsInFlight.add(body.orderId);
   try {
-    const repayment = getManualLinePayRepaymentContext(body.orderId, { now });
+    const repayment = manualRepaymentRepository
+      ? await manualRepaymentRepository.getRepaymentContext(body.orderId, { now })
+      : getManualLinePayRepaymentContext(body.orderId, { now });
     if (!repayment) {
       throw new PaymentServiceError(404, { error: "Order not found" });
     }
@@ -469,7 +503,7 @@ async function requestManualLinePayRepaymentUnlocked({ authUser, body, now } = {
       provider: originalAuthorization.provider
     });
     if (providerState.state === "captured") {
-      const reconciled = captureLinePayAuthorizationInDatabase({
+      const captureInput = {
         orderId: repayment.orderId,
         providerTransactionId: originalAuthorization.providerAuthorizationId,
         provider: originalAuthorization.provider,
@@ -478,7 +512,10 @@ async function requestManualLinePayRepaymentUnlocked({ authUser, body, now } = {
         finalAmount: repayment.finalAmount,
         reason: "manual_repayment_original_capture_reconciled",
         providerPayload: providerState.payload
-      });
+      };
+      const reconciled = paymentCaptureRepository
+        ? await paymentCaptureRepository.captureAuthorization(captureInput)
+        : captureLinePayAuthorizationInDatabase(captureInput);
       throw new PaymentServiceError(409, {
         error: "Original LINE Pay payment was already captured",
         status: "already_paid",
@@ -499,7 +536,8 @@ async function requestManualLinePayRepaymentUnlocked({ authUser, body, now } = {
           orderId: repayment.orderId,
           transactionId: originalAuthorization.providerAuthorizationId,
           provider: originalAuthorization.provider,
-          reason: "manual_repayment_release_original_authorization"
+          reason: "manual_repayment_release_original_authorization",
+          authorizationCancelRepository
         });
       } catch (error) {
         throw new PaymentServiceError(502, {
@@ -533,16 +571,19 @@ async function requestManualLinePayRepaymentUnlocked({ authUser, body, now } = {
         status: "provider_transaction_missing"
       });
     }
-    const authorization = createPendingLinePayAuthorization({
+    const pendingAuthorizationInput = {
       orderId: repayment.orderId,
       amount: repayment.finalAmount,
       providerTransactionId: transactionId,
       paymentFlow: "direct_repayment"
-    });
-    enqueuePendingAuthorizationReconciliation(authorization, {
+    };
+    const authorization = authorizationRequestRepository
+      ? await authorizationRequestRepository.createPendingAuthorization(pendingAuthorizationInput)
+      : createPendingLinePayAuthorization(pendingAuthorizationInput);
+    await enqueuePendingAuthorizationReconciliation(authorization, {
       amount: repayment.finalAmount,
       now
-    });
+    }, { reliabilityJobRepository });
     if (!authorization) {
       throw new PaymentServiceError(500, {
         error: "Unable to persist the LINE Pay repayment",
@@ -639,6 +680,8 @@ async function confirmLinePayAuthorizationUnlocked({
   orderId,
   now,
   authorizationConfirmRepository,
+  authorizationCancelRepository,
+  manualRepaymentRepository,
   providerConfirmer,
   providerVoider
 }) {
@@ -693,15 +736,22 @@ async function confirmLinePayAuthorizationUnlocked({
       };
     }
 
-    const repayment = getManualLinePayRepaymentContext(resolvedOrderId);
+    const repayment = manualRepaymentRepository
+      ? await manualRepaymentRepository.getRepaymentContext(resolvedOrderId, { now })
+      : getManualLinePayRepaymentContext(resolvedOrderId);
     const currentRepaymentIsPending = repayment?.reason === "repayment_already_pending"
       && repayment.latestRepayment?.id === resolvedPendingPayment.authorizationId;
     if (!repayment || (!repayment.eligible && !currentRepaymentIsPending)) {
-      cancelPendingLinePayAuthorizationInDatabase({
+      const cancelInput = {
         orderId: resolvedOrderId,
         providerTransactionId: transactionId,
         reason: repayment?.reason || "manual_repayment_not_available"
-      });
+      };
+      if (authorizationCancelRepository) {
+        await authorizationCancelRepository.cancelPendingAuthorization(cancelInput);
+      } else {
+        cancelPendingLinePayAuthorizationInDatabase(cancelInput);
+      }
       deletePendingLinePayPayment({ orderId: resolvedOrderId, transactionId });
       return {
         error: repayment?.reason || "manual_repayment_not_available",
@@ -712,14 +762,23 @@ async function confirmLinePayAuthorizationUnlocked({
     }
 
     const payload = await confirmLinePayPayment(transactionId, { amount, currency });
-    const repaymentResult = completeManualLinePayRepaymentInDatabase({
-      orderId: resolvedOrderId,
-      providerTransactionId: transactionId,
-      amount,
-      providerCaptureId: transactionId,
-      providerPayload: payload,
-      now
-    });
+    const repaymentResult = manualRepaymentRepository
+      ? await manualRepaymentRepository.completeRepayment({
+          orderId: resolvedOrderId,
+          providerTransactionId: transactionId,
+          amount,
+          providerCaptureId: transactionId,
+          providerPayload: payload,
+          now
+        })
+      : completeManualLinePayRepaymentInDatabase({
+          orderId: resolvedOrderId,
+          providerTransactionId: transactionId,
+          amount,
+          providerCaptureId: transactionId,
+          providerPayload: payload,
+          now
+        });
     deletePendingLinePayPayment({ orderId: resolvedOrderId, transactionId });
     return {
       ...repaymentResult,
@@ -808,7 +867,8 @@ async function confirmLinePayAuthorizationUnlocked({
 
   const replacementVoidResult = await voidReplacedAuthorizationIfNeeded({
     authorizationResult,
-    orderId: resolvedOrderId
+    orderId: resolvedOrderId,
+    authorizationCancelRepository
   });
 
   return {
@@ -897,7 +957,11 @@ async function compensateRejectedPostgresAuthorization({
   return { authorization, payload, status: "authorization_voided" };
 }
 
-async function voidReplacedAuthorizationIfNeeded({ authorizationResult, orderId }) {
+async function voidReplacedAuthorizationIfNeeded({
+  authorizationResult,
+  orderId,
+  authorizationCancelRepository
+}) {
   const replacedAuthorization = authorizationResult?.replacedAuthorization;
   if (!replacedAuthorization || replacedAuthorization.status !== "authorized") {
     return null;
@@ -908,17 +972,23 @@ async function voidReplacedAuthorizationIfNeeded({ authorizationResult, orderId 
       orderId,
       transactionId: replacedAuthorization.providerAuthorizationId,
       provider: replacedAuthorization.provider,
-      reason: "order_revision_replaced_authorization"
+      reason: "order_revision_replaced_authorization",
+      authorizationCancelRepository
     });
   } catch (error) {
     try {
-      recordLinePayVoidFailureInDatabase({
+      const failureInput = {
         orderId,
         provider: replacedAuthorization.provider,
         providerTransactionId: replacedAuthorization.providerAuthorizationId,
         reason: "order_revision_replaced_authorization_void_failed",
         providerPayload: error.linePayPayload || { message: error.message }
-      });
+      };
+      if (authorizationCancelRepository) {
+        await authorizationCancelRepository.recordVoidFailure(failureInput);
+      } else {
+        recordLinePayVoidFailureInDatabase(failureInput);
+      }
     } catch {
       // Keep the replacement authorization success visible to the caller.
     }

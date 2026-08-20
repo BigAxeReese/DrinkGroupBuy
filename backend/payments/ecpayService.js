@@ -23,7 +23,22 @@ const {
   verifyEcpayCheckMacValue
 } = require("./ecpayClient");
 
-async function withEcpayOperationLock(orderId, operation) {
+async function withEcpayOperationLock(orderId, operation, repository) {
+  if (repository?.kind === "postgres") {
+    try {
+      return await repository.withOperationLock(orderId, operation);
+    } catch (error) {
+      if (error.code === "operation_locked") {
+        throw new PaymentServiceError(409, {
+          error: "payment_operation_locked",
+          status: "retry_later",
+          lockKey: error.lock?.lockKey
+        });
+      }
+      throw error;
+    }
+  }
+
   const ownerId = `ecpay-operation-${process.pid}-${randomUUID()}`;
   const lockKey = `ecpay:${orderId}`;
   const lock = acquireOperationLock({ lockKey, ownerId, leaseMs: 120_000 });
@@ -50,7 +65,7 @@ function generateEcpayMerchantTradeNo() {
   return randomUUID().replace(/-/g, "").slice(0, 20);
 }
 
-async function requestEcpayAuthorization({ authUser, body } = {}) {
+async function requestEcpayAuthorization({ authUser, body, ecpayAuthorizationRepository } = {}) {
   if (!authUser) {
     throw new PaymentServiceError(401, { error: "Authentication required" });
   }
@@ -58,13 +73,19 @@ async function requestEcpayAuthorization({ authUser, body } = {}) {
     throw new PaymentServiceError(400, { error: "Missing required field: orderId" });
   }
 
-  return withEcpayOperationLock(body.orderId, () => requestEcpayAuthorizationUnlocked({ authUser, body }));
+  return withEcpayOperationLock(
+    body.orderId,
+    () => requestEcpayAuthorizationUnlocked({ authUser, body, ecpayAuthorizationRepository }),
+    ecpayAuthorizationRepository
+  );
 }
 
-async function requestEcpayAuthorizationUnlocked({ authUser, body }) {
+async function requestEcpayAuthorizationUnlocked({ authUser, body, ecpayAuthorizationRepository }) {
   const provider = body.provider === "mock_ecpay" ? "mock_ecpay" : "ecpay";
 
-  const order = getOrderPaymentContext(body.orderId);
+  const order = await (ecpayAuthorizationRepository
+    ? ecpayAuthorizationRepository.getOrderPaymentContext(body.orderId)
+    : getOrderPaymentContext(body.orderId));
   if (!order) {
     throw new PaymentServiceError(404, {
       error: "Order not found in backend database",
@@ -82,7 +103,9 @@ async function requestEcpayAuthorizationUnlocked({ authUser, body }) {
     });
   }
 
-  const existingAuthorization = getLatestAuthorizationForOrder(body.orderId);
+  const existingAuthorization = await (ecpayAuthorizationRepository
+    ? ecpayAuthorizationRepository.getLatestAuthorizationForOrder(body.orderId)
+    : getLatestAuthorizationForOrder(body.orderId));
   if (order.paymentStatus === "authorized" || existingAuthorization?.status === "authorized") {
     throw new PaymentServiceError(409, {
       error: "Order is already authorized",
@@ -99,12 +122,24 @@ async function requestEcpayAuthorizationUnlocked({ authUser, body }) {
   }
 
   const merchantTradeNo = generateEcpayMerchantTradeNo();
-  const authorization = createPendingPaymentAuthorization({
+  const createPendingInput = {
     orderId: body.orderId,
     amount: Number(body.amount),
     provider,
     providerTransactionId: merchantTradeNo
-  });
+  };
+  const authorization = await (ecpayAuthorizationRepository
+    ? ecpayAuthorizationRepository.createPendingAuthorization(createPendingInput)
+    : createPendingPaymentAuthorization(createPendingInput));
+  if (!authorization) {
+    // The order's amount changed between the check above and the (now amount-revalidating)
+    // insert -- most likely a concurrent PATCH /api/orders/:orderId edit. Surface a clear,
+    // retryable error instead of returning a "success" response with authorization: null.
+    throw new PaymentServiceError(409, {
+      error: "Order changed before the ECPay authorization could be created",
+      status: "order_changed_retry"
+    });
+  }
 
   return {
     provider,
@@ -129,8 +164,10 @@ function buildCheckoutRedirectUrl(orderId) {
 // Renders the auto-submitting HTML form that carries the customer to ECPay's hosted
 // checkout page. AioCheckOut is a POST redirect, unlike LINE Pay's single GET URL, so
 // mobile opens this intermediary page instead of an ECPay URL directly.
-function renderEcpayCheckoutRedirectHtml(orderId) {
-  const authorization = getLatestAuthorizationForOrder(orderId);
+async function renderEcpayCheckoutRedirectHtml(orderId, ecpayAuthorizationRepository) {
+  const authorization = await (ecpayAuthorizationRepository
+    ? ecpayAuthorizationRepository.getLatestAuthorizationForOrder(orderId)
+    : getLatestAuthorizationForOrder(orderId));
   if (!authorization || authorization.status !== "pending" || !isEcpayProvider(authorization.provider)) {
     return null;
   }
@@ -169,26 +206,43 @@ function escapeHtml(value) {
 // Handles the ReturnURL webhook (the authoritative confirmation). Caller (server.js) is
 // responsible for reading orderId off the request URL and replying "1|OK" on success,
 // regardless of whether the underlying order/authorization state turns out to be valid.
-async function handleEcpayReturnWebhook({ orderId, formFields }) {
+async function handleEcpayReturnWebhook({ orderId, formFields, ecpayAuthorizationRepository }) {
   if (!verifyEcpayCheckMacValue(formFields)) {
     return { error: "invalid_check_mac_value" };
   }
 
-  const pendingAuthorization = getLatestAuthorizationForOrder(orderId);
+  const pendingAuthorization = await (ecpayAuthorizationRepository
+    ? ecpayAuthorizationRepository.getLatestAuthorizationForOrder(orderId)
+    : getLatestAuthorizationForOrder(orderId));
   if (!pendingAuthorization || !isEcpayProvider(pendingAuthorization.provider)) {
     return { error: "ecpay_authorization_not_found" };
   }
 
-  return withEcpayOperationLock(orderId, () => authorizePaymentInDatabase({
+  const authorizeInput = {
     orderId,
     provider: pendingAuthorization.provider,
     amount: pendingAuthorization.originalAmount,
     providerPayload: formFields
-  }));
+  };
+  return withEcpayOperationLock(orderId, () => (
+    ecpayAuthorizationRepository
+      ? ecpayAuthorizationRepository.authorizeAuthorization(authorizeInput)
+      : authorizePaymentInDatabase(authorizeInput)
+  ), ecpayAuthorizationRepository);
 }
 
-async function captureEcpayAuthorization({ orderId, provider = "ecpay", amount, finalAmount, reason = "ecpay_capture" } = {}) {
-  const context = getPaymentAuthorizationContext({ orderId, provider });
+async function captureEcpayAuthorization({
+  orderId,
+  provider = "ecpay",
+  amount,
+  finalAmount,
+  reason = "ecpay_capture",
+  paymentCaptureRepository,
+  ecpayAuthorizationRepository
+} = {}) {
+  const context = await (paymentCaptureRepository
+    ? paymentCaptureRepository.getAuthorizationContext({ orderId, provider })
+    : getPaymentAuthorizationContext({ orderId, provider }));
   if (!context) return null;
 
   const authorization = context.authorization;
@@ -210,11 +264,11 @@ async function captureEcpayAuthorization({ orderId, provider = "ecpay", amount, 
     ? { RtnCode: "1", RtnMsg: "mock_close_success" }
     : await closeEcpayCreditCardAuthorization({
         merchantTradeNo: authorization.providerAuthorizationId,
-        tradeNo: await getEcpayTradeNo(authorization),
+        tradeNo: await getEcpayTradeNo(authorization, ecpayAuthorizationRepository),
         amount: captureAmount
       });
 
-  const captureResult = capturePaymentInDatabase({
+  const captureInput = {
     orderId: authorization.orderId,
     providerTransactionId: authorization.providerAuthorizationId,
     provider,
@@ -223,7 +277,10 @@ async function captureEcpayAuthorization({ orderId, provider = "ecpay", amount, 
     finalAmount: resolvedFinalAmount,
     reason,
     providerPayload: payload
-  });
+  };
+  const captureResult = await (paymentCaptureRepository
+    ? paymentCaptureRepository.captureAuthorization(captureInput)
+    : capturePaymentInDatabase(captureInput));
 
   if (captureResult?.error) {
     throw new PaymentServiceError(409, captureResult);
@@ -232,8 +289,16 @@ async function captureEcpayAuthorization({ orderId, provider = "ecpay", amount, 
   return { ...captureResult, payload };
 }
 
-async function voidEcpayAuthorization({ orderId, provider = "ecpay", reason = "ecpay_void_authorization" } = {}) {
-  const context = getPaymentAuthorizationContext({ orderId, provider });
+async function voidEcpayAuthorization({
+  orderId,
+  provider = "ecpay",
+  reason = "ecpay_void_authorization",
+  authorizationCancelRepository,
+  ecpayAuthorizationRepository
+} = {}) {
+  const context = await (authorizationCancelRepository
+    ? authorizationCancelRepository.getAuthorizationContext({ orderId, provider })
+    : getPaymentAuthorizationContext({ orderId, provider }));
   if (!context) return null;
   const authorization = context.authorization;
 
@@ -245,17 +310,20 @@ async function voidEcpayAuthorization({ orderId, provider = "ecpay", reason = "e
     ? { RtnCode: "1", RtnMsg: "mock_cancel_success" }
     : await cancelEcpayCreditCardAuthorization({
         merchantTradeNo: authorization.providerAuthorizationId,
-        tradeNo: await getEcpayTradeNo(authorization),
+        tradeNo: await getEcpayTradeNo(authorization, ecpayAuthorizationRepository),
         amount: authorization.authorizedAmount
       });
 
-  const voidResult = voidPaymentInDatabase({
+  const voidInput = {
     orderId: authorization.orderId,
     providerTransactionId: authorization.providerAuthorizationId,
     provider,
     reason,
     providerPayload: payload
-  });
+  };
+  const voidResult = await (authorizationCancelRepository
+    ? authorizationCancelRepository.voidAuthorization(voidInput)
+    : voidPaymentInDatabase(voidInput));
 
   if (voidResult?.error) {
     throw new PaymentServiceError(409, voidResult);
@@ -346,14 +414,18 @@ async function refundEcpayPayment({ authUser, body, paymentRefundRepository } = 
   return { ...completedRefund, provider, payload };
 }
 
-async function getEcpayTradeNo(authorization, paymentRefundRepository) {
+// `repository` may be a paymentRefundRepository (refund path) or an
+// ecpayAuthorizationRepository (capture/void paths) -- both expose the same
+// getLatestProviderEventPayload(lookupInput) shape over the shared payment_provider_events
+// table, so either works interchangeably here.
+async function getEcpayTradeNo(authorization, repository) {
   const lookupInput = {
     resourceType: "authorization",
     resourceId: authorization.id,
     eventType: "confirm_success"
   };
-  const webhookPayload = paymentRefundRepository
-    ? await paymentRefundRepository.getLatestProviderEventPayload(lookupInput)
+  const webhookPayload = repository
+    ? await repository.getLatestProviderEventPayload(lookupInput)
     : getLatestPaymentProviderEventPayload(lookupInput);
   return webhookPayload?.TradeNo || null;
 }

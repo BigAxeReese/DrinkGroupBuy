@@ -32,9 +32,15 @@ function createCustomerOrderWriteRepository(input = {}) {
         "sqliteWriter is required when CUSTOMER_ORDER_WRITE_RUNTIME=sqlite"
       );
     }
+    if (typeof input.sqliteUpdater !== "function") {
+      throw new Error(
+        "sqliteUpdater is required when CUSTOMER_ORDER_WRITE_RUNTIME=sqlite"
+      );
+    }
     return {
       kind: "sqlite",
       createOrder: async (orderInput) => input.sqliteWriter(orderInput),
+      updateOrder: async (orderInput) => input.sqliteUpdater(orderInput),
       close: async () => {},
     };
   }
@@ -47,6 +53,7 @@ function createCustomerOrderWriteRepository(input = {}) {
   return {
     kind: "postgres",
     createOrder: (orderInput) => createPostgresCustomerOrder(database, orderInput),
+    updateOrder: (orderInput) => updatePostgresPendingOrder(database, orderInput),
     close: async () => {
       if (ownsDatabase) await database.close();
     },
@@ -309,6 +316,211 @@ async function createPostgresCustomerOrder(database, input) {
   });
 }
 
+async function updatePostgresPendingOrder(database, input) {
+  const now = input.now || new Date().toISOString();
+
+  return database.transaction(async (transaction) => {
+    const orderResult = await transaction.query(`
+      SELECT id, activity_id, customer_user_id, status, payment_status, submitted_at
+      FROM orders
+      WHERE id = $1
+      FOR UPDATE
+    `, [input.orderId]);
+    const order = orderResult.rows[0];
+    if (!order) return { error: "order_not_found" };
+    if (order.customer_user_id !== input.customerUserId) {
+      return { error: "order_access_denied" };
+    }
+    if (order.status !== "submitted" || order.payment_status !== "pending") {
+      return {
+        error: "order_not_editable",
+        status: order.status,
+        paymentStatus: order.payment_status,
+      };
+    }
+
+    const activityResult = await transaction.query(`
+      SELECT id, store_id, status, maximum_cups
+      FROM group_buy_activities
+      WHERE id = $1
+      FOR UPDATE
+    `, [order.activity_id]);
+    const activity = activityResult.rows[0];
+    if (!activity) return { error: "activity_not_found" };
+    if (!["recruiting", "confirmed"].includes(activity.status)) {
+      return { error: "activity_not_joinable", status: activity.status };
+    }
+
+    const pricedItems = await pricePostgresOrderItems(transaction, activity.store_id, input.items);
+    if (pricedItems.error) return pricedItems;
+    const items = pricedItems.items;
+    const totalCups = items.reduce((sum, item) => sum + item.quantity, 0);
+    const originalAmount = items.reduce((sum, item) => sum + item.subtotal, 0);
+    if (pricedItems.priceChanged) {
+      return {
+        error: "order_price_changed",
+        originalAmount,
+        items: toAuthoritativeOrderItems(items),
+      };
+    }
+
+    const discountValidation = await validatePostgresOrderDiscount(transaction, activity.id, items);
+    if (!discountValidation.valid) return discountValidation;
+
+    const capacityResult = await transaction.query(`
+      SELECT COALESCE(SUM(total_cups), 0)::integer AS authorized_cups
+      FROM orders
+      WHERE activity_id = $1
+        AND id != $2
+        AND payment_status IN ('authorized', 'captured')
+        AND status != 'cancelled'
+    `, [order.activity_id, input.orderId]);
+    const authorizedCups = Number(capacityResult.rows[0]?.authorized_cups ?? 0);
+    if (
+      activity.maximum_cups
+      && authorizedCups + totalCups > Number(activity.maximum_cups)
+    ) {
+      return {
+        error: "capacity_exceeded",
+        maximumCups: Number(activity.maximum_cups),
+        authorizedCups,
+        requestedCups: totalCups,
+      };
+    }
+
+    const pendingAuthorizationsResult = await transaction.query(`
+      SELECT id, status, provider_authorization_id
+      FROM payment_authorizations
+      WHERE order_id = $1
+        AND status = 'pending'
+      FOR UPDATE
+    `, [input.orderId]);
+    const pendingAuthorizations = pendingAuthorizationsResult.rows;
+
+    for (const authorization of pendingAuthorizations) {
+      await transaction.query(`
+        UPDATE payment_authorizations
+        SET status = 'failed',
+            failure_reason = 'order_updated_before_authorization',
+            updated_at = $2
+        WHERE id = $1
+      `, [authorization.id, now]);
+
+      await transaction.query(`
+        INSERT INTO status_history (
+          id, resource_type, resource_id, from_status, to_status, reason, actor_user_id, created_at
+        ) VALUES ($1, 'payment_authorization', $2, 'pending', 'failed', 'order_updated_before_authorization', $3, $4)
+      `, [`status-history-${randomUUID()}`, authorization.id, input.customerUserId, now]);
+    }
+
+    await transaction.query(`
+      DELETE FROM order_item_customizations
+      WHERE order_item_id IN (
+        SELECT id FROM order_items WHERE order_id = $1
+      )
+    `, [input.orderId]);
+    await transaction.query("DELETE FROM order_items WHERE order_id = $1", [input.orderId]);
+
+    const responseItems = [];
+    for (const item of items) {
+      const orderItemId = `order-item-${randomUUID()}`;
+      await transaction.query(`
+        INSERT INTO order_items (
+          id, order_id, menu_item_id, item_name_snapshot, quantity, unit_price_snapshot, subtotal
+        ) VALUES ($1, $2, $3, $4, $5, $6, $7)
+      `, [
+        orderItemId,
+        input.orderId,
+        item.menuItemId,
+        item.itemName,
+        item.quantity,
+        item.unitPrice,
+        item.subtotal,
+      ]);
+
+      const responseCustomizations = [];
+      for (const [index, customization] of item.customizations.entries()) {
+        const customizationId = `order-item-customization-${randomUUID()}`;
+        await transaction.query(`
+          INSERT INTO order_item_customizations (
+            id, order_item_id, customization_option_id, option_type, label_snapshot, price_delta_snapshot, sort_order
+          ) VALUES ($1, $2, $3, $4, $5, $6, $7)
+        `, [
+          customizationId,
+          orderItemId,
+          customization.optionId,
+          customization.optionType,
+          customization.label,
+          customization.priceDelta,
+          index,
+        ]);
+        responseCustomizations.push({
+          id: customizationId,
+          customizationOptionId: customization.optionId,
+          optionType: customization.optionType,
+          label: customization.label,
+          priceDelta: customization.priceDelta,
+        });
+      }
+
+      responseItems.push({
+        id: orderItemId,
+        menuItemId: item.menuItemId,
+        itemName: item.itemName,
+        quantity: item.quantity,
+        unitPrice: item.unitPrice,
+        subtotal: item.subtotal,
+        customizations: responseCustomizations,
+      });
+    }
+
+    const fallbackPurchasePreference = input.fallbackPurchasePreference || "decline_original_price";
+    await transaction.query(`
+      UPDATE orders
+      SET fallback_purchase_preference = $2,
+          total_cups = $3,
+          original_amount = $4,
+          final_amount = NULL,
+          payment_status = 'pending',
+          authorization_status = 'pending',
+          merchant_acceptance_status = 'pending',
+          pickup_status = 'not_ready',
+          updated_at = $5
+      WHERE id = $1
+    `, [input.orderId, fallbackPurchasePreference, totalCups, originalAmount, now]);
+
+    await transaction.query(`
+      INSERT INTO status_history (
+        id, resource_type, resource_id, from_status, to_status, reason, actor_user_id, created_at
+      ) VALUES ($1, 'order', $2, 'submitted', 'submitted', 'customer_update_pending_order', $3, $4)
+    `, [`status-history-${randomUUID()}`, input.orderId, input.customerUserId, now]);
+
+    return {
+      order: {
+        id: input.orderId,
+        activityId: order.activity_id,
+        customerUserId: order.customer_user_id,
+        status: "submitted",
+        fallbackPurchasePreference,
+        totalCups,
+        originalAmount,
+        finalAmount: null,
+        paymentStatus: "pending",
+        authorizationStatus: "pending",
+        merchantAcceptanceStatus: "pending",
+        pickupStatus: "not_ready",
+        submittedAt: toIsoString(order.submitted_at),
+        updatedAt: now,
+        items: responseItems,
+      },
+      failedAuthorizations: pendingAuthorizations.map((authorization) => ({
+        id: authorization.id,
+        providerAuthorizationId: authorization.provider_authorization_id,
+      })),
+    };
+  });
+}
+
 async function pricePostgresOrderItems(database, storeId, inputItems) {
   if (!Array.isArray(inputItems) || inputItems.length === 0) {
     return {
@@ -541,5 +753,6 @@ module.exports = {
   createPostgresCustomerOrder,
   pricePostgresOrderItems,
   resolveCustomerOrderWriteRuntime,
+  updatePostgresPendingOrder,
   validatePostgresOrderDiscount,
 };

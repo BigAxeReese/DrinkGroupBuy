@@ -224,7 +224,7 @@ async function main() {
     assert(requestResult.paymentUrl?.web?.includes("checkout-redirect"), "paymentUrl should point at the checkout-redirect route", requestResult);
     requestedCount += 1;
 
-    const checkoutHtml = renderEcpayCheckoutRedirectHtml(scenarioA.orderId);
+    const checkoutHtml = await renderEcpayCheckoutRedirectHtml(scenarioA.orderId);
     assert(checkoutHtml?.includes("AioCheckOut"), "checkout redirect html should target ECPay AioCheckOut", checkoutHtml);
     assert(checkoutHtml?.includes(requestResult.authorization.providerAuthorizationId), "checkout form should carry the MerchantTradeNo", checkoutHtml);
 

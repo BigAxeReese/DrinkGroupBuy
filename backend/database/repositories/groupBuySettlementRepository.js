@@ -626,11 +626,13 @@ function toIsoString(value) {
 module.exports = {
   claimPostgresSettlementJobs,
   completePostgresSettlement,
+  completePostgresSettlementJob,
   createGroupBuySettlementRepository,
   createPostgresSettlementPlan,
   enqueuePostgresSettlementJob,
   getPostgresCaptureRetryState,
   listPostgresDueActivities,
+  mapJob,
   resolveGroupBuySettlementRuntime,
   reschedulePostgresSettlementJob,
   withPostgresSettlementLock,

@@ -11,16 +11,27 @@ async function cancelMerchantOrder({
   reason,
   now,
   merchantGroupBuyActivityCancelRepository,
-  paymentAuthorizationCancelRepository
+  paymentAuthorizationCancelRepository,
+  ecpayAuthorizationRepository
 }) {
   const idempotencyKey = `merchant-cancel-activity-${activityId}-order-${order.id}`;
   const orderCancelOperation = async () => {
     if (order.payment_status === "authorized") {
       if (isEcpayProvider(order.payment_provider)) {
+        // ECPay's own request/webhook steps are gated by ECPAY_AUTHORIZATION_RUNTIME, a
+        // separate flag from PAYMENT_AUTHORIZATION_CANCEL_RUNTIME (see
+        // ecpayAuthorizationRepository.js). If they're out of sync, an ECPay authorization
+        // row can still live only in SQLite even though paymentAuthorizationCancelRepository
+        // is postgres -- voiding it there would silently find nothing and no-op instead of
+        // erroring, so only use the postgres repositories when both flags agree.
+        const ecpayReposReady = paymentAuthorizationCancelRepository?.kind === "postgres"
+          && ecpayAuthorizationRepository?.kind === "postgres";
         await voidEcpayAuthorization({
           orderId: order.id,
           provider: order.payment_provider,
-          reason: "merchant_cancelled_group_buy_activity"
+          reason: "merchant_cancelled_group_buy_activity",
+          authorizationCancelRepository: ecpayReposReady ? paymentAuthorizationCancelRepository : undefined,
+          ecpayAuthorizationRepository: ecpayReposReady ? ecpayAuthorizationRepository : undefined
         });
       } else {
         await voidLinePayAuthorization({
@@ -56,6 +67,7 @@ async function cancelMerchantGroupBuyActivity(input = {}) {
   const now = input.now || new Date().toISOString();
   const merchantGroupBuyActivityCancelRepository = input.merchantGroupBuyActivityCancelRepository;
   const paymentAuthorizationCancelRepository = input.paymentAuthorizationCancelRepository;
+  const ecpayAuthorizationRepository = input.ecpayAuthorizationRepository;
   const logger = input.logger || console;
 
   const activity = await merchantGroupBuyActivityCancelRepository.getActivityForCancellation({
@@ -97,7 +109,8 @@ async function cancelMerchantGroupBuyActivity(input = {}) {
     reason: input.reason,
     now,
     merchantGroupBuyActivityCancelRepository,
-    paymentAuthorizationCancelRepository
+    paymentAuthorizationCancelRepository,
+    ecpayAuthorizationRepository
   })));
 
   const cancelledOrderIds = [];
@@ -122,7 +135,7 @@ async function cancelMerchantGroupBuyActivity(input = {}) {
     reason: input.reason,
     actorUserId: input.actorUserId,
     now,
-    actionType: "merchant_cancel_group_buy_activity"
+    actionType: input.actionType || "merchant_cancel_group_buy_activity"
   });
 
   return {

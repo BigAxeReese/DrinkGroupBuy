@@ -37,7 +37,7 @@ async function main() {
   const retryNow = "2026-07-30T00:00:31.000Z";
   const expiredLockNow = "2026-07-30T00:02:01.000Z";
 
-  const firstJob = enqueueLinePayReconciliationJob({
+  const firstJob = await enqueueLinePayReconciliationJob({
     authorizationId: "authorization-1",
     orderId: "order-1",
     providerTransactionId: "line-pay-transaction-1",
@@ -47,7 +47,7 @@ async function main() {
     now: initialNow,
     runAfter: initialNow
   });
-  const duplicateJob = enqueueLinePayReconciliationJob({
+  const duplicateJob = await enqueueLinePayReconciliationJob({
     authorizationId: "authorization-1",
     orderId: "order-1",
     providerTransactionId: "line-pay-transaction-1",
@@ -86,7 +86,7 @@ async function main() {
   });
   assert.equal(retryJob.status, "retry_wait");
 
-  const backfilledRetry = enqueueLinePayReconciliationJob({
+  const backfilledRetry = await enqueueLinePayReconciliationJob({
     authorizationId: "authorization-1",
     orderId: "order-1",
     providerTransactionId: "line-pay-transaction-1",

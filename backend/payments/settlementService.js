@@ -65,7 +65,8 @@ async function settleGroupBuyActivityUnlocked(input = {}) {
     now,
     settlementRepository,
     paymentCaptureRepository,
-    authorizationCancelRepository
+    authorizationCancelRepository,
+    ecpayAuthorizationRepository
   } = input;
   const planInput = { activityId, actorUserId, force, now };
   const plan = settlementRepository
@@ -107,13 +108,23 @@ async function settleGroupBuyActivityUnlocked(input = {}) {
       // A thrown error naturally falls through to the generic failure handling in the
       // catch block, since it won't carry the LINE-Pay-specific captureFailure markers.
       if (isEcpayProvider(order.paymentProvider)) {
+        // See the matching comment in merchantActivityCancelService.js: ECPAY_AUTHORIZATION_
+        // RUNTIME is an independent flag from PAYMENT_CAPTURE_RUNTIME / PAYMENT_AUTHORIZATION_
+        // CANCEL_RUNTIME, so only trust the postgres capture/cancel repositories for an ECPay
+        // authorization when all three agree -- otherwise the row may still live in SQLite
+        // only, and querying Postgres for it would silently find nothing.
+        const ecpayReposReady = paymentCaptureRepository?.kind === "postgres"
+          && authorizationCancelRepository?.kind === "postgres"
+          && ecpayAuthorizationRepository?.kind === "postgres";
         if (order.action === "capture") {
           const captureResult = await captureEcpayAuthorization({
             orderId: order.id,
             provider: order.paymentProvider,
             amount: order.captureAmount,
             finalAmount: order.finalAmount,
-            reason: `deadline_settlement_${order.actionReason}`
+            reason: `deadline_settlement_${order.actionReason}`,
+            paymentCaptureRepository: ecpayReposReady ? paymentCaptureRepository : undefined,
+            ecpayAuthorizationRepository: ecpayReposReady ? ecpayAuthorizationRepository : undefined
           });
           results.push({
             orderId: order.id,
@@ -127,7 +138,9 @@ async function settleGroupBuyActivityUnlocked(input = {}) {
         const voidResult = await voidEcpayAuthorization({
           orderId: order.id,
           provider: order.paymentProvider,
-          reason: `deadline_settlement_${order.actionReason}`
+          reason: `deadline_settlement_${order.actionReason}`,
+          authorizationCancelRepository: ecpayReposReady ? authorizationCancelRepository : undefined,
+          ecpayAuthorizationRepository: ecpayReposReady ? ecpayAuthorizationRepository : undefined
         });
         results.push({
           orderId: order.id,
@@ -397,7 +410,8 @@ async function runDueGroupBuySettlements(input = {}) {
         now,
         settlementRepository: input.settlementRepository,
         paymentCaptureRepository: input.paymentCaptureRepository,
-        authorizationCancelRepository: input.authorizationCancelRepository
+        authorizationCancelRepository: input.authorizationCancelRepository,
+        ecpayAuthorizationRepository: input.ecpayAuthorizationRepository
       });
 
       if (!result) {
@@ -528,7 +542,8 @@ async function runDueGroupBuySettlementJobs(input = {}) {
         now,
         settlementRepository: input.settlementRepository,
         paymentCaptureRepository: input.paymentCaptureRepository,
-        authorizationCancelRepository: input.authorizationCancelRepository
+        authorizationCancelRepository: input.authorizationCancelRepository,
+        ecpayAuthorizationRepository: input.ecpayAuthorizationRepository
       });
       const retryable = !result
         || result.error === "settlement_retry_pending"
@@ -602,7 +617,8 @@ function startDeadlineSettlementScheduler(input = {}) {
         now: input.nowProvider ? input.nowProvider() : undefined,
         settlementRepository: input.settlementRepository,
         paymentCaptureRepository: input.paymentCaptureRepository,
-        authorizationCancelRepository: input.authorizationCancelRepository
+        authorizationCancelRepository: input.authorizationCancelRepository,
+        ecpayAuthorizationRepository: input.ecpayAuthorizationRepository
       });
 
       if (summary.queuedCount > 0 || summary.failedCount > 0) {
