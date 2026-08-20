@@ -21,8 +21,11 @@ updated: 2026-08-15
 - `##` = top-level module, `-` = nested item (2-space indent per level, depth unlimited).
 - Each line may carry `[status]` (one of exactly: `完成`／`進行中`／`待處理`／`暫緩`), `(date)`, `— note` — all optional.
 - An item's own line may be followed by an indented `> ` line for a longer explanation (multiple `>` lines join into one paragraph).
-  - `>` 說明 = what the item **is / does** — stable, usually written once.
-  - `— note` (or the item's own line) = current progress, blockers, evidence — updates as work proceeds.
+  - `>` 說明 = what the item **is / does** — stable, usually written once. **Write for a non-technical reader**: plain language, no unexplained jargon/abbreviations (API, schema, migration, etc.) — spell out what a technical term means in one clause if it's needed. Only skip the description when a layperson would understand the item from its name alone, not just a developer.
+    - **Not a narrative.** Never write it as "originally thought X, then discovered Y, so did Z" — that's process storytelling, not a description of what the item is. Test: could this sentence be written before the work even started? If not, it's narrative — move it to `— note`.
+    - Bad (narrative, belongs in `— note` instead): `> 原本以為要寫一支複雜的資料搬家工具，深入確認後發現目前根本沒有真實商家資料...`
+    - Good (stable, could've been written on day one): `> 把現在開發資料庫裡可以沿用的資料，安全地變成正式環境一開始就有的起始資料的規劃與準備工作。`
+  - `— note` (or the item's own line) = current progress, blockers, evidence — updates as work proceeds. This is where "originally X, then discovered Y" narrative belongs, if it's worth keeping at all.
 - Parent nodes' completion is computed from descendant leaf status, not from the parent's own `[status]` tag.
 
 ## Granularity
