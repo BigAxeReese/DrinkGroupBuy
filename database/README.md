@@ -155,7 +155,7 @@ npm run postgres-reliability:multiprocess
 ## 注意事項
 
 - `drink-group-buy-dev.sqlite` 是本機產物，不要上傳 GitHub。
-- **`drink-group-buy-dev.sqlite` 目前資料已過期，跟現在的 `seed-dev.sql` 對不上**（2026-08-20 用 `scripts/order-api-smoke.js` 測試時發現 `store-001` 查不到）。日常開發已永久切到 PostgreSQL，這個檔案主要只影響還在用 SQLite 的獨立 smoke test 腳本；要修好需要重新用 `db:init` + `db:seed` 重建這個檔案（會整個重建、不是增量修正），屬於會改變本機檔案狀態的操作，先記錄、待確認後再處理。
+- `drink-group-buy-dev.sqlite` 於 2026-08-21 用 `db:init` + `db:seed` 重建過一次（見下方對應日期記錄），修正了 2026-08-20 發現的資料過期問題。
 - `database/test/` 是展示/測試資料，不是正式資料庫規格。
 - LINE Pay 真正上線前，付款狀態、webhook、capture、void、refund 都需要更完整的記錄與測試。
 
@@ -175,3 +175,11 @@ npm run postgres-reliability:multiprocess
 延續上一筆記錄的「`backend/.env` 全域生效」現象，這次又在 `scripts/order-api-smoke.js` 發現同一類問題：它用子行程（`spawn`）啟動自己的 backend 並只明確指定 2 個 `*_RUNTIME` 為 `sqlite`，其餘變數（含 `DATABASE_URL`）沿用 `...process.env`，於是被 `backend/.env` 悄悄補上其餘變數為 `postgres`，兩邊混用觸發啟動期的一致性檢查而直接噴錯。已比照 `merchant-activity-cancel-service-smoke.js` 的做法，在這支腳本的子行程 env 明確列出全部 21 個 `*_RUNTIME` 為 `sqlite`、`DATABASE_URL` 明確清空。修好後這支腳本本身還有另一個無關的既有問題——`database/drink-group-buy-dev.sqlite` 這份本機檔案的資料已經跟目前 `seed-dev.sql` 對不上（`store-001` 查不到），屬於本機檔案過期，不是這次改動造成，未在這次範圍內處理。
 
 新增欄位本身：`stores` 增加 `pickup_closing_time`（`HH:MM` 24 小時制文字，可為 NULL）——`database/migrations/006_store_pickup_closing_time_postgres.sql` 已套用到本機 PostgreSQL；`database/schema.sql` 已同步更新供未來全新建立的 SQLite 資料庫使用。目前所有既有種子店家維持 NULL（等同 24 小時營業、不設取餐時段上限），避免影響既有測試對「取餐時間沒有上限」的假設；已用真實 API 呼叫暫時把 `store-001` 設成 `22:00` 驗證「允許」「拒絕」「剛好卡在邊界」三種情境皆正確後，改回 NULL。詳見 `backend/pickup/pickupWindow.js`（含對應 `backend/pickup/pickupWindow.test.js`）。
+
+## 2026-08-21 重建過期的 `drink-group-buy-dev.sqlite`
+
+延續上一筆記錄提到、但當時未處理的問題：這個檔案不只資料過期（`store-001` 查不到），資料表結構也過期——`pickup_closing_time` 這種新欄位是改在 `schema.sql`，只有全新建立的 SQLite 資料庫才會套用，不會回頭幫既有檔案加欄位；若之後有流程用這個舊檔案建立團購活動，會直接噴 `no such column` 的 SQL 錯誤，比原本「店家查不到」更嚴重。
+
+另外實測確認：`node:sqlite` 的 `DatabaseSync` 在檔案不存在時會**默默建立一個空白檔案**（不報錯），因此考慮過的「乾脆刪掉」方案其實比放著不管更糟——`ecpay-smoke.js`、`pickup-credential-smoke.js`、`pickup-expiration-smoke.js`、`settlement-smoke.js`、`refund-request-smoke.js`、`merchant-activity-cancel-service-smoke.js`、`order-api-smoke.js` 這 7 支腳本全部只假設這個檔案已經有完整資料表結構、自己完全不會建表，刪除會讓這 7 支全部改成噴 `no such table` 的錯誤，而不是現在只有 1 支因為資料過期而壞。
+
+重建前先備份至 `database/backups/`（沿用既有備份命名慣例），接著執行 `npm run db:init`（依 `schema.sql` 重建資料表結構）與 `npm run db:seed`（匯入 `seed-dev.sql`）。重建後確認：`PRAGMA integrity_check` = `ok`、`PRAGMA foreign_key_check` 無違規、`pickup_closing_time` 欄位存在、`store-001` 資料正確（2 個菜單品項）。上述 7 支腳本與 `npm test`（63/63）全數重新驗證通過。
