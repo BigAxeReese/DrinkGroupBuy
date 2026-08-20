@@ -56,8 +56,33 @@ async function main() {
       AUTH_DEV_MODE: "true",
       AUTH_TOKEN_SECRET: "local-api-smoke-secret",
       DRINK_GROUP_BUY_DB_PATH: databasePath,
+      // Explicitly pinned to sqlite (and DATABASE_URL cleared) so this test's own backend
+      // subprocess isn't silently pulled onto the real dev PostgreSQL database by
+      // backend/.env's permanent postgres defaults, which backend/auth.js's loadLocalEnv
+      // loads into any env var not already present -- same class of gap fixed in
+      // scripts/merchant-activity-cancel-service-smoke.js earlier.
+      DATABASE_URL: "",
+      AUTH_PROFILE_READ_RUNTIME: "sqlite",
       STORE_MENU_READ_RUNTIME: "sqlite",
+      STORE_DIRECTORY_READ_RUNTIME: "sqlite",
       GROUP_BUY_ACTIVITY_READ_RUNTIME: "sqlite",
+      GROUP_BUY_ACTIVITY_WRITE_RUNTIME: "sqlite",
+      MERCHANT_MENU_RUNTIME: "sqlite",
+      CUSTOMER_ORDER_WRITE_RUNTIME: "sqlite",
+      CUSTOMER_ORDER_READ_RUNTIME: "sqlite",
+      PAYMENT_AUTHORIZATION_REQUEST_RUNTIME: "sqlite",
+      PAYMENT_AUTHORIZATION_CONFIRM_RUNTIME: "sqlite",
+      PAYMENT_AUTHORIZATION_CANCEL_RUNTIME: "sqlite",
+      CUSTOMER_ORDER_CANCEL_RUNTIME: "sqlite",
+      MANUAL_LINE_PAY_REPAYMENT_RUNTIME: "sqlite",
+      PAYMENT_RELIABILITY_JOB_RUNTIME: "sqlite",
+      ECPAY_AUTHORIZATION_RUNTIME: "sqlite",
+      PAYMENT_CAPTURE_RUNTIME: "sqlite",
+      GROUP_BUY_SETTLEMENT_RUNTIME: "sqlite",
+      PICKUP_CREDENTIAL_RUNTIME: "sqlite",
+      PAYMENT_REFUND_RUNTIME: "sqlite",
+      ORDER_REVISION_RUNTIME: "sqlite",
+      MERCHANT_ACTIVITY_CANCEL_RUNTIME: "sqlite",
     },
     windowsHide: true
   });
