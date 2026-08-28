@@ -1157,8 +1157,9 @@ export function AppNavigator() {
       const result = await cancelMerchantGroupBuyActivityApi(groupBuyActivityId, { reason });
       actionsRef.current.cancelMerchantGroupBuyActivityFromApi(result.activity, result.cancelledOrderIds);
       return result;
-    }
-  }), [cartItems, groupBuyActivities, orders, selectedCustomerId, selectedMerchantStoreId]);
+    },
+    refreshBusinessTime: businessTime.refresh
+  }), [cartItems, groupBuyActivities, orders, selectedCustomerId, selectedMerchantStoreId, businessTime.refresh]);
   const actionsRef = useRef(actions);
   actionsRef.current = actions;
 

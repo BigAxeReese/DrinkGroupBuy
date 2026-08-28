@@ -521,3 +521,28 @@
 | Mobile 端移除是否留下死碼或壞掉的畫面邏輯 | `PaymentAuthorizationScreen.jsx` 的 `selectedProvider` state、付款方式選擇區塊、`getProviderDisplayName` 與所有 `=== "ecpay"` 分支已一併移除並簡化成單一 LINE Pay 路徑；`grep -ri ecpay` 整個 `mobile/` 目錄下已無殘留 |
 
 **驗證限制**：`npm test` 84/84（不需要即時 PostgreSQL 連線的單元測試）全過；額外實際啟動 backend 對接真實 PostgreSQL 16，確認一般路由（`GET /api/stores`）正常回應、ECPay 路由回應變成通用 404-等效的 503（非 ECPay 專屬訊息），驗證後已關閉這個臨時啟動的測試 process，未影響使用者原本的 dev session。Mobile 端因為是 JSX，這次只做語法層面與逐行核對，沒有實際在模擬器／瀏覽器操作畫面確認付款流程——之後如果要對付款流程做一次真機或 Web 預覽的人工操作驗證，建議連同這次改動一起走一遍「送出訂單 → 進入付款畫面 → 完成 LINE Pay 授權」的完整路徑。
+
+## 2026-08-28 — 管理員無條件取消團購 + 後台團購列表分歷史／進行中
+
+**範圍**：`backend/payments/merchantActivityCancelService.js`（新增 `input.unconditional` 參數，繞過「僅限 recruiting 狀態」與「截止前 30 分鐘鎖定」兩道守門條件）、`backend/server.js`（兩個既有管理員取消路由——`DELETE /api/admin/group-buy-activities/:id` 與 `POST /admin/group-buy-activities/:id/cancel`——改傳 `unconditional: true`；`renderAdminDashboardBody` 重構為「進行中團購」／「歷史團購」兩個區塊；同時補上前一輪 `/code-review` 發現的 `/admin/refund-requests` 維護頁面缺少登入檢查的漏洞修復）、`scripts/merchant-activity-cancel-service-smoke.js`（新增兩個情境：管理員無條件取消繞過狀態與截止鎖定、非管理員呼叫仍維持原本限制）
+**觸發原因**：使用者回報實機操作卡住——後台想取消一個 `ordering`／`failed` 狀態的團購被擋下「這個團購目前的狀態無法取消」；使用者要求管理員可無條件取消，並「決定是否退款」
+
+### 設計決策（用 AskUserQuestion 跟使用者確認過，不是我自行假設）
+
+已請款（`payment_status = captured`）的訂單，這次**完全不動**——不取消訂單、不觸發退款。使用者明確表示「退款應該要另外設一個管理金錢的地方不能跟其他綁再一起」，所以退款維持走既有的 `refundRequestService.js`（商家申請、管理員核准）這條獨立流程，不併入取消團購的邏輯。技術上這剛好也是既有 `listEligibleOrders` 查詢原本就有的行為（`payment_status NOT IN ('captured', 'refunded')` 早就排除已請款訂單），所以這次不需要改查詢，只需要確保「繞過狀態檢查」不會意外把這個既有的排除條件也繞過去。
+
+### 發現
+
+沒有找到信心度達到門檻（8/10 以上）的漏洞。
+
+### 沒發現問題的部分（已交叉驗證）
+
+| 面向 | 檢查結果 |
+|------|----------|
+| `unconditional` 旁路是否可能被非管理員觸發 | 全 repo 搜過 `cancelMerchantGroupBuyActivity(` 的三個呼叫點：商家自助取消（line 888）未傳這個參數、沿用原本的 `canManageStore` 真實檢查，不受影響；兩個管理員路由分別掛在 `authUser.roles.includes("admin")`（JSON API）與 `requireAdminWebUser`（web 表單，未登入會被導去 `/admin/login`）後面，兩道守門都是既有邏輯，這次沒有改動 |
+| 繞過狀態檢查是否連帶繞過活動不存在／店家歸屬檢查 | `activity_not_found` 與 `canManageStore(activity.store_id)` 兩個檢查在 `input.unconditional` 判斷之前就先執行、不受這個旗標影響（管理員路由的 `canManageStore` 本來就固定回傳 `true`，是既有設計，不是這次新增） |
+| 已請款訂單是否會被這次改動意外波及 | 用 smoke test 實際跑過一個「`ordering` 狀態＋1 筆待處理訂單＋1 筆已請款訂單」的情境，管理員無條件取消後確認：待處理訂單被取消，已請款訂單的 `status`／`payment_status` 完全沒被改動；另外用瀏覽器對真實 PostgreSQL dev 環境實際操作驗證了一次（見下方「驗證限制」），結果一致 |
+| 管理後台列表重構（HTML 拆成兩區塊）是否有新的 XSS/跳脫遺漏 | 逐一比對重構前後：`activity.title`／`activity.status`／店名／取消原因／`csrfToken` 全部維持原本的 `escapeHtml(...)`，新增的兩個區塊標題只插入數字（陣列長度），沒有插入任何使用者可控字串 |
+| 是否意外弱化商家自助取消原本的保護 | smoke test 新增情境 7 明確驗證：同樣的非 recruiting 狀態，商家自助取消（不傳 `unconditional`）仍然照舊被 `activity_not_cancellable` 擋下 |
+
+**驗證限制**：`npm test` 92/92 全過；`merchant-activity-cancel-service:smoke`（會重建本機 SQLite dev 資料庫）經使用者明確同意後執行，執行前已備份、執行後確認 `integrity_check=ok` 且 0 筆 foreign key 違反。另外用瀏覽器實際登入 `/admin` 對**真實 PostgreSQL dev 資料庫**操作驗證了取消 `ordering`／`failed` 狀態團購兩種情境，過程中不慎誤解了這個專案的實際 runtime（以為團購讀寫走 SQLite，其實永久走 PostgreSQL），導致兩筆真實種子測試資料被意外取消；已在使用者確認後用一次性、範圍精確的 SQL 修正腳本把這兩筆活動的 `status`／`cancellation_reason`／`updated_at` 還原，並刪除因此多出的 `status_history`／`audit_logs` 紀錄，還原後重新讀取確認資料與異動前一致。

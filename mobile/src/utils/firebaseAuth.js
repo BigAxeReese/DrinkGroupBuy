@@ -66,10 +66,7 @@ export function useFirebaseGoogleLogin() {
     return toFirebaseLoginResult(credentialResult);
   }
 
-  return {
-    signInWithGoogle,
-    redirectUri: null
-  };
+  return { signInWithGoogle };
 }
 
 export async function signOutFirebaseUser() {

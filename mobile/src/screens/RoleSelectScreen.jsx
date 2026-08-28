@@ -31,7 +31,7 @@ function FirebaseRoleSelectScreen(props) {
 }
 
 function RoleSelectContent({ navigation, isDevAuthMode, googleLogin = null }) {
-  const { redirectUri, signInWithGoogle } = googleLogin || {};
+  const { signInWithGoogle } = googleLogin || {};
   const [loginError, setLoginError] = useState("");
   const [isLoggingIn, setIsLoggingIn] = useState(false);
   const [signedInUser, setSignedInUser] = useState(null);
@@ -223,13 +223,6 @@ function RoleSelectContent({ navigation, isDevAuthMode, googleLogin = null }) {
         登入代表你同意<Text style={styles.termsLink}>服務條款</Text>與<Text style={styles.termsLink}>隱私政策</Text>
       </Text>
       <Text style={styles.version}>DrinkGroupBuy Prototype</Text>
-
-      {isDevAuthMode && redirectUri ? (
-        <View style={styles.redirectCard}>
-          <Text style={styles.redirectLabel}>開發回呼網址</Text>
-          <Text selectable style={styles.redirectValue}>{redirectUri}</Text>
-        </View>
-      ) : null}
     </ScrollView>
   );
 }
@@ -732,24 +725,6 @@ const styles = StyleSheet.create({
     fontSize: 15,
     fontWeight: "700",
     textAlign: "center"
-  },
-  redirectCard: {
-    gap: 5,
-    marginTop: 16,
-    borderRadius: 6,
-    backgroundColor: "#eef2ff",
-    padding: 10
-  },
-  redirectLabel: {
-    color: "#475569",
-    fontSize: 11,
-    fontWeight: "900"
-  },
-  redirectValue: {
-    color: "#1e3a8a",
-    fontSize: 12,
-    fontWeight: "800",
-    lineHeight: 17
   },
   pressed: {
     opacity: 0.72

@@ -428,6 +428,91 @@ async function main() {
       brokenOrderAfter
     );
 
+    // Scenario 6: admin unconditional cancel bypasses both the status guard (activity is
+    // "ordering", not "recruiting") and the deadline-lock window, but still leaves a captured
+    // order completely untouched -- refunding it is a separate, deliberate action through the
+    // refund-request flow, not something this cascade should do on the admin's behalf.
+    const adminScenario = buildScenario("admin-unconditional", 10 * 60 * 1000);
+    withDatabase((database) => {
+      insertScenario(database, adminScenario);
+      database.prepare(`
+        UPDATE group_buy_activities SET status = 'ordering' WHERE id = ?
+      `).run(adminScenario.activityId);
+      const now = new Date().toISOString();
+      insertUser(database, `${adminScenario.id}-admin`, "admin", now);
+      insertUser(database, `${adminScenario.id}-customer-1`, "customer", now);
+      insertUser(database, `${adminScenario.id}-customer-2`, "customer", now);
+      insertOrder(database, {
+        id: `order-${adminScenario.id}-pending`,
+        activityId: adminScenario.activityId,
+        customerUserId: `${adminScenario.id}-customer-1`,
+        paymentStatus: "pending",
+        authorizationStatus: "pending",
+        withAuthorization: false
+      }, now);
+      insertOrder(database, {
+        id: `order-${adminScenario.id}-captured`,
+        activityId: adminScenario.activityId,
+        customerUserId: `${adminScenario.id}-customer-2`,
+        paymentStatus: "captured",
+        authorizationStatus: "captured",
+        withAuthorization: true,
+        authorizationRowStatus: "captured"
+      }, now);
+    });
+    const adminResult = await cancelMerchantGroupBuyActivity({
+      activityId: adminScenario.activityId,
+      reason: "admin_override",
+      actorUserId: `${adminScenario.id}-admin`,
+      now: new Date().toISOString(),
+      canManageStore: alwaysAllow,
+      actionType: "admin_cancel_group_buy_activity",
+      unconditional: true,
+      merchantGroupBuyActivityCancelRepository,
+      paymentAuthorizationCancelRepository
+    });
+    assert(
+      !adminResult.error,
+      "admin unconditional cancel should succeed despite non-recruiting status and deadline lock",
+      adminResult
+    );
+    assert(adminResult.activity.status === "cancelled", "activity should be cancelled", adminResult.activity);
+    assert(
+      adminResult.cancelledOrderIds.length === 1 && adminResult.cancelledOrderIds[0] === `order-${adminScenario.id}-pending`,
+      "only the pending order should be cancelled",
+      adminResult
+    );
+    const adminCapturedOrder = getOrderRow(`order-${adminScenario.id}-captured`);
+    assert(
+      adminCapturedOrder.status !== "cancelled" && adminCapturedOrder.payment_status === "captured",
+      "captured order must stay completely untouched by admin unconditional cancel",
+      adminCapturedOrder
+    );
+
+    // Scenario 7: without `unconditional`, the exact same non-recruiting status is still rejected
+    // -- confirms the bypass is opt-in per call, not a global loosening of the guard.
+    const nonAdminScenario = buildScenario("non-admin-still-blocked", 60 * 60 * 1000);
+    withDatabase((database) => {
+      insertScenario(database, nonAdminScenario);
+      database.prepare(`
+        UPDATE group_buy_activities SET status = 'ordering' WHERE id = ?
+      `).run(nonAdminScenario.activityId);
+    });
+    const stillBlockedResult = await cancelMerchantGroupBuyActivity({
+      activityId: nonAdminScenario.activityId,
+      reason: "food_shortage",
+      actorUserId: nonAdminScenario.merchantUserId,
+      now: new Date().toISOString(),
+      canManageStore: alwaysAllow,
+      merchantGroupBuyActivityCancelRepository,
+      paymentAuthorizationCancelRepository
+    });
+    assert(
+      stillBlockedResult.error === "activity_not_cancellable",
+      "merchant self-cancel (no `unconditional`) must still be rejected for a non-recruiting activity",
+      stillBlockedResult
+    );
+
     console.log("Merchant activity cancel service smoke test passed.");
     console.log(`happy-path: cancelledOrderCount=${result.cancelledOrderCount}, failedOrderIds=${result.failedOrderIds.length}`);
   } finally {

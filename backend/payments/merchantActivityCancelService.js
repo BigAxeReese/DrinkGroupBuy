@@ -67,14 +67,22 @@ async function cancelMerchantGroupBuyActivity(input = {}) {
       idempotent: true
     };
   }
-  if (activity.status !== "recruiting") {
-    return { error: "activity_not_cancellable", status: activity.status };
-  }
+  // Admin cancel (input.unconditional) bypasses both the "recruiting only" and deadline-lock
+  // guards below -- it's an explicit operator override for stuck/in-progress group buys, not a
+  // merchant self-service action, so the protections that exist to stop a merchant backing out
+  // on customers right before a deadline don't apply. Orders that already captured payment stay
+  // untouched either way (listEligibleOrders excludes captured/refunded) -- refunding those is a
+  // separate, deliberate action through the refund-request flow, not bundled into this cascade.
+  if (!input.unconditional) {
+    if (activity.status !== "recruiting") {
+      return { error: "activity_not_cancellable", status: activity.status };
+    }
 
-  const deadline = Date.parse(activity.deadline_at);
-  const lockMinutes = Number(activity.withdrawal_lock_minutes ?? ACTIVITY_LOCK_MINUTES_DEFAULT);
-  if (!Number.isNaN(deadline) && deadline - Date.parse(now) <= lockMinutes * 60_000) {
-    return { error: "activity_locked_by_deadline", deadlineAt: activity.deadline_at, lockMinutes };
+    const deadline = Date.parse(activity.deadline_at);
+    const lockMinutes = Number(activity.withdrawal_lock_minutes ?? ACTIVITY_LOCK_MINUTES_DEFAULT);
+    if (!Number.isNaN(deadline) && deadline - Date.parse(now) <= lockMinutes * 60_000) {
+      return { error: "activity_locked_by_deadline", deadlineAt: activity.deadline_at, lockMinutes };
+    }
   }
 
   const eligibleOrders = await merchantGroupBuyActivityCancelRepository.listEligibleOrders({

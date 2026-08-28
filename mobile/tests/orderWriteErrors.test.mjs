@@ -11,6 +11,10 @@ source = source.replace(
   'import { formatDeadlineLabel } from "./deadlineTime";',
   'const formatDeadlineLabel = (value) => `<formatted:${value}>`;'
 );
+source = source.replace(
+  'import { lookupErrorMessage } from "./errorMessageLookup";',
+  'const lookupErrorMessage = (code, table, fallback) => table[code] ?? fallback;'
+);
 const errorsModule = await import(
   `data:text/javascript;base64,${Buffer.from(source).toString("base64")}`
 );

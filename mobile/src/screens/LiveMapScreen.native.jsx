@@ -7,13 +7,14 @@ import { useActivityMapFilters } from "../hooks/useActivityMapFilters";
 import { useDevLocationConfig } from "../hooks/useDevLocationConfig";
 import { mapCenter, mapDefaults } from "../mock/mapConfig";
 import { reportAppliedDevLocation } from "../utils/devLocationControl";
-import { buildStoreMapStores, getStoreMapDestination } from "../utils/groupBuyActivityStores";
+import { buildStoreMapStores, getStoreMapDestination, getStoreMarkerLabel } from "../utils/groupBuyActivityStores";
 
 export function LiveMapScreen({ navigation, appState, selectedAuthUserId }) {
   const mapRef = useRef(null);
   const lastReportSignatureRef = useRef("");
   const zoom = mapDefaults.zoom;
   const [selectedStoreId, setSelectedStoreId] = useState(null);
+  const [filteredOutStoreName, setFilteredOutStoreName] = useState(null);
   const [locationPermission, setLocationPermission] = useState("not_required");
   const [locationPermissionDismissed, setLocationPermissionDismissed] = useState(false);
   const [userPosition, setUserPosition] = useState({
@@ -53,9 +54,10 @@ export function LiveMapScreen({ navigation, appState, selectedAuthUserId }) {
 
   useEffect(() => {
     if (selectedStoreId && !visibleStoreIds.has(selectedStoreId)) {
+      setFilteredOutStoreName(mapStores.find((store) => store.id === selectedStoreId)?.name ?? null);
       setSelectedStoreId(null);
     }
-  }, [visibleStoreIds, selectedStoreId]);
+  }, [visibleStoreIds, selectedStoreId, mapStores]);
 
   useEffect(() => {
     let active = true;
@@ -175,9 +177,12 @@ export function LiveMapScreen({ navigation, appState, selectedAuthUserId }) {
             <Marker
               key={store.id}
               coordinate={{ latitude: store.latitude, longitude: store.longitude }}
-              title={store.name}
+              title={getStoreMarkerLabel(store)}
               description={hasRecruitingGroupBuyActivity ? "有招募中的團購" : "目前沒有招募中團購"}
-              onPress={() => setSelectedStoreId(store.id)}
+              onPress={() => {
+                setFilteredOutStoreName(null);
+                setSelectedStoreId(store.id);
+              }}
               pinColor={hasRecruitingGroupBuyActivity ? "#facc15" : "#2563eb"}
             />
           );
@@ -233,6 +238,23 @@ export function LiveMapScreen({ navigation, appState, selectedAuthUserId }) {
               <Text style={styles.locationPermissionPromptSecondaryText}>先不要，使用預設位置</Text>
             </Pressable>
           </View>
+        </View>
+      ) : null}
+
+      {!selectedStore && filteredOutStoreName ? (
+        <View style={styles.storeCard}>
+          <View style={styles.storeInfo}>
+            <Text style={styles.storeMeta}>
+              {filteredOutStoreName} 已不符合目前的篩選條件，卡片已自動關閉。
+            </Text>
+          </View>
+          <Pressable
+            accessibilityRole="button"
+            onPress={() => setFilteredOutStoreName(null)}
+            style={styles.viewGroupBuyActivitiesButton}
+          >
+            <Text style={styles.viewGroupBuyActivitiesText}>知道了</Text>
+          </Pressable>
         </View>
       ) : null}
 

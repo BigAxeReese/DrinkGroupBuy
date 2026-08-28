@@ -91,6 +91,10 @@ export function MerchantGroupBuyActivityCreateScreen({ navigation, actions, memb
       return;
     }
 
+    // Dev/test only: pulls in a business-time clock the operator may have just moved forward via
+    // the dev console, so a stale client-side snapshot doesn't get rejected as "in the past" by
+    // the server's fresh clock. No-ops outside dev mode (see useDevBusinessTime's `enabled` gate).
+    await actions.refreshBusinessTime?.();
     const startDate = getBusinessNow();
     const deadlineError = getDeadlineValidationError(startDate, deadlineDate);
     if (deadlineError) {

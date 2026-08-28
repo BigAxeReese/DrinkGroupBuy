@@ -523,8 +523,11 @@ const server = http.createServer(async (request, response) => {
     ) {
       // /admin/* is the server-rendered web console (browser navigation, not fetch), so it needs
       // an HTML response here -- the JSON error below would otherwise replace the whole page with
-      // an unstyled blob instead of the console's normal error banner.
+      // an unstyled blob instead of the console's normal error banner. Still gated on admin login
+      // like every other /admin route -- requireAdminWebUser redirects to /admin/login itself.
       if (url.pathname.startsWith("/admin")) {
+        const adminUser = await requireAdminWebUser(request, response);
+        if (!adminUser) return;
         sendHtml(response, 503, renderAdminPage({
           title: "系統維護中",
           bodyHtml: renderAdminNotice({ type: "error", text: "後端資料庫遷移尚未完成，這個功能暫時無法使用，請稍後再試。" }),
@@ -1740,6 +1743,7 @@ const server = http.createServer(async (request, response) => {
           now: businessClock.nowIso(),
           canManageStore: () => true,
           actionType: "admin_cancel_group_buy_activity",
+          unconditional: true,
           merchantGroupBuyActivityCancelRepository,
           paymentAuthorizationCancelRepository
         });
@@ -2001,6 +2005,7 @@ const server = http.createServer(async (request, response) => {
           now: businessClock.nowIso(),
           canManageStore: () => true,
           actionType: "admin_cancel_group_buy_activity",
+          unconditional: true,
           merchantGroupBuyActivityCancelRepository,
           paymentAuthorizationCancelRepository
         });
@@ -2543,21 +2548,20 @@ ${ADMIN_THEME_VARIABLES}
 </html>`;
 }
 
-function renderAdminDashboardBody({ activities, notice, csrfToken }) {
-  const noticeHtml = renderAdminNotice(notice);
-  if (activities.length === 0) {
-    return `${noticeHtml}<section class="empty">目前沒有團購。</section>`;
-  }
+// Matches docs/AI-status-candidates.md's group_buy_activity state machine: completed/failed/
+// cancelled are terminal (no further transitions out), everything else (draft/recruiting/
+// confirmed/ordering/ready_for_pickup) is still an active, in-progress state.
+const HISTORICAL_ACTIVITY_STATUSES = new Set(["completed", "failed", "cancelled"]);
 
-  const cardsHtml = activities.map((activity) => {
-    const isCancelled = activity.status === "cancelled";
-    const cancelForm = isCancelled ? "" : `
-      <form class="row" method="POST" action="/admin/group-buy-activities/${encodeURIComponent(activity.id)}/cancel" onsubmit="return confirm('確定要取消這個團購嗎？此動作會一併取消底下的訂單並撤銷付款授權。');">
-        <input type="hidden" name="csrfToken" value="${escapeHtml(csrfToken)}" />
-        <input type="text" name="reason" placeholder="取消原因（選填）" style="flex:1; min-width:160px;" />
-        <button type="submit" class="btn-danger">取消團購</button>
-      </form>`;
-    return `
+function renderAdminActivityCard(activity, csrfToken) {
+  const isCancelled = activity.status === "cancelled";
+  const cancelForm = isCancelled ? "" : `
+    <form class="row" method="POST" action="/admin/group-buy-activities/${encodeURIComponent(activity.id)}/cancel" onsubmit="return confirm('確定要取消這個團購嗎？此動作會取消尚未請款的訂單並撤銷付款授權；已完成請款的訂單不受影響，如需退款請至退款審核處理。');">
+      <input type="hidden" name="csrfToken" value="${escapeHtml(csrfToken)}" />
+      <input type="text" name="reason" placeholder="取消原因（選填）" style="flex:1; min-width:160px;" />
+      <button type="submit" class="btn-danger">取消團購</button>
+    </form>`;
+  return `
     <div class="card">
       <h2>${escapeHtml(activity.title)} <span class="badge">${escapeHtml(activity.status)}</span></h2>
       <p class="meta">店家：${escapeHtml(activity.store?.name || activity.storeId)}</p>
@@ -2565,9 +2569,29 @@ function renderAdminDashboardBody({ activities, notice, csrfToken }) {
       ${activity.cancellationReason ? `<p class="meta" style="color:#b91c1c;">取消原因：${escapeHtml(activity.cancellationReason)}</p>` : ""}
       ${cancelForm}
     </div>`;
-  }).join("\n");
+}
 
-  return `${noticeHtml}${cardsHtml}`;
+function renderAdminDashboardBody({ activities, notice, csrfToken }) {
+  const noticeHtml = renderAdminNotice(notice);
+  if (activities.length === 0) {
+    return `${noticeHtml}<section class="empty">目前沒有團購。</section>`;
+  }
+
+  const inProgressActivities = activities.filter((activity) => !HISTORICAL_ACTIVITY_STATUSES.has(activity.status));
+  const historicalActivities = activities.filter((activity) => HISTORICAL_ACTIVITY_STATUSES.has(activity.status));
+
+  const inProgressHtml = inProgressActivities.length === 0
+    ? `<section class="empty">目前沒有進行中的團購。</section>`
+    : inProgressActivities.map((activity) => renderAdminActivityCard(activity, csrfToken)).join("\n");
+  const historicalHtml = historicalActivities.length === 0
+    ? `<section class="empty">目前沒有歷史團購。</section>`
+    : historicalActivities.map((activity) => renderAdminActivityCard(activity, csrfToken)).join("\n");
+
+  return `${noticeHtml}
+  <h3 class="section-title">進行中團購（${inProgressActivities.length} 筆）</h3>
+  ${inProgressHtml}
+  <h3 class="section-title">歷史團購（${historicalActivities.length} 筆）</h3>
+  ${historicalHtml}`;
 }
 
 function renderAdminRefundRequestsBody({ pendingRequests, reviewedRequests, notice, csrfToken }) {
