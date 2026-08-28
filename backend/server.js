@@ -2496,6 +2496,9 @@ ${ADMIN_THEME_VARIABLES}
   input[type="text"]:focus { outline: none; border-color: var(--line-strong); box-shadow: 0 0 0 1px var(--line-strong); }
   section.empty { color: var(--muted); font-size: 13px; padding: 10px 0; }
   h3.section-title { font-size: 13px; color: var(--muted); margin: 22px 0 8px; }
+  .dashboard-columns { display: grid; grid-template-columns: 1fr 1fr; gap: 24px; align-items: start; }
+  .dashboard-columns h3.section-title { margin-top: 0; }
+  @media (max-width: 720px) { .dashboard-columns { grid-template-columns: 1fr; } }
 </style>
 </head>
 <body>
@@ -2588,10 +2591,16 @@ function renderAdminDashboardBody({ activities, notice, csrfToken }) {
     : historicalActivities.map((activity) => renderAdminActivityCard(activity, csrfToken)).join("\n");
 
   return `${noticeHtml}
-  <h3 class="section-title">進行中團購（${inProgressActivities.length} 筆）</h3>
-  ${inProgressHtml}
-  <h3 class="section-title">歷史團購（${historicalActivities.length} 筆）</h3>
-  ${historicalHtml}`;
+  <div class="dashboard-columns">
+    <div>
+      <h3 class="section-title">進行中團購（${inProgressActivities.length} 筆）</h3>
+      ${inProgressHtml}
+    </div>
+    <div>
+      <h3 class="section-title">歷史團購（${historicalActivities.length} 筆）</h3>
+      ${historicalHtml}
+    </div>
+  </div>`;
 }
 
 function renderAdminRefundRequestsBody({ pendingRequests, reviewedRequests, notice, csrfToken }) {
