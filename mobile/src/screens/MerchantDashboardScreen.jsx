@@ -165,7 +165,7 @@ export function MerchantDashboardScreen({ navigation, appState, actions, memberA
           </View>
           <View style={styles.flex}>
             <Text style={styles.storeName}>{merchantStore?.name ?? "我的店家"}</Text>
-            <Text style={styles.storeSubtitle}>商家首頁 · Prototype 身分：{merchantStoreId}</Text>
+            <Text style={styles.storeSubtitle}>商家首頁</Text>
           </View>
           <Pressable accessibilityRole="button" onPress={memberAction} style={styles.memberPill}>
             <Text style={styles.memberPillText}>會員</Text>

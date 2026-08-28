@@ -76,7 +76,6 @@ async function main() {
       CUSTOMER_ORDER_CANCEL_RUNTIME: "sqlite",
       MANUAL_LINE_PAY_REPAYMENT_RUNTIME: "sqlite",
       PAYMENT_RELIABILITY_JOB_RUNTIME: "sqlite",
-      ECPAY_AUTHORIZATION_RUNTIME: "sqlite",
       PAYMENT_CAPTURE_RUNTIME: "sqlite",
       GROUP_BUY_SETTLEMENT_RUNTIME: "sqlite",
       PICKUP_CREDENTIAL_RUNTIME: "sqlite",

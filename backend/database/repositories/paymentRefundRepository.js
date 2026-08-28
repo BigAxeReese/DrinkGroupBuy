@@ -61,7 +61,7 @@ function createPaymentRefundRepository(input = {}) {
 }
 
 // ---------------------------------------------------------------------------
-// Provider refund execution (LINE Pay / ECPay share this same layer today).
+// Provider refund execution.
 // ---------------------------------------------------------------------------
 
 async function createPendingRefundPostgres(database, input = {}) {
@@ -481,7 +481,7 @@ async function listRefundRequestsForAdminPostgres(database, input = {}) {
 
 // ---------------------------------------------------------------------------
 // Read helpers used by the merchant refund-request approval workflow (server-side
-// store-ownership check and provider resolution before dispatching to LINE Pay/ECPay).
+// store-ownership check and provider resolution before dispatching the refund).
 // ---------------------------------------------------------------------------
 
 async function getOrderStoreIdPostgres(database, input = {}) {
@@ -504,9 +504,9 @@ async function getLatestAuthorizationForOrderPostgres(database, input = {}) {
   return result.rows[0] ? mapPaymentAuthorization(result.rows[0]) : null;
 }
 
-// Used by ECPay refund to recover the provider's TradeNo from the confirm webhook payload
-// recorded earlier by paymentAuthorizationConfirmRepository -- ECPay's refund API needs it
-// alongside MerchantTradeNo, and it's never stored as its own column.
+// Reads back a provider's raw event payload recorded earlier by
+// paymentAuthorizationConfirmRepository, for a refund flow that needs a provider-specific
+// field from that payload which isn't stored as its own column.
 async function getLatestProviderEventPayloadPostgres(database, input = {}) {
   const result = input.eventType
     ? await database.query(`

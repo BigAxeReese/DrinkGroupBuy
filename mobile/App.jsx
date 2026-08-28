@@ -1,13 +1,16 @@
 import { StatusBar } from "expo-status-bar";
-import { Platform, SafeAreaView, StyleSheet, View } from "react-native";
+import { Platform, StyleSheet, View } from "react-native";
+import { SafeAreaProvider, SafeAreaView } from "react-native-safe-area-context";
 import { AppNavigator } from "./src/navigation/AppNavigator";
 
 export default function App() {
   const app = (
-    <SafeAreaView style={styles.safeArea}>
-      <StatusBar style="dark" backgroundColor="#f6f8fb" translucent={false} />
-      <AppNavigator />
-    </SafeAreaView>
+    <SafeAreaProvider>
+      <SafeAreaView style={styles.safeArea} edges={["top", "bottom", "left", "right"]}>
+        <StatusBar style="dark" backgroundColor="#f6f8fb" translucent={false} />
+        <AppNavigator />
+      </SafeAreaView>
+    </SafeAreaProvider>
   );
 
   if (Platform.OS === "web") {

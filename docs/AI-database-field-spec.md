@@ -341,7 +341,7 @@ PostgreSQL draft 另有 `phone_verified_at`、`email_verified_at`、`last_login_
 | 1   | `id`                        | 預授權編號          | TEXT    | PK        | 建議使用 `pay_auth_` 加唯一後綴                                       | `pay_auth_001`              |
 | 2   | `order_id`                  | 訂單編號            | TEXT    | FK, INDEX | References `orders(id)`                                               | `order_001`                 |
 | 3   | `order_revision_id`         | 訂單修改版本編號    | TEXT    | FK        | 可為 NULL；修改訂單重新預授權時使用                                   | `order_revision_001`        |
-| 4   | `provider`                  | 金流服務商          | TEXT    |           | `line_pay`, `mock_line_pay`, `ecpay`, `mock_ecpay`（`ecpay`/`mock_ecpay` 為 2026-08-05 新增） | `line_pay`                  |
+| 4   | `provider`                  | 金流服務商          | TEXT    |           | `line_pay`, `mock_line_pay`（`ecpay`/`mock_ecpay` 曾於 2026-08-05 新增，隨 ECPay 移除已於 2026-08-27 從允許值移除） | `line_pay`                  |
 | 5   | `payment_flow`              | 付款流程            | TEXT    |           | `authorization`, `direct_repayment`                                   | `direct_repayment`          |
 | 6   | `status`                    | 付款處理狀態        | TEXT    |           | `pending`, `authorized`, `captured`, `authorization_voided`, `failed` | `authorized`                |
 | 7   | `original_amount`           | 原始金額            | INTEGER |           | `>= 0`                                                                | `280`                       |
@@ -382,7 +382,7 @@ PostgreSQL draft 另有 `phone_verified_at`、`email_verified_at`、`last_login_
 | 2   | `payment_capture_id`       | 請款編號          | TEXT    | FK     | References `payment_captures(id)`        | `pay_capture_001`           |
 | 3   | `payment_authorization_id` | 預授權編號        | TEXT    | FK     | References `payment_authorizations(id)`  | `pay_auth_001`              |
 | 4   | `order_id`                 | 訂單編號          | TEXT    | FK     | References `orders(id)`                  | `order_001`                 |
-| 5   | `provider`                 | 金流服務商        | TEXT    |        | `line_pay`, `mock_line_pay`, `ecpay`, `mock_ecpay` | `line_pay`                  |
+| 5   | `provider`                 | 金流服務商        | TEXT    |        | `line_pay`, `mock_line_pay` | `line_pay`                  |
 | 6   | `status`                   | 退款狀態          | TEXT    |        | `pending`, `refunded`, `failed`          | `refunded`                  |
 | 7   | `refund_amount`            | 退款金額          | INTEGER |        | `> 0`，不得超過該請款剩餘可退款金額       | `248`                       |
 | 8   | `provider_refund_id`       | Provider 退款編號 | TEXT    |        | 成功前可為 NULL                          | `linepay-refund-123`        |

@@ -57,6 +57,40 @@ export function formatDeadlineLabel(deadlineAt) {
   return formatDateTimeInput(date);
 }
 
+const WEEKDAY_LABELS = ["日", "一", "二", "三", "四", "五", "六"];
+
+// Pickup start/end usually share a calendar day (the window is a fixed 3 hours, see
+// backend/pickup/pickupWindow.js), so the date is normally shown once instead of repeating it
+// for both ends like formatDeadlineLabel would. But stores without a configured closing time
+// have no cap on how late pickupStartAt can be, so the 3-hour window can cross midnight --
+// show both dates in that case instead of implying the end time is on the same day.
+export function formatPickupTimeRangeLabel(pickupStartAt, pickupEndAt) {
+  const start = new Date(pickupStartAt);
+  const end = new Date(pickupEndAt);
+  if (Number.isNaN(start.getTime()) || Number.isNaN(end.getTime())) {
+    return [pickupStartAt, pickupEndAt].filter(Boolean).join(" - ");
+  }
+  const startDatePart = `${pad(start.getMonth() + 1)}/${pad(start.getDate())}（${WEEKDAY_LABELS[start.getDay()]}）`;
+  if (isSameCalendarDay(start, end)) {
+    return `${startDatePart} ${formatTimeOfDay(start)} - ${formatTimeOfDay(end)}`;
+  }
+  const endDatePart = `${pad(end.getMonth() + 1)}/${pad(end.getDate())}（${WEEKDAY_LABELS[end.getDay()]}）`;
+  return `${startDatePart} ${formatTimeOfDay(start)} - ${endDatePart} ${formatTimeOfDay(end)}`;
+}
+
+function isSameCalendarDay(left, right) {
+  return left.getFullYear() === right.getFullYear()
+    && left.getMonth() === right.getMonth()
+    && left.getDate() === right.getDate();
+}
+
+function formatTimeOfDay(date) {
+  const hours24 = date.getHours();
+  const meridiem = hours24 >= 12 ? "下午" : "上午";
+  const hours12 = hours24 % 12 || 12;
+  return `${meridiem}${pad(hours12)}:${pad(date.getMinutes())}`;
+}
+
 export function formatDateTimeInput(date) {
   const hours24 = date.getHours();
   const meridiem = hours24 >= 12 ? "\u4e0b\u5348" : "\u4e0a\u5348";

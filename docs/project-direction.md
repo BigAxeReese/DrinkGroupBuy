@@ -45,7 +45,7 @@ DrinkGroupBuy 是 Android-first 的手搖飲團購 App，讓顧客探索附近�
 - Backend：Node.js 內建 HTTP server，業務狀態與權限由 Backend 管理。
 - Database：SQLite 是本機開發預設；PostgreSQL 是正式多人環境方向，透過 repository runtime 開關逐切片驗證，不雙寫。
 - Firebase 只負責身份驗證，不作主要交易資料庫。
-- LINE Pay 是主要付款 provider；ECPay 是備援。付款、訂單、結算、取餐與 audit 資料不得由 Mobile 直接寫入。
+- LINE Pay 是唯一付款 provider（曾並存的備援 ECPay 已於 2026-08-27 完全移除）。付款、訂單、結算、取餐與 audit 資料不得由 Mobile 直接寫入。
 - Secret 只放本機環境檔；任何 `EXPO_PUBLIC_*` 都視為可被 client 讀取的公開設定。
 
 系統實際協作方式見 `docs/AI-architecture.md`；精確欄位、status 與未決策事項分別見 `docs/AI-database-field-spec.md`、`docs/AI-status-candidates.md`、`docs/open-questions.md`。

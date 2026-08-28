@@ -363,4 +363,161 @@
 | 告警內容 | 本次只把既有 `logAlertRequiredJobs` 列入可測介面並驗證篩選行為，沒有擴張日誌欄位；告警仍只輸出工作識別、狀態、次數與既有序列化錯誤，不輸出環境憑證 |
 | 數值邊界 | Mobile 顯示 helper 只接受非負整數；缺少或不合法的訂單最終金額顯示為待同步，不用預設 0 偽裝成已結算金額 |
 
+---
+
+## 2026-08-22 — 新增管理員網頁後台（`/admin`）
+
+**範圍**：`backend/server.js` 新增的 `/admin`、`/admin/login`、`/admin/logout`、`/admin/group-buy-activities/:id/cancel`、`/admin/refund-requests`、`/admin/refund-requests/:id/approve`、`/admin/refund-requests/:id/reject` 路由與相關 helper 函式（`getAdminWebUser`、`requireAdminWebUser`、`verifyAdminWebPassword`、`buildAdminCsrfToken`、`verifyAdminCsrfToken`、`buildAdminSessionCookie` 等）；`backend/auth.js` 的既有 `createAuthToken`／`verifyAuthToken` 未改動，只是被新入口重用。Mobile 端同時移除 `AdminDashboardScreen.jsx`、`AdminRefundRequestsScreen.jsx` 與相關 API client 函式，純刪除不影響本次安全範圍。
+**觸發原因**：使用者要求把管理員功能從手機 App 移到獨立網頁後台；改動涉及退款核准（金流）與新的登入/session 機制，依規則主動觸發
+
+### 發現
+
+| 嚴重度 | 位置 | 問題 | 建議修法 | 狀態 |
+|--------|------|------|------|------|
+| 中 | `backend/server.js`（`buildAdminSessionCookie`／`buildAdminSessionClearCookie`） | 新的 admin session cookie 一開始沒有加 `Secure` 屬性；這個 cookie 帶的是跟既有 JSON admin API 共用的同一把簽章 token，若未來透過非 HTTPS 存取（例如內部 staging 網址、被 SSL-strip），有被網路中間人攔截並重放取得完整管理員權限的風險。信心度 7/10（在正式環境用 TLS 部署時風險才成立，本機開發本來就是明文 HTTP） | 加上 `Secure`，比照檔案裡既有的 `NODE_ENV === "production"` 條件式寫法，本機開發維持可用、正式環境自動加固 | 已修（當下就修，`adminCookieSecureAttribute()`） |
+
+### 沒發現問題的部分（已交叉驗證）
+
+| 面向 | 檢查結果 |
+|------|----------|
+| XSS | 新的 admin HTML 頁面裡，所有外部可控字串（活動標題、店名、取消原因、退款店家/訂單 ID/申請原因/駁回原因、從 query string 讀出的 flash 訊息、登入錯誤訊息、CSRF token 本身）都有經過既有 `escapeHtml()` 才插進 HTML；沒有插值的只有數字（杯數、人數）跟已經 `encodeURIComponent()` 處理過、用在雙引號屬性裡的 ID |
+| CSRF | 所有會改資料的表單（取消團購、核准/駁回退款）都要求一次性 CSRF token，token 是 `HMAC-SHA256(sessionToken, AUTH_SESSION_SECRET)`，沒有 cookie 就算不出來；沒帶或帶錯 token 一律 403，已用真實 HTTP 請求驗證擋下 |
+| 認證繞過 | `/admin/login` 用 `crypto.timingSafeEqual` 做固定時間密碼比對，沒有預設密碼／空密碼可以繞過的路徑；`ADMIN_WEB_PASSWORD` 沒設定時直接判定密碼錯誤，不會意外開放 |
+| 授權 | 每個受保護路由都先呼叫 `requireAdminWebUser` guard，session 解出來的 user 一定要 `roles.includes("admin")` 才算數；沒有其他角色可以誤觸這些路由 |
+| 業務邏輯是否被繞過 | 取消團購／核准退款／駁回退款都直接重用既有 `cancelMerchantGroupBuyActivity`／`approveRefundRequest`／`rejectRefundRequest`，完全沒有另外寫一套簡化版邏輯；連 Postgres/SQLite 執行模式一致性 boot-time 檢查（`isSqliteOrderDependentRoute`／`isSettlementRouteReadyForPostgres`）都特地把新路由納入同一個既有 gate，不會繞過 |
+| SQL injection | 本次沒有新增或修改任何 SQL 查詢，新路由都是呼叫既有 repository／service 函式 |
+| Session 固定攻擊 | 每次登入都重新 `createAuthToken`，沒有讓 client 指定或延用舊 token 的路徑 |
+
+**驗證方式**：以真實 HTTP 請求（非模擬）驗證登入成功／密碼錯誤／未登入導向登入頁／CSRF 缺失回 403／CSRF 正確但目標不存在回傳正確錯誤訊息／登出清除 cookie；未對真實資料觸發一次成功的取消或退款核准（避免動到開發資料庫裡的真實資料）。`npm test` 69/69 全數通過（未改動任何被測邏輯）。
+
+---
+
+## 2026-08-22（同日追加）— 呼應上一筆：`/code-review` 發現的修復
+
+**範圍**：對同一批 `/admin` 網頁後台程式碼做的後續修改，回應 `/code-review`（xhigh 強度，10 個角度）找到的 15 個問題裡跟這份安全記錄相關的幾項：把 `verifyAdminWebPassword`／`verifyAdminCsrfToken` 改成呼叫 `backend/auth.js` 新匯出的 `safeEqual()`（不再各自重複寫一份 timing-safe 比對）；把 `getAdminWebUser` 改成呼叫新的共用 `getUserFromToken()`（跟既有 `getAuthenticatedUser` 共用同一套 token 解析邏輯）；`POST /admin/login` 改成直接 `getById(ADMIN_WEB_USER_ID)` 查詢，不再呼叫只該給開發模式身份切換器用的 `listDevUsers()`；把三個會改資料的表單（取消團購、核准／駁回退款）的 CSRF 檢查抽成共用的 `readCsrfVerifiedAdminFormBody()`；把 `GET /admin/refund-requests` 補進原本漏掉的 PostgreSQL 執行模式一致性檢查（`isSqliteOrderDependentRoute`／`isSettlementRouteReadyForPostgres`）；這個檢查若觸發，`/admin/*` 路徑現在會回傳有樣式的 HTML 錯誤頁，不再是沒有樣式的原始 JSON。
+**確認是否解決**：這批修改全部是重構（保留原本行為，只是把重複的邏輯抽成共用函式）或是「新增檢查/新增資訊揭露」（例如把原本悄悄吞掉的訂單取消失敗清單顯示出來），沒有任何一項是放寬權限、放寬驗證或縮小檢查範圍——已用真實 HTTP 請求重新驗證登入、CSRF 拒絕、cancel 對不存在活動回傳翻譯過的中文錯誤訊息（而非原始英文代碼）、refund reject 對不存在申請回傳正確錯誤訊息、登出流程都正常，`npm test` 70/70（含新增的跨午夜取餐時間標籤測試）全數通過。判定：上一筆記錄的所有發現都已解決，不需要另外開一輪完整安全審查。
+
 **驗證限制**：`npm test` 53 項、`group-buy-activity-read:smoke`、`check:sql-safety`、SQLite `integrity_check`／`foreign_key_check`、Mobile Babel 解析與 Web export 已通過；沒有呼叫真實 LINE Pay／ECPay、沒有對 live PostgreSQL 執行 migration，也尚未由使用者在 Android 模擬器人工確認最終結算卡片排版。
+
+---
+
+## 2026-08-23 — 管理員網頁後台改為支援多組密碼
+
+**範圍**：`backend/server.js` 的 `verifyAdminWebPassword`；`backend/.env` 的 `ADMIN_WEB_PASSWORD`（單一密碼）改名為 `ADMIN_WEB_PASSWORDS`（逗號分隔的多組密碼）
+**觸發原因**：使用者要求把單一密碼換掉，並新增 3 組密碼供不同人使用（共 4 組）
+
+### 發現
+
+沒有找到信心度達到門檻（8/10 以上）的漏洞。
+
+### 沒發現問題的部分
+
+| 面向 | 檢查結果 |
+|------|----------|
+| 比對方式 | 每組密碼都用既有的 `safeEqual()`（timing-safe）逐一比對，用 `reduce` 而非 `.some()`——即使某一組提早比對成功，後面的組別還是會照樣比對完，避免比對次數／時間差洩漏「submit 的密碼命中第幾組」這種側channel 資訊 |
+| 密碼強度 | 4 組密碼都是使用者自訂、非本工具產生，強度判斷交由使用者自行負責；沒有把任何一組寫死在程式碼裡（只在 `backend/.env`，不進 git） |
+| 身份模型 | 4 組密碼都對應同一個管理員身份（`user-admin-001`），沒有因為多組密碼而分裂出多個身份或多套權限，audit log 仍然是同一個 `actorUserId`，沒有新增稽核缺口 |
+| 舊密碼失效 | 舊的單一密碼 `UGznhaQHBr0W` 已從設定檔移除，改用真實 HTTP 請求驗證確認舊密碼跟隨意亂猜的密碼一樣會被拒絕（`error=1`），4 組新密碼各自都能成功登入 |
+
+**驗證方式**：以真實 HTTP 請求驗證 4 組新密碼皆可登入、舊密碼與亂猜密碼皆被拒絕。`npm test` 70/70 全數通過（未改動任何被測邏輯）。
+
+---
+
+## 2026-08-24 — 本機測試控制台併入 /admin 登入、個人中心新增真正的登出
+
+**範圍**：`backend/server.js`（`/dev-console/*` route gate、`buildAdminSessionCookie`／`buildAdminSessionClearCookie` 的 cookie Path）；`mobile/src/navigation/AppNavigator.js`（新增 `navigation.logout()`）；新檔 `mobile/src/screens/ProfileScreen.jsx`；`mobile/src/screens/RoleSelectScreen.jsx`（登入後把完整 user 物件往下傳）
+**觸發原因**：使用者要求「本機測試控制台是後台的一部分，進入要密碼」，把原本只靠 loopback 限制、不需要密碼的 `/dev-console` 併入 `/admin` 的登入狀態；順帶把個人中心的「登出」從假登出（只是換畫面）改成真的清掉登入憑證
+
+### 發現
+
+| 嚴重度 | 位置 | 問題 | 建議修法 | 狀態 |
+|--------|------|------|----------|------|
+| 中 | `mobile/src/navigation/AppNavigator.js`（新增的 `logout()`） | `logout()` 原本只清掉 token／角色／會員資料，沒清本機快取的 `orders`／`cartItems`／`paymentAuthorizations`；這些資料用一個只有 4 筆對照的固定表（`RoleSelectScreen.jsx` 的 `backendCustomerToPrototypeCustomer`）分桶，任何不在表裡的真實帳號都會落到同一個 fallback 桶（`"customer-yinji"`）。同一台裝置上，A 登出後 B 用不同真實帳號登入，會看到 A 留下的購物車與訂單/付款紀錄 | 在 `logout()` 裡一併清空 `orders`／`cartItems`／`paymentAuthorizations` 並重設 `selectedCustomerId`／`selectedMerchantStoreId` 為預設值 | 已修 |
+
+### 沒發現問題的部分
+
+| 面向 | 檢查結果 |
+|------|----------|
+| `/dev-console` 存取控制完整性 | 逐一核對 `/dev-console` 區塊裡的每一條 route（頁面、靜態檔、`api/status`、`api/accounts`、`api/business-time` GET/PUT、`api/config` GET/PUT、`api/config/reset`、`api/events`），全部落在新加的 `requireAdminWebUser` 檢查之後，沒有漏掉任何一條 |
+| App 呼叫路徑沒被誤鎖 | Mobile App 本身直接呼叫的 `GET /dev-console/api/app/config`／`POST /dev-console/api/app/report`（`mobile/src/utils/devLocationControl.js`）刻意排除在新的密碼檢查之外，仍只靠原本的 loopback + `AUTH_DEV_MODE` 把關；用不帶任何 cookie 的 `curl` 實測仍回 200，人看的頁面／控制 API 在同樣條件下正確被導去登入頁 |
+| Cookie Path 放寬（`/admin` → `/`） | `HttpOnly`／`SameSite=Lax`／正式環境的 `Secure` 屬性都沒變；確認 `parseCookies(request)[ADMIN_SESSION_COOKIE_NAME]` 只在 `/admin/*` 跟 `/dev-console/*` 這兩處被讀取，其他路由不會意外因為 cookie 送達範圍變大而多長出新的攻擊面 |
+| 兩支例外路由本身的資料外洩風險 | `api/app/config`／`api/app/report` 讓同機任何呼叫者可讀寫別的測試帳號模擬定位，但這個能力併入前就已存在（僅限本機 + 開發模式），這次沒有擴大 |
+| `ProfileScreen.jsx` 資料範圍 | 只顯示 `currentUserProfile` 這個 prop 本身帶的資料（登入當下後端已回傳、屬於目前登入者自己），沒有另外呼叫任何 API 或顯示其他角色/其他使用者的資料 |
+
+**驗證方式**：以真實 HTTP 請求驗證：`/admin` 未登入導向登入頁、登入後 `/dev-console` 頁面與帳號列表可直接開啟（同一顆 session cookie）、`api/app/config` 全程不帶 cookie 仍回 200、`api/accounts` 不帶 cookie 回 302 導向登入頁。Web 預覽走過完整流程：登入 → 個人中心顯示真實資料 → 登出 → 回到登入畫面，且登出後本機快取的訂單／購物車／付款紀錄狀態確認已重設。
+
+---
+
+## 2026-08-24（同日追加）— 正式告警通知管道（ALERT_WEBHOOK_URL）
+
+**範圍**：新檔 `backend/payments/alertNotifier.js`；呼叫端 `backend/payments/reliabilityService.js`（`logAlertRequiredJobs`、reconciliation scheduler 的頂層 catch）、`backend/payments/settlementService.js`（settlement scheduler 的 per-job alert 迴圈與頂層 catch）
+**觸發原因**：呼應 `docs/AI-security-review-log.md` 之前一筆與 `PROGRESS.md` 都記錄過的「正式告警通知管道 [待處理]」——原本付款背景工作失敗只寫進伺服器本機的結構化 log，這次補上一個可設定的外部 webhook，讓失敗能主動推播出去
+
+### 發現
+
+| 嚴重度 | 位置 | 問題 | 建議修法 | 狀態 |
+|--------|------|------|----------|------|
+| 中 | `backend/payments/settlementService.js`（`runDueGroupBuySettlementJobs` 把整個 `result` 存成 job 的 `lastError`，含 `plan.orders`／`results`／`failures` 三個陣列） | 結算排程失敗時，`job.lastError` 帶的是**整個團購活動所有訂單**的明細（每筆訂單的 `customerUserId`、`providerTransactionId`、金額），跟 LINE Pay 對帳排程刻意精簡過的 `{message, linePayPayload}` 不一樣。這份完整明細被原封不動送進 `sendPaymentReliabilityJobAlert`，等於把一整批顧客與金流識別碼從「只存在伺服器本機」擴大到「送到操作員自己接的外部 webhook（Slack／Discord 之類）」，範圍比原本只寫本機 log 大很多 | 在 `alertNotifier.js` 送出前先摘要化：拿掉 `plan`／`results`／`failures` 這三個陣列本身，只保留筆數（`orderCount`／`resultCount`／`failureCount`），其餘欄位（`error` 代碼等）照舊送出 | 已修 |
+
+### 沒發現問題的部分
+
+| 面向 | 檢查結果 |
+|------|----------|
+| 是否外洩密鑰／憑證 | 追過 `linePayClient.js`／`ecpayClient.js` 的錯誤物件組成，`lastError`／`linePayPayload` 只會帶 provider 回傳的代碼／訊息，從沒帶過 channel secret、HashKey/HashIV、bearer token 這類機密 |
+| `ALERT_WEBHOOK_URL` 本身是否可被外部操控 | 純粹讀 `backend/.env`，跟使用者輸入無關；依既有審查慣例，環境變數視為受信任設定，不算攻擊面 |
+| Webhook 呼叫是否會反過來影響金流邏輯 | `postAlertWebhook` 的回傳值只用在自己的 log／回傳結果，沒有被拿去判斷任何工作是否算完成、是否要重試——webhook 掛掉或回應異常不會讓真正的付款/結算判斷跟著錯 |
+| 未設定時的行為 | `ALERT_WEBHOOK_URL` 沒設就完全不呼叫 `fetch`，`npm test`／sandbox 環境不會意外對外發送任何請求 |
+
+**驗證方式**：新增 7 個單元測試（未設定時不呼叫、成功送出、webhook 回應非 2xx、webhook 連線失敗、排程層級失敗、以及這次修復的「settlement 明細被摘要化、顧客 ID／交易序號不再出現在送出內容裡」），與既有測試共 77/77 全數通過；重新啟動 backend 確認模組正常載入、排程照常啟動。
+
+---
+
+## 2026-08-26 — ECPay webhook 可被用來偽造「已付款」訂單，新增後端總開關
+
+**範圍**：`backend/payments/ecpayService.js`（`handleEcpayReturnWebhook`，唯讀調查，本次未修改）、`backend/payments/ecpayClient.js`（`getEcpayConfig`／`verifyEcpayCheckMacValue`，唯讀調查，本次未修改）、`backend/server.js`（新增 `isEcpayEnabled()`，四支 ECPay 路由 `/api/payments/ecpay/request`／`checkout-redirect`／`return`／`client-back` 加上總開關擋門）、`.env.example`（新增 `ECPAY_ENABLED=false` 說明）
+**觸發原因**：使用者直接提問「檢查是否能透過未完成的 ecpay 漏洞去動到訂單」，非 CLAUDE.md 規則自動觸發，屬於手動要求的調查
+**呼應**：2026-08-20 那筆審查過 ECPay 的 Postgres 支援，範圍是「webhook 會不會被重放造成重複請款/授權」並確認沒問題；這次發現的是兩個不同的問題（見下），2026-08-20 的結論不受影響、也沒有被推翻，只是那次審查範圍沒有涵蓋到這兩點
+
+### 發現
+
+| 嚴重度 | 位置 | 問題 | 建議修法 | 狀態 |
+|--------|------|------|----------|------|
+| 高 | `backend/payments/ecpayService.js:209`（`handleEcpayReturnWebhook`） | 只驗證 `CheckMacValue` 簽章是否合法，從未檢查 ECPay 真正代表付款結果的 `RtnCode` 欄位，簽章一過就無條件呼叫 `authorizeAuthorization` 把訂單標記為已付款；往下追過 `backend/db.js`（`authorizeLinePayPaymentInDatabase`）與 Postgres 版 `confirmPostgresAuthorization` 兩條路徑，皆沒有任何地方檢查過 `RtnCode`。顧客只要在 ECPay 真實頁面上讓卡片刷卡失敗，ECPay 仍會送出一個「簽章正確、內容為失敗」的通知，系統會誤判為付款成功——不需要偽造任何東西，走真實 ECPay 流程即可觸發 | 在 `authorizeAuthorization` 之前，額外檢查 `formFields.RtnCode === "1"`，非成功一律回傳失敗、不得呼叫任何會改動訂單狀態的函式 | 待處理（本次先用下面的總開關擋住整條路徑，尚未修這個檢查本身） |
+| 高 | `backend/payments/ecpayClient.js:17-30`（`getEcpayConfig`） | `ECPAY_ENV` 沒有明確設成 `"production"` 時預設為 `"stage"`，此時 `hashKey`／`hashIv` 會 fallback 成 ECPay 官方開發者文件公開發布的測試密鑰（`STAGE_HASH_KEY`／`STAGE_HASH_IV`），任何人都查得到、算得出合法的 `CheckMacValue`。已核對目前 `backend/.env` 實際設定確實是 `ECPAY_ENV=stage` 且未另外設定 `ECPAY_HASH_KEY`／`ECPAY_HASH_IV`，符合觸發條件；`ECPAY_RETURN_URL` 也設成一個公開的 Cloudflare tunnel 網址，代表這條路徑理論上可被公開存取。攻擊者需先合法擁有一筆自己訂單的待付款 ECPay 授權（`/request` 本身有做歸屬與金額檢查，無法幫別人的訂單建立），之後可完全跳過 ECPay 頁面，直接偽造簽章正確的 POST 打到 `/return`，讓自己的訂單被標記為已付款 | 正式環境要求 `ECPAY_ENV` 必須明確設定且不得預設 fallback 到 stage 金鑰；或至少在 `assertEcpayConfig` 加上「正式環境偵測到仍在使用已知的公開 stage 金鑰」時直接拒絕啟動 | 待處理（本次先用下面的總開關擋住整條路徑，尚未修這個 fallback 本身） |
+
+### 已完成的緩解措施（本次實際改動）
+
+上面兩個問題都還沒有直接修正核心邏輯，但確認：手機 App 隱藏 ECPay 付款入口（`PROGRESS.md`）**沒有**同步在後端擋掉這幾支路由，直接用 HTTP 呼叫完全打得到，等於「藏起來」目前沒有提供實際防護。考量 ECPay 業務上已經是「備援、暫緩」優先度，且要正確修好上面兩個問題還需要重新過一次完整的 ECPay 端對端測試，這次先加一個後端總開關：新增 `isEcpayEnabled()`（讀取 `ECPAY_ENABLED`，預設 `false`），四支路由（`request`／`checkout-redirect`／`return`／`client-back`）在最前面就擋下，未經明確設定 `ECPAY_ENABLED=true` 一律回傳「暫停使用」，不會呼叫任何會讀寫訂單的邏輯。
+
+### 沒發現問題的部分
+
+| 面向 | 檢查結果 |
+|------|----------|
+| 金額能否被偽造 | `handleEcpayReturnWebhook` 用的是資料庫裡既有 `pendingAuthorization.originalAmount`，不是採信偽造請求裡的金額欄位，所以上面的漏洞只能讓「已存在、金額正確」的待付款授權變成已付款，無法無中生有偽造任意金額的訂單 |
+| 新開關本身是否引入新的注入或資料外洩 | `isEcpayEnabled()` 只讀取受信任的環境變數；四處新增的 503 回應重用既有 `buildLinePayResultPage`／`buildLinePayAppReturnUrl`／`toSafeScriptString`，跟原本程式碼路徑用的是同一套跳脫邏輯，`orderId` 沒有新的資料流向 |
+| 新開關是否弱化任何既有檢查 | 四個新增的 `if (!isEcpayEnabled())` 都是最先執行、且只會讓路由回應「停用」提早結束，不會略過或改動後面任何既有的驗證邏輯 |
+
+**驗證限制**：本次是唯讀調查加上一個純粹「提早擋門」的開關，沒有實際呼叫真實 ECPay 網路，也沒有重建/寫入開發資料庫；`npm test` 84/84 全過、`node --check backend/server.js` 語法檢查通過。尚未用真實 HTTP 請求驗證停用後四支路由的實際回應內容（需要重啟目前正在跑的本機 backend process 才能載入新程式碼，這次沒有主動重啟使用者手動啟動的 dev server）。`RtnCode` 檢查與 stage 金鑰 fallback 這兩個核心問題本身仍待修——若之後要重新啟用 ECPay，這兩點必須先修好才能把 `ECPAY_ENABLED` 打開。
+
+## 2026-08-27 — 呼應上一筆：ECPay 整個移除，而非修復
+
+**範圍**：`backend/server.js`（移除 4 支路由、repository 初始化與所有 postgres 就緒檢查）、`backend/payments/ecpayService.js`／`ecpayClient.js`（整檔刪除）、`backend/database/repositories/ecpayAuthorizationRepository.js`（整檔刪除）、`backend/payments/settlementService.js`／`merchantActivityCancelService.js`／`refundRequestService.js`（移除 ECPay 分支，保留 LINE Pay 邏輯）、`backend/db.js`（刪除一次性 `widenPaymentProviderCheckConstraints` 遷移函式）、`database/schema.sql`（`payment_authorizations`／`payment_refunds` 的 `provider` CHECK constraint 收回只允許 `line_pay`／`mock_line_pay`）、`mobile/src/screens/PaymentAuthorizationScreen.jsx`／`mobile/src/utils/apiClient.js`（移除信用卡付款選項與對應 API 呼叫）、`scripts/ecpay-smoke.js`／`ecpay-authorization-repository-smoke.js`（整檔刪除）、`.env.example`／`backend/.env`／`package.json`（清除對應設定與 script）
+**觸發原因**：使用者確認後，直接要求「把 ecpay 完全刪除以絕後患」，取代上一筆記錄裡「先加總開關」的暫時緩解措施
+**呼應**：直接呼應上一筆（2026-08-26）記錄的兩個高風險發現——`handleEcpayReturnWebhook` 缺少 `RtnCode` 檢查、`getEcpayConfig` 在非正式環境 fallback 成公開 stage 金鑰。兩者當時都標記「待處理」，這次確認：**兩者已完全解決**，因為存在這兩個問題的程式碼（`ecpayService.js`、`ecpayClient.js`）已整檔刪除，不是繼續留著加強防護，是問題所在的程式碼本身不存在了
+
+### 發現
+
+沒有找到信心度達到門檻（8/10 以上）的新漏洞。這次改動性質是移除既有攻擊面，不是新增邏輯。
+
+### 沒發現問題的部分
+
+| 面向 | 檢查結果 |
+|------|----------|
+| 是否有殘留但仍可觸發的 ECPay 程式碼路徑 | `grep -ri ecpay` 掃過整個 repo（不含歷史紀錄型文件與已套用的 migration 檔），backend／mobile／scripts 三個目錄下已無任何殘留引用；語法檢查（`node --check`）全數通過 |
+| 移除 provider 分支後，LINE Pay 既有邏輯是否被連帶改動 | `settlementService.js`／`merchantActivityCancelService.js`／`refundRequestService.js` 三處都是刪除 `isEcpayProvider(...)` 判斷式整個分支，LINE Pay 那條分支的程式碼本身逐行核對未被觸碰；`npm test` 84/84 全過 |
+| 移除的路由是否留下可被利用的殘破狀態 | 4 支路由（`request`／`checkout-redirect`／`return`／`client-back`）連同 `isEcpayEnabled()` 開關一起整段刪除，不是只刪路由留著開關，也不是只關開關留著路由；實際啟動 backend（對真實 PostgreSQL）後人工測試 `POST /api/payments/ecpay/request` 與 `GET /api/payments/ecpay/client-back`，回應是既有「`/api/payments/` 前綴但找不到對應路由」的通用 503（`customer_order_runtime_mismatch`），跟其他任何不存在的 `/api/payments/*` 路徑行為一致，不是殘留的 ECPay 專屬回應 |
+| CHECK constraint 收窄是否影響既有資料 | 只改了 `database/schema.sql`（給全新建立的資料庫用的範本）與 `backend/db.js` 裡同樣只在資料表不存在時才會執行的 `CREATE TABLE IF NOT EXISTS`；沒有對正在使用中的 SQLite 開發檔案或真實 PostgreSQL 資料庫執行任何 `ALTER`／`migrate`，兩邊的既有資料表結構未被觸碰 |
+| 移除後是否還有資料因此變成「處理邏輯消失」的孤兒 | 唯讀查詢過 SQLite 開發檔案與真實 PostgreSQL 資料庫的 `payment_authorizations`，`provider LIKE '%ecpay%'` 兩邊都是 0 筆，代表這次移除的分支在移除當下沒有任何真實資料依賴它 |
+| Mobile 端移除是否留下死碼或壞掉的畫面邏輯 | `PaymentAuthorizationScreen.jsx` 的 `selectedProvider` state、付款方式選擇區塊、`getProviderDisplayName` 與所有 `=== "ecpay"` 分支已一併移除並簡化成單一 LINE Pay 路徑；`grep -ri ecpay` 整個 `mobile/` 目錄下已無殘留 |
+
+**驗證限制**：`npm test` 84/84（不需要即時 PostgreSQL 連線的單元測試）全過；額外實際啟動 backend 對接真實 PostgreSQL 16，確認一般路由（`GET /api/stores`）正常回應、ECPay 路由回應變成通用 404-等效的 503（非 ECPay 專屬訊息），驗證後已關閉這個臨時啟動的測試 process，未影響使用者原本的 dev session。Mobile 端因為是 JSX，這次只做語法層面與逐行核對，沒有實際在模擬器／瀏覽器操作畫面確認付款流程——之後如果要對付款流程做一次真機或 Web 預覽的人工操作驗證，建議連同這次改動一起走一遍「送出訂單 → 進入付款畫面 → 完成 LINE Pay 授權」的完整路徑。

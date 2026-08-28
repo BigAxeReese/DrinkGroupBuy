@@ -7,9 +7,17 @@ import { ProgressSummary } from "../components/ProgressSummary";
 import { StatusBadge } from "../components/StatusBadge";
 import { getGroupBuyActivityById, formatCurrency, isWithdrawalLocked } from "../utils/calculations";
 import { getGroupBuyActivityStore } from "../utils/groupBuyActivityStores";
+import { getGroupBuyActivityJoinAction } from "../utils/groupBuyActivityJoinState";
 
-export function GroupBuyActivityDetailScreen({ navigation, route, appState, actions, memberAction }) {
+export function GroupBuyActivityDetailScreen({ navigation, route, appState, actions, memberAction, selectedCustomerId }) {
   const groupBuyActivity = getGroupBuyActivityById(appState.groupBuyActivities, route.params?.groupBuyActivityId);
+  const existingOrder = groupBuyActivity
+    ? appState.orders.find((order) => (
+      order.groupBuyActivityId === groupBuyActivity.id
+        && order.customerId === selectedCustomerId
+        && order.status !== "cancelled"
+    ))
+    : null;
   const activitySyncStatus = appState.groupBuyActivitySyncStatus ?? "idle";
   const retryActivitySync = () => actions.syncGroupBuyActivities().catch(() => {});
   if (!groupBuyActivity) {
@@ -30,6 +38,7 @@ export function GroupBuyActivityDetailScreen({ navigation, route, appState, acti
 
   const store = getGroupBuyActivityStore(groupBuyActivity);
   const withdrawalLocked = isWithdrawalLocked(groupBuyActivity);
+  const joinAction = getGroupBuyActivityJoinAction(groupBuyActivity, Boolean(existingOrder));
 
   return (
     <MobileScreen
@@ -78,8 +87,14 @@ export function GroupBuyActivityDetailScreen({ navigation, route, appState, acti
       </Section>
 
       <PrimaryButton
-        label={groupBuyActivity.canJoin ? "選擇飲料並加入" : "目前不可加入"}
-        onPress={() => groupBuyActivity.canJoin && navigation.go("drinkSelection", { groupBuyActivityId: groupBuyActivity.id })}
+        label={joinAction.label}
+        onPress={() => {
+          if (joinAction.target === "customerOrders") {
+            navigation.go("customerOrders");
+          } else if (joinAction.target === "drinkSelection") {
+            navigation.go("drinkSelection", { groupBuyActivityId: groupBuyActivity.id });
+          }
+        }}
       />
       <PrimaryButton
         label="查看團購進度"

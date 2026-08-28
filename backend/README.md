@@ -184,7 +184,7 @@ PAYMENT_RECONCILIATION_RETRY_INTERVAL_MS=30000
 PAYMENT_RECONCILIATION_ALLOW_PRODUCTION=false
 ```
 
-`NODE_ENV=production` 時，必須明確設定 `PAYMENT_RECONCILIATION_ALLOW_PRODUCTION=true` 才會啟動。Terminal job 會保存 `alert_required=1`，admin 可用 `GET /api/admin/payment-reliability/alerts` 查詢，scheduler 也會輸出結構化警示日誌；目前尚未接 Email／Slack 等通知服務。
+`NODE_ENV=production` 時，必須明確設定 `PAYMENT_RECONCILIATION_ALLOW_PRODUCTION=true` 才會啟動。Terminal job 會保存 `alert_required=1`，admin 可用 `GET /api/admin/payment-reliability/alerts` 查詢，scheduler 也會輸出結構化警示日誌，並透過 `backend/payments/alertNotifier.js` 呼叫 `ALERT_WEBHOOK_URL`（未設定時不送、不報錯，`npm test` 與 sandbox 環境本來就不會設這個變數）。這個 URL 是通用的 webhook（Slack／Discord／Mattermost 的 incoming webhook 都吃同樣的 `{"text": "..."}` JSON 格式，或接一個自訂的內部服務），不綁定特定通知服務；同一支模組也會在 scheduler 本身丟例外（不是單一 job 失敗，是整個排程掛掉）時發送。
 
 本機可用以下指令驗證 job 去重、跨執行個體 claim、租約逾時接手、失敗告警旗標與 provider 狀態對帳：
 
@@ -217,7 +217,6 @@ PostgreSQL 版的對應驗收見 `database/README.md`（`npm run postgres-reliab
 - `backend/database/repositories/paymentAuthorizationConfirmRepository.js`
 - `backend/database/repositories/manualLinePayRepaymentRepository.js`
 - `backend/database/repositories/paymentReliabilityJobRepository.js`（重用 `groupBuySettlementRepository.js` 的通用 job-queue 函式，同一張 `payment_reliability_jobs` 表依 `job_type` 區分）
-- `backend/database/repositories/ecpayAuthorizationRepository.js`（請款／作廢直接重用 `paymentCaptureRepository.js`／`paymentAuthorizationCancelRepository.js`，webhook 確認回跳重用 `paymentAuthorizationConfirmRepository.js`；`getLatestAuthorizationForOrder`／`createPendingAuthorization` 因既有 LINE Pay 版本有 provider 篩選或自動排入對帳工作等專屬邏輯，改為獨立實作）
 
 預設不改變目前行為：
 
@@ -236,7 +235,6 @@ CUSTOMER_ORDER_CANCEL_RUNTIME=sqlite
 AUTH_PROFILE_READ_RUNTIME=sqlite
 MANUAL_LINE_PAY_REPAYMENT_RUNTIME=sqlite
 PAYMENT_RELIABILITY_JOB_RUNTIME=sqlite
-ECPAY_AUTHORIZATION_RUNTIME=sqlite
 ```
 
 已套用 PostgreSQL migrations／seed 並設定 `DATABASE_URL` 後，才可把個別切片切成：
@@ -256,10 +254,9 @@ CUSTOMER_ORDER_CANCEL_RUNTIME=postgres
 AUTH_PROFILE_READ_RUNTIME=postgres
 MANUAL_LINE_PAY_REPAYMENT_RUNTIME=postgres
 PAYMENT_RELIABILITY_JOB_RUNTIME=postgres
-ECPAY_AUTHORIZATION_RUNTIME=postgres
 ```
 
-啟用 PostgreSQL 訂單切片時，Backend 會要求 auth、公開菜單、活動讀取／寫入、商家菜單、顧客建單、訂單讀取、authorization request／confirm／cancel 與顧客取消全部使用 PostgreSQL。顧客建單、confirm、cancel redirect、一般 void 與顧客取消交易皆採 activity-first row lock；付款生命週期以 `operation_locks` 防止跨執行個體重複執行。cancel redirect 會交易式寫入失敗狀態、provider event、history、audit 並取消 reconciliation job；已授權訂單取消必須先 void 成功才會取消訂單，provider void 失敗會保留原訂單並留下 event／audit。訂單送出後、預授權前的顧客編輯（`PATCH /api/orders/:orderId`）已隨顧客建單一併支援 PostgreSQL，同樣走 row lock 並重算計價／折扣／容量。LINE Pay 人工重新請款（`manualLinePayRepaymentRepository`）與對帳背景排程（`paymentReliabilityJobRepository`，`reliabilityService.js`）現在都已支援 PostgreSQL：確認回跳（`GET /api/payments/line-pay/confirm`）、發起重新請款（`POST /api/payments/line-pay/repay`）、`enqueuePendingAuthorizationReconciliation` 排入的對帳背景排程三者共用同一組 repository，只有全部（`PAYMENT_AUTHORIZATION_CONFIRM_RUNTIME`、`PAYMENT_AUTHORIZATION_CANCEL_RUNTIME`、`PAYMENT_AUTHORIZATION_REQUEST_RUNTIME`、`PAYMENT_CAPTURE_RUNTIME`、`MANUAL_LINE_PAY_REPAYMENT_RUNTIME`、`PAYMENT_RELIABILITY_JOB_RUNTIME`）都切到 postgres 時，`/api/payments/line-pay/repay` 才會放行、對帳排程才會啟用，任一沒切齊都維持原本的 SQLite 行為或 `503`。ECPay 請款／作廢／webhook 確認回跳（`ecpayAuthorizationRepository`，`ECPAY_AUTHORIZATION_RUNTIME`）現在也支援 PostgreSQL；請款／作廢動作實際寫入哪個 runtime，由呼叫方（結算排程、商家取消團購）在每次呼叫前重新核對 `ECPAY_AUTHORIZATION_RUNTIME`／`PAYMENT_CAPTURE_RUNTIME`／`PAYMENT_AUTHORIZATION_CANCEL_RUNTIME` 三者是否同時為 postgres 決定，避免只切了其中一兩個時，ECPay 授權紀錄仍留在 SQLite、卻被拿去查詢 PostgreSQL 而悄悄查無資料。revision payment、refund、pickup 與 settlement 仍回 `503 customer_order_runtime_mismatch`。受控 PostgreSQL 訂單模式仍會自動停用仍依賴 SQLite 的 settlement／pickup scheduler；因此目前不是完整付款 E2E runtime。
+啟用 PostgreSQL 訂單切片時，Backend 會要求 auth、公開菜單、活動讀取／寫入、商家菜單、顧客建單、訂單讀取、authorization request／confirm／cancel 與顧客取消全部使用 PostgreSQL。顧客建單、confirm、cancel redirect、一般 void 與顧客取消交易皆採 activity-first row lock；付款生命週期以 `operation_locks` 防止跨執行個體重複執行。cancel redirect 會交易式寫入失敗狀態、provider event、history、audit 並取消 reconciliation job；已授權訂單取消必須先 void 成功才會取消訂單，provider void 失敗會保留原訂單並留下 event／audit。訂單送出後、預授權前的顧客編輯（`PATCH /api/orders/:orderId`）已隨顧客建單一併支援 PostgreSQL，同樣走 row lock 並重算計價／折扣／容量。LINE Pay 人工重新請款（`manualLinePayRepaymentRepository`）與對帳背景排程（`paymentReliabilityJobRepository`，`reliabilityService.js`）現在都已支援 PostgreSQL：確認回跳（`GET /api/payments/line-pay/confirm`）、發起重新請款（`POST /api/payments/line-pay/repay`）、`enqueuePendingAuthorizationReconciliation` 排入的對帳背景排程三者共用同一組 repository，只有全部（`PAYMENT_AUTHORIZATION_CONFIRM_RUNTIME`、`PAYMENT_AUTHORIZATION_CANCEL_RUNTIME`、`PAYMENT_AUTHORIZATION_REQUEST_RUNTIME`、`PAYMENT_CAPTURE_RUNTIME`、`MANUAL_LINE_PAY_REPAYMENT_RUNTIME`、`PAYMENT_RELIABILITY_JOB_RUNTIME`）都切到 postgres 時，`/api/payments/line-pay/repay` 才會放行、對帳排程才會啟用，任一沒切齊都維持原本的 SQLite 行為或 `503`。revision payment、refund、pickup 與 settlement 仍回 `503 customer_order_runtime_mismatch`。受控 PostgreSQL 訂單模式仍會自動停用仍依賴 SQLite 的 settlement／pickup scheduler；因此目前不是完整付款 E2E runtime。
 
 本機契約測試會驗證 SQLite 委派、adapter 與 PostgreSQL API 格式：
 
@@ -280,8 +277,6 @@ npm run line-pay-confirm-service:smoke
 npm run line-pay-cancel-service:smoke
 npm run payment-capture:smoke
 npm run line-pay-capture-service:smoke
-npm run ecpay-authorization:smoke
-npm run ecpay:smoke
 ```
 
 設定本機 `DATABASE_URL` 並套用 PostgreSQL migrations 後，可執行：

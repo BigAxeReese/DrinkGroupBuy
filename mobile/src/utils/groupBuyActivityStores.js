@@ -26,7 +26,7 @@ export function buildStoreMapStores(stores = [], groupBuyActivities = []) {
       ...normalizedStore,
       hasRecruitingGroupBuyActivity: false,
       recruitingGroupBuyActivityId: null,
-      joinableGroupBuyActivityIds: [],
+      joinableGroupBuyActivities: [],
       progressText: ""
     });
   });
@@ -38,10 +38,14 @@ export function buildStoreMapStores(stores = [], groupBuyActivities = []) {
 
     current.hasRecruitingGroupBuyActivity = true;
     current.recruitingGroupBuyActivityId ??= groupBuyActivity.id;
-    current.joinableGroupBuyActivityIds.push(groupBuyActivity.id);
-    current.progressText = current.joinableGroupBuyActivityIds.length === 1
+    current.joinableGroupBuyActivities.push({
+      id: groupBuyActivity.id,
+      currentCups: Number(groupBuyActivity.currentCups ?? 0),
+      pickupStartAt: groupBuyActivity.pickupStartAt ?? null
+    });
+    current.progressText = current.joinableGroupBuyActivities.length === 1
       ? getGroupBuyActivityProgressText(groupBuyActivity)
-      : `${current.joinableGroupBuyActivityIds.length} 個團購`;
+      : `${current.joinableGroupBuyActivities.length} 個團購`;
   });
 
   return [...storesById.values()];
@@ -53,8 +57,14 @@ export function isJoinableGroupBuyActivity(groupBuyActivity) {
     && !groupBuyActivity.cancellationReason;
 }
 
+export function getStoreMarkerLabel(store) {
+  return store.hasRecruitingGroupBuyActivity && store.progressText
+    ? `${store.name} ${store.progressText}`
+    : store.name;
+}
+
 export function getStoreMapDestination(store) {
-  const activityIds = store?.joinableGroupBuyActivityIds ?? [];
+  const activityIds = (store?.joinableGroupBuyActivities ?? []).map((activity) => activity.id);
   if (activityIds.length > 1) {
     return { name: "storeGroupBuyActivities", params: { storeId: store.id } };
   }

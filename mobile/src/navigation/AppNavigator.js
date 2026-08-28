@@ -15,9 +15,8 @@ import { MerchantDashboardScreen } from "../screens/MerchantDashboardScreen";
 import { MerchantMenuManagementScreen } from "../screens/MerchantMenuManagementScreen";
 import { MerchantRefundRequestsScreen } from "../screens/MerchantRefundRequestsScreen";
 import { CustomerPlaceholderScreen } from "../screens/CustomerPlaceholderScreen";
+import { ProfileScreen } from "../screens/ProfileScreen";
 import { CustomerOrdersScreen } from "../screens/CustomerOrdersScreen";
-import { AdminDashboardScreen } from "../screens/AdminDashboardScreen";
-import { AdminRefundRequestsScreen } from "../screens/AdminRefundRequestsScreen";
 import { CartScreen } from "../screens/CartScreen";
 import { LiveMapScreen } from "../screens/LiveMapScreen";
 import { StoreMenuScreen } from "../screens/StoreMenuScreen";
@@ -25,7 +24,7 @@ import { StoreGroupBuyActivitiesScreen } from "../screens/StoreGroupBuyActivitie
 import { DevBusinessTimeBanner } from "../components/DevBusinessTimeBanner";
 import { useDevBusinessTime } from "../hooks/useDevBusinessTime";
 import { getBusinessNow } from "../utils/businessTime";
-import { formatDeadlineLabel, getMinutesUntilDeadline, isDeadlineReached } from "../utils/deadlineTime";
+import { formatDeadlineLabel, formatPickupTimeRangeLabel, getMinutesUntilDeadline, isDeadlineReached } from "../utils/deadlineTime";
 import { getGroupBuyActivityCapacityInfo, wouldExceedGroupBuyActivityCapacity } from "../utils/groupBuyActivityProgress";
 import { normalizeOrderItem } from "../utils/orderItems";
 import { buildOrderItemsChange, rollbackAuthorizedCups } from "../utils/orderState";
@@ -44,8 +43,10 @@ import {
   lookupPickupCredential as lookupPickupCredentialApi,
   markGroupBuyActivityReadyForPickup,
   redeemPickupCredential as redeemPickupCredentialApi,
+  setAuthToken,
   updateOrder
 } from "../utils/apiClient";
+import { signOutFirebaseUser } from "../utils/firebaseAuth";
 
 const initialRoute = { name: "roleSelect", params: {} };
 const backendCustomerUserIds = {
@@ -151,7 +152,7 @@ function normalizeBackendGroupBuyActivity(activity, existingActivity = {}) {
     pickupStartAt,
     pickupEndAt,
     pickupTime: pickupStartAt && pickupEndAt
-      ? `${pickupStartAt} - ${pickupEndAt}`
+      ? formatPickupTimeRangeLabel(pickupStartAt, pickupEndAt)
       : existingActivity.pickupTime,
     maximumCups: activity?.maximumCups ?? existingActivity.maximumCups ?? tiers[tiers.length - 1]?.targetCups ?? 0,
     targetCups: activity?.targetCups ?? existingActivity.targetCups ?? tiers[0]?.targetCups ?? 0,
@@ -359,6 +360,7 @@ export function AppNavigator() {
   const businessTime = useDevBusinessTime();
   const [stack, setStack] = useState([initialRoute]);
   const [currentRole, setCurrentRole] = useState(null);
+  const [currentUserProfile, setCurrentUserProfile] = useState(null);
   const [selectedCustomerId, setSelectedCustomerId] = useState("customer-yinji");
   const [selectedAuthUserId, setSelectedAuthUserId] = useState(null);
   const [selectedMerchantStoreId, setSelectedMerchantStoreId] = useState("store-001");
@@ -461,8 +463,9 @@ export function AppNavigator() {
   }, [businessTime.snapshot.version, groupBuyActivities, storageLoaded]);
 
   const navigation = useMemo(() => ({
-    selectRole(role, routeName, params = {}) {
+    selectRole(role, routeName, params = {}, userProfile = null) {
       setCurrentRole(role);
+      setCurrentUserProfile(userProfile);
       setSelectedAuthUserId(params.authUserId || null);
       if (role === "merchant" && params.storeId) {
         setSelectedMerchantStoreId(params.storeId);
@@ -480,6 +483,23 @@ export function AppNavigator() {
     },
     back() {
       setStack((items) => (items.length > 1 ? items.slice(0, -1) : items));
+    },
+    logout() {
+      setAuthToken(null);
+      signOutFirebaseUser().catch(() => {});
+      setCurrentRole(null);
+      setCurrentUserProfile(null);
+      setSelectedAuthUserId(null);
+      setSelectedCustomerId("customer-yinji");
+      setSelectedMerchantStoreId("store-001");
+      // Cart/orders/payment records are cached locally under a small hardcoded customerId
+      // bucket (see backendCustomerToPrototypeCustomer in RoleSelectScreen.jsx), so a second
+      // real account logging in on the same device after this one logs out would otherwise land
+      // in the same bucket and see this account's cart and order history.
+      setOrders(initialOrders);
+      setCartItems([]);
+      setPaymentAuthorizations(initialPaymentAuthorizations);
+      setStack([initialRoute]);
     }
   }), []);
 
@@ -1101,41 +1121,6 @@ export function AppNavigator() {
       }
       return result;
     },
-    createMerchantGroupBuyActivity(form) {
-      const groupBuyActivityId = `groupBuyActivity-merchant-${Date.now()}`;
-      const normalizedTiers = (form.tiers || [])
-        .map((tier) => ({
-          cups: Number(tier.cups),
-          discountAmount: Number(tier.discountAmount)
-        }))
-        .filter((tier) => tier.cups > 0 && tier.discountAmount > 0)
-        .sort((left, right) => left.cups - right.cups);
-      const promotionTiers = normalizedTiers.length > 0
-        ? normalizedTiers
-        : [{ cups: 20, discountAmount: 200 }];
-      const newGroupBuyActivity = {
-        id: groupBuyActivityId,
-        storeId: form.storeId,
-        title: form.title || "商家優惠活動",
-        status: "recruiting",
-        currentCups: 0,
-        targetCups: promotionTiers[0].cups,
-        maximumCups: promotionTiers[promotionTiers.length - 1].cups,
-        participantCount: 0,
-        remainingTimeText: "剛建立",
-        minutesUntilDeadline: getMinutesUntilDeadline({ deadlineAt: form.deadlineAt }) ?? 120,
-        withdrawalLockMinutes: 30,
-        startTime: form.startTime || getBusinessNow().toISOString(),
-        deadlineAt: form.deadlineAt,
-        endTime: form.endTime || formatDeadlineLabel(form.deadlineAt),
-        pickupTime: form.pickupTime || "今日 16:30 - 17:00",
-        canJoin: true,
-        tiers: promotionTiers,
-        notices: [form.notices || "Prototype 建立活動，不會寫入後端。"]
-      };
-      setGroupBuyActivities((items) => [newGroupBuyActivity, ...items]);
-      return groupBuyActivityId;
-    },
     addMerchantGroupBuyActivityFromApi(activity) {
       const newGroupBuyActivity = normalizeBackendGroupBuyActivity(activity);
       setGroupBuyActivities((items) => [
@@ -1143,52 +1128,6 @@ export function AppNavigator() {
         ...items.filter((item) => item.id !== newGroupBuyActivity.id)
       ]);
       return newGroupBuyActivity.id;
-    },
-    cancelGroupBuyActivity(groupBuyActivityId, cancellationReason = "管理員刪除團購") {
-      setGroupBuyActivities((items) => items.map((groupBuyActivity) => (
-        groupBuyActivity.id === groupBuyActivityId
-          ? {
-              ...groupBuyActivity,
-              status: "cancelled",
-              canJoin: false,
-              cancellationReason
-            }
-            : groupBuyActivity
-      )));
-      setOrders((items) => items.map((order) => (
-        order.groupBuyActivityId === groupBuyActivityId
-          ? {
-              ...order,
-              status: "cancelled",
-              pickupStatus: "cancelled",
-              merchantAcceptanceStatus: "cancelled",
-              cancellationReason
-            }
-          : order
-      )));
-    },
-    cancelGroupBuyActivityFromApi(activity) {
-      setGroupBuyActivities((items) => items.map((groupBuyActivity) => (
-        groupBuyActivity.id === activity.id
-          ? {
-              ...groupBuyActivity,
-              status: activity.status,
-              canJoin: activity.status === "recruiting",
-              cancellationReason: activity.cancellationReason
-            }
-            : groupBuyActivity
-      )));
-      setOrders((items) => items.map((order) => (
-        order.groupBuyActivityId === activity.id
-          ? {
-              ...order,
-              status: "cancelled",
-              pickupStatus: "cancelled",
-              merchantAcceptanceStatus: "cancelled",
-              cancellationReason: activity.cancellationReason
-            }
-          : order
-      )));
     },
     cancelMerchantGroupBuyActivityFromApi(activity, cancelledOrderIds) {
       const cancelledOrderIdSet = new Set(cancelledOrderIds || []);
@@ -1288,6 +1227,7 @@ export function AppNavigator() {
     appState,
     actions,
     currentRole,
+    currentUserProfile,
     selectedCustomerId,
     selectedAuthUserId,
     selectedMerchantStoreId,
@@ -1315,8 +1255,7 @@ export function AppNavigator() {
         {current.name === "merchantRefundRequests" && <MerchantRefundRequestsScreen {...screenProps} />}
         {current.name === "customerPlaceholder" && <CustomerPlaceholderScreen {...screenProps} />}
         {current.name === "customerOrders" && <CustomerOrdersScreen {...screenProps} />}
-        {current.name === "adminDashboard" && <AdminDashboardScreen {...screenProps} />}
-        {current.name === "adminRefundRequests" && <AdminRefundRequestsScreen {...screenProps} />}
+        {current.name === "profile" && <ProfileScreen {...screenProps} />}
       </View>
       {current.name !== "roleSelect" ? (
         <BottomNav

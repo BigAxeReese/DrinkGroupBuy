@@ -171,7 +171,7 @@ function ensureRuntimeSchema(database) {
       payment_capture_id TEXT NOT NULL REFERENCES payment_captures(id),
       payment_authorization_id TEXT NOT NULL REFERENCES payment_authorizations(id),
       order_id TEXT NOT NULL REFERENCES orders(id),
-      provider TEXT NOT NULL CHECK (provider IN ('line_pay', 'mock_line_pay', 'ecpay', 'mock_ecpay')),
+      provider TEXT NOT NULL CHECK (provider IN ('line_pay', 'mock_line_pay')),
       status TEXT NOT NULL DEFAULT 'pending' CHECK (status IN ('pending', 'refunded', 'failed')),
       refund_amount INTEGER NOT NULL CHECK (refund_amount > 0),
       provider_refund_id TEXT,
@@ -186,7 +186,6 @@ function ensureRuntimeSchema(database) {
     CREATE INDEX IF NOT EXISTS idx_payment_refunds_order ON payment_refunds(order_id);
   `);
 
-  widenPaymentProviderCheckConstraints(database);
   addCustomizationOptionPriceDeltaCheckConstraint(database);
 
   database.exec(`
@@ -254,116 +253,6 @@ function ensureRuntimeSchema(database) {
     CREATE INDEX IF NOT EXISTS idx_operation_locks_expiry
     ON operation_locks(locked_until);
   `);
-}
-
-// SQLite CHECK constraints cannot be altered in place; adding a new provider value
-// requires rebuilding the table (https://www.sqlite.org/lang_altertable.html #6).
-function widenPaymentProviderCheckConstraints(database) {
-  const authorizationTable = database.prepare(
-    "SELECT sql FROM sqlite_master WHERE type = 'table' AND name = 'payment_authorizations'"
-  ).get();
-  const refundTable = database.prepare(
-    "SELECT sql FROM sqlite_master WHERE type = 'table' AND name = 'payment_refunds'"
-  ).get();
-
-  const needsAuthorizationRebuild = Boolean(authorizationTable) && !authorizationTable.sql.includes("'ecpay'");
-  const needsRefundRebuild = Boolean(refundTable) && !refundTable.sql.includes("'ecpay'");
-  if (!needsAuthorizationRebuild && !needsRefundRebuild) return;
-
-  database.exec("PRAGMA foreign_keys = OFF;");
-  try {
-    database.exec("BEGIN;");
-    try {
-      if (needsAuthorizationRebuild) {
-        database.exec(`
-          CREATE TABLE payment_authorizations_new (
-            id TEXT PRIMARY KEY,
-            order_id TEXT NOT NULL REFERENCES orders(id),
-            order_revision_id TEXT REFERENCES order_revisions(id),
-            provider TEXT NOT NULL CHECK (provider IN ('line_pay', 'mock_line_pay', 'ecpay', 'mock_ecpay')),
-            payment_flow TEXT NOT NULL DEFAULT 'authorization',
-            status TEXT NOT NULL DEFAULT 'pending'
-              CHECK (status IN ('pending', 'authorized', 'captured', 'authorization_voided', 'failed')),
-            original_amount INTEGER NOT NULL CHECK (original_amount >= 0),
-            authorized_amount INTEGER NOT NULL DEFAULT 0 CHECK (authorized_amount >= 0),
-            provider_authorization_id TEXT,
-            expires_at TEXT,
-            authorized_at TEXT,
-            voided_at TEXT,
-            failure_reason TEXT,
-            created_at TEXT NOT NULL,
-            updated_at TEXT NOT NULL
-          );
-
-          INSERT INTO payment_authorizations_new (
-            id, order_id, order_revision_id, provider, payment_flow, status,
-            original_amount, authorized_amount, provider_authorization_id,
-            expires_at, authorized_at, voided_at, failure_reason, created_at, updated_at
-          )
-          SELECT
-            id, order_id, order_revision_id, provider, payment_flow, status,
-            original_amount, authorized_amount, provider_authorization_id,
-            expires_at, authorized_at, voided_at, failure_reason, created_at, updated_at
-          FROM payment_authorizations;
-
-          DROP TABLE payment_authorizations;
-          ALTER TABLE payment_authorizations_new RENAME TO payment_authorizations;
-
-          CREATE INDEX idx_payment_authorizations_order ON payment_authorizations(order_id);
-          CREATE INDEX idx_payment_authorizations_order_revision ON payment_authorizations(order_revision_id);
-        `);
-      }
-
-      if (needsRefundRebuild) {
-        database.exec(`
-          CREATE TABLE payment_refunds_new (
-            id TEXT PRIMARY KEY,
-            payment_capture_id TEXT NOT NULL REFERENCES payment_captures(id),
-            payment_authorization_id TEXT NOT NULL REFERENCES payment_authorizations(id),
-            order_id TEXT NOT NULL REFERENCES orders(id),
-            provider TEXT NOT NULL CHECK (provider IN ('line_pay', 'mock_line_pay', 'ecpay', 'mock_ecpay')),
-            status TEXT NOT NULL DEFAULT 'pending' CHECK (status IN ('pending', 'refunded', 'failed')),
-            refund_amount INTEGER NOT NULL CHECK (refund_amount > 0),
-            provider_refund_id TEXT,
-            idempotency_key TEXT UNIQUE,
-            refunded_at TEXT,
-            failure_reason TEXT,
-            created_at TEXT NOT NULL,
-            updated_at TEXT NOT NULL
-          );
-
-          INSERT INTO payment_refunds_new (
-            id, payment_capture_id, payment_authorization_id, order_id, provider, status,
-            refund_amount, provider_refund_id, idempotency_key, refunded_at, failure_reason,
-            created_at, updated_at
-          )
-          SELECT
-            id, payment_capture_id, payment_authorization_id, order_id, provider, status,
-            refund_amount, provider_refund_id, idempotency_key, refunded_at, failure_reason,
-            created_at, updated_at
-          FROM payment_refunds;
-
-          DROP TABLE payment_refunds;
-          ALTER TABLE payment_refunds_new RENAME TO payment_refunds;
-
-          CREATE INDEX idx_payment_refunds_capture ON payment_refunds(payment_capture_id);
-          CREATE INDEX idx_payment_refunds_order ON payment_refunds(order_id);
-        `);
-      }
-
-      const fkViolations = database.prepare("PRAGMA foreign_key_check;").all();
-      if (fkViolations.length > 0) {
-        throw new Error(`payment provider CHECK migration produced foreign key violations: ${JSON.stringify(fkViolations)}`);
-      }
-
-      database.exec("COMMIT;");
-    } catch (error) {
-      database.exec("ROLLBACK;");
-      throw error;
-    }
-  } finally {
-    database.exec("PRAGMA foreign_keys = ON;");
-  }
 }
 
 // SQLite CHECK constraints cannot be altered in place; adding the non-negative
@@ -5607,10 +5496,10 @@ function getLatestPaymentCaptureByAuthorizationId(authorizationId) {
   }
 }
 
-// Reads back the raw provider payload most recently recorded for a resource (e.g. the
-// ECPay webhook fields for an authorization), so it can be reused later without a new
-// column — see how authorizeLinePayPaymentInDatabase/voidLinePayAuthorizationInDatabase
-// wrap providerPayload as payload_json = JSON.stringify({ providerPayload, ... }).
+// Reads back the raw provider payload most recently recorded for a resource, so it can be
+// reused later without a new column — see how authorizeLinePayPaymentInDatabase/
+// voidLinePayAuthorizationInDatabase wrap providerPayload as
+// payload_json = JSON.stringify({ providerPayload, ... }).
 function getLatestPaymentProviderEventPayload({ resourceType, resourceId, eventType }) {
   const database = openDatabase();
   try {

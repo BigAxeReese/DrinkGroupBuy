@@ -63,12 +63,11 @@ Windows 組員完成一次性環境設定後，可以在專案根目錄依需求
 `04-start-console.cmd` 會：
 
 1. 檢查 Backend 是否已由 `01-start-server.cmd` 啟動；未啟動就停止並提示。
-2. 啟動 `local-dev-console/` 的 `3100` 控制台。
-3. 使用預設瀏覽器開啟 `http://127.0.0.1:3100/`。
+2. 使用預設瀏覽器開啟 `http://127.0.0.1:3001/dev-console`（實際 port 依 `backend/.env` 的 `PORT` 而定）。
 
 控制台目前可查看測試帳號、個別顧客定位，以及全域業務時間。業務時間可切換成真實時間、前後位移或固定時間，用來快速測試截止與取餐流程；設定不會改電腦時間，Backend 重啟後會恢復真實時間。套用後 App 最多約 5 秒同步；背景排程則在下一次檢查週期套用，不會因按下套用而立刻執行扣款。
 
-這個入口不會代為啟動 Backend，也不會啟動 Metro、Android 模擬器或 App。`local-dev-console/` 仍是本機專用且不納入 Git；資料夾不存在時會顯示明確錯誤。
+2026-08-23 起，控制台已併入主 Backend（`backend/devConsole/`），不再是獨立的 3100 埠程序——這個入口現在只是開瀏覽器分頁，不會另外啟動任何東西，所以也不會代為啟動 Backend、Metro、Android 模擬器或 App。控制台只接受從本機（loopback）發出的請求，跟原本 `local-dev-console/` 只綁定 127.0.0.1 的行為一致；用真手機透過區網 IP 開啟 App 時，定位控制台的自動同步功能不會生效（Android 模擬器可以，因為 `10.0.2.2` 會被系統轉譯成本機）。`local-dev-console/` 資料夾保留當歷史規劃文件，程式本身不再執行。
 
 ## 每位組員首次使用前
 
@@ -98,6 +97,8 @@ EXPO_PUBLIC_BACKEND_URL=http://10.0.2.2:3000
 ```
 
 連接埠必須與 `backend/.env` 的 `PORT` 一致。例如 Backend 使用 `3001`，Mobile 就改成 `http://10.0.2.2:3001`。
+
+真的 Android 手機（不是模擬器）連線時，`10.0.2.2` 沒有作用，要改成電腦在區域網路裡的實際 IP（例如 `http://192.168.0.93:3001`）；詳見下方「常見問題」的「用真的 Android 手機（不是模擬器）測試」。
 
 若使用開發身份選擇器，還需要互相對應：
 
@@ -146,7 +147,7 @@ powershell -NoProfile -ExecutionPolicy Bypass -File scripts\start-dev.ps1 `
 
 ### 連接埠已被其他專案占用
 
-啟動器會避免重複啟動已占用的 `Backend PORT`、`8081`、`8083` 與 `3100`。如果占用者不是 DrinkGroupBuy，請先關閉該程序，再重新執行。
+啟動器會避免重複啟動已占用的 `Backend PORT`、`8081` 與 `8083`（控制台已併入 Backend，不再單獨占用 `3100`）。如果占用者不是 DrinkGroupBuy，請先關閉該程序，再重新執行。
 
 ### App、網頁或後台提示 Backend 尚未啟動
 
@@ -165,6 +166,20 @@ powershell -NoProfile -ExecutionPolicy Bypass -File scripts\start-dev.ps1 `
 1. 開瀏覽器開發者工具（`F12`）→ Console，確認失敗的請求網址是不是 `10.0.2.2`。
 2. 是的話，改用 `03-start-web.cmd` 啟動網頁版（不要直接執行 `npm run mobile:web`）；或執行 `npm run mobile:web:preview`，這個指令會在啟動前先把 `EXPO_PUBLIC_BACKEND_URL` 覆寫成 `http://127.0.0.1:3001`，效果跟 `03-start-web.cmd` 一致。
 3. `.claude/launch.json`（Claude Code 用來啟動網頁版預覽的設定）已經改成呼叫 `mobile:web:preview`，所以透過 Claude Code 啟動不會再遇到這個問題；`mobile/src/utils/apiClient.js` 與 `mobile/src/utils/devLocationControl.js` 也各自加了一層防護，網頁版一律忽略指向 `10.0.2.2` 的覆寫值，即使環境變數設錯也不會整個打不通，但畫面上仍可能因為改連到別的位址而暫時看不到本機控制台資料，最好還是照上面兩步驟修正根本設定。
+
+### 用真的 Android 手機（不是模擬器）測試
+
+啟動器本身不需要額外設定——`scripts/start-dev.ps1` 的裝置偵測（`Get-ConnectedAndroidDevice`）只看 `adb devices` 有沒有裝置回應，接上的真機會被當成一般「已連接的 Android 裝置」，跟模擬器走同一條路徑，會優先於模擬器被使用。手機端需要：
+
+1. 開啟「開發人員選項」→「USB 偵錯」，用 USB 線接上電腦。
+2. 手機會跳出「是否允許 USB 偵錯」的授權提示，需要在手機上按下允許（建議勾選「一律允許使用這台電腦」）。
+3. **三星手機常見卡點**：如果「USB 偵錯」／「無線偵錯」下面出現「已遭自動封鎖程式封鎖」，是三星「Auto Blocker（自動封鎖程式）」這個安全功能擋住的，需要到「設定」→「安全性與隱私」→「自動封鎖程式」先關閉，USB 偵錯才會真的生效。
+4. 「使用 USB 作為」要選「傳輸檔案 / Android Auto」，選「僅限手機充電」電腦端偵測不到完整的偵錯連線。
+
+真機第一次測試（2026-08-21）另外發現兩個模擬器上不會出現的問題：
+
+- **後端網址不能用 `10.0.2.2`**：那個位址只在模擬器的虛擬網路裡有意義，真機透過 Wi-Fi 連線，需要 `mobile/.env` 的 `EXPO_PUBLIC_BACKEND_URL` 指向電腦在區域網路裡的實際 IP（例如 `http://192.168.0.93:3001`，用 `ipconfig` 查詢；換 Wi-Fi 或重開機後這個 IP 可能會變，要重新確認）。改這個值後，因為是啟動時就固定寫進打包內容的環境變數，**要重新啟動 Metro／`02-start-app.cmd` 那個終端機視窗才會生效**，單純在手機上按重試沒有用。若手機還是連不上，確認電腦的 Windows 防火牆有沒有允許 Node.js 接受區網連線（本機測過已經有一條允許規則，但不同電腦第一次開防火牆詢問時若選了「封鎖」，要手動到「Windows 防火牆」設定裡放行）。
+- **Android 9 以上預設擋掉不加密的 HTTP 連線**：後端開發伺服器是純 HTTP（沒有本機 TLS 憑證），手機系統會直接擋掉這個連線，畫面上顯示「Network request failed」，網址跟 port 都對也一樣連不上。已在 `mobile/app.config.js` 加上 `expo-build-properties` 這個 plugin，設定 `android.usesCleartextTraffic: true` 解決。這是**原生設定**，不是 JS 改動，套用後需要整個重新建置：跑 `npm run mobile:android`（不是 `02-start-app.cmd`——App 已安裝過的話它只會重開舊版本，不會重新套用原生設定變更）。
 
 ### 找不到模擬器
 

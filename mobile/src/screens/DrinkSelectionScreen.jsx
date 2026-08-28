@@ -205,7 +205,7 @@ function DrinkMenuContent({ navigation, route, appState, actions, memberAction, 
 
           <View style={styles.stickyAction}>
             <PrimaryButton
-              label={editOrderItem ? "儲存修改（Mock）" : editOrderId ? "加入訂單並重新預授權" : "加入購物車"}
+              label={editOrderItem ? "儲存修改" : editOrderId ? "加入訂單並重新預授權" : "加入購物車"}
               style={styles.stickyButton}
               onPress={() => {
                 const orderItem = buildCartItem({

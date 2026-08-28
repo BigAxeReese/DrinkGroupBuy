@@ -1,0 +1,133 @@
+<!doctype html>
+<html lang="zh-Hant">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>DrinkGroupBuy 本機測試控制台</title>
+    <link rel="stylesheet" href="/dev-console/styles.css" />
+  </head>
+  <body>
+    <main class="shell">
+      <header class="hero">
+        <div>
+          <div class="eyebrow"><span class="dev-badge">DEV ONLY</span> DrinkGroupBuy</div>
+          <h1>本機測試控制台</h1>
+          <p>逐一控制顧客測試定位，不修改帳號、角色、Firebase UID 或店家權限。</p>
+        </div>
+        <div class="header-actions">
+          <a class="button button-secondary" href="/admin">管理員後台 →</a>
+          <button id="refreshButton" class="button button-secondary" type="button">重新檢查</button>
+        </div>
+      </header>
+
+      <section class="status-grid" aria-label="系統狀態">
+        <article class="status-card">
+          <div class="status-label">控制伺服器</div>
+          <div id="consoleStatus" class="status-value">檢查中</div>
+          <div id="consoleMeta" class="status-meta">—</div>
+        </article>
+        <article class="status-card">
+          <div class="status-label">主 Backend</div>
+          <div id="backendStatus" class="status-value">檢查中</div>
+          <div id="backendMeta" class="status-meta">—</div>
+        </article>
+        <article class="status-card">
+          <div class="status-label">App 同步</div>
+          <div id="appStatus" class="status-value">尚未串接</div>
+          <div id="appMeta" class="status-meta">等待 Mobile 回報</div>
+        </article>
+      </section>
+
+      <div id="message" class="message" role="status" aria-live="polite" hidden></div>
+
+      <section class="panel">
+        <div class="panel-heading">
+          <div>
+            <div class="section-number">01</div>
+            <h2>所有測試帳號</h2>
+          </div>
+          <span id="accountCount" class="version-badge">— 個帳號</span>
+        </div>
+        <p class="panel-description">資料來自主 Backend 的 dev-only 帳號清單。顧客可各自設定定位；角色與店家權限維持唯讀。</p>
+        <div id="accountsMessage" class="empty-state">正在讀取測試帳號</div>
+        <div id="accountsTableWrap" class="table-wrap" hidden>
+          <table class="accounts-table">
+            <thead>
+              <tr>
+                <th>模擬帳號名稱</th>
+                <th>帳號資料</th>
+                <th>權限</th>
+                <th>商家店家</th>
+                <th>顧客定位方式</th>
+              </tr>
+            </thead>
+            <tbody id="accountsTableBody"></tbody>
+          </table>
+        </div>
+      </section>
+
+      <section class="panel">
+        <div class="panel-heading">
+          <div>
+            <div class="section-number">02</div>
+            <h2>全域業務時間</h2>
+          </div>
+          <span id="businessTimeBadge" class="version-badge">讀取中</span>
+        </div>
+        <p class="panel-description">所有測試帳號共用，後端用它判斷訂單截止、取消與取餐時限。只限開發模式；不改電腦時間、Firebase 或金流簽章時間。</p>
+        <form id="businessTimeForm" class="business-time-form">
+          <fieldset class="mode-selector business-time-modes">
+            <legend>時間方式</legend>
+            <label class="mode-option">
+              <input type="radio" name="businessTimeMode" value="real" checked />
+              <span><strong>真實時間</strong><small>與後端主機現在時間一致</small></span>
+            </label>
+            <label class="mode-option">
+              <input type="radio" name="businessTimeMode" value="offset" />
+              <span><strong>快轉／倒退</strong><small>跟著真實時間走，最多前後 7 天</small></span>
+            </label>
+            <label class="mode-option">
+              <input type="radio" name="businessTimeMode" value="fixed" />
+              <span><strong>固定時間</strong><small>停在指定時刻，最多前後 7 天</small></span>
+            </label>
+          </fieldset>
+          <div class="business-time-fields">
+            <label id="offsetField" class="field" hidden>
+              <span>位移分鐘（正數快轉、負數倒退）</span>
+              <input id="offsetMinutes" type="number" min="-10080" max="10080" step="1" value="60" />
+            </label>
+            <label id="fixedField" class="field" hidden>
+              <span>固定日期時間（台灣本機時間）</span>
+              <input id="fixedNow" type="datetime-local" />
+            </label>
+          </div>
+          <div class="business-time-summary">
+            <div><span>後端業務時間</span><strong id="effectiveBusinessTime">—</strong></div>
+            <div><span>真實伺服器時間</span><strong id="realBusinessTime">—</strong></div>
+          </div>
+          <div class="actions">
+            <button class="button button-primary" type="submit">套用時間設定</button>
+            <button id="resetBusinessTimeButton" class="button button-secondary" type="button">恢復真實時間</button>
+          </div>
+        </form>
+      </section>
+
+      <section class="panel">
+        <div class="panel-heading">
+          <div>
+            <div class="section-number">03</div>
+            <h2>操作紀錄</h2>
+          </div>
+        </div>
+        <ol id="eventList" class="event-list">
+          <li class="empty-state">讀取中</li>
+        </ol>
+      </section>
+
+      <footer>
+        <strong>本機限定：</strong>目前只監聽 127.0.0.1。尚未加入 Mobile 配對驗證前，不開放區域網路存取。
+      </footer>
+    </main>
+    <script src="/dev-console/app.js" defer></script>
+  </body>
+</html>

@@ -1,22 +1,19 @@
 import { useEffect, useRef, useState } from "react";
 import { AppState, Linking, Platform, Pressable, StyleSheet, Text, View } from "react-native";
 import { MobileScreen, Section } from "../components/MobileScreen";
-import { PlaceholderBox } from "../components/PlaceholderBox";
 import { PrimaryButton } from "../components/PrimaryButton";
 import { StatusBadge } from "../components/StatusBadge";
 import { formatCurrency } from "../utils/calculations";
 import { getManualRepaymentStateInfo } from "../utils/manualRepayment";
 import {
+  getAuthMode,
   getPickupOverdueRule,
-  requestEcpayAuthorization,
   requestLinePayAuthorization,
   requestLinePayRepayment
 } from "../utils/apiClient";
 
 const LINE_PAY_SYNC_POLL_INTERVAL_MS = 3000;
 const LINE_PAY_SYNC_POLL_TIMEOUT_MS = 90000;
-// ECPay implementation remains available; keep its customer-facing entry hidden for now.
-const SHOW_ECPAY_PAYMENT_OPTION = false;
 const PAYMENT_SYNC_FINISHED_STATUSES = new Set([
   "authorized",
   "captured",
@@ -26,11 +23,11 @@ const PAYMENT_SYNC_FINISHED_STATUSES = new Set([
 ]);
 
 export function PaymentAuthorizationScreen({ navigation, route, appState, actions, memberAction, selectedCustomerId }) {
+  const isDevAuthMode = getAuthMode() === "dev";
   const [linePayStatus, setLinePayStatus] = useState("idle");
   const [linePayMessage, setLinePayMessage] = useState("");
   const [syncStatus, setSyncStatus] = useState("idle");
   const [syncMessage, setSyncMessage] = useState("");
-  const [selectedProvider, setSelectedProvider] = useState("line_pay");
   const [pickupRule, setPickupRule] = useState(null);
   const [pickupRuleStatus, setPickupRuleStatus] = useState("idle");
   const [pickupRuleMessage, setPickupRuleMessage] = useState("");
@@ -127,7 +124,7 @@ export function PaymentAuthorizationScreen({ navigation, route, appState, action
         onMemberPress={memberAction}
       >
         <Section title="目前沒有付款資料">
-          <Text style={styles.meta}>訂單已清空，送出購物車後才會建立 LINE Pay 預授權 mock。</Text>
+          <Text style={styles.meta}>訂單已清空，送出購物車後才會建立 LINE Pay 預授權。</Text>
         </Section>
       </MobileScreen>
     );
@@ -169,37 +166,14 @@ export function PaymentAuthorizationScreen({ navigation, route, appState, action
 
       <Section title="授權金額">
         <View style={styles.providerCard}>
-          <Text style={styles.providerName}>
-            {getProviderDisplayName(isAuthorized || isCaptured ? payment.provider : selectedProvider)}
-          </Text>
+          <Text style={styles.providerName}>LINE Pay</Text>
           <Text style={styles.providerMeta}>付款對象：{payment.recipientName}</Text>
         </View>
         <View style={styles.amountRows}>
-          <AmountRow label="原價 originalAmount" value={payment.originalAmount} />
-          <AmountRow label="預授權 authorizedAmount" value={payment.authorizedAmount} />
-          <Text style={styles.meta}>authorizationStatus：{payment.authorizationStatus}</Text>
+          <AmountRow label="訂單原價" value={payment.originalAmount} />
+          <AmountRow label="已授權金額" value={payment.authorizedAmount} />
         </View>
-        <PlaceholderBox title="Line Pay authorization" />
       </Section>
-
-      {!isManualRepayment && !isAuthorized && !isCaptured ? (
-        <Section title="付款方式">
-          <View style={styles.providerToggleRow}>
-            <PrimaryButton
-              label="LINE Pay"
-              variant={selectedProvider === "line_pay" ? "primary" : "secondary"}
-              onPress={() => setSelectedProvider("line_pay")}
-            />
-            {SHOW_ECPAY_PAYMENT_OPTION ? (
-              <PrimaryButton
-                label="信用卡"
-                variant={selectedProvider === "ecpay" ? "primary" : "secondary"}
-                onPress={() => setSelectedProvider("ecpay")}
-              />
-            ) : null}
-          </View>
-        </Section>
-      ) : null}
 
       {needsPickupRuleConsent ? (
         <Section title="付款前確認">
@@ -258,17 +232,7 @@ export function PaymentAuthorizationScreen({ navigation, route, appState, action
         </Section>
       ) : null}
 
-      <Section title={selectedProvider === "ecpay" ? "信用卡（ECPay）Stage 測試" : "LINE Pay sandbox"}>
-        <Text style={styles.meta}>
-          {isManualRepayment
-            ? "此按鈕會開啟 LINE Pay，並以結算後金額直接付款。"
-            : `此按鈕會向 backend 建立${selectedProvider === "ecpay" ? "信用卡（ECPay）" : "LINE Pay"}預授權請求，並開啟付款頁。`}
-        </Text>
-        <Text style={styles.meta}>
-          {isManualRepayment
-            ? "付款成功後會自動更新訂單並加入店家製作清單。"
-            : "完成授權後會自動刷新 backend 訂單狀態；目前只做授權 confirm，不會正式請款。"}
-        </Text>
+      <Section title="LINE Pay">
         {linePayMessage ? (
           <Text style={linePayStatus === "error" ? styles.errorText : styles.successText}>{linePayMessage}</Text>
         ) : null}
@@ -277,78 +241,100 @@ export function PaymentAuthorizationScreen({ navigation, route, appState, action
             {deepLinkResultMessage.message}
           </Text>
         ) : null}
-        <PrimaryButton
-          label={repaymentState?.disabled
-            ? repaymentState.disabledLabel
-            : linePayStatus === "loading"
-              ? "正在建立付款請求..."
-              : isManualRepayment
-                ? "前往 LINE Pay 重新付款"
-                : selectedProvider === "ecpay"
-                  ? "前往信用卡預授權"
-                  : "前往 LINE Pay 預授權"}
-          disabled={Boolean(
-            repaymentState?.disabled
-            || (needsPickupRuleConsent && (pickupRuleStatus !== "ready" || !pickupRuleAccepted || !pickupRuleContentViewed))
-          )}
-          onPress={() => {
-            if (
-              linePayStatus === "loading"
-              || repaymentState?.disabled
-              || (needsPickupRuleConsent && (pickupRuleStatus !== "ready" || !pickupRuleAccepted || !pickupRuleContentViewed))
-            ) return;
-            const startPayment = isManualRepayment ? startLinePayRepayment : startPaymentAuthorization;
-            startPayment({
-              payment,
-              order,
-              provider: selectedProvider,
-              routeRevision: {
-                id: route.params?.orderRevisionId,
-                amount: route.params?.revisionAmount,
-                items: route.params?.revisionItems
-              },
-              ruleConsent: needsPickupRuleConsent && pickupRule ? {
-                accepted: pickupRuleAccepted,
-                ruleType: pickupRule.ruleType,
-                ruleVersion: pickupRule.ruleVersion
-              } : null,
-              onRuleOutdated: () => setPickupRuleReloadKey((value) => value + 1),
-              actions,
-              pollIntervalRef,
-              pollTimeoutRef,
-              pollInFlightRef,
-              setLinePayStatus,
-              setLinePayMessage,
-              setSyncStatus,
-              setSyncMessage
-            });
-          }}
-        />
-        <PrimaryButton
-          label={syncStatus === "loading" ? "正在刷新付款狀態..." : "刷新付款狀態"}
-          variant="secondary"
-          onPress={() => {
-            if (syncStatus === "loading") return;
-            syncBackendOrder({ orderId: payment.orderId, actions, setSyncStatus, setSyncMessage });
-          }}
-        />
-        {syncMessage ? (
-          <Text style={syncStatus === "error" ? styles.errorText : styles.successText}>{syncMessage}</Text>
+        {!isAuthorized && !isCaptured ? (
+          <>
+            <Text style={styles.meta}>
+              {isManualRepayment
+                ? "此按鈕會開啟 LINE Pay，並以結算後金額直接付款。"
+                : "點擊後會開啟 LINE Pay 付款頁，完成授權即完成加入團購的付款程序。"}
+            </Text>
+            <Text style={styles.meta}>
+              {isManualRepayment
+                ? "付款成功後會自動更新訂單並加入店家製作清單。"
+                : "完成後畫面會自動更新付款狀態。"}
+            </Text>
+            <PrimaryButton
+              label={repaymentState?.disabled
+                ? repaymentState.disabledLabel
+                : linePayStatus === "loading"
+                  ? "正在建立付款請求..."
+                  : isManualRepayment
+                    ? "前往 LINE Pay 重新付款"
+                    : "前往 LINE Pay 預授權"}
+              disabled={Boolean(
+                repaymentState?.disabled
+                || (needsPickupRuleConsent && (pickupRuleStatus !== "ready" || !pickupRuleAccepted || !pickupRuleContentViewed))
+              )}
+              onPress={() => {
+                if (
+                  linePayStatus === "loading"
+                  || repaymentState?.disabled
+                  || (needsPickupRuleConsent && (pickupRuleStatus !== "ready" || !pickupRuleAccepted || !pickupRuleContentViewed))
+                ) return;
+                const startPayment = isManualRepayment ? startLinePayRepayment : startPaymentAuthorization;
+                startPayment({
+                  payment,
+                  order,
+                  routeRevision: {
+                    id: route.params?.orderRevisionId,
+                    amount: route.params?.revisionAmount,
+                    items: route.params?.revisionItems
+                  },
+                  ruleConsent: needsPickupRuleConsent && pickupRule ? {
+                    accepted: pickupRuleAccepted,
+                    ruleType: pickupRule.ruleType,
+                    ruleVersion: pickupRule.ruleVersion
+                  } : null,
+                  onRuleOutdated: () => setPickupRuleReloadKey((value) => value + 1),
+                  actions,
+                  pollIntervalRef,
+                  pollTimeoutRef,
+                  pollInFlightRef,
+                  setLinePayStatus,
+                  setLinePayMessage,
+                  setSyncStatus,
+                  setSyncMessage
+                });
+              }}
+            />
+            <PrimaryButton
+              label={syncStatus === "loading" ? "正在刷新付款狀態..." : "刷新付款狀態"}
+              variant="secondary"
+              onPress={() => {
+                if (syncStatus === "loading") return;
+                syncBackendOrder({ orderId: payment.orderId, actions, setSyncStatus, setSyncMessage });
+              }}
+            />
+            {syncMessage ? (
+              <Text style={syncStatus === "error" ? styles.errorText : styles.successText}>{syncMessage}</Text>
+            ) : null}
+          </>
         ) : null}
       </Section>
 
       {isCaptured ? (
         <Section title="請款結果">
-          <AmountRow label="優惠價 finalAmount" value={payment.finalAmount} />
-          <AmountRow label="實際請款 captureAmount" value={payment.captureAmount} />
-          <AmountRow label="釋放差額 releasedAmount" value={payment.releasedAmount} />
+          <AmountRow label="優惠後金額" value={payment.finalAmount} />
+          <AmountRow label="實際請款金額" value={payment.captureAmount} />
+          <AmountRow label="已釋放差額" value={payment.releasedAmount} />
         </Section>
       ) : null}
 
+      {/* Real capture only ever happens via the backend's automatic deadline settlement -- a
+          customer must never be able to trigger it themselves. captureQualifiedPayment is a
+          local-only prototype mock (no real backend call), kept as a dev-testing convenience;
+          gated so it can't render or fire outside dev auth mode. */}
       {!isManualRepayment && (isAuthorized || isCaptured) ? (
         <PrimaryButton
-          label={isCaptured ? "已完成優惠價請款" : canCapture ? "模擬達標後部分請款" : "等待達標後請款"}
-          onPress={() => !isCaptured && canCapture && actions.captureQualifiedPayment(payment.orderId, payment.finalAmount ?? Math.round(payment.originalAmount * 0.83))}
+          label={isCaptured
+            ? "已完成優惠價請款"
+            : isDevAuthMode && canCapture
+              ? "模擬達標後部分請款"
+              : "等待達標後請款"}
+          onPress={() => {
+            if (isCaptured || !isDevAuthMode || !canCapture) return;
+            actions.captureQualifiedPayment(payment.orderId, payment.finalAmount ?? Math.round(payment.originalAmount * 0.83));
+          }}
         />
       ) : null}
       <PrimaryButton label="前往取貨資訊" variant="secondary" onPress={() => navigation.go("pickupInfo", { orderId: payment.orderId })} />
@@ -443,7 +429,6 @@ async function startLinePayRepayment({
 async function startPaymentAuthorization({
   payment,
   order,
-  provider = "line_pay",
   routeRevision = null,
   ruleConsent = null,
   onRuleOutdated = null,
@@ -456,7 +441,7 @@ async function startPaymentAuthorization({
   setSyncStatus,
   setSyncMessage
 }) {
-  const providerLabel = provider === "ecpay" ? "信用卡" : "LINE Pay";
+  const providerLabel = "LINE Pay";
   let revisionPayment = null;
   try {
     if (!payment || !order) {
@@ -469,20 +454,15 @@ async function startPaymentAuthorization({
     revisionPayment = getRevisionPaymentContext(order, payment, routeRevision);
     const paymentAmount = revisionPayment?.amount ?? payment.originalAmount;
 
-    const payload = provider === "ecpay"
-      ? await requestEcpayAuthorization({
-          orderId: order.id,
-          amount: paymentAmount
-        })
-      : await requestLinePayAuthorization({
-          orderId: order.id,
-          orderRevisionId: revisionPayment?.id,
-          amount: paymentAmount,
-          ruleConsent,
-          productName: order.itemName || "DrinkGroupBuy 飲料訂單",
-          packageName: payment.recipientName || "DrinkGroupBuy",
-          products: buildLinePayProducts(order, payment, revisionPayment)
-        });
+    const payload = await requestLinePayAuthorization({
+      orderId: order.id,
+      orderRevisionId: revisionPayment?.id,
+      amount: paymentAmount,
+      ruleConsent,
+      productName: order.itemName || "DrinkGroupBuy 飲料訂單",
+      packageName: payment.recipientName || "DrinkGroupBuy",
+      products: buildLinePayProducts(order, payment, revisionPayment)
+    });
     const paymentUrl = payload.paymentUrl?.web || payload.paymentUrl?.app;
     if (!paymentUrl) {
       throw new Error(`${providerLabel} 沒有回傳付款網址`);
@@ -507,7 +487,7 @@ async function startPaymentAuthorization({
     }
     if (error.payload?.status === "already_authorized") {
       setLinePayStatus("ready");
-      setLinePayMessage(`此訂單已完成${providerLabel}授權，正在同步 backend 狀態。`);
+      setLinePayMessage(`此訂單已完成${providerLabel}授權，正在同步最新付款狀態。`);
       syncBackendOrder({
         orderId: payment.orderId,
         actions,
@@ -519,7 +499,7 @@ async function startPaymentAuthorization({
 
     if (error.payload?.status === "authorization_already_pending") {
       setLinePayStatus("ready");
-      setLinePayMessage(`此訂單已有一筆${providerLabel}授權流程進行中，會自動等待 backend 結果。`);
+      setLinePayMessage(`此訂單已有一筆${providerLabel}授權流程進行中，會自動等待結果。`);
       startLinePaySyncPolling({
         orderId: payment.orderId,
         orderRevisionId: revisionPayment?.id,
@@ -646,14 +626,9 @@ function formatRepaymentCutoff(value) {
   });
 }
 
-function getProviderDisplayName(provider) {
-  if (provider === "ecpay" || provider === "mock_ecpay") return "信用卡（ECPay）";
-  return "LINE Pay";
-}
-
 function getDeepLinkResultMessage(params = {}) {
   if (!params.linePayResultStatus) return null;
-  const providerLabel = params.paymentResultSource === "ecpay" ? "信用卡" : "LINE Pay";
+  const providerLabel = "LINE Pay";
   if (params.linePayResultStatus === "authorized") {
     return { type: "success", message: `已從${providerLabel}返回 App，正在同步預授權結果。` };
   }
@@ -762,10 +737,6 @@ const styles = StyleSheet.create({
     color: "#047857",
     fontSize: 13,
     fontWeight: "800"
-  },
-  providerToggleRow: {
-    flexDirection: "row",
-    gap: 10
   },
   successText: {
     color: "#047857",

@@ -6,13 +6,11 @@
 
 ## 付款 Provider 方向
 
-第一階段主要付款 provider 是 LINE Pay。**LINE Pay「分離式請款」已於 2026-07-31 獲官方核准**（測試商店 `test_202606269512`），並已於 2026-08-08 完成 Sandbox 人工端對端驗證（詳見 `docs/line-pay-separated-capture-sandbox-checklist.md`），通過門檻全數達成。2026-08-05 起新增的信用卡（綠界 ECPay）維持作為第二個 provider 並存，原本新增的唯一原因是「LINE Pay 分離式請款官方審核進度不確定」，該原因已隨核准與驗證完成而解除；ECPay 現在的角色回歸單純的備援/並行選項，非必要路徑。本文件其餘規則（預授權、截止結算才請款、折扣分攤等）對信用卡 provider 同樣適用，是 provider 中立的商業規則。
+唯一付款 provider 是 LINE Pay。**LINE Pay「分離式請款」已於 2026-07-31 獲官方核准**（測試商店 `test_202606269512`），並已於 2026-08-08 完成 Sandbox 人工端對端驗證（詳見 `docs/line-pay-separated-capture-sandbox-checklist.md`），通過門檻全數達成。
 
-信用卡走「跳轉到 ECPay 託管付款頁」的標準結帳方式（AioCheckOut），不做 ECPay「幕後交易授權」API——那個方式需要商家自己收明碼卡號，會有 PCI-DSS 合規負擔。標準方式下卡號在 ECPay 網域輸入，後端完全不經手卡號。
+信用卡（綠界 ECPay）曾於 2026-08-05 新增作為第二個 provider，唯一原因是當時 LINE Pay 分離式請款官方審核進度不確定；該原因已隨核准與驗證完成而解除，ECPay 於 2026-08-27 完全移除（見 `docs/AI-security-review-log.md` 2026-08-26／2026-08-27 兩筆記錄），不再是備援選項。本文件其餘規則（預授權、截止結算才請款、折扣分攤等）維持 provider 中立的寫法，日後若要新增其他 provider 仍可套用。
 
-ECPay 與 LINE Pay 在確認機制上有本質差異：LINE Pay 靠使用者瀏覽器被導回 `confirmUrl` 這個 GET redirect 本身觸發後端 confirm；ECPay 是兩條獨立路徑——`ReturnURL`（ECPay 伺服器對後端 POST 的權威通知，須驗 CheckMacValue、須回覆 `"1|OK"`）與 `ClientBackURL`（單純把瀏覽器導回，不是權威來源）。ECPay 的「先授權、之後才關帳（capture）」是帳號層級標準設定，不需要像 LINE Pay 分離式請款那樣另外向 provider 申請；關帳期限（21 天內須完成 API 關帳，90 天後系統放棄不請款）也比 LINE Pay 更寬鬆。
-
-LINE Pay 實作與驗證進度詳見 `docs/AI-current-progress.md`「2026-08-08 LINE Pay 分離式請款 Sandbox 人工端對端驗證完成」與 `docs/line-pay-separated-capture-sandbox-checklist.md`。ECPay 實作進度詳見 `docs/AI-current-progress.md`「2026-08-05 新增信用卡（ECPay）付款」；後端路由、mobile 付款方式選擇 UI 與自動化 smoke test（`npm run ecpay:smoke`）皆已完成並驗證，可從 App 發起信用卡付款。尚未完成的是真正打 ECPay Stage 環境的人工端對端驗證（`docs/ecpay-checkout-stage-checklist.md`），目前只驗證過 `mock_ecpay`；因 LINE Pay 已核准並驗證完成，此項優先度已降低。
+LINE Pay 實作與驗證進度詳見 `docs/AI-current-progress.md`「2026-08-08 LINE Pay 分離式請款 Sandbox 人工端對端驗證完成」與 `docs/line-pay-separated-capture-sandbox-checklist.md`。
 
 ## 已確認規則
 
@@ -103,7 +101,7 @@ LINE Pay 實作與驗證進度詳見 `docs/AI-current-progress.md`「2026-08-08 
 4. Backend 以自己的權威規則全文與真實伺服器時間寫入 `order_rule_consents`，不採信 Client 傳入全文、帳號或時間。
 5. 同一訂單、規則類型與版本採 append-only idempotent 紀錄；重試不覆寫第一次同意時間，規則升版則新增一筆歷史紀錄。
 6. 未同意、版本過期或保存失敗都不會呼叫 LINE Pay provider。
-7. 第一版已套用一般預授權與 revision 重新預授權；LINE Pay 手動重新付款沿用該訂單既有同意證據。ECPay 入口目前隱藏，尚未套用同一 gate。
+7. 第一版已套用一般預授權與 revision 重新預授權；LINE Pay 手動重新付款沿用該訂單既有同意證據。
 
 ### 付款結果同步
 
@@ -210,4 +208,4 @@ LINE Pay 實作與驗證進度詳見 `docs/AI-current-progress.md`「2026-08-08 
 ## 尚未決定
 
 1. void 失敗時的具體重試間隔、最大重試時間與告警方式尚未設計。
-2. Deadline settlement 已使用持久化 job 與 DB lease；兩程序 claim／lease takeover 測試已通過，仍需 PostgreSQL row-lock 驗收與正式告警通知管道。
+2. Deadline settlement 已使用持久化 job 與 DB lease；兩程序 claim／lease takeover 測試已通過。PostgreSQL row-lock 驗收（8/20）與正式告警通知管道（8/24，`ALERT_WEBHOOK_URL`）皆已完成，細節見 `PROGRESS.md`。

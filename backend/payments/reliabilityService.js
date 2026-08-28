@@ -17,6 +17,7 @@ const {
   retrieveLinePayPaymentDetails
 } = require("./linePayClient");
 const { confirmLinePayAuthorization, inferLinePayPaymentState } = require("./linePayService");
+const { sendPaymentReliabilityJobAlert, sendSchedulerFailureAlert } = require("./alertNotifier");
 
 const RECONCILIATION_JOB_TYPE = "reconcile_line_pay_request";
 
@@ -290,6 +291,7 @@ function startLinePayReconciliationScheduler(input = {}) {
       return summary;
     } catch (error) {
       logger.error?.("[line-pay-reconciliation]", error);
+      sendSchedulerFailureAlert(error, { source: "line_pay_reconciliation", logger });
       return { error: error.message };
     } finally {
       running = false;
@@ -327,6 +329,7 @@ function logAlertRequiredJobs(results, logger, source) {
       maxAttempts: entry.job.maxAttempts,
       lastError: entry.job.lastError
     });
+    sendPaymentReliabilityJobAlert(entry, { source, logger });
   }
 }
 

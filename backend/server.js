@@ -1,4 +1,7 @@
 const http = require("node:http");
+const crypto = require("node:crypto");
+const path = require("node:path");
+const { promises: fs } = require("node:fs");
 const {
   cancelGroupBuyActivity,
   cancelCustomerOrderInDatabase,
@@ -61,7 +64,7 @@ const {
   completeManualLinePayRepaymentInDatabase,
   listPendingLinePayAuthorizations
 } = require("./db");
-const { createAuthToken, getBearerToken, verifyAuthToken, verifyPassword } = require("./auth");
+const { createAuthToken, getBearerToken, safeEqual, verifyAuthToken, verifyPassword } = require("./auth");
 const { verifyFirebaseIdToken } = require("./firebaseAuth");
 const {
   PaymentServiceError,
@@ -74,11 +77,6 @@ const {
   voidLinePayAuthorization
 } = require("./payments/linePayService");
 const { getPickupOverdueRule } = require("./payments/orderRuleConsent");
-const {
-  handleEcpayReturnWebhook,
-  renderEcpayCheckoutRedirectHtml,
-  requestEcpayAuthorization
-} = require("./payments/ecpayService");
 const {
   approveRefundRequest,
   createMerchantRefundRequest,
@@ -105,6 +103,17 @@ const {
   redeemPickupCode
 } = require("./pickup/credentialService");
 const { startPickupExpirationScheduler } = require("./pickup/expirationService");
+const {
+  loadDevConsoleState,
+  getDevConsoleState,
+  getCustomerConfig: getDevConsoleCustomerConfig,
+  updateCustomerConfig: updateDevConsoleCustomerConfig,
+  resetCustomerConfig: resetDevConsoleCustomerConfig,
+  recordAppReport: recordDevConsoleAppReport,
+  recordBusinessTimeUpdate: recordDevConsoleBusinessTimeUpdate,
+  toConsoleAccount,
+  normalizeCustomerId: normalizeDevConsoleCustomerId
+} = require("./devConsole/devConsoleState");
 const {
   createStoreMenuReadRepository
 } = require("./database/repositories/storeMenuReadRepository");
@@ -165,9 +174,6 @@ const {
 const {
   createPaymentReliabilityJobRepository
 } = require("./database/repositories/paymentReliabilityJobRepository");
-const {
-  createEcpayAuthorizationRepository
-} = require("./database/repositories/ecpayAuthorizationRepository");
 const { businessClock } = require("./time/businessClock");
 
 const port = Number(process.env.PORT ?? 3000);
@@ -308,16 +314,6 @@ const reliabilityJobRepository = createPaymentReliabilityJobRepository({
     rescheduleJob: (value) => reschedulePaymentReliabilityJob(value),
     listPendingLinePayAuthorizations: (value) => listPendingLinePayAuthorizations(value),
     listAlerts: (value) => listPaymentReliabilityAlerts(value),
-  },
-});
-const ecpayAuthorizationRepository = createEcpayAuthorizationRepository({
-  sqliteGateway: {
-    getOrderPaymentContext: (orderId) => getOrderPaymentContext(orderId),
-    getLatestAuthorizationForOrder: (orderId) => getLatestLinePayAuthorizationForOrder(orderId),
-    getAuthorizationContext: (query) => getLinePayAuthorizationContext(query),
-    createPendingAuthorization: (value) => createPendingLinePayAuthorization(value),
-    authorizeAuthorization: (value) => authorizeLinePayPaymentInDatabase(value),
-    getLatestProviderEventPayload: (value) => getLatestPaymentProviderEventPayload(value),
   },
 });
 if (
@@ -482,48 +478,6 @@ if (manualRepaymentPostgresReady) {
   }
 }
 
-// ECPay capture/void reuse the same PAYMENT_CAPTURE_RUNTIME / PAYMENT_AUTHORIZATION_CANCEL_
-// RUNTIME repositories LINE Pay already uses (payment_authorizations/payment_captures are
-// shared, provider-generic tables), so those two must already be postgres. ECPAY_
-// AUTHORIZATION_RUNTIME is its own separate flag gating the request/webhook steps that are
-// unique to ECPay and can't reuse LINE Pay's request/confirm repositories as-is (see
-// ecpayAuthorizationRepository.js) -- settlementService.js and merchantActivityCancelService.js
-// additionally re-check all three repositories' `.kind` together before every capture/void
-// call, so leaving this flag on sqlite while the other two are postgres degrades safely
-// (ECPay falls back to SQLite) rather than silently missing rows that only exist in SQLite.
-const ecpayPostgresReady = ecpayAuthorizationRepository.kind === "postgres"
-  && paymentCaptureRepository.kind === "postgres"
-  && paymentAuthorizationCancelRepository.kind === "postgres";
-if (ecpayAuthorizationRepository.kind === "postgres" && !ecpayPostgresReady) {
-  throw new Error(
-    "PostgreSQL ECPay support requires PAYMENT_CAPTURE_RUNTIME and "
-    + "PAYMENT_AUTHORIZATION_CANCEL_RUNTIME to be postgres too, since ECPay capture/void "
-    + "write the same payment_authorizations/payment_captures rows."
-  );
-}
-if (ecpayPostgresReady) {
-  if (customerOrderWriteRepository.kind !== "postgres") {
-    throw new Error(
-      "PostgreSQL ECPay support requires the full PostgreSQL order-write stack "
-      + "(CUSTOMER_ORDER_WRITE_RUNTIME and its dependent *_RUNTIME flags) to be postgres too, "
-      + "since ECPay reads and writes the same orders rows."
-    );
-  }
-  // ECPay capture/void move money just like LINE Pay capture, so they share the same
-  // explicit production opt-in rather than getting their own.
-  const ecpayLinePayEnv = String(process.env.LINE_PAY_ENV || "sandbox").toLowerCase();
-  const allowPostgresEcpayInProduction = readBooleanEnv(
-    process.env.PAYMENT_CAPTURE_RUNTIME_ALLOW_PRODUCTION,
-    false
-  );
-  if (ecpayLinePayEnv === "production" && !allowPostgresEcpayInProduction) {
-    throw new Error(
-      "PostgreSQL ECPay support in production requires an explicit, separate opt-in: "
-      + "set PAYMENT_CAPTURE_RUNTIME_ALLOW_PRODUCTION=true."
-    );
-  }
-}
-
 // The LINE Pay reconciliation background scheduler reads/writes authorizations, cancels stale
 // ones, and completes manual repayments -- it can only run against PostgreSQL once every
 // repository it touches is also PostgreSQL, or it would silently read one runtime and write
@@ -567,6 +521,17 @@ const server = http.createServer(async (request, response) => {
       && isSqliteOrderDependentRoute(request.method, url.pathname)
       && !isSettlementRouteReadyForPostgres(request.method, url.pathname)
     ) {
+      // /admin/* is the server-rendered web console (browser navigation, not fetch), so it needs
+      // an HTML response here -- the JSON error below would otherwise replace the whole page with
+      // an unstyled blob instead of the console's normal error banner.
+      if (url.pathname.startsWith("/admin")) {
+        sendHtml(response, 503, renderAdminPage({
+          title: "系統維護中",
+          bodyHtml: renderAdminNotice({ type: "error", text: "後端資料庫遷移尚未完成，這個功能暫時無法使用，請稍後再試。" }),
+          activeNav: null
+        }));
+        return;
+      }
       sendJson(response, 503, {
         error: "customer_order_runtime_mismatch",
         message: "This order follow-up route still requires the SQLite order runtime."
@@ -842,7 +807,7 @@ const server = http.createServer(async (request, response) => {
       }
 
       const body = await readJsonBody(request);
-      const validationError = validateCreateActivity(body);
+      const validationError = validateCreateActivity(body, businessClock.nowIso());
       if (validationError) {
         sendJson(response, 400, { error: validationError });
         return;
@@ -924,8 +889,7 @@ const server = http.createServer(async (request, response) => {
           now: businessClock.nowIso(),
           canManageStore: (storeId) => canManageStore(authUser, storeId),
           merchantGroupBuyActivityCancelRepository,
-          paymentAuthorizationCancelRepository,
-          ecpayAuthorizationRepository: ecpayPostgresReady ? ecpayAuthorizationRepository : undefined
+          paymentAuthorizationCancelRepository
         });
         if (result.error) {
           const statusByError = {
@@ -1004,7 +968,10 @@ const server = http.createServer(async (request, response) => {
         return;
       }
 
-      const order = getOrderDetail(orderPickupCredentialMatch[1], { now: businessClock.nowIso() });
+      const order = await customerOrderReadRepository.getOrderDetail(
+        orderPickupCredentialMatch[1],
+        { now: businessClock.nowIso() }
+      );
       if (!order) {
         sendJson(response, 404, { error: "Order not found" });
         return;
@@ -1607,88 +1574,6 @@ const server = http.createServer(async (request, response) => {
       return;
     }
 
-    if (request.method === "POST" && url.pathname === "/api/payments/ecpay/request") {
-      const authUser = await getAuthenticatedUser(request);
-      if (!authUser) {
-        sendJson(response, 401, { error: "Authentication required" });
-        return;
-      }
-
-      const body = await readJsonBody(request);
-      try {
-        const result = await requestEcpayAuthorization({
-          authUser,
-          body,
-          ecpayAuthorizationRepository: ecpayPostgresReady ? ecpayAuthorizationRepository : undefined
-        });
-        sendJson(response, 201, result);
-      } catch (error) {
-        if (error instanceof PaymentServiceError) {
-          sendJson(response, error.statusCode, error.payload);
-          return;
-        }
-        throw error;
-      }
-      return;
-    }
-
-    if (request.method === "GET" && url.pathname === "/api/payments/ecpay/checkout-redirect") {
-      const orderId = url.searchParams.get("orderId");
-      const html = orderId
-        ? await renderEcpayCheckoutRedirectHtml(
-            orderId,
-            ecpayPostgresReady ? ecpayAuthorizationRepository : undefined
-          )
-        : null;
-      if (!html) {
-        sendHtml(response, 404, buildLinePayResultPage({
-          title: "找不到待付款的信用卡預授權",
-          message: "請回到 App 重新發起付款。",
-          appReturnUrl: buildLinePayAppReturnUrl({ orderId, status: "failed", error: "ecpay_authorization_not_found", source: "ecpay" })
-        }));
-        return;
-      }
-      sendHtml(response, 200, html);
-      return;
-    }
-
-    // ECPay ReturnURL: the authoritative, server-to-server payment notification. This is
-    // POST + form-encoded, unlike LINE Pay's GET-redirect-is-the-confirm-call model, and
-    // ECPay retries delivery until it receives a literal "1|OK" response body.
-    if (request.method === "POST" && url.pathname === "/api/payments/ecpay/return") {
-      const orderId = url.searchParams.get("orderId");
-      const formFields = await readFormBody(request);
-      if (!orderId) {
-        sendText(response, 400, "0|orderId missing");
-        return;
-      }
-
-      const result = await handleEcpayReturnWebhook({
-        orderId,
-        formFields,
-        ecpayAuthorizationRepository: ecpayPostgresReady ? ecpayAuthorizationRepository : undefined
-      });
-      if (result?.error === "invalid_check_mac_value") {
-        sendText(response, 400, "0|CheckMacValue invalid");
-        return;
-      }
-      sendText(response, 200, "1|OK");
-      return;
-    }
-
-    // ECPay ClientBackURL: only carries the customer's browser back. NOT an authoritative
-    // source — the ReturnURL webhook above may not have arrived yet, so this must not
-    // trigger any state change and must read current DB state rather than trust query params.
-    if (request.method === "GET" && url.pathname === "/api/payments/ecpay/client-back") {
-      const orderId = url.searchParams.get("orderId");
-      sendHtml(response, 200, buildLinePayResultPage({
-        title: "信用卡付款處理中",
-        message: "請回到 App 查看付款狀態；若狀態尚未更新，請稍後手動重新整理。",
-        appReturnUrl: buildLinePayAppReturnUrl({ orderId, status: "pending", source: "ecpay" })
-      }));
-      return;
-    }
-
     const adminSettleActivityMatch = url.pathname.match(/^\/api\/admin\/group-buy-activities\/([^/]+)\/settle$/);
     if (request.method === "GET" && url.pathname === "/api/admin/payment-reliability/alerts") {
       const authUser = await getAuthenticatedUser(request);
@@ -1748,10 +1633,7 @@ const server = http.createServer(async (request, response) => {
         now: businessClock.nowIso(),
         settlementRepository: settlementPostgresReady ? groupBuySettlementRepository : undefined,
         paymentCaptureRepository: settlementPostgresReady ? paymentCaptureRepository : undefined,
-        authorizationCancelRepository: settlementPostgresReady ? paymentAuthorizationCancelRepository : undefined,
-        ecpayAuthorizationRepository: settlementPostgresReady && ecpayPostgresReady
-          ? ecpayAuthorizationRepository
-          : undefined
+        authorizationCancelRepository: settlementPostgresReady ? paymentAuthorizationCancelRepository : undefined
       });
 
       if (!result) {
@@ -1859,8 +1741,7 @@ const server = http.createServer(async (request, response) => {
           canManageStore: () => true,
           actionType: "admin_cancel_group_buy_activity",
           merchantGroupBuyActivityCancelRepository,
-          paymentAuthorizationCancelRepository,
-          ecpayAuthorizationRepository: ecpayPostgresReady ? ecpayAuthorizationRepository : undefined
+          paymentAuthorizationCancelRepository
         });
         if (result.error) {
           const statusByError = {
@@ -1883,6 +1764,320 @@ const server = http.createServer(async (request, response) => {
         }
         throw error;
       }
+      return;
+    }
+
+    // Dev-only test console (formerly a separate process at local-dev-console/, port 3100 --
+    // merged here on 2026-08-23 so it's one tool instead of two). Controls simulated customer
+    // GPS location and the global simulated business clock for local testing; never modifies
+    // accounts, roles, or store permissions. Gated on isDevAuthModeEnabled() (its own account
+    // list already needs AUTH_DEV_MODE) AND isLoopbackRequest -- the original process only ever
+    // bound to 127.0.0.1, so this preserves that exact reachability boundary (works from the web
+    // preview and from an Android *emulator*, which maps 10.0.2.2 back to host loopback; a real
+    // phone over LAN still can't reach it).
+    // On top of that, as of 2026-08-24 this console is treated as part of the /admin backend
+    // (same nav, same session) -- the human-facing page and its control API also require the
+    // same /admin login, not just loopback. The two app-facing routes below are the exception:
+    // the mobile app itself calls them directly (no browser, no admin session) to simulate
+    // location during dev testing, so they stay reachable on the loopback+dev-mode gate alone.
+    if (url.pathname === "/dev-console" || url.pathname.startsWith("/dev-console/")) {
+      if (!isDevAuthModeEnabled() || !isLoopbackRequest(request)) {
+        sendJson(response, 404, { error: "Not found" });
+        return;
+      }
+
+      const isAppFacingDevConsoleRoute = (request.method === "GET" && url.pathname === "/dev-console/api/app/config")
+        || (request.method === "POST" && url.pathname === "/dev-console/api/app/report");
+      if (!isAppFacingDevConsoleRoute) {
+        const adminUser = await requireAdminWebUser(request, response);
+        if (!adminUser) return;
+      }
+
+      if (request.method === "GET" && (url.pathname === "/dev-console" || url.pathname === "/dev-console/")) {
+        sendHtml(response, 200, await fs.readFile(path.join(__dirname, "devConsole", "public", "index.html"), "utf8"));
+        return;
+      }
+      if (request.method === "GET" && url.pathname === "/dev-console/styles.css") {
+        const content = await fs.readFile(path.join(__dirname, "devConsole", "public", "styles.css"));
+        response.writeHead(200, { "Content-Type": "text/css; charset=utf-8", "Cache-Control": "no-store" });
+        response.end(content);
+        return;
+      }
+      if (request.method === "GET" && url.pathname === "/dev-console/app.js") {
+        const content = await fs.readFile(path.join(__dirname, "devConsole", "public", "app.js"));
+        response.writeHead(200, { "Content-Type": "text/javascript; charset=utf-8", "Cache-Control": "no-store" });
+        response.end(content);
+        return;
+      }
+
+      if (request.method === "GET" && url.pathname === "/dev-console/api/status") {
+        const devConsoleState = getDevConsoleState();
+        sendJson(response, 200, {
+          console: { ok: true, localOnly: true },
+          backend: { ok: true, statusCode: 200, service: "drink-group-buy-backend", error: null },
+          configVersion: getDevConsoleCustomerConfig(normalizeDevConsoleCustomerId(devConsoleState.appReport?.user?.id)).version,
+          appReport: devConsoleState.appReport
+        });
+        return;
+      }
+
+      if (request.method === "GET" && url.pathname === "/dev-console/api/accounts") {
+        try {
+          const users = await authProfileReadRepository.listDevUsers();
+          sendJson(response, 200, { ok: true, statusCode: 200, error: null, accounts: users.map(toConsoleAccount) });
+        } catch (error) {
+          sendJson(response, 200, { ok: false, accounts: [], statusCode: null, error: error.message });
+        }
+        return;
+      }
+
+      if (request.method === "GET" && url.pathname === "/dev-console/api/business-time") {
+        sendJson(response, 200, { businessTime: businessClock.getSnapshot() });
+        return;
+      }
+
+      if (request.method === "PUT" && url.pathname === "/dev-console/api/business-time") {
+        try {
+          const body = await readJsonBody(request);
+          const businessTime = businessClock.configure(body, { nodeEnv: process.env.NODE_ENV });
+          await recordDevConsoleBusinessTimeUpdate(businessTime);
+          sendJson(response, 200, { businessTime });
+        } catch (error) {
+          sendJson(response, 400, { error: error.code || "business_time_invalid", message: error.message });
+        }
+        return;
+      }
+
+      if (request.method === "GET" && url.pathname === "/dev-console/api/config") {
+        const devConsoleState = getDevConsoleState();
+        sendJson(response, 200, { config: devConsoleState.config, customerConfigs: devConsoleState.customerConfigs });
+        return;
+      }
+
+      if (request.method === "GET" && url.pathname === "/dev-console/api/app/config") {
+        const userId = normalizeDevConsoleCustomerId(url.searchParams.get("userId"));
+        sendJson(response, 200, { userId, config: getDevConsoleCustomerConfig(userId) });
+        return;
+      }
+
+      if (request.method === "PUT" && url.pathname === "/dev-console/api/config") {
+        try {
+          const body = await readJsonBody(request);
+          sendJson(response, 200, await updateDevConsoleCustomerConfig(body));
+        } catch (error) {
+          if (error instanceof PaymentServiceError) {
+            sendJson(response, error.statusCode, error.payload);
+            return;
+          }
+          throw error;
+        }
+        return;
+      }
+
+      if (request.method === "POST" && url.pathname === "/dev-console/api/config/reset") {
+        try {
+          const body = await readJsonBody(request);
+          sendJson(response, 200, await resetDevConsoleCustomerConfig(body));
+        } catch (error) {
+          if (error instanceof PaymentServiceError) {
+            sendJson(response, error.statusCode, error.payload);
+            return;
+          }
+          throw error;
+        }
+        return;
+      }
+
+      if (request.method === "GET" && url.pathname === "/dev-console/api/events") {
+        sendJson(response, 200, { events: getDevConsoleState().events });
+        return;
+      }
+
+      if (request.method === "POST" && url.pathname === "/dev-console/api/app/report") {
+        try {
+          const body = await readJsonBody(request);
+          sendJson(response, 200, { appReport: await recordDevConsoleAppReport(body) });
+        } catch (error) {
+          if (error instanceof PaymentServiceError) {
+            sendJson(response, error.statusCode, error.payload);
+            return;
+          }
+          throw error;
+        }
+        return;
+      }
+
+      sendJson(response, 404, { error: "Not found" });
+      return;
+    }
+
+    // Server-rendered admin web console. Plain HTML/forms, no build step -- see
+    // docs/AI-architecture.md for why this replaced the mobile app's dev-only admin screens.
+    // Session is a cookie holding the same signed token createAuthToken() issues for the
+    // mobile API, so every mutation below reuses the exact service functions (and therefore
+    // the exact audit-log / idempotency / role-check behavior) the JSON admin API already had.
+    if (request.method === "GET" && url.pathname === "/admin/login") {
+      const existingAdminUser = await getAdminWebUser(request);
+      if (existingAdminUser) {
+        response.writeHead(302, { Location: "/admin" });
+        response.end();
+        return;
+      }
+      const loginError = url.searchParams.get("error") === "1" ? "密碼錯誤，請再試一次。" : null;
+      sendHtml(response, 200, renderAdminLoginPage({ error: loginError }));
+      return;
+    }
+
+    if (request.method === "POST" && url.pathname === "/admin/login") {
+      const body = await readFormBody(request);
+      if (!verifyAdminWebPassword(body.password)) {
+        response.writeHead(302, { Location: "/admin/login?error=1" });
+        response.end();
+        return;
+      }
+
+      // Targeted lookup by the known seed id instead of authProfileReadRepository.listDevUsers()
+      // -- that method's contract is "the dev-mode identity picker" (its only other call site is
+      // gated behind isDevAuthModeEnabled()), and scanning every customer/merchant/admin account
+      // just to find this one row doesn't fit an admin-login path that must work regardless of
+      // AUTH_DEV_MODE.
+      const adminUser = await authProfileReadRepository.getById(ADMIN_WEB_USER_ID);
+      if (!adminUser || !adminUser.roles.includes("admin")) {
+        sendHtml(response, 500, renderAdminLoginPage({
+          error: `系統找不到管理員身份（${ADMIN_WEB_USER_ID}），請確認資料庫已正確 seed。`
+        }));
+        return;
+      }
+
+      const token = createAuthToken(adminUser);
+      response.writeHead(302, {
+        "Set-Cookie": buildAdminSessionCookie(token),
+        Location: "/admin"
+      });
+      response.end();
+      return;
+    }
+
+    if (request.method === "POST" && url.pathname === "/admin/logout") {
+      response.writeHead(302, {
+        "Set-Cookie": buildAdminSessionClearCookie(),
+        Location: "/admin/login"
+      });
+      response.end();
+      return;
+    }
+
+    if (request.method === "GET" && url.pathname === "/admin") {
+      const adminUser = await requireAdminWebUser(request, response);
+      if (!adminUser) return;
+
+      const activities = await groupBuyActivityReadRepository.listActivities();
+      const csrfToken = buildAdminCsrfToken(parseCookies(request)[ADMIN_SESSION_COOKIE_NAME]);
+      const bodyHtml = renderAdminDashboardBody({
+        activities,
+        notice: readAdminNoticeFromQuery(url),
+        csrfToken
+      });
+      sendHtml(response, 200, renderAdminPage({ title: "全平台團購", bodyHtml, activeNav: "dashboard" }));
+      return;
+    }
+
+    const adminWebCancelActivityMatch = url.pathname.match(/^\/admin\/group-buy-activities\/([^/]+)\/cancel$/);
+    if (request.method === "POST" && adminWebCancelActivityMatch) {
+      const adminUser = await requireAdminWebUser(request, response);
+      if (!adminUser) return;
+
+      const body = await readCsrfVerifiedAdminFormBody(request, response);
+      if (!body) return;
+
+      try {
+        // Mirrors the JSON DELETE /api/admin/group-buy-activities/:id route above exactly --
+        // same cascade service, same canManageStore: () => true (admin can cancel any store's
+        // activity), same actionType for the audit trail.
+        const result = await cancelMerchantGroupBuyActivity({
+          activityId: adminWebCancelActivityMatch[1],
+          reason: (body.reason && String(body.reason).trim()) || "Cancelled by admin web console.",
+          actorUserId: adminUser.id,
+          now: businessClock.nowIso(),
+          canManageStore: () => true,
+          actionType: "admin_cancel_group_buy_activity",
+          merchantGroupBuyActivityCancelRepository,
+          paymentAuthorizationCancelRepository
+        });
+        // A non-empty failedOrderIds means the activity itself cancelled but some orders' LINE
+        // Pay void calls failed (result has no top-level `.error` for this case) -- must
+        // not show plain success or the admin has no way to know a payment is still live and
+        // needs manual follow-up.
+        const redirectNotice = result.error
+          ? { type: "error", text: describeAdminCancelActivityError(result.error) }
+          : result.failedOrderIds?.length > 0
+            ? {
+                type: "warning",
+                text: `團購已取消，但有 ${result.failedOrderIds.length} 筆訂單的付款作廢失敗，需要人工檢查：${result.failedOrderIds.join("、")}`
+              }
+            : { type: "success", text: "已取消團購。" };
+        response.writeHead(302, { Location: buildAdminRedirectLocation("/admin", redirectNotice) });
+        response.end();
+      } catch (error) {
+        response.writeHead(302, {
+          Location: buildAdminRedirectLocation("/admin", { type: "error", text: `取消失敗：${error.message}` })
+        });
+        response.end();
+      }
+      return;
+    }
+
+    if (request.method === "GET" && url.pathname === "/admin/refund-requests") {
+      const adminUser = await requireAdminWebUser(request, response);
+      if (!adminUser) return;
+
+      const refundRequests = refundPostgresReady
+        ? await paymentRefundRepository.listRefundRequestsForAdmin({})
+        : listRefundRequestsForAdmin({});
+      const csrfToken = buildAdminCsrfToken(parseCookies(request)[ADMIN_SESSION_COOKIE_NAME]);
+      const bodyHtml = renderAdminRefundRequestsBody({
+        pendingRequests: refundRequests.filter((item) => item.status === "pending"),
+        reviewedRequests: refundRequests.filter((item) => item.status !== "pending"),
+        notice: readAdminNoticeFromQuery(url),
+        csrfToken
+      });
+      sendHtml(response, 200, renderAdminPage({ title: "退款審核", bodyHtml, activeNav: "refunds" }));
+      return;
+    }
+
+    const adminWebApproveRefundMatch = url.pathname.match(/^\/admin\/refund-requests\/([^/]+)\/approve$/);
+    if (request.method === "POST" && adminWebApproveRefundMatch) {
+      const adminUser = await requireAdminWebUser(request, response);
+      if (!adminUser) return;
+
+      const body = await readCsrfVerifiedAdminFormBody(request, response);
+      if (!body) return;
+
+      await handleAdminRefundDecision(response, {
+        serviceFn: approveRefundRequest,
+        adminUser,
+        requestId: adminWebApproveRefundMatch[1],
+        serviceBody: {},
+        successText: "已核准並執行退款。"
+      });
+      return;
+    }
+
+    const adminWebRejectRefundMatch = url.pathname.match(/^\/admin\/refund-requests\/([^/]+)\/reject$/);
+    if (request.method === "POST" && adminWebRejectRefundMatch) {
+      const adminUser = await requireAdminWebUser(request, response);
+      if (!adminUser) return;
+
+      const body = await readCsrfVerifiedAdminFormBody(request, response);
+      if (!body) return;
+
+      await handleAdminRefundDecision(response, {
+        serviceFn: rejectRefundRequest,
+        adminUser,
+        requestId: adminWebRejectRefundMatch[1],
+        serviceBody: { reason: body.reason },
+        successText: "已駁回這筆退款申請。"
+      });
       return;
     }
 
@@ -1913,6 +2108,7 @@ const schedulerEnvironment = {
     : process.env.PICKUP_EXPIRATION_SCHEDULER_ENABLED
 };
 
+loadDevConsoleState().then(() => {
 server.listen(port, () => {
   console.log(`DrinkGroupBuy backend listening on http://localhost:${port}`);
   linePayReconciliationScheduler = startLinePayReconciliationScheduler({
@@ -1938,10 +2134,7 @@ server.listen(port, () => {
     nowProvider: () => businessClock.nowIso(),
     settlementRepository: settlementPostgresReady ? groupBuySettlementRepository : undefined,
     paymentCaptureRepository: settlementPostgresReady ? paymentCaptureRepository : undefined,
-    authorizationCancelRepository: settlementPostgresReady ? paymentAuthorizationCancelRepository : undefined,
-    ecpayAuthorizationRepository: settlementPostgresReady && ecpayPostgresReady
-      ? ecpayAuthorizationRepository
-      : undefined
+    authorizationCancelRepository: settlementPostgresReady ? paymentAuthorizationCancelRepository : undefined
   });
   if (deadlineSettlementScheduler.enabled) {
     console.log(`Deadline settlement scheduler enabled (${deadlineSettlementScheduler.intervalMs}ms interval)`);
@@ -1959,6 +2152,10 @@ server.listen(port, () => {
   } else {
     console.log(`Pickup expiration scheduler disabled: ${pickupExpirationScheduler.reason}`);
   }
+});
+}).catch((error) => {
+  console.error("Failed to load dev console state:", error.message);
+  process.exit(1);
 });
 
 function sendPickupServiceResult(response, result) {
@@ -2052,7 +2249,7 @@ function readJsonBody(request) {
   });
 }
 
-// ECPay's ReturnURL webhook posts application/x-www-form-urlencoded, not JSON.
+// The /admin web console's forms post application/x-www-form-urlencoded, not JSON.
 function readFormBody(request) {
   return new Promise((resolve, reject) => {
     let rawBody = "";
@@ -2066,7 +2263,356 @@ function readFormBody(request) {
   });
 }
 
-function validateCreateActivity(body) {
+const ADMIN_SESSION_COOKIE_NAME = "admin_session";
+const ADMIN_SESSION_MAX_AGE_SECONDS = 60 * 60 * 12; // matches auth.js TOKEN_TTL_SECONDS
+// The one seeded operations/remediation identity (database/seed-dev.sql, database/migrations/
+// 002_seed_dev_postgres.sql) that POST /admin/login resolves ADMIN_WEB_PASSWORDS to.
+const ADMIN_WEB_USER_ID = "user-admin-001";
+
+function parseCookies(request) {
+  const header = request.headers.cookie;
+  if (!header) return {};
+  return Object.fromEntries(
+    header
+      .split(";")
+      .map((part) => {
+        const separatorIndex = part.indexOf("=");
+        if (separatorIndex === -1) return null;
+        const name = part.slice(0, separatorIndex).trim();
+        if (!name) return null;
+        return [name, decodeURIComponent(part.slice(separatorIndex + 1).trim())];
+      })
+      .filter(Boolean)
+  );
+}
+
+// This cookie carries the same signed token accepted as a Bearer token by the full JSON admin
+// API, so a network-position attacker who captures it gets full admin access -- Secure (over
+// production TLS) stops it going out in cleartext. Conditional on NODE_ENV, matching the pattern
+// already used elsewhere in this file, since local dev has no TLS in front of the backend.
+function adminCookieSecureAttribute() {
+  return process.env.NODE_ENV === "production" ? "; Secure" : "";
+}
+
+// Path=/ (not /admin) so the same session also covers /dev-console, which is now treated as
+// part of the admin backend and requires this same login (see the /dev-console route gate).
+function buildAdminSessionCookie(token) {
+  return `${ADMIN_SESSION_COOKIE_NAME}=${encodeURIComponent(token)}; HttpOnly; Path=/; SameSite=Lax; Max-Age=${ADMIN_SESSION_MAX_AGE_SECONDS}${adminCookieSecureAttribute()}`;
+}
+
+function buildAdminSessionClearCookie() {
+  return `${ADMIN_SESSION_COOKIE_NAME}=; HttpOnly; Path=/; SameSite=Lax; Max-Age=0${adminCookieSecureAttribute()}`;
+}
+
+async function getAdminWebUser(request) {
+  const user = await getUserFromToken(parseCookies(request)[ADMIN_SESSION_COOKIE_NAME]);
+  return user?.roles.includes("admin") ? user : null;
+}
+
+// Guard clause for every protected /admin/* route: redirects to the login page and returns
+// null on failure so the caller can `if (!adminUser) return;` immediately.
+async function requireAdminWebUser(request, response) {
+  const adminUser = await getAdminWebUser(request);
+  if (adminUser) return adminUser;
+  response.writeHead(302, { Location: "/admin/login" });
+  response.end();
+  return null;
+}
+
+function getAdminWebPasswords() {
+  return (process.env.ADMIN_WEB_PASSWORDS || "")
+    .split(",")
+    .map((value) => value.trim())
+    .filter(Boolean);
+}
+
+function verifyAdminWebPassword(password) {
+  if (typeof password !== "string" || !password) return false;
+  const candidates = getAdminWebPasswords();
+  // Compares against every configured password (not short-circuiting on the first match) so a
+  // submitted password's comparison time doesn't reveal which one, if any, it matched.
+  return candidates.reduce((matched, candidate) => safeEqual(password, candidate) || matched, false);
+}
+
+// Derived from the session token itself (HMAC'd with the same secret createAuthToken() uses)
+// instead of a second server-side session store -- an attacker who doesn't already have the
+// session cookie can't compute this, and SameSite=Lax on that cookie already blocks the cookie
+// from riding along on a cross-site POST, so this is defense in depth for the mutation routes.
+function buildAdminCsrfToken(sessionToken) {
+  if (!sessionToken) return null;
+  return crypto.createHmac("sha256", process.env.AUTH_SESSION_SECRET).update(sessionToken).digest("base64url");
+}
+
+function verifyAdminCsrfToken(cookies, formBody) {
+  const expected = buildAdminCsrfToken(cookies[ADMIN_SESSION_COOKIE_NAME]);
+  const provided = typeof formBody.csrfToken === "string" ? formBody.csrfToken : "";
+  if (!expected || !provided) return false;
+  return safeEqual(provided, expected);
+}
+
+// Reads a form body already verified against the admin session's CSRF token, replying 403 and
+// returning null on failure -- shared by every mutating /admin/* POST route so the guard is
+// defined once instead of copy-pasted per route.
+async function readCsrfVerifiedAdminFormBody(request, response) {
+  const body = await readFormBody(request);
+  if (!verifyAdminCsrfToken(parseCookies(request), body)) {
+    sendText(response, 403, "CSRF token 驗證失敗，請重新整理頁面再試一次。");
+    return null;
+  }
+  return body;
+}
+
+function readAdminNoticeFromQuery(url) {
+  const message = url.searchParams.get("message");
+  if (!message) return null;
+  return { text: message, type: url.searchParams.get("type") === "error" ? "error" : "success" };
+}
+
+function buildAdminRedirectLocation(path, notice) {
+  if (!notice) return path;
+  return `${path}?${new URLSearchParams({ message: notice.text, type: notice.type }).toString()}`;
+}
+
+function formatAdminCurrency(amount) {
+  return `NT$${(Number(amount) || 0).toLocaleString("zh-TW")}`;
+}
+
+function renderAdminNotice(notice) {
+  if (!notice) return "";
+  const noticeClass = ["success", "error", "warning"].includes(notice.type) ? notice.type : "success";
+  return `<div class="notice ${noticeClass}">${escapeHtml(notice.text)}</div>`;
+}
+
+const ADMIN_CANCEL_ACTIVITY_ERROR_LABELS = {
+  activity_not_found: "找不到這個團購活動。",
+  activity_locked_by_deadline: "已進入截止前 30 分鐘鎖定窗口，無法取消。",
+  activity_not_cancellable: "這個團購目前的狀態無法取消。"
+};
+
+function describeAdminCancelActivityError(errorCode) {
+  return ADMIN_CANCEL_ACTIVITY_ERROR_LABELS[errorCode] || `取消失敗：${errorCode}`;
+}
+
+// Refund approve/reject both throw PaymentServiceError on failure; the one case worth
+// translating specially is the concurrent-double-review race (409, "Refund request is already
+// approved/rejected") -- mirrors the friendly message the deleted AdminRefundRequestsScreen.jsx
+// used to show instead of the raw backend string.
+function extractAdminWebErrorMessage(error) {
+  if (!(error instanceof PaymentServiceError)) return error.message;
+  const code = error.payload?.error;
+  if (typeof code === "string" && code.startsWith("Refund request is already")) {
+    return "這筆申請已經被其他人審核過了，請重新整理。";
+  }
+  return code || "審核失敗";
+}
+
+// Shared by the approve and reject routes below -- same guard/CSRF shape, same
+// {authUser, requestId, body, paymentRefundRepository} service-call shape, same
+// success/error redirect pattern. The cancel-activity route is deliberately NOT folded in here:
+// it calls a differently-shaped service and reports failure via a `result.error` field instead
+// of throwing, so sharing this helper would need its own internal branch just to paper over
+// that mismatch.
+async function handleAdminRefundDecision(response, { serviceFn, adminUser, requestId, serviceBody, successText }) {
+  try {
+    await serviceFn({
+      authUser: adminUser,
+      requestId,
+      body: serviceBody,
+      paymentRefundRepository: refundPostgresReady ? paymentRefundRepository : undefined
+    });
+    response.writeHead(302, {
+      Location: buildAdminRedirectLocation("/admin/refund-requests", { type: "success", text: successText })
+    });
+    response.end();
+  } catch (error) {
+    response.writeHead(302, {
+      Location: buildAdminRedirectLocation("/admin/refund-requests", { type: "error", text: extractAdminWebErrorMessage(error) })
+    });
+    response.end();
+  }
+}
+
+// Shared with backend/devConsole/public/styles.css's :root block -- same dark theme, same
+// tokens, so /admin and /dev-console (now cross-linked in the same nav) look like one tool
+// instead of two visually unrelated pages glued together.
+const ADMIN_THEME_VARIABLES = `
+  :root {
+    color-scheme: dark;
+    --background: #050505;
+    --surface: #0b0b0b;
+    --surface-strong: #111111;
+    --text: #f5f5f5;
+    --muted: #a6a6a6;
+    --line: #3a3a3a;
+    --line-strong: #eeeeee;
+    --success: #8ef0b0;
+    --warning: #ffd479;
+    --error: #ff8c8c;
+    font-family: "Microsoft JhengHei", "Noto Sans TC", Arial, sans-serif;
+  }
+`;
+
+function renderAdminPage({ title, bodyHtml, activeNav }) {
+  const navLinkClass = (key) => (key === activeNav ? "nav-link active" : "nav-link");
+  return `<!DOCTYPE html>
+<html lang="zh-Hant">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>${escapeHtml(title)} · DrinkGroupBuy 管理後台</title>
+<style>
+${ADMIN_THEME_VARIABLES}
+  * { box-sizing: border-box; }
+  body { margin: 0; background: var(--background); color: var(--text); }
+  header { background: var(--surface); border-bottom: 1px solid var(--line); padding: 14px 20px; display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: 10px; }
+  header h1 { font-size: 16px; margin: 0; letter-spacing: -0.01em; }
+  nav { display: flex; gap: 16px; align-items: center; }
+  nav a.nav-link { color: var(--muted); text-decoration: none; font-size: 13px; font-weight: 700; }
+  nav a.nav-link.active, nav a.nav-link:hover { color: var(--text); }
+  form.logout { margin: 0; }
+  form.logout button { background: none; border: none; color: var(--muted); font-size: 13px; font-weight: 700; cursor: pointer; padding: 0; }
+  form.logout button:hover { color: var(--text); }
+  main { max-width: 960px; margin: 0 auto; padding: 20px; }
+  .notice { border: 1px solid; background: transparent; padding: 10px 14px; margin-bottom: 16px; font-size: 13px; font-weight: 700; }
+  .notice.success { border-color: var(--success); color: var(--success); }
+  .notice.error { border-color: var(--error); color: var(--error); }
+  .notice.warning { border-color: var(--warning); color: var(--warning); }
+  .card { background: var(--surface); border: 1px solid var(--line); padding: 14px 16px; margin-bottom: 12px; }
+  .card h2 { margin: 0 0 6px; font-size: 15px; }
+  .meta { color: var(--muted); font-size: 12px; margin: 2px 0; }
+  .badge { display: inline-block; border: 1px solid var(--text); border-radius: 2px; padding: 2px 8px; font-size: 11px; font-weight: 700; vertical-align: middle; }
+  .row { display: flex; gap: 8px; flex-wrap: wrap; margin-top: 10px; align-items: center; }
+  button, .btn { border: 1px solid var(--text); border-radius: 0; padding: 8px 14px; font-size: 13px; font-weight: 700; cursor: pointer; background: transparent; color: var(--text); }
+  button:hover:not(:disabled), .btn:hover { filter: invert(1); }
+  .btn-danger { border-color: var(--error); color: var(--error); }
+  .btn-primary { background: var(--text); color: var(--background); }
+  .btn-secondary { background: transparent; color: var(--text); }
+  input[type="text"] { border: 1px solid #666666; border-radius: 0; background: var(--background); color: var(--text); padding: 8px 10px; font-size: 13px; font-family: inherit; }
+  input[type="text"]:focus { outline: none; border-color: var(--line-strong); box-shadow: 0 0 0 1px var(--line-strong); }
+  section.empty { color: var(--muted); font-size: 13px; padding: 10px 0; }
+  h3.section-title { font-size: 13px; color: var(--muted); margin: 22px 0 8px; }
+</style>
+</head>
+<body>
+<header>
+  <h1>DrinkGroupBuy 管理後台</h1>
+  <nav>
+    <a class="${navLinkClass("dashboard")}" href="/admin">全平台團購</a>
+    <a class="${navLinkClass("refunds")}" href="/admin/refund-requests">退款審核</a>
+    ${isDevAuthModeEnabled() ? '<a class="nav-link" href="/dev-console">本機測試控制台</a>' : ""}
+    <form class="logout" method="POST" action="/admin/logout">
+      <button type="submit">登出</button>
+    </form>
+  </nav>
+</header>
+<main>
+${bodyHtml}
+</main>
+</body>
+</html>`;
+}
+
+function renderAdminLoginPage({ error } = {}) {
+  return `<!DOCTYPE html>
+<html lang="zh-Hant">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>管理後台登入 · DrinkGroupBuy</title>
+<style>
+${ADMIN_THEME_VARIABLES}
+  * { box-sizing: border-box; }
+  body { margin: 0; min-height: 100vh; display: flex; align-items: center; justify-content: center; background: var(--background); }
+  form { background: var(--surface); border: 1px solid var(--line); padding: 28px 26px; width: 300px; }
+  h1 { font-size: 16px; margin: 0 0 18px; color: var(--text); }
+  input { width: 100%; border: 1px solid #666666; border-radius: 0; background: var(--background); color: var(--text); padding: 10px 12px; font-size: 14px; margin-bottom: 12px; box-sizing: border-box; }
+  input:focus { outline: none; border-color: var(--line-strong); box-shadow: 0 0 0 1px var(--line-strong); }
+  button { width: 100%; border: 1px solid var(--text); border-radius: 0; padding: 10px; font-size: 14px; font-weight: 700; background: var(--text); color: var(--background); cursor: pointer; }
+  button:hover { filter: invert(1); }
+  p.error { color: var(--error); font-size: 12px; font-weight: 700; margin: 0 0 12px; }
+</style>
+</head>
+<body>
+<form method="POST" action="/admin/login">
+  <h1>DrinkGroupBuy 管理後台</h1>
+  ${error ? `<p class="error">${escapeHtml(error)}</p>` : ""}
+  <input type="password" name="password" placeholder="密碼" autofocus required />
+  <button type="submit">登入</button>
+</form>
+</body>
+</html>`;
+}
+
+function renderAdminDashboardBody({ activities, notice, csrfToken }) {
+  const noticeHtml = renderAdminNotice(notice);
+  if (activities.length === 0) {
+    return `${noticeHtml}<section class="empty">目前沒有團購。</section>`;
+  }
+
+  const cardsHtml = activities.map((activity) => {
+    const isCancelled = activity.status === "cancelled";
+    const cancelForm = isCancelled ? "" : `
+      <form class="row" method="POST" action="/admin/group-buy-activities/${encodeURIComponent(activity.id)}/cancel" onsubmit="return confirm('確定要取消這個團購嗎？此動作會一併取消底下的訂單並撤銷付款授權。');">
+        <input type="hidden" name="csrfToken" value="${escapeHtml(csrfToken)}" />
+        <input type="text" name="reason" placeholder="取消原因（選填）" style="flex:1; min-width:160px;" />
+        <button type="submit" class="btn-danger">取消團購</button>
+      </form>`;
+    return `
+    <div class="card">
+      <h2>${escapeHtml(activity.title)} <span class="badge">${escapeHtml(activity.status)}</span></h2>
+      <p class="meta">店家：${escapeHtml(activity.store?.name || activity.storeId)}</p>
+      <p class="meta">杯數：${activity.currentCups} / ${activity.targetCups} 杯・參加人數：${activity.participantCount}</p>
+      ${activity.cancellationReason ? `<p class="meta" style="color:#b91c1c;">取消原因：${escapeHtml(activity.cancellationReason)}</p>` : ""}
+      ${cancelForm}
+    </div>`;
+  }).join("\n");
+
+  return `${noticeHtml}${cardsHtml}`;
+}
+
+function renderAdminRefundRequestsBody({ pendingRequests, reviewedRequests, notice, csrfToken }) {
+  const noticeHtml = renderAdminNotice(notice);
+
+  const pendingHtml = pendingRequests.length === 0
+    ? `<section class="empty">目前沒有待審核的退款申請。</section>`
+    : pendingRequests.map((request) => `
+    <div class="card">
+      <h2>${formatAdminCurrency(request.requestedAmount)} <span class="badge">${escapeHtml(request.status)}</span></h2>
+      <p class="meta">店家：${escapeHtml(request.storeId)}・訂單：${escapeHtml(request.orderId)}</p>
+      <p class="meta">申請原因：${escapeHtml(request.reason || "")}</p>
+      <div class="row">
+        <form method="POST" action="/admin/refund-requests/${encodeURIComponent(request.id)}/approve" onsubmit="return confirm('確定要核准並執行退款嗎？');">
+          <input type="hidden" name="csrfToken" value="${escapeHtml(csrfToken)}" />
+          <button type="submit" class="btn-primary">核准並退款</button>
+        </form>
+        <form class="row" method="POST" action="/admin/refund-requests/${encodeURIComponent(request.id)}/reject" style="flex:1;">
+          <input type="hidden" name="csrfToken" value="${escapeHtml(csrfToken)}" />
+          <input type="text" name="reason" placeholder="駁回原因" required style="flex:1; min-width:120px;" />
+          <button type="submit" class="btn-secondary">駁回</button>
+        </form>
+      </div>
+    </div>`).join("\n");
+
+  const reviewedHtml = reviewedRequests.length === 0
+    ? `<section class="empty">目前沒有已審核的退款申請。</section>`
+    : reviewedRequests.map((request) => `
+    <div class="card">
+      <h2>${formatAdminCurrency(request.requestedAmount)} <span class="badge">${escapeHtml(request.status)}</span></h2>
+      <p class="meta">店家：${escapeHtml(request.storeId)}・訂單：${escapeHtml(request.orderId)}</p>
+      ${request.status === "rejected" && request.rejectionReason ? `<p class="meta" style="color:#b91c1c;">駁回原因：${escapeHtml(request.rejectionReason)}</p>` : ""}
+    </div>`).join("\n");
+
+  return `${noticeHtml}
+  <h3 class="section-title">待審核（${pendingRequests.length} 筆）</h3>
+  ${pendingHtml}
+  <h3 class="section-title">審核紀錄（${reviewedRequests.length} 筆）</h3>
+  ${reviewedHtml}`;
+}
+
+const MINIMUM_ACTIVITY_DURATION_MS = 30 * 60 * 1000;
+const ACTIVITY_START_AT_PAST_TOLERANCE_MS = 60 * 1000;
+
+function validateCreateActivity(body, now) {
   const requiredFields = [
     "storeId",
     "title",
@@ -2083,7 +2629,18 @@ function validateCreateActivity(body) {
   if (Number.isNaN(startTime)) return "startAt must be a valid datetime";
   if (Number.isNaN(deadlineTime)) return "deadlineAt must be a valid datetime";
   if (Number.isNaN(pickupStartTime)) return "pickupStartAt must be a valid datetime";
+  // The mobile create screen always sends the current time as startAt (there's no scheduling
+  // UI to pick a future one), so this mainly guards against someone calling the API directly
+  // with an arbitrary past value. The small tolerance absorbs ordinary request latency between
+  // the app reading "now" and this request actually arriving.
+  const nowTime = Date.parse(now);
+  if (!Number.isNaN(nowTime) && startTime < nowTime - ACTIVITY_START_AT_PAST_TOLERANCE_MS) {
+    return "startAt must not be in the past";
+  }
   if (deadlineTime <= startTime) return "deadlineAt must be after startAt";
+  if (deadlineTime - startTime < MINIMUM_ACTIVITY_DURATION_MS) {
+    return "deadlineAt must be at least 30 minutes after startAt";
+  }
   if (deadlineTime - startTime > 24 * 60 * 60 * 1000) {
     return "deadlineAt must be within 24 hours of startAt";
   }
@@ -2199,11 +2756,17 @@ function readOrderListQuery(url) {
   };
 }
 
-async function getAuthenticatedUser(request) {
-  const token = getBearerToken(request);
+// Shared by the mobile JSON API's Authorization-header session (getAuthenticatedUser) and the
+// admin web console's cookie session (getAdminWebUser) -- they only differ in where the token
+// comes from, not in how it's verified or resolved to a user.
+async function getUserFromToken(token) {
   const payload = verifyAuthToken(token);
   if (!payload?.sub) return null;
   return authProfileReadRepository.getById(payload.sub);
+}
+
+async function getAuthenticatedUser(request) {
+  return getUserFromToken(getBearerToken(request));
 }
 
 function canAccessOrder(user, order) {
@@ -2227,8 +2790,6 @@ function isSqliteOrderDependentRoute(method, pathname) {
   if (method === "GET" && pathname === "/api/payments/line-pay/confirm") return false;
   if (method === "GET" && pathname === "/api/payments/line-pay/cancel") return false;
   if (method === "POST" && /^\/api\/orders\/[^/]+\/cancel$/.test(pathname)) return false;
-  // No DB read/write at all -- just renders a static "processing" page from query params.
-  if (method === "GET" && pathname === "/api/payments/ecpay/client-back") return false;
   return pathname.startsWith("/api/orders/")
     || pathname.startsWith("/api/payments/")
     || pathname.startsWith("/api/pickup-credentials/")
@@ -2238,7 +2799,9 @@ function isSqliteOrderDependentRoute(method, pathname) {
     || /^\/api\/merchant\/orders\/[^/]+\/refund-requests$/.test(pathname)
     || /^\/api\/merchant\/stores\/[^/]+\/refund-requests$/.test(pathname)
     || pathname === "/api/admin/refund-requests"
-    || /^\/api\/admin\/refund-requests\/[^/]+\/(approve|reject)$/.test(pathname);
+    || /^\/api\/admin\/refund-requests\/[^/]+\/(approve|reject)$/.test(pathname)
+    || pathname === "/admin/refund-requests"
+    || /^\/admin\/refund-requests\/[^/]+\/(approve|reject)$/.test(pathname);
 }
 
 // NOTE: despite the name, this covers every postgres-gated follow-up domain (settlement,
@@ -2257,6 +2820,7 @@ function isSettlementRouteReadyForPostgres(method, pathname) {
     && (
       pathname.startsWith("/api/pickup-credentials/")
       || pathname.startsWith("/api/merchant/pickup-credentials/")
+      || (method === "GET" && /^\/api\/orders\/[^/]+\/pickup-credential$/.test(pathname))
       || (method === "POST" && /^\/api\/merchant\/group-buy-activities\/[^/]+\/ready-for-pickup$/.test(pathname))
     )
   ) {
@@ -2270,6 +2834,12 @@ function isSettlementRouteReadyForPostgres(method, pathname) {
       || (method === "GET" && /^\/api\/merchant\/stores\/[^/]+\/refund-requests$/.test(pathname))
       || (method === "GET" && pathname === "/api/admin/refund-requests")
       || (method === "POST" && /^\/api\/admin\/refund-requests\/[^/]+\/(approve|reject)$/.test(pathname))
+      // Same underlying actions as the JSON routes above, just reached from the server-rendered
+      // /admin web console (see the bottom of the request handler) instead of the mobile app --
+      // must stay behind the same PostgreSQL-readiness gate since they read/call the same
+      // repository and service.
+      || (method === "GET" && pathname === "/admin/refund-requests")
+      || (method === "POST" && /^\/admin\/refund-requests\/[^/]+\/(approve|reject)$/.test(pathname))
     )
   ) {
     return true;
@@ -2289,16 +2859,6 @@ function isSettlementRouteReadyForPostgres(method, pathname) {
     && paymentAuthorizationCancelRepository.kind === "postgres"
     && paymentAuthorizationRequestRepository.kind === "postgres"
     && reliabilityJobRepository.kind === "postgres"
-  ) {
-    return true;
-  }
-  if (
-    ecpayPostgresReady
-    && (
-      (method === "POST" && pathname === "/api/payments/ecpay/request")
-      || (method === "GET" && pathname === "/api/payments/ecpay/checkout-redirect")
-      || (method === "POST" && pathname === "/api/payments/ecpay/return")
-    )
   ) {
     return true;
   }

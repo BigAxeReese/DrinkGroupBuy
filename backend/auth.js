@@ -119,6 +119,7 @@ function stripEnvQuotes(value) {
 module.exports = {
   createAuthToken,
   getBearerToken,
+  safeEqual,
   verifyAuthToken,
   verifyPassword
 };

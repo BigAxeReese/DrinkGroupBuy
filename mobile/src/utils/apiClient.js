@@ -1,6 +1,7 @@
 import Constants from "expo-constants";
 import { Platform } from "react-native";
 import { fetchWithTimeout } from "./fetchWithTimeout";
+import { getOrderWriteErrorMessage } from "./orderWriteErrors";
 
 // 10.0.2.2 is the Android emulator's alias for the host machine's localhost;
 // it only resolves inside the emulator's virtual network, so web/browser
@@ -256,26 +257,6 @@ async function writeMenuItemRequest(path, method, body) {
   return payload.menuItem;
 }
 
-export async function deleteGroupBuyActivity(activityId, input = {}) {
-  const requestKey = `deleteGroupBuyActivity:${activityId}:${stableStringify(input)}`;
-  return dedupeRequest(requestKey, async () => {
-    const response = await fetch(`${backendBaseUrl}/api/admin/group-buy-activities/${activityId}`, {
-      method: "DELETE",
-      headers: withAuthHeaders({
-        "Content-Type": "application/json"
-      }),
-      body: JSON.stringify(input)
-    });
-
-    const payload = await response.json();
-    if (!response.ok) {
-      throw new Error(payload.error ?? "Delete group-buy activity failed");
-    }
-
-    return payload.activity;
-  });
-}
-
 export async function createOrder(input) {
   const requestKey = `createOrder:${stableStringify(input)}`;
   return dedupeRequest(requestKey, async () => {
@@ -428,28 +409,6 @@ export async function requestLinePayAuthorization(input) {
   });
 }
 
-export async function requestEcpayAuthorization(input) {
-  const requestKey = `requestEcpayAuthorization:${stableStringify(input)}`;
-  return dedupeRequest(requestKey, async () => {
-    const response = await fetch(`${backendBaseUrl}/api/payments/ecpay/request`, {
-      method: "POST",
-      headers: withAuthHeaders({
-        "Content-Type": "application/json"
-      }),
-      body: JSON.stringify(input)
-    });
-
-    const payload = await response.json();
-    if (!response.ok) {
-      const error = new Error(payload.error ?? "ECPay authorization request failed");
-      error.payload = payload;
-      throw error;
-    }
-
-    return payload;
-  });
-}
-
 export async function requestLinePayRepayment(input) {
   const requestKey = `requestLinePayRepayment:${stableStringify(input)}`;
   return dedupeRequest(requestKey, async () => {
@@ -536,60 +495,6 @@ export async function listMerchantRefundRequests(storeId, input = {}) {
   return payload.refundRequests;
 }
 
-export async function listAdminRefundRequests(input = {}) {
-  const query = input.status ? `?status=${encodeURIComponent(input.status)}` : "";
-  const response = await fetch(
-    `${backendBaseUrl}/api/admin/refund-requests${query}`,
-    { headers: withAuthHeaders() }
-  );
-  const payload = await response.json();
-  if (!response.ok) {
-    const error = new Error(payload.error ?? "List refund requests failed");
-    error.status = response.status;
-    error.payload = payload;
-    throw error;
-  }
-  return payload.refundRequests;
-}
-
-export async function approveAdminRefundRequest(requestId, input = {}) {
-  const response = await fetch(
-    `${backendBaseUrl}/api/admin/refund-requests/${encodeURIComponent(requestId)}/approve`,
-    {
-      method: "POST",
-      headers: withAuthHeaders({ "Content-Type": "application/json" }),
-      body: JSON.stringify(input)
-    }
-  );
-  const payload = await response.json();
-  if (!response.ok) {
-    const error = new Error(payload.error ?? "Approve refund request failed");
-    error.status = response.status;
-    error.payload = payload;
-    throw error;
-  }
-  return payload;
-}
-
-export async function rejectAdminRefundRequest(requestId, input) {
-  const response = await fetch(
-    `${backendBaseUrl}/api/admin/refund-requests/${encodeURIComponent(requestId)}/reject`,
-    {
-      method: "POST",
-      headers: withAuthHeaders({ "Content-Type": "application/json" }),
-      body: JSON.stringify(input)
-    }
-  );
-  const payload = await response.json();
-  if (!response.ok) {
-    const error = new Error(payload.error ?? "Reject refund request failed");
-    error.status = response.status;
-    error.payload = payload;
-    throw error;
-  }
-  return payload;
-}
-
 async function postPickupRequest(path, body) {
   const response = await fetch(`${backendBaseUrl}${path}`, {
     method: "POST",
@@ -616,16 +521,6 @@ async function dedupeRequest(key, requestFn) {
   });
   inflightRequests.set(key, requestPromise);
   return requestPromise;
-}
-
-function getOrderWriteErrorMessage(payload, fallback) {
-  if (payload?.error === "order_price_changed") {
-    return "菜單價格已更新，請重新確認購物車金額後再送出。";
-  }
-  if (payload?.error === "order_items_invalid") {
-    return "飲品、供應狀態或客製化選項已變更，請重新選擇後再送出。";
-  }
-  return payload?.error ?? fallback;
 }
 
 function stableStringify(value) {

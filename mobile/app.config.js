@@ -37,6 +37,24 @@ module.exports = {
       }
     }
   },
+  plugins: [
+    [
+      "expo-build-properties",
+      {
+        // Android 9+ blocks plain-HTTP traffic by default; the dev backend is HTTP-only
+        // (no local TLS cert setup), so real devices and emulators alike need this to reach
+        // it. This project has no separate production build profile yet, so gate it on
+        // NODE_ENV instead of leaving it unconditionally true -- a build ever run with
+        // NODE_ENV=production won't silently allow plaintext HTTP app-wide.
+        android: {
+          usesCleartextTraffic: process.env.NODE_ENV !== "production"
+        }
+      }
+    ],
+    // No iosUrlScheme option here -- this project only targets android/web (see `platforms`
+    // above), and that option is iOS-only.
+    "@react-native-google-signin/google-signin"
+  ],
   extra: {
     prototypeOnly: true,
     googleMapsConfigured: Boolean(googleMapsApiKey),

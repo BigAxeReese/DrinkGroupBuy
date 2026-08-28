@@ -21,6 +21,9 @@ mobile/.env.*
 *.sqlite3
 *.db
 
+# Dev console local state (mirrors what local-dev-console/.gitignore already excluded)
+backend/data/
+
 # Expo / build outputs
 .expo/
 dist/

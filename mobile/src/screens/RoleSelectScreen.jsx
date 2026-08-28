@@ -51,8 +51,13 @@ function RoleSelectContent({ navigation, isDevAuthMode, googleLogin = null }) {
     listDevAuthUsers()
       .then((users) => {
         if (!isMounted) return;
-        setDevUsers(users);
-        setSelectedDevUserId((currentUserId) => currentUserId || users[0]?.id || "");
+        // Admin has no entry point in the mobile app -- it moved to the /admin web console
+        // (see backend/server.js) -- so this dev-only identity switcher shouldn't offer it.
+        // Checks roles directly (not the derived, prioritized primaryRole) so a user who ever
+        // carries "admin" alongside another role is still excluded.
+        const selectableUsers = users.filter((user) => !user.roles.includes("admin"));
+        setDevUsers(selectableUsers);
+        setSelectedDevUserId((currentUserId) => currentUserId || selectableUsers[0]?.id || "");
       })
       .catch((error) => {
         if (!isMounted) return;
@@ -82,9 +87,13 @@ function RoleSelectContent({ navigation, isDevAuthMode, googleLogin = null }) {
       });
 
       const route = getRouteForUser(backendResult.user);
-      navigation.selectRole(route.role, route.routeName, route.params);
+      navigation.selectRole(route.role, route.routeName, route.params, backendResult.user);
     } catch (error) {
-      setLoginError(getLoginErrorMessage(error));
+      // Backing out of the account picker is a deliberate, ordinary choice -- showing a red
+      // error banner for it would make the app look like it's complaining about nothing.
+      if (error.code !== "cancelled") {
+        setLoginError(getLoginErrorMessage(error));
+      }
     } finally {
       setIsLoggingIn(false);
     }
@@ -104,7 +113,7 @@ function RoleSelectContent({ navigation, isDevAuthMode, googleLogin = null }) {
       });
 
       const route = getRouteForUser(backendResult.user);
-      navigation.selectRole(route.role, route.routeName, route.params);
+      navigation.selectRole(route.role, route.routeName, route.params, backendResult.user);
     } catch (error) {
       setLoginError(getDevLoginErrorMessage(error));
     } finally {
@@ -275,9 +284,6 @@ function LoginOptionButton({ icon, iconStyle, label, onPress, disabled = false, 
 }
 
 function getRouteForUser(user) {
-  if (user.roles.includes("admin")) {
-    return { role: "admin", routeName: "adminDashboard", params: { authUserId: user.id } };
-  }
   if (user.roles.includes("merchant")) {
     return {
       role: "merchant",
@@ -297,6 +303,9 @@ function getRouteForUser(user) {
         authUserId: user.id
       }
     };
+  }
+  if (user.roles.includes("admin")) {
+    throw new Error("管理員身份不在手機 App 裡，請改用電腦瀏覽器開啟 /admin 網頁後台登入");
   }
   throw new Error("這個帳號沒有可進入 App 的有效身份");
 }

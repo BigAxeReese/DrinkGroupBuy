@@ -20,7 +20,7 @@ backend/server.js (Node.js built-in HTTP)
           ↓                         ↓
 SQLite development runtime    PostgreSQL controlled slices
           ↓                         ↓
-LINE Pay / ECPay / Firebase Admin / scheduler workers
+LINE Pay / Firebase Admin / scheduler workers
 ```
 
 Mobile 不直接連資料庫或付款 provider。Backend 是身份、價格、容量、狀態轉換與敏感操作的權威邊界。
@@ -32,7 +32,7 @@ Mobile 不直接連資料庫或付款 provider。Backend 是身份、價格、�
 - `mobile/src/utils/apiClient.js` 集中呼叫 Backend 並保存目前 bearer token。App 在登入、切換角色、回到前景及部分畫面操作時重新同步店家、活動或訂單。
 - 活動、店家與訂單逐步以 Backend 回應覆蓋畫面 state；購物車仍是 Mobile local state。Web 可由 `prototypeStorage.js` 存入 `localStorage`，這只是 prototype cache，不是跨裝置資料庫或最終 API contract。
 - `mobile/src/mock/` 仍有身份、初始訂單、付款與地圖預設等 fixture。判斷某功能資料來源時，必須沿 import 與 action 追蹤，不能因 mock 檔仍存在就判定 runtime 使用它。
-- LINE Pay／ECPay 結果可經 Backend HTML 落地頁回到 app deep link；Mobile 同時保留 polling、foreground refresh 與手動刷新作備援。
+- LINE Pay 結果可經 Backend HTML 落地頁回到 app deep link；Mobile 同時保留 polling、foreground refresh 與手動刷新作備援。
 
 ## Backend
 
@@ -40,6 +40,7 @@ Mobile 不直接連資料庫或付款 provider。Backend 是身份、價格、�
 - 核心領域邏輯分到 `backend/payments/`、`backend/pricing/`、`backend/pickup/`、`backend/reliability/`。新的複雜規則應維持 service／repository 邊界，不再把整段流程塞回 route dispatcher。
 - `backend/db.js` 是既有 SQLite gateway，包含 schema compatibility 與多數交易操作。`backend/database/repositories/` 為可切換 SQLite／PostgreSQL 的切片；adapter 介面在 `backend/database/`。
 - Server 啟動後可執行 payment reconciliation、deadline settlement 與 pickup expiration scheduler。這些 worker 會處理長時間付款／結算狀態，不能以 Mobile 是否開啟作為可靠性前提。
+- `backend/devConsole/` 是本機開發測試控制台（模擬顧客定位、模擬業務時間），掛在 `/dev-console`；2026-08-23 從獨立的 `local-dev-console/`（3100 埠）併入。只接受 loopback 連線（`isLoopbackRequest`）且要求 `AUTH_DEV_MODE=true`，區網 IP（例如真手機用 LAN IP 連）不會因為同一台伺服器就連得到；真手機要連只能透過 `adb reverse tcp:3001 tcp:3001` 把 USB 接線當隧道，讓手機自己的 `127.0.0.1:3001` 請求送回電腦本機（伺服器端看起來就是 loopback 連線），這不是放寬邊界，是同一個 loopback-only 規則下唯一能讓真手機也符合條件的方式（`mobile/.env` 的 `EXPO_PUBLIC_DEV_CONSOLE_URL` 需設成 `http://127.0.0.1:3001/dev-console`，不能設 LAN IP）。2026-08-24 起併入 `/admin` 的登入狀態：人看的頁面與控制 API 額外要求 `/admin` 的登入 session（同一顆 cookie，`Path=/`），只有 Mobile App 直接呼叫、模擬定位用的 `GET /dev-console/api/app/config` 與 `POST /dev-console/api/app/report` 兩支例外，仍只靠 loopback + `AUTH_DEV_MODE` 把關，不需要 App 本身登入 `/admin`。
 
 ## Database 與 runtime 切換
 
@@ -55,11 +56,11 @@ Mobile 不直接連資料庫或付款 provider。Backend 是身份、價格、�
 - Backend 由 Firebase Admin 驗證 token，再從資料庫解析使用者角色與店家關係，最後簽發本專案 bearer token。角色與 `storeId` 不信任 client 自報值。
 - 舊密碼 login 與 dev-session 是開發相容路徑。Dev identity 只有 `AUTH_DEV_MODE=true`、非 production 且 Mobile `EXPO_PUBLIC_AUTH_MODE=dev` 時才可使用。
 - Admin／營運能力目前主要是開發或補救邊界；不能因畫面或 route 存在就視為 production 身份模型已完成。
+- 管理員入口是 `backend/server.js` 直接輸出的 `/admin` 網頁後台（server-rendered HTML／表單，無獨立前端專案），跟 Mobile／Firebase 完全分開：用 `ADMIN_WEB_PASSWORDS`（`backend/.env`，逗號分隔的多組密碼，皆對應同一個管理員身份）登入，成功後把既有的 `createAuthToken()` 簽出的同一種 bearer token 放進 HttpOnly cookie 當 session，取消團購／退款核准駁回都直接呼叫既有 service 函式，未另外實作一套邏輯。Mobile App 本身不再有任何管理員畫面或路由。
 
 ## 付款、結算與取餐
 
-- LINE Pay request／confirm／cancel、capture／void／refund 與重新付款由 `backend/payments/linePayService.js` 協調；provider 簽章與 secret 僅在 Backend。
-- ECPay 有獨立 client/service 與 webhook／return flow，定位為備援 provider。兩個 provider 共用資料庫狀態與部分 App 跳轉概念，但不能假設 provider 行為完全相同。
+- LINE Pay request／confirm／cancel、capture／void／refund 與重新付款由 `backend/payments/linePayService.js` 協調；provider 簽章與 secret 僅在 Backend。這是目前唯一的付款 provider（ECPay 備援方案已於 2026-08-27 完全移除，見 `docs/AI-security-review-log.md`）。
 - 訂單送出、revision、付款前規則同意、provider 操作、截止結算與退款都需要 Backend 權威金額、idempotency、transaction／row lock 或 operation lease，以及 status／audit 紀錄。
 - Provider redirect 不是唯一真相；Backend 以資料庫狀態、provider reconciliation 與持久化 reliability job 收斂結果。
 - 取餐憑證的建立、查詢、核銷與 expiration 由 pickup service／repository 與 scheduler 處理。
@@ -68,7 +69,7 @@ Mobile 不直接連資料庫或付款 provider。Backend 是身份、價格、�
 
 - Firebase：Mobile 公開 config + Google OAuth client ID；Backend Firebase Admin credential。
 - Google Maps／Location：Android 使用 native map 與 foreground location；Web 使用 Google Maps JavaScript API 與瀏覽器 geolocation。Dev-only 位置控制必須同時受 build/auth mode 限制。
-- LINE Pay／ECPay：只由 Backend 保存 provider credential、簽章並呼叫 API。正式 capture、refund 或 production scheduler 需要獨立人工核准與環境 gate。
+- LINE Pay：只由 Backend 保存 provider credential、簽章並呼叫 API。正式 capture、refund 或 production scheduler 需要獨立人工核准與環境 gate。
 - 環境變數範本在 root `.env.example` 與 `mobile/.env.example`。文件只記變數用途，不得複製真實值。
 
 ## 開發、建置與驗證

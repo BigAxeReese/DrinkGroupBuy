@@ -18,11 +18,7 @@ const {
   getLinePayCaptureProviderState,
   voidLinePayAuthorization
 } = require("./linePayService");
-const {
-  captureEcpayAuthorization,
-  isEcpayProvider,
-  voidEcpayAuthorization
-} = require("./ecpayService");
+const { sendPaymentReliabilityJobAlert, sendSchedulerFailureAlert } = require("./alertNotifier");
 
 const CAPTURE_MAX_ATTEMPTS = 3;
 const CAPTURE_RETRY_INTERVAL_MS = 30_000;
@@ -65,8 +61,7 @@ async function settleGroupBuyActivityUnlocked(input = {}) {
     now,
     settlementRepository,
     paymentCaptureRepository,
-    authorizationCancelRepository,
-    ecpayAuthorizationRepository
+    authorizationCancelRepository
   } = input;
   const planInput = { activityId, actorUserId, force, now };
   const plan = settlementRepository
@@ -102,55 +97,6 @@ async function settleGroupBuyActivityUnlocked(input = {}) {
     }
 
     try {
-      // ECPay has no retry-state/reconciliation machinery yet (deferred; see
-      // docs/AI-current-progress.md 2026-08-05 entry), so it gets a single capture/void
-      // attempt here instead of going through the LINE Pay retry-state branches below.
-      // A thrown error naturally falls through to the generic failure handling in the
-      // catch block, since it won't carry the LINE-Pay-specific captureFailure markers.
-      if (isEcpayProvider(order.paymentProvider)) {
-        // See the matching comment in merchantActivityCancelService.js: ECPAY_AUTHORIZATION_
-        // RUNTIME is an independent flag from PAYMENT_CAPTURE_RUNTIME / PAYMENT_AUTHORIZATION_
-        // CANCEL_RUNTIME, so only trust the postgres capture/cancel repositories for an ECPay
-        // authorization when all three agree -- otherwise the row may still live in SQLite
-        // only, and querying Postgres for it would silently find nothing.
-        const ecpayReposReady = paymentCaptureRepository?.kind === "postgres"
-          && authorizationCancelRepository?.kind === "postgres"
-          && ecpayAuthorizationRepository?.kind === "postgres";
-        if (order.action === "capture") {
-          const captureResult = await captureEcpayAuthorization({
-            orderId: order.id,
-            provider: order.paymentProvider,
-            amount: order.captureAmount,
-            finalAmount: order.finalAmount,
-            reason: `deadline_settlement_${order.actionReason}`,
-            paymentCaptureRepository: ecpayReposReady ? paymentCaptureRepository : undefined,
-            ecpayAuthorizationRepository: ecpayReposReady ? ecpayAuthorizationRepository : undefined
-          });
-          results.push({
-            orderId: order.id,
-            action: "capture",
-            status: captureResult?.status || "captured",
-            capture: captureResult?.capture || null
-          });
-          continue;
-        }
-
-        const voidResult = await voidEcpayAuthorization({
-          orderId: order.id,
-          provider: order.paymentProvider,
-          reason: `deadline_settlement_${order.actionReason}`,
-          authorizationCancelRepository: ecpayReposReady ? authorizationCancelRepository : undefined,
-          ecpayAuthorizationRepository: ecpayReposReady ? ecpayAuthorizationRepository : undefined
-        });
-        results.push({
-          orderId: order.id,
-          action: "void",
-          status: voidResult?.status || "authorization_voided",
-          authorization: voidResult?.authorization || null
-        });
-        continue;
-      }
-
       if (order.action === "capture") {
         const retryInput = {
           orderId: order.id,
@@ -410,8 +356,7 @@ async function runDueGroupBuySettlements(input = {}) {
         now,
         settlementRepository: input.settlementRepository,
         paymentCaptureRepository: input.paymentCaptureRepository,
-        authorizationCancelRepository: input.authorizationCancelRepository,
-        ecpayAuthorizationRepository: input.ecpayAuthorizationRepository
+        authorizationCancelRepository: input.authorizationCancelRepository
       });
 
       if (!result) {
@@ -542,8 +487,7 @@ async function runDueGroupBuySettlementJobs(input = {}) {
         now,
         settlementRepository: input.settlementRepository,
         paymentCaptureRepository: input.paymentCaptureRepository,
-        authorizationCancelRepository: input.authorizationCancelRepository,
-        ecpayAuthorizationRepository: input.ecpayAuthorizationRepository
+        authorizationCancelRepository: input.authorizationCancelRepository
       });
       const retryable = !result
         || result.error === "settlement_retry_pending"
@@ -617,8 +561,7 @@ function startDeadlineSettlementScheduler(input = {}) {
         now: input.nowProvider ? input.nowProvider() : undefined,
         settlementRepository: input.settlementRepository,
         paymentCaptureRepository: input.paymentCaptureRepository,
-        authorizationCancelRepository: input.authorizationCancelRepository,
-        ecpayAuthorizationRepository: input.ecpayAuthorizationRepository
+        authorizationCancelRepository: input.authorizationCancelRepository
       });
 
       if (summary.queuedCount > 0 || summary.failedCount > 0) {
@@ -644,6 +587,7 @@ function startDeadlineSettlementScheduler(input = {}) {
           maxAttempts: entry.job.maxAttempts,
           lastError: entry.job.lastError
         });
+        sendPaymentReliabilityJobAlert(entry, { source: "group_buy_settlement", logger });
       }
       return summary;
     } catch (error) {
@@ -651,6 +595,7 @@ function startDeadlineSettlementScheduler(input = {}) {
         message: error.message,
         stack: error.stack
       });
+      sendSchedulerFailureAlert(error, { source: "group_buy_settlement", logger });
       return {
         error: error.message
       };

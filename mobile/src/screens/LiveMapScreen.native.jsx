@@ -1,47 +1,61 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import * as Location from "expo-location";
-import { Pressable, StyleSheet, Text, View } from "react-native";
+import { Linking, Pressable, StyleSheet, Text, View } from "react-native";
 import MapView, { Marker, PROVIDER_GOOGLE } from "react-native-maps";
-import { DistanceRadiusFilter } from "../components/DistanceRadiusFilter";
+import { ActivityFilterPanel } from "../components/ActivityFilterPanel";
+import { useActivityMapFilters } from "../hooks/useActivityMapFilters";
 import { useDevLocationConfig } from "../hooks/useDevLocationConfig";
 import { mapCenter, mapDefaults } from "../mock/mapConfig";
-import { calculateDistanceKm } from "../utils/distance";
 import { reportAppliedDevLocation } from "../utils/devLocationControl";
 import { buildStoreMapStores, getStoreMapDestination } from "../utils/groupBuyActivityStores";
 
 export function LiveMapScreen({ navigation, appState, selectedAuthUserId }) {
   const mapRef = useRef(null);
   const lastReportSignatureRef = useRef("");
-  const [zoom, setZoom] = useState(mapDefaults.zoom);
+  const zoom = mapDefaults.zoom;
   const [selectedStoreId, setSelectedStoreId] = useState(null);
   const [locationPermission, setLocationPermission] = useState("not_required");
+  const [locationPermissionDismissed, setLocationPermissionDismissed] = useState(false);
   const [userPosition, setUserPosition] = useState({
     latitude: mapCenter.latitude,
     longitude: mapCenter.longitude
   });
-  const [radiusKm, setRadiusKm] = useState(null);
-  const { config, enabled: devControlEnabled, syncError, syncStatus } = useDevLocationConfig(selectedAuthUserId);
+  const { config, enabled: devControlEnabled } = useDevLocationConfig(selectedAuthUserId);
+  // Dev builds keep using the console's config exactly as before; everywhere else, always try
+  // for the real device position -- Android/iOS already show their own native "allow location"
+  // prompt, so there's no need for an extra in-app explanation screen ahead of it. If the person
+  // denies, the banner below (driven by locationPermission) is what nudges them to go turn it on.
+  const effectiveLocationMode = devControlEnabled ? config.locationMode : "live";
   const mapStores = useMemo(
     () => buildStoreMapStores(appState?.stores, appState?.groupBuyActivities),
     [appState?.stores, appState?.groupBuyActivities]
   );
-  const visibleMapStores = useMemo(() => {
-    if (radiusKm == null) return mapStores;
-    return mapStores.filter((store) => {
-      const distanceKm = calculateDistanceKm(userPosition, store);
-      return distanceKm != null && distanceKm <= radiusKm;
-    });
-  }, [mapStores, radiusKm, userPosition.latitude, userPosition.longitude]);
+  const {
+    filters,
+    visibleMapStores,
+    visibleStoreIds,
+    statusText,
+    filterPanelVisible,
+    openFilterPanel,
+    closeFilterPanel,
+    applyFilters
+  } = useActivityMapFilters(mapStores, userPosition);
   const selectedStore = mapStores.find((store) => store.id === selectedStoreId);
   const storeSyncStatus = appState?.storeSyncStatus ?? "idle";
   const storeStatusText = storeSyncStatus === "error"
     ? "店家資料載入失敗"
     : storeSyncStatus === "loading" && mapStores.length === 0
       ? "店家資料載入中..."
-      : `${visibleMapStores.length} 間店家`;
-  const locationName = config.locationMode === "live" && locationPermission === "granted"
+      : statusText;
+  const locationName = effectiveLocationMode === "live" && locationPermission === "granted"
     ? "手機即時位置"
     : config.fixedLocation.name;
+
+  useEffect(() => {
+    if (selectedStoreId && !visibleStoreIds.has(selectedStoreId)) {
+      setSelectedStoreId(null);
+    }
+  }, [visibleStoreIds, selectedStoreId]);
 
   useEffect(() => {
     let active = true;
@@ -65,7 +79,7 @@ export function LiveMapScreen({ navigation, appState, selectedAuthUserId }) {
 
     async function applyLocationConfig() {
       setUserPosition(fallbackPosition);
-      if (config.locationMode !== "live") {
+      if (effectiveLocationMode !== "live") {
         setLocationPermission("not_required");
         reportApplied("not_required");
         return;
@@ -110,21 +124,19 @@ export function LiveMapScreen({ navigation, appState, selectedAuthUserId }) {
   }, [
     config.fixedLocation.latitude,
     config.fixedLocation.longitude,
-    config.locationMode,
     config.version,
     devControlEnabled,
+    effectiveLocationMode,
     selectedAuthUserId
   ]);
 
-  useEffect(() => {
+  const recenterOnUser = () => {
     mapRef.current?.animateCamera({ center: userPosition, zoom }, { duration: 350 });
-  }, [userPosition, zoom]);
-
-  const changeZoom = (amount) => {
-    const nextZoom = Math.min(mapDefaults.maximumZoom, Math.max(mapDefaults.minimumZoom, zoom + amount));
-    setZoom(nextZoom);
-    mapRef.current?.animateCamera({ center: userPosition, zoom: nextZoom }, { duration: 250 });
   };
+
+  useEffect(() => {
+    recenterOnUser();
+  }, [userPosition, zoom]);
 
   const openSelectedStore = () => {
     if (!selectedStore) return;
@@ -154,7 +166,7 @@ export function LiveMapScreen({ navigation, appState, selectedAuthUserId }) {
         <Marker
           coordinate={userPosition}
           title={locationName}
-          description={config.locationMode === "live" ? "顧客即時 GPS；失敗時使用固定備援位置" : "控制台指定的顧客固定位置"}
+          description={effectiveLocationMode === "live" ? "顧客即時 GPS；失敗時使用固定備援位置" : "控制台指定的顧客固定位置"}
           pinColor="#7c3aed"
         />
         {visibleMapStores.map((store) => {
@@ -174,37 +186,61 @@ export function LiveMapScreen({ navigation, appState, selectedAuthUserId }) {
 
       <View style={styles.topOverlay}>
         <Text style={styles.title}>即時地圖</Text>
-        <Text style={styles.subtitle}>中心：{locationName}</Text>
-        <Text style={styles.subtitle}>
-          {devControlEnabled
-            ? `控制台：${syncStatus === "ready" ? `${config.locationMode} · v${config.version}` : syncError || "同步中"}`
-            : "開發定位控制未啟用"}
-        </Text>
         <Text style={styles.subtitle}>{storeStatusText}</Text>
         <View style={styles.legendRow}>
           <LegendDot color="#2563eb" label="沒有可加入活動" />
           <LegendDot color="#facc15" label="有可加入活動" />
         </View>
         <View style={styles.filterRow}>
-          <DistanceRadiusFilter onChange={setRadiusKm} value={radiusKm} />
+          <Pressable
+            accessibilityRole="button"
+            onPress={openFilterPanel}
+            style={({ pressed }) => [styles.filterButton, pressed && styles.pressed]}
+          >
+            <Text style={styles.filterButtonText}>篩選</Text>
+          </Pressable>
         </View>
       </View>
 
-      <View style={styles.zoomControls}>
-        <Pressable accessibilityRole="button" onPress={() => changeZoom(1)} style={styles.zoomButton}>
-          <Text style={styles.zoomButtonText}>＋</Text>
-        </Pressable>
-        <Text style={styles.zoomLabel}>{zoom}</Text>
-        <Pressable accessibilityRole="button" onPress={() => changeZoom(-1)} style={styles.zoomButton}>
-          <Text style={styles.zoomButtonText}>－</Text>
-        </Pressable>
-      </View>
+      <Pressable
+        accessibilityRole="button"
+        accessibilityLabel="回到目前位置"
+        onPress={recenterOnUser}
+        style={({ pressed }) => [styles.recenterButton, pressed && styles.recenterButtonPressed]}
+      >
+        <Text style={styles.recenterIcon}>⌖</Text>
+      </Pressable>
+
+      {!devControlEnabled && locationPermission === "denied" && !locationPermissionDismissed ? (
+        <View style={styles.locationPermissionPromptCard}>
+          <Text style={styles.locationPermissionPromptTitle}>請開啟定位權限</Text>
+          <Text style={styles.locationPermissionPromptBody}>
+            開啟定位後，地圖會顯示你目前的位置，才能使用距離篩選找到附近的店家。目前顯示的是預設位置。
+          </Text>
+          <View style={styles.locationPermissionPromptActions}>
+            <Pressable
+              accessibilityRole="button"
+              onPress={() => Linking.openSettings()}
+              style={({ pressed }) => [styles.locationPermissionPromptPrimaryButton, pressed && styles.pressed]}
+            >
+              <Text style={styles.locationPermissionPromptPrimaryText}>前往設定開啟</Text>
+            </Pressable>
+            <Pressable
+              accessibilityRole="button"
+              onPress={() => setLocationPermissionDismissed(true)}
+              style={({ pressed }) => [styles.locationPermissionPromptSecondaryButton, pressed && styles.pressed]}
+            >
+              <Text style={styles.locationPermissionPromptSecondaryText}>先不要，使用預設位置</Text>
+            </Pressable>
+          </View>
+        </View>
+      ) : null}
 
       {selectedStore ? (
         <View style={styles.storeCard}>
           <View style={styles.storeInfo}>
             <Text style={styles.storeName}>{selectedStore.name}</Text>
-            <Text style={styles.storeMeta}>
+            <Text style={styles.storeMeta} numberOfLines={2}>
               {selectedStore.address || "地址未提供"} · {selectedStore.hasRecruitingGroupBuyActivity ? `招募中的團購 ${selectedStore.progressText}` : "目前沒有招募中團購"}
             </Text>
           </View>
@@ -214,13 +250,20 @@ export function LiveMapScreen({ navigation, appState, selectedAuthUserId }) {
             style={styles.viewGroupBuyActivitiesButton}
           >
             <Text style={styles.viewGroupBuyActivitiesText}>
-              {selectedStore.joinableGroupBuyActivityIds.length > 1
+              {selectedStore.joinableGroupBuyActivities.length > 1
                 ? "活動列表"
                 : selectedStore.hasRecruitingGroupBuyActivity ? "查看活動" : "查看菜單"}
             </Text>
           </Pressable>
         </View>
       ) : null}
+
+      <ActivityFilterPanel
+        visible={filterPanelVisible}
+        filters={filters}
+        onApply={applyFilters}
+        onClose={closeFilterPanel}
+      />
     </View>
   );
 }
@@ -270,6 +313,23 @@ const styles = StyleSheet.create({
   filterRow: {
     marginTop: 6
   },
+  filterButton: {
+    alignSelf: "flex-start",
+    minHeight: 34,
+    borderRadius: 12,
+    alignItems: "center",
+    justifyContent: "center",
+    backgroundColor: "#eef2f7",
+    paddingHorizontal: 16
+  },
+  filterButtonText: {
+    color: "#0f172a",
+    fontSize: 13,
+    fontWeight: "900"
+  },
+  pressed: {
+    opacity: 0.75
+  },
   legendItem: {
     flexDirection: "row",
     alignItems: "center",
@@ -285,37 +345,25 @@ const styles = StyleSheet.create({
     fontSize: 10,
     fontWeight: "800"
   },
-  zoomControls: {
+  recenterButton: {
     position: "absolute",
+    bottom: 100,
     right: 14,
-    top: 14,
-    alignItems: "center",
-    borderRadius: 14,
-    overflow: "hidden",
-    backgroundColor: "#ffffff",
-    elevation: 5
-  },
-  zoomButton: {
     width: 46,
     height: 46,
+    borderRadius: 23,
     alignItems: "center",
-    justifyContent: "center"
+    justifyContent: "center",
+    backgroundColor: "#111827",
+    elevation: 5
   },
-  zoomButtonText: {
-    color: "#0f172a",
-    fontSize: 25,
+  recenterButtonPressed: {
+    opacity: 0.8
+  },
+  recenterIcon: {
+    color: "#ffffff",
+    fontSize: 20,
     fontWeight: "900"
-  },
-  zoomLabel: {
-    width: 46,
-    color: "#64748b",
-    fontSize: 10,
-    fontWeight: "800",
-    textAlign: "center",
-    paddingVertical: 5,
-    borderTopWidth: 1,
-    borderBottomWidth: 1,
-    borderColor: "#e2e8f0"
   },
   storeCard: {
     position: "absolute",
@@ -356,6 +404,60 @@ const styles = StyleSheet.create({
   viewGroupBuyActivitiesText: {
     color: "#ffffff",
     fontSize: 12,
+    fontWeight: "900"
+  },
+  locationPermissionPromptCard: {
+    position: "absolute",
+    left: 14,
+    right: 14,
+    bottom: 16,
+    gap: 8,
+    borderRadius: 16,
+    backgroundColor: "#ffffff",
+    padding: 14,
+    elevation: 6
+  },
+  locationPermissionPromptTitle: {
+    color: "#0f172a",
+    fontSize: 15,
+    fontWeight: "900"
+  },
+  locationPermissionPromptBody: {
+    color: "#475569",
+    fontSize: 12.5,
+    lineHeight: 18,
+    fontWeight: "600"
+  },
+  locationPermissionPromptActions: {
+    flexDirection: "row",
+    flexWrap: "wrap",
+    gap: 8,
+    marginTop: 2
+  },
+  locationPermissionPromptPrimaryButton: {
+    minHeight: 40,
+    borderRadius: 12,
+    alignItems: "center",
+    justifyContent: "center",
+    backgroundColor: "#1f6feb",
+    paddingHorizontal: 16
+  },
+  locationPermissionPromptPrimaryText: {
+    color: "#ffffff",
+    fontSize: 13,
+    fontWeight: "900"
+  },
+  locationPermissionPromptSecondaryButton: {
+    minHeight: 40,
+    borderRadius: 12,
+    alignItems: "center",
+    justifyContent: "center",
+    backgroundColor: "#eef2f7",
+    paddingHorizontal: 16
+  },
+  locationPermissionPromptSecondaryText: {
+    color: "#334155",
+    fontSize: 13,
     fontWeight: "900"
   }
 });

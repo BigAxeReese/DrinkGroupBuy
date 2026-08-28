@@ -19,7 +19,6 @@ $databasePath = Join-Path $projectRoot "database\drink-group-buy-dev.sqlite"
 $appPackage = "com.drinkgroupbuy.prototype"
 $metroPort = 8081
 $webPort = 8083
-$devConsolePort = 3100
 
 function Write-Step {
   param([string]$Message)
@@ -56,16 +55,11 @@ function Invoke-ServiceMode {
     Invoke-NpmCommand -WorkingDirectory $mobileRoot -Arguments @("run", "start", "--", "--dev-client", "--port", "$metroPort")
     return
   }
-  if ($ServiceName -eq "console") {
-    $Host.UI.RawUI.WindowTitle = "DrinkGroupBuy Local Console"
-    Invoke-NpmCommand -WorkingDirectory (Join-Path $projectRoot "local-dev-console") -Arguments @("start")
-    return
-  }
   if ($ServiceName -eq "web") {
     $Host.UI.RawUI.WindowTitle = "DrinkGroupBuy Web"
     $env:BROWSER = "none"
     $env:EXPO_PUBLIC_BACKEND_URL = "http://127.0.0.1:$ServiceBackendPort"
-    $env:EXPO_PUBLIC_DEV_CONSOLE_URL = "http://127.0.0.1:$devConsolePort"
+    $env:EXPO_PUBLIC_DEV_CONSOLE_URL = "http://127.0.0.1:$ServiceBackendPort/dev-console"
     Invoke-NpmCommand -WorkingDirectory $mobileRoot -Arguments @("run", "web")
     return
   }
@@ -308,22 +302,6 @@ function Start-WebPreview {
   }
 }
 
-function Start-DevConsole {
-  $consoleRoot = Join-Path $projectRoot "local-dev-console"
-  if (-not (Test-Path -LiteralPath (Join-Path $consoleRoot "server.js"))) {
-    throw "local-dev-console is not present. It is local-only and is not included in Git."
-  }
-  if (-not (Test-TcpPort -Port $devConsolePort)) {
-    Write-Step "Starting optional local console on port $devConsolePort"
-    Start-ServiceWindow -ServiceName "console"
-    if (-not (Wait-TcpPort -Port $devConsolePort -TimeoutSeconds 20)) {
-      Write-Host "[WARN] Local console did not start; the main App can still run." -ForegroundColor Yellow
-      throw "Local console did not start on port $devConsolePort. Check the Local Console window."
-    }
-  }
-  return $true
-}
-
 function Get-ConnectedAndroidDevice {
   param([string]$AdbPath)
 
@@ -455,15 +433,16 @@ if ($LaunchTarget -eq "Server") {
 Assert-BackendRunning -Port $backendPort
 
 if ($LaunchTarget -eq "Console") {
-  $consoleStarted = Start-DevConsole
-  if ($consoleStarted -and -not $SkipBrowser) {
-    Start-Process "http://127.0.0.1:$devConsolePort/" | Out-Null
+  # The console used to be its own process on port 3100 (local-dev-console/); merged into the
+  # main backend under /dev-console on 2026-08-23, so this now just opens a browser tab -- no
+  # separate process to start, only the already-running backend from 01-start-server.cmd.
+  if (-not $SkipBrowser) {
+    Start-Process "http://127.0.0.1:$backendPort/dev-console" | Out-Null
   }
 
   Write-Host ""
   Write-Host "DrinkGroupBuy console environment is ready." -ForegroundColor Green
-  Write-Host "Backend: http://127.0.0.1:$backendPort" -ForegroundColor Green
-  Write-Host "Console: http://127.0.0.1:$devConsolePort" -ForegroundColor Green
+  Write-Host "Console: http://127.0.0.1:$backendPort/dev-console" -ForegroundColor Green
   exit 0
 }
 

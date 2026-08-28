@@ -109,13 +109,13 @@ export function CartScreen({ navigation, route, appState, actions, memberAction,
           <Text style={styles.totalLabel}>原價合計</Text>
           <Text style={styles.totalAmount}>{formatCurrency(totalAmount)}</Text>
         </View>
-        <Text style={styles.notice}>
-          {canUpdatePendingOrder
-            ? "送出後會以目前購物車內容更新尚未授權的訂單。預授權成功後，購物車才會清空。"
-            : blocksOrderUpdate
-              ? "此團購已有一筆已授權或已鎖定的訂單，請先回到訂單頁查看。"
-            : "送出訂單後才會進入 LINE Pay 預授權；目前仍是 prototype，不會真實扣款。"}
-        </Text>
+        {canUpdatePendingOrder || blocksOrderUpdate ? (
+          <Text style={styles.notice}>
+            {canUpdatePendingOrder
+              ? "送出後會以目前購物車內容更新尚未授權的訂單。預授權成功後，購物車才會清空。"
+              : "此團購已有一筆已授權或已鎖定的訂單，請先回到訂單頁查看。"}
+          </Text>
+        ) : null}
       </Section>
 
       <Section title="">

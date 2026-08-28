@@ -64,9 +64,12 @@ export function getDevConsoleBaseUrl() {
     Constants.expoConfig?.extra?.devConsoleBaseUrl,
     Constants.manifest2?.extra?.expoClient?.extra?.devConsoleBaseUrl
   ].find((url) => url && !isAndroidOnlyOverride(url));
+  // The dev console used to be its own process on port 3100; merged into the main backend under
+  // /dev-console on 2026-08-23, so this now shares the backend's own host/port instead of a
+  // separate one.
   const fallbackUrl = Platform.OS === "android"
-    ? "http://10.0.2.2:3100"
-    : "http://127.0.0.1:3100";
+    ? "http://10.0.2.2:3001/dev-console"
+    : "http://127.0.0.1:3001/dev-console";
   return String(configuredUrl || fallbackUrl).replace(/\/$/, "");
 }
 

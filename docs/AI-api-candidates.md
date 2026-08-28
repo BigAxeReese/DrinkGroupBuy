@@ -306,10 +306,6 @@ API JSON 使用 `camelCase`。已實作 routes 只對目前開發 prototype 具�
 | `POST /api/admin/refund-requests/:requestId/reject`         | 營運駁回退款申請              | 已實作第一版，admin-only；需填 `reason`，不呼叫 provider |
 | `GET /api/payments/line-pay/status/:transactionId`          | 查詢 provider 狀態並對帳     | 正式上線前用於重試、redirect 遺失與付款狀態 reconciliation |
 | `GET /api/admin/payment-reliability/alerts`                  | 查詢終止失敗工作             | 已實作 admin-only、jobType/status/limit 白名單篩選；通知通道尚未接入 |
-| `POST /api/payments/ecpay/request`                           | 建立 ECPay 信用卡預授權請求  | 已實作並已用真實 HTTP 請求驗證（含真實建單、dev auth）；`npm run ecpay:smoke` 覆蓋 `mock_ecpay` 情境；尚未打過真實 ECPay Stage 網路（見 `docs/ecpay-checkout-stage-checklist.md`） |
-| `POST /api/payments/ecpay/return`                            | ECPay ReturnURL webhook（權威付款通知） | 已實作並驗證（含 CheckMacValue 驗簽、竄改簽章正確拒絕）；與 LINE Pay 的 GET confirm 模式不同，是 POST + 必須回應純文字 `1\|OK` |
-| `GET /api/payments/ecpay/client-back`                        | ECPay ClientBackURL（僅導回瀏覽器，非權威來源） | 已實作；不觸發任何狀態變更，只查目前 DB 狀態顯示 |
-| `GET /api/payments/ecpay/checkout-redirect`                  | 產生導向 ECPay 託管付款頁的 auto-submit 表單頁 | 已實作並驗證；ECPay AioCheckOut 是 POST 表單跳轉，不是單一 GET URL，故需要這個中介頁面 |
 
 ### 商家履約
 

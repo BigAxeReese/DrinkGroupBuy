@@ -1,12 +1,12 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import Constants from "expo-constants";
 import { Pressable, StyleSheet, Text, View } from "react-native";
-import { DistanceRadiusFilter } from "../components/DistanceRadiusFilter";
+import { ActivityFilterPanel } from "../components/ActivityFilterPanel";
+import { useActivityMapFilters } from "../hooks/useActivityMapFilters";
 import { useDevLocationConfig } from "../hooks/useDevLocationConfig";
 import { mapCenter, mapDefaults } from "../mock/mapConfig";
-import { calculateDistanceKm } from "../utils/distance";
 import { reportAppliedDevLocation } from "../utils/devLocationControl";
-import { buildStoreMapStores, getStoreMapDestination } from "../utils/groupBuyActivityStores";
+import { buildStoreMapStores, getStoreMapDestination, getStoreMarkerLabel } from "../utils/groupBuyActivityStores";
 
 export function LiveMapScreen({ navigation, appState, selectedAuthUserId }) {
   const mapElementRef = useRef(null);
@@ -23,20 +23,22 @@ export function LiveMapScreen({ navigation, appState, selectedAuthUserId }) {
     latitude: mapCenter.latitude,
     longitude: mapCenter.longitude
   });
-  const [radiusKm, setRadiusKm] = useState(null);
-  const { config, enabled: devControlEnabled, syncError, syncStatus } = useDevLocationConfig(selectedAuthUserId);
+  const { config, enabled: devControlEnabled } = useDevLocationConfig(selectedAuthUserId);
 
   const mapStores = useMemo(
     () => buildStoreMapStores(appState?.stores, appState?.groupBuyActivities),
     [appState?.stores, appState?.groupBuyActivities]
   );
-  const visibleMapStores = useMemo(() => {
-    if (radiusKm == null) return mapStores;
-    return mapStores.filter((store) => {
-      const distanceKm = calculateDistanceKm(userPosition, store);
-      return distanceKm != null && distanceKm <= radiusKm;
-    });
-  }, [mapStores, radiusKm, userPosition.latitude, userPosition.longitude]);
+  const {
+    filters,
+    visibleMapStores,
+    visibleStoreIds,
+    statusText,
+    filterPanelVisible,
+    openFilterPanel,
+    closeFilterPanel,
+    applyFilters
+  } = useActivityMapFilters(mapStores, userPosition);
 
   const selectedStore = mapStores.find((store) => store.id === selectedStoreId);
   const storeSyncStatus = appState?.storeSyncStatus ?? "idle";
@@ -44,7 +46,7 @@ export function LiveMapScreen({ navigation, appState, selectedAuthUserId }) {
     ? "店家資料載入失敗"
     : storeSyncStatus === "loading" && mapStores.length === 0
       ? "店家資料載入中..."
-      : `${visibleMapStores.length} 間店家`;
+      : statusText;
   const apiKey = (process.env.EXPO_PUBLIC_GOOGLE_MAPS_API_KEY
     || Constants.expoConfig?.extra?.googleMapsWebApiKey
     || Constants.manifest2?.extra?.expoClient?.extra?.googleMapsWebApiKey
@@ -56,6 +58,12 @@ export function LiveMapScreen({ navigation, appState, selectedAuthUserId }) {
   const locationName = config.locationMode === "live" && locationPermission === "granted"
     ? "瀏覽器即時位置"
     : config.fixedLocation.name;
+
+  useEffect(() => {
+    if (selectedStoreId && !visibleStoreIds.has(selectedStoreId)) {
+      setSelectedStoreId(null);
+    }
+  }, [visibleStoreIds, selectedStoreId]);
 
   useEffect(() => {
     const fallbackPosition = {
@@ -167,9 +175,13 @@ export function LiveMapScreen({ navigation, appState, selectedAuthUserId }) {
     };
   }, [apiKey]);
 
+  const recenterOnUser = () => {
+    mapInstanceRef.current?.panTo(userMapCenter);
+  };
+
   useEffect(() => {
     if (!mapReady || !mapInstanceRef.current) return;
-    mapInstanceRef.current.panTo(userMapCenter);
+    recenterOnUser();
   }, [mapReady, userMapCenter]);
 
   useEffect(() => {
@@ -271,19 +283,19 @@ export function LiveMapScreen({ navigation, appState, selectedAuthUserId }) {
 
       <View style={styles.overlay}>
         <Text style={styles.title}>即時地圖</Text>
-        <Text style={styles.subtitle}>中心：{locationName}</Text>
-        <Text style={styles.subtitle}>
-          {devControlEnabled
-            ? `控制台：${syncStatus === "ready" ? `${config.locationMode} · v${config.version}` : syncError || "同步中"}`
-            : "開發定位控制未啟用"}
-        </Text>
         <Text style={styles.subtitle}>{storeStatusText}</Text>
         <View style={styles.legendRow}>
           <LegendDot color="#2563eb" label="沒有可加入活動" />
           <LegendDot color="#facc15" label="有可加入活動" />
         </View>
         <View style={styles.filterRow} pointerEvents="auto">
-          <DistanceRadiusFilter onChange={setRadiusKm} value={radiusKm} />
+          <Pressable
+            accessibilityRole="button"
+            onPress={openFilterPanel}
+            style={({ pressed }) => [styles.filterButton, pressed && styles.pressed]}
+          >
+            <Text style={styles.filterButtonText}>篩選</Text>
+          </Pressable>
         </View>
       </View>
 
@@ -293,11 +305,22 @@ export function LiveMapScreen({ navigation, appState, selectedAuthUserId }) {
         </View>
       ) : null}
 
+      {mapReady ? (
+        <Pressable
+          accessibilityRole="button"
+          accessibilityLabel="回到目前位置"
+          onPress={recenterOnUser}
+          style={({ pressed }) => [styles.recenterButton, pressed && styles.recenterButtonPressed]}
+        >
+          <Text style={styles.recenterIcon}>⌖</Text>
+        </Pressable>
+      ) : null}
+
       {selectedStore ? (
         <View style={styles.storeCard}>
           <View style={styles.storeInfo}>
             <Text style={styles.storeName}>{selectedStore.name}</Text>
-            <Text style={styles.storeMeta}>
+            <Text style={styles.storeMeta} numberOfLines={2}>
               {selectedStore.address || "地址未提供"} · {selectedStore.hasRecruitingGroupBuyActivity ? `團購進行中 ${selectedStore.progressText}` : "目前沒有進行中的團購"}
             </Text>
           </View>
@@ -307,13 +330,20 @@ export function LiveMapScreen({ navigation, appState, selectedAuthUserId }) {
             style={styles.viewGroupBuyActivitiesButton}
           >
             <Text style={styles.viewGroupBuyActivitiesText}>
-              {selectedStore.joinableGroupBuyActivityIds.length > 1
+              {selectedStore.joinableGroupBuyActivities.length > 1
                 ? "活動列表"
                 : selectedStore.hasRecruitingGroupBuyActivity ? "查看活動" : "查看菜單"}
             </Text>
           </Pressable>
         </View>
       ) : null}
+
+      <ActivityFilterPanel
+        visible={filterPanelVisible}
+        filters={filters}
+        onApply={applyFilters}
+        onClose={closeFilterPanel}
+      />
     </View>
   );
 }
@@ -365,12 +395,6 @@ function loadGoogleMaps(apiKey) {
   });
 
   return window.__drinkGroupBuyGoogleMapsPromise;
-}
-
-function getStoreMarkerLabel(store) {
-  return store.hasRecruitingGroupBuyActivity && store.progressText
-    ? `${store.name} ${store.progressText}`
-    : store.name;
 }
 
 function createStoreOverlayMarker({ googleMaps, map, position, title, color, markerText, labelText, onPress }) {
@@ -539,6 +563,23 @@ const styles = StyleSheet.create({
   filterRow: {
     marginTop: 6
   },
+  filterButton: {
+    alignSelf: "flex-start",
+    minHeight: 34,
+    borderRadius: 12,
+    alignItems: "center",
+    justifyContent: "center",
+    backgroundColor: "#eef2f7",
+    paddingHorizontal: 16
+  },
+  filterButtonText: {
+    color: "#0f172a",
+    fontSize: 13,
+    fontWeight: "900"
+  },
+  pressed: {
+    opacity: 0.75
+  },
   legendItem: {
     flexDirection: "row",
     alignItems: "center",
@@ -595,6 +636,26 @@ const styles = StyleSheet.create({
     backgroundColor: "#ffffff",
     padding: 12,
     boxShadow: "0 6px 18px rgba(15,23,42,0.24)"
+  },
+  recenterButton: {
+    position: "absolute",
+    bottom: 100,
+    right: 14,
+    width: 46,
+    height: 46,
+    borderRadius: 23,
+    alignItems: "center",
+    justifyContent: "center",
+    backgroundColor: "#111827",
+    boxShadow: "0 6px 18px rgba(15,23,42,0.24)"
+  },
+  recenterButtonPressed: {
+    opacity: 0.8
+  },
+  recenterIcon: {
+    color: "#ffffff",
+    fontSize: 20,
+    fontWeight: "900"
   },
   storeInfo: {
     flex: 1,

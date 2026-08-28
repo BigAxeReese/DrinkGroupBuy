@@ -17,10 +17,6 @@ const NativeDateTimePicker = Platform.OS === "web"
 const MAX_ACTIVITY_DEADLINE_MS = 24 * 60 * 60 * 1000;
 const MIN_PICKUP_AFTER_DEADLINE_MS = 30 * 60 * 1000;
 const DEFAULT_PICKUP_AFTER_DEADLINE_MS = 30 * 60 * 1000;
-// Pickup end time is not merchant-configurable -- it's always exactly 3 hours after pickup
-// start (backend/server.js's computeActivityPickupEndAt is the source of truth; this constant
-// is only used to show the merchant a preview of the resulting pickup window).
-const PICKUP_WINDOW_MS = 3 * 60 * 60 * 1000;
 
 export function MerchantGroupBuyActivityCreateScreen({ navigation, actions, memberAction, selectedMerchantStoreId }) {
   const initialDeadlineDate = new Date(createDeadlineIsoFromInput(getDefaultDeadlineInput()));
@@ -114,12 +110,6 @@ export function MerchantGroupBuyActivityCreateScreen({ navigation, actions, memb
     const startTime = startDate.toISOString();
     const deadlineAt = deadlineDate.toISOString();
     const pickupStartAt = pickupStartDate.toISOString();
-    // Pickup end time is computed by the backend (fixed 3-hour window, capped by the store's
-    // closing time) -- not sent here. The local value below is only for the offline
-    // prototype-fallback branch's own mock data, since it never reaches the real backend.
-    const pickupEndDate = new Date(pickupStartDate.getTime() + PICKUP_WINDOW_MS);
-    const pickupEndAt = pickupEndDate.toISOString();
-    const pickupTime = `${formatDeadlineWithoutYear(pickupStartDate)} - ${formatDeadlineWithoutYear(pickupEndDate)}`;
     let groupBuyActivityId;
 
     try {
@@ -137,7 +127,7 @@ export function MerchantGroupBuyActivityCreateScreen({ navigation, actions, memb
       });
       groupBuyActivityId = actions.addMerchantGroupBuyActivityFromApi(activity);
       setSubmitMessageKind("success");
-      setSubmitMessage("活動已建立，並寫入 backend SQLite。");
+      setSubmitMessage("活動已建立。");
     } catch (error) {
       if (error.status) {
         const mappedError = mapGroupBuyActivityCreateError(error, tiers);
@@ -147,20 +137,12 @@ export function MerchantGroupBuyActivityCreateScreen({ navigation, actions, memb
         return;
       }
 
-      groupBuyActivityId = actions.createMerchantGroupBuyActivity({
-        storeId: selectedMerchantStoreId,
-        title,
-        tiers,
-        startTime,
-        deadlineAt,
-        endTime: formatDeadlineWithoutYear(new Date(deadlineAt)),
-        pickupStartAt,
-        pickupEndAt,
-        pickupTime,
-        notices
-      });
-      setSubmitMessageKind("warning");
-      setSubmitMessage(`Backend 未連線，已用本機 prototype 建立：${error.message}`);
+      // Network-level failure (backend unreachable) -- show the error and stop, don't create a
+      // local-only activity: it would never reach the backend, so no customer could ever see or
+      // join it, while the merchant is told it succeeded.
+      setSubmitMessageKind("error");
+      setSubmitMessage(`建立失敗，請檢查網路後重試：${error.message}`);
+      return;
     } finally {
       setSubmitting(false);
     }

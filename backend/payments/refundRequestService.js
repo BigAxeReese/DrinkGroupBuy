@@ -7,7 +7,6 @@ const {
   rejectRefundRequestInDatabase
 } = require("../db");
 const { PaymentServiceError, refundLinePayPayment } = require("./linePayService");
-const { isEcpayProvider, refundEcpayPayment } = require("./ecpayService");
 
 async function createMerchantRefundRequest({ authUser, orderId, body, paymentRefundRepository } = {}) {
   if (!authUser?.roles?.includes("merchant")) {
@@ -90,29 +89,17 @@ async function approveRefundRequest({ authUser, requestId, body, paymentRefundRe
   const refundIdempotencyKey = body?.idempotencyKey || `refund-request-approval:${refundRequest.id}`;
   const refundReason = `refund_request_approved:${refundRequest.id}`;
 
-  const refundResult = isEcpayProvider(authorization?.provider)
-    ? await refundEcpayPayment({
-        authUser,
-        paymentRefundRepository,
-        body: {
-          orderId: refundRequest.orderId,
-          refundAmount: refundRequest.requestedAmount,
-          idempotencyKey: refundIdempotencyKey,
-          reason: refundReason,
-          provider: authorization.provider
-        }
-      })
-    : await refundLinePayPayment({
-        authUser,
-        paymentRefundRepository,
-        body: {
-          orderId: refundRequest.orderId,
-          refundAmount: refundRequest.requestedAmount,
-          idempotencyKey: refundIdempotencyKey,
-          reason: refundReason,
-          provider: authorization?.provider
-        }
-      });
+  const refundResult = await refundLinePayPayment({
+    authUser,
+    paymentRefundRepository,
+    body: {
+      orderId: refundRequest.orderId,
+      refundAmount: refundRequest.requestedAmount,
+      idempotencyKey: refundIdempotencyKey,
+      reason: refundReason,
+      provider: authorization?.provider
+    }
+  });
 
   const approveInput = {
     requestId: refundRequest.id,

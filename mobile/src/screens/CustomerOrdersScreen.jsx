@@ -403,6 +403,15 @@ function OrderDetailCard({ order, groupBuyActivities, payments, actions, navigat
         <View style={styles.pickupPending}>
           <Text style={styles.pickupPendingTitle}>{pickupPendingContent.title}</Text>
           <Text style={styles.pickupPendingText}>{pickupPendingContent.text}</Text>
+          {order.paymentStatus === "pending" ? (
+            <PrimaryButton
+              label="前往付款"
+              onPress={() => navigation.go("paymentAuthorization", {
+                groupBuyActivityId: order.groupBuyActivityId,
+                orderId: order.id
+              })}
+            />
+          ) : null}
         </View>
       ) : null}
     </View>

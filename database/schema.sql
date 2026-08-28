@@ -287,7 +287,7 @@ CREATE TABLE payment_authorizations (
   id TEXT PRIMARY KEY,
   order_id TEXT NOT NULL REFERENCES orders(id),
   order_revision_id TEXT REFERENCES order_revisions(id),
-  provider TEXT NOT NULL CHECK (provider IN ('line_pay', 'mock_line_pay', 'ecpay', 'mock_ecpay')),
+  provider TEXT NOT NULL CHECK (provider IN ('line_pay', 'mock_line_pay')),
   payment_flow TEXT NOT NULL DEFAULT 'authorization'
     CHECK (payment_flow IN ('authorization', 'direct_repayment')),
   status TEXT NOT NULL DEFAULT 'pending'
@@ -332,7 +332,7 @@ CREATE TABLE payment_refunds (
   payment_capture_id TEXT NOT NULL REFERENCES payment_captures(id),
   payment_authorization_id TEXT NOT NULL REFERENCES payment_authorizations(id),
   order_id TEXT NOT NULL REFERENCES orders(id),
-  provider TEXT NOT NULL CHECK (provider IN ('line_pay', 'mock_line_pay', 'ecpay', 'mock_ecpay')),
+  provider TEXT NOT NULL CHECK (provider IN ('line_pay', 'mock_line_pay')),
   status TEXT NOT NULL DEFAULT 'pending' CHECK (status IN ('pending', 'refunded', 'failed')),
   refund_amount INTEGER NOT NULL CHECK (refund_amount > 0),
   provider_refund_id TEXT,

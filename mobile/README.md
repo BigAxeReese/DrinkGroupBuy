@@ -113,7 +113,7 @@ EXPO_PUBLIC_GOOGLE_WEB_CLIENT_ID=your_web_oauth_client_id.apps.googleusercontent
 
 ### 本機定位控制台
 
-`EXPO_PUBLIC_DEV_CONSOLE_URL` 只在開發 build 且 `EXPO_PUBLIC_AUTH_MODE=dev` 時使用。Android Emulator 連回電腦使用 `http://10.0.2.2:3100`；同一台電腦的 Web 預覽使用 `http://127.0.0.1:3100`。
+`EXPO_PUBLIC_DEV_CONSOLE_URL` 只在開發 build 且 `EXPO_PUBLIC_AUTH_MODE=dev` 時使用。控制台已併入主 Backend（`backend/devConsole/`，路徑 `/dev-console`），不再是獨立的 3100 埠服務。Android Emulator 連回電腦使用 `http://10.0.2.2:3001/dev-console`；同一台電腦的 Web 預覽使用 `http://127.0.0.1:3001/dev-console`。
 
 App 會依目前登入的 Backend `userId` 每 5 秒讀取個別定位設定：固定模式直接套用座標，即時模式使用 GPS。控制台無法連線時，App 會保留最後一次成功設定；首次連線失敗則使用台中科大預設。
 

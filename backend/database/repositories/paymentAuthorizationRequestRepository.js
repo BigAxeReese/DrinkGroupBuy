@@ -130,9 +130,9 @@ async function getPostgresOrderPaymentContext(database, orderId) {
 async function getLatestPostgresAuthorizationForOrder(database, orderId) {
   // No provider filter: getLatestLinePayAuthorizationForOrder in backend/db.js (the SQLite
   // source of truth this mirrors) returns the latest authorization for the order regardless
-  // of provider. A provider-scoped filter here would miss a still-pending authorization from
-  // a different provider (e.g. an ECPay attempt) and let a duplicate LINE Pay authorization
-  // request slip past the "already pending" check in requestLinePayAuthorizationUnlocked.
+  // of provider. A provider-scoped filter here would miss a still-pending authorization and
+  // let a duplicate LINE Pay authorization request slip past the "already pending" check in
+  // requestLinePayAuthorizationUnlocked.
   const result = await database.query(`
     SELECT *
     FROM payment_authorizations

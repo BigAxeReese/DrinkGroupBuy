@@ -51,6 +51,14 @@ export function mapGroupBuyActivityCreateError(error, tiers = []) {
     return message;
   };
 
+  if (payload.error === "startAt must not be in the past") {
+    return { message: "開始時間不能是過去的時間，請重新整理後再試一次。", tierErrors };
+  }
+
+  if (payload.error === "deadlineAt must be at least 30 minutes after startAt") {
+    return { message: "團購開放時間至少要有 30 分鐘，請延後截止時間。", tierErrors };
+  }
+
   if (payload.error === "pickup_start_too_late_for_store_hours") {
     const latestTime = payload.latestPickupStartAt
       ? new Date(payload.latestPickupStartAt).toLocaleTimeString("zh-TW", { hour: "2-digit", minute: "2-digit" })
