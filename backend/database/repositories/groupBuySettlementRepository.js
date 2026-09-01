@@ -208,6 +208,18 @@ async function createPostgresSettlementPlan(database, input = {}) {
       SET status = 'locked', updated_at = $1
       WHERE activity_id = $2 AND status = 'submitted' AND payment_status = 'authorized'
     `, [now, input.activityId]);
+    // Orders whose customer never even attempted LINE Pay (payment_status stays 'pending'
+    // forever) are otherwise invisible to settlement -- they'd sit as "active" indefinitely
+    // since getOrderLifecycleBucket has no pending-forever branch. Resolve them to cancelled
+    // now that the deadline has passed, using the same field set the merchant/customer cancel
+    // repositories use, so they correctly reclassify into order history.
+    const neverPaidResult = await transaction.query(`
+      UPDATE orders
+      SET status = 'cancelled', pickup_status = 'cancelled', merchant_acceptance_status = 'cancelled', updated_at = $1
+      WHERE activity_id = $2 AND status = 'submitted' AND payment_status = 'pending'
+      RETURNING id
+    `, [now, input.activityId]);
+    const neverPaidOrderCount = neverPaidResult.rows.length;
     await insertAudit(transaction, actorUserId, "start_group_buy_settlement", input.activityId, {
       force,
       authorizedCups,
@@ -217,6 +229,7 @@ async function createPostgresSettlementPlan(database, input = {}) {
       allocatedDiscountAmount: discountSummary.estimatedAllocatedDiscountAmount,
       undistributedDiscountAmount: discountSummary.estimatedUndistributedDiscountAmount,
       discountFunder: "merchant",
+      neverPaidOrderCount,
     }, now);
 
     return {
@@ -229,6 +242,7 @@ async function createPostgresSettlementPlan(database, input = {}) {
       undistributedDiscountAmount: discountSummary.estimatedUndistributedDiscountAmount,
       discountFunder: "merchant",
       capturedOrderCount: orders.filter((order) => order.action === "already_captured").length,
+      neverPaidOrderCount,
       orders,
     };
   });

@@ -227,6 +227,9 @@ function OrderDetailCard({ order, groupBuyActivities, payments, actions, navigat
       <View style={styles.summaryRow}>
         <View style={styles.flex}>
           <Text style={styles.storeName}>{store?.name ?? "店家資料"}</Text>
+          {groupBuyActivity?.pickupTime ? (
+            <Text style={styles.meta}>取餐時間：{groupBuyActivity.pickupTime}</Text>
+          ) : null}
           <Pressable
             accessibilityRole="button"
             onPress={() => navigation.go("groupBuyActivityDetail", { groupBuyActivityId: order.groupBuyActivityId })}

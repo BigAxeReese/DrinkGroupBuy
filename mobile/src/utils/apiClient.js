@@ -1,5 +1,6 @@
 import Constants from "expo-constants";
 import { Platform } from "react-native";
+import { saveAuthSession } from "./authSession";
 import { fetchWithTimeout } from "./fetchWithTimeout";
 import { getOrderWriteErrorMessage } from "./orderWriteErrors";
 
@@ -56,6 +57,7 @@ export async function login(input) {
   }
 
   setAuthToken(payload.token);
+  saveAuthSession({ token: payload.token, user: payload.user }).catch(() => {});
   return payload;
 }
 
@@ -76,6 +78,7 @@ export async function loginWithFirebaseIdToken(idToken) {
   }
 
   setAuthToken(payload.token);
+  saveAuthSession({ token: payload.token, user: payload.user }).catch(() => {});
   return payload;
 }
 
@@ -108,6 +111,19 @@ export async function loginWithDevUser(userId) {
   }
 
   setAuthToken(payload.token);
+  saveAuthSession({ token: payload.token, user: payload.user }).catch(() => {});
+  return payload;
+}
+
+export async function verifyAuthSession() {
+  const response = await fetch(`${backendBaseUrl}/api/auth/session`, { headers: withAuthHeaders() });
+  const payload = await response.json();
+  if (!response.ok) {
+    const error = new Error(payload.error ?? "Session verification failed");
+    error.status = response.status;
+    error.payload = payload;
+    throw error;
+  }
   return payload;
 }
 

@@ -7,13 +7,7 @@ import {
   loginWithFirebaseIdToken
 } from "../utils/apiClient";
 import { signOutFirebaseUser, useFirebaseGoogleLogin } from "../utils/firebaseAuth";
-
-const backendCustomerToPrototypeCustomer = {
-  "user-customer-yinji": "customer-yinji",
-  "user-customer-bolun": "customer-bolun",
-  "user-customer-lixuan": "customer-lixuan",
-  "user-customer-jingwei": "customer-jingwei"
-};
+import { getRouteForUser } from "../utils/authRouting";
 
 export function RoleSelectScreen(props) {
   const isDevAuthMode = getAuthMode() === "dev";
@@ -274,33 +268,6 @@ function LoginOptionButton({ icon, iconStyle, label, onPress, disabled = false, 
       <Text numberOfLines={1} adjustsFontSizeToFit style={[styles.loginButtonLabel, compact && styles.compactLoginButtonLabel]}>{label}</Text>
     </Pressable>
   );
-}
-
-function getRouteForUser(user) {
-  if (user.roles.includes("merchant")) {
-    return {
-      role: "merchant",
-      routeName: "merchantDashboard",
-      params: {
-        storeId: user.merchantStores?.[0]?.id ?? "store-001",
-        authUserId: user.id
-      }
-    };
-  }
-  if (user.roles.includes("customer")) {
-    return {
-      role: "customer",
-      routeName: "nearby",
-      params: {
-        userId: backendCustomerToPrototypeCustomer[user.id] ?? "customer-yinji",
-        authUserId: user.id
-      }
-    };
-  }
-  if (user.roles.includes("admin")) {
-    throw new Error("管理員身份不在手機 App 裡，請改用電腦瀏覽器開啟 /admin 網頁後台登入");
-  }
-  throw new Error("這個帳號沒有可進入 App 的有效身份");
 }
 
 function getLoginErrorMessage(error) {

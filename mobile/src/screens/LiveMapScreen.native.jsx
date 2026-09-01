@@ -16,7 +16,6 @@ export function LiveMapScreen({ navigation, appState, selectedAuthUserId }) {
   const [selectedStoreId, setSelectedStoreId] = useState(null);
   const [filteredOutStoreName, setFilteredOutStoreName] = useState(null);
   const [locationPermission, setLocationPermission] = useState("not_required");
-  const [locationPermissionDismissed, setLocationPermissionDismissed] = useState(false);
   const [userPosition, setUserPosition] = useState({
     latitude: mapCenter.latitude,
     longitude: mapCenter.longitude
@@ -35,22 +34,14 @@ export function LiveMapScreen({ navigation, appState, selectedAuthUserId }) {
     filters,
     visibleMapStores,
     visibleStoreIds,
-    statusText,
     filterPanelVisible,
     openFilterPanel,
     closeFilterPanel,
     applyFilters
   } = useActivityMapFilters(mapStores, userPosition);
   const selectedStore = mapStores.find((store) => store.id === selectedStoreId);
-  const storeSyncStatus = appState?.storeSyncStatus ?? "idle";
-  const storeStatusText = storeSyncStatus === "error"
-    ? "店家資料載入失敗"
-    : storeSyncStatus === "loading" && mapStores.length === 0
-      ? "店家資料載入中..."
-      : statusText;
-  const locationName = effectiveLocationMode === "live" && locationPermission === "granted"
-    ? "手機即時位置"
-    : config.fixedLocation.name;
+  const hasRealLocation = effectiveLocationMode === "live" && locationPermission === "granted";
+  const locationName = hasRealLocation ? "手機即時位置" : config.fixedLocation.name;
 
   useEffect(() => {
     if (selectedStoreId && !visibleStoreIds.has(selectedStoreId)) {
@@ -189,23 +180,13 @@ export function LiveMapScreen({ navigation, appState, selectedAuthUserId }) {
         })}
       </MapView>
 
-      <View style={styles.topOverlay}>
-        <Text style={styles.title}>即時地圖</Text>
-        <Text style={styles.subtitle}>{storeStatusText}</Text>
-        <View style={styles.legendRow}>
-          <LegendDot color="#2563eb" label="沒有可加入活動" />
-          <LegendDot color="#facc15" label="有可加入活動" />
-        </View>
-        <View style={styles.filterRow}>
-          <Pressable
-            accessibilityRole="button"
-            onPress={openFilterPanel}
-            style={({ pressed }) => [styles.filterButton, pressed && styles.pressed]}
-          >
-            <Text style={styles.filterButtonText}>篩選</Text>
-          </Pressable>
-        </View>
-      </View>
+      <Pressable
+        accessibilityRole="button"
+        onPress={openFilterPanel}
+        style={({ pressed }) => [styles.filterButton, pressed && styles.pressed]}
+      >
+        <Text style={styles.filterButtonText}>篩選</Text>
+      </Pressable>
 
       <Pressable
         accessibilityRole="button"
@@ -216,7 +197,7 @@ export function LiveMapScreen({ navigation, appState, selectedAuthUserId }) {
         <Text style={styles.recenterIcon}>⌖</Text>
       </Pressable>
 
-      {!devControlEnabled && locationPermission === "denied" && !locationPermissionDismissed ? (
+      {!devControlEnabled && locationPermission === "denied" ? (
         <View style={styles.locationPermissionPromptCard}>
           <Text style={styles.locationPermissionPromptTitle}>請開啟定位權限</Text>
           <Text style={styles.locationPermissionPromptBody}>
@@ -229,13 +210,6 @@ export function LiveMapScreen({ navigation, appState, selectedAuthUserId }) {
               style={({ pressed }) => [styles.locationPermissionPromptPrimaryButton, pressed && styles.pressed]}
             >
               <Text style={styles.locationPermissionPromptPrimaryText}>前往設定開啟</Text>
-            </Pressable>
-            <Pressable
-              accessibilityRole="button"
-              onPress={() => setLocationPermissionDismissed(true)}
-              style={({ pressed }) => [styles.locationPermissionPromptSecondaryButton, pressed && styles.pressed]}
-            >
-              <Text style={styles.locationPermissionPromptSecondaryText}>先不要，使用預設位置</Text>
             </Pressable>
           </View>
         </View>
@@ -285,16 +259,9 @@ export function LiveMapScreen({ navigation, appState, selectedAuthUserId }) {
         filters={filters}
         onApply={applyFilters}
         onClose={closeFilterPanel}
+        hasLocation={hasRealLocation}
+        onOpenLocationSettings={!devControlEnabled ? () => Linking.openSettings() : null}
       />
-    </View>
-  );
-}
-
-function LegendDot({ color, label }) {
-  return (
-    <View style={styles.legendItem}>
-      <View style={[styles.legendDot, { backgroundColor: color }]} />
-      <Text style={styles.legendText}>{label}</Text>
     </View>
   );
 }
@@ -305,44 +272,17 @@ const styles = StyleSheet.create({
     overflow: "hidden",
     backgroundColor: "#e2e8f0"
   },
-  topOverlay: {
-    position: "absolute",
-    top: 14,
-    left: 14,
-    right: 72,
-    gap: 2,
-    borderRadius: 16,
-    backgroundColor: "rgba(255,255,255,0.94)",
-    paddingHorizontal: 14,
-    paddingVertical: 11,
-    elevation: 5
-  },
-  title: {
-    color: "#0f172a",
-    fontSize: 18,
-    fontWeight: "900"
-  },
-  subtitle: {
-    color: "#334155",
-    fontSize: 12,
-    fontWeight: "800"
-  },
-  legendRow: {
-    flexDirection: "row",
-    gap: 12,
-    marginTop: 5
-  },
-  filterRow: {
-    marginTop: 6
-  },
   filterButton: {
-    alignSelf: "flex-start",
+    position: "absolute",
+    bottom: 44,
+    right: 14,
     minHeight: 34,
     borderRadius: 12,
     alignItems: "center",
     justifyContent: "center",
     backgroundColor: "#eef2f7",
-    paddingHorizontal: 16
+    paddingHorizontal: 16,
+    elevation: 5
   },
   filterButtonText: {
     color: "#0f172a",
@@ -351,21 +291,6 @@ const styles = StyleSheet.create({
   },
   pressed: {
     opacity: 0.75
-  },
-  legendItem: {
-    flexDirection: "row",
-    alignItems: "center",
-    gap: 5
-  },
-  legendDot: {
-    width: 9,
-    height: 9,
-    borderRadius: 5
-  },
-  legendText: {
-    color: "#475569",
-    fontSize: 10,
-    fontWeight: "800"
   },
   recenterButton: {
     position: "absolute",
@@ -466,19 +391,6 @@ const styles = StyleSheet.create({
   },
   locationPermissionPromptPrimaryText: {
     color: "#ffffff",
-    fontSize: 13,
-    fontWeight: "900"
-  },
-  locationPermissionPromptSecondaryButton: {
-    minHeight: 40,
-    borderRadius: 12,
-    alignItems: "center",
-    justifyContent: "center",
-    backgroundColor: "#eef2f7",
-    paddingHorizontal: 16
-  },
-  locationPermissionPromptSecondaryText: {
-    color: "#334155",
     fontSize: 13,
     fontWeight: "900"
   }

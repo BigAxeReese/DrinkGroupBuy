@@ -250,7 +250,9 @@ async function requestLinePayAuthorization(input) {
 async function requestLinePayAuthorizationUnlocked({
   authUser,
   body,
+  now,
   authorizationRequestRepository,
+  authorizationCancelRepository,
   orderRevisionRepository,
   reliabilityJobRepository,
   requestPayment = requestLinePayPayment
@@ -285,7 +287,8 @@ async function requestLinePayAuthorizationUnlocked({
         customerUserId: revision.customerUserId,
         originalAmount: revision.originalAmount,
         paymentStatus: revision.paymentStatus,
-        authorizationStatus: revision.authorizationStatus
+        authorizationStatus: revision.authorizationStatus,
+        deadlineAt: revision.deadlineAt
       }
     : await (authorizationRequestRepository
         ? authorizationRequestRepository.getOrderPaymentContext(body.orderId)
@@ -298,6 +301,20 @@ async function requestLinePayAuthorizationUnlocked({
   }
   if (order.customerUserId !== authUser.id) {
     throw new PaymentServiceError(403, { error: "Order access denied" });
+  }
+  // Nothing previously stopped a customer from requesting (or LINE Pay confirming) a brand new
+  // authorization for an activity whose deadline has already passed -- settlement only ever
+  // looks at orders that were already authorized/captured before its snapshot, so a
+  // post-deadline authorization would never be counted toward the group buy, capacity, or
+  // settlement outcome, yet would still place a real hold on the customer.
+  const deadlineTime = Date.parse(order.deadlineAt);
+  const nowTime = Date.parse(now || new Date().toISOString());
+  if (!Number.isNaN(deadlineTime) && !Number.isNaN(nowTime) && nowTime >= deadlineTime) {
+    throw new PaymentServiceError(409, {
+      error: "Group buy activity deadline has already passed",
+      status: "activity_deadline_passed",
+      deadlineAt: order.deadlineAt
+    });
   }
   if (order.originalAmount !== Number(body.amount)) {
     throw new PaymentServiceError(409, {
@@ -337,11 +354,24 @@ async function requestLinePayAuthorizationUnlocked({
     });
   }
   if (existingAuthorization?.status === "pending") {
-    throw new PaymentServiceError(409, {
-      error: "Order already has a pending LINE Pay authorization",
-      status: "authorization_already_pending",
-      authorization: existingAuthorization
-    });
+    // The customer opened LINE Pay for a previous attempt and never completed it (closed the
+    // page, backed out) -- LINE Pay itself has no API to cancel a request before it's confirmed,
+    // so there's no way to positively know it's dead. Abandoning it here and starting a fresh
+    // request is safe: confirmLinePayAuthorizationUnlocked's own guard (authorization_not_pending)
+    // refuses to call LINE Pay's confirm API for a local record that's no longer "pending", so
+    // even if the customer somehow returns to the old page and completes it, we never place a
+    // real hold for it. Reuses the same cancel path the reconciliation job uses, so audit trail,
+    // order-revision handling, and idempotency are all identical to that already-tested case.
+    const cancelInput = {
+      orderId: order.id,
+      providerTransactionId: existingAuthorization.providerAuthorizationId,
+      reason: "customer_retried_before_confirmation"
+    };
+    if (authorizationCancelRepository) {
+      await authorizationCancelRepository.cancelPendingAuthorization(cancelInput);
+    } else {
+      cancelPendingLinePayAuthorizationInDatabase(cancelInput);
+    }
   }
 
   const ruleConsentInput = buildOrderRuleConsentRecord({

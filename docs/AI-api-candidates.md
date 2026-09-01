@@ -1,6 +1,6 @@
 # API 清單與候選項
 
-最後更新：2026-08-15
+最後更新：2026-08-29
 
 ## 語言規則
 
@@ -32,6 +32,19 @@ API JSON 使用 `camelCase`。已實作 routes 只對目前開發 prototype 具�
 | 可切換資料來源    | `AUTH_PROFILE_READ_RUNTIME=sqlite|postgres`；預設 `sqlite`，Firebase session、dev auth 與 bearer token 後續角色／門市權限解析共用同一 repository |
 | PostgreSQL 差異   | PostgreSQL v1 以 `merchant_users.store_id` 作授權邊界且不分內部權限等級；`merchantStores[].permissionLevel` 保留但回傳 `null` |
 | 遷移備註          | 不要再新增依賴 phone/password 或 email/password login 的 production features                            |
+
+### 登入狀態持久化（app 重開免重新登入）
+
+| 項目               | 內容                                                                                         |
+| ------------------ | -------------------------------------------------------------------------------------------- |
+| 決策日期           | 2026-08-29                                                                                    |
+| 觸發原因           | 真機測試發現 App 完全關閉重開後一定要重新登入——`authToken` 只存在 JS 記憶體變數（`mobile/src/utils/apiClient.js`），沒有任何持久化機制 |
+| 已實作 route       | `GET /api/auth/session`                                                                       |
+| Request            | 無 body，僅需帶 `Authorization: Bearer <token>`                                               |
+| Response           | 成功 `{ user }`（欄位與 login 回傳的 `user` 相同）；token 無效或過期回傳 401                   |
+| Mobile 端持久化    | 登入成功時把 `{ token, user }` 存進 `expo-secure-store`（僅 native，web 因瀏覽器沒有對應加密儲存機制而略過，維持 web 原本重新整理即需登入的行為）；App 啟動時讀回並呼叫本 route 重新驗證，成功才略過登入畫面直接導向對應角色首頁，401 會清掉本機存的憑證、其他錯誤（如無網路）保留憑證供下次啟動再試 |
+| 為何要重新呼叫這支 API，不直接信任本機存的 user | 角色／門市權限可能在使用者離線期間被後台變更，重新問一次 backend 才能確保導向的畫面跟權限是最新的，不是憑證存起來當下的舊快照 |
+| 共用邏輯           | 角色對應到起始畫面的邏輯（`getRouteForUser`）已抽成 `mobile/src/utils/authRouting.js`，登入當下與 App 啟動還原共用同一份，不會兩邊邏輯兜不起來 |
 
 ### 開發期角色測試登入
 

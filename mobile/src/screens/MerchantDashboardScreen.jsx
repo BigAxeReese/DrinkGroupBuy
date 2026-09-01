@@ -284,10 +284,11 @@ export function MerchantDashboardScreen({ navigation, appState, actions, memberA
           const paidOrders = relatedOrders.filter((order) => ["authorized", "captured"].includes(order.paymentStatus)).length;
           const capturedOrders = relatedOrders.filter((order) => order.paymentStatus === "captured").length;
           const readyPickups = relatedOrders.filter((order) => order.pickupStatus === "ready").length;
-          const manufacturableOrders = relatedOrders.filter((order) => (
+          const manufacturableOrderList = relatedOrders.filter((order) => (
             order.paymentStatus === "captured"
             && !["ready", "picked_up", "cancelled"].includes(order.pickupStatus)
-          )).length;
+          ));
+          const manufacturableOrders = manufacturableOrderList.length;
 
           return (
             <View key={groupBuyActivity.id} style={styles.card}>
@@ -312,6 +313,17 @@ export function MerchantDashboardScreen({ navigation, appState, actions, memberA
               <Text style={styles.summary}>已請款 {capturedOrders} 筆 · 可取貨：{readyPickups} 筆</Text>
               {pendingPaymentOrders > 0 ? (
                 <Text style={styles.warningText}>待付款 {pendingPaymentOrders} 筆，不列入製作清單。</Text>
+              ) : null}
+              {manufacturableOrderList.length > 0 ? (
+                <View style={styles.productionList}>
+                  <Text style={styles.productionListTitle}>待製作明細</Text>
+                  {manufacturableOrderList.map((order) => (
+                    <View key={order.id} style={styles.productionOrderRow}>
+                      <Text style={styles.productionCustomer}>{order.customerSurname ?? order.customerId}</Text>
+                      <Text style={styles.productionItems}>{formatOrderItemsSummary(order.items)}</Text>
+                    </View>
+                  ))}
+                </View>
               ) : null}
               {manufacturableOrders > 0 ? (
                 <PrimaryButton
@@ -441,6 +453,13 @@ function getCancelErrorMessage(error) {
     activity_not_cancellable: "此團購目前狀態無法取消。"
   };
   return messages[errorCode] || "取消團購失敗，請稍後再試。";
+}
+
+function formatOrderItemsSummary(items = []) {
+  return items.map((item) => {
+    const details = [item.sweetness, item.ice, ...(item.toppings || [])].filter(Boolean).join("、");
+    return `${item.itemName || "飲料"} x${item.quantity}${details ? `（${details}）` : ""}`;
+  }).join("、");
 }
 
 function getOrderStatusLabel(status) {
@@ -677,6 +696,32 @@ const styles = StyleSheet.create({
     color: "#1f6feb",
     fontSize: 12,
     fontWeight: "900"
+  },
+  productionList: {
+    gap: 6,
+    borderRadius: 12,
+    borderWidth: 1,
+    borderColor: "#e2e8f0",
+    backgroundColor: "#f8fafc",
+    padding: 10
+  },
+  productionListTitle: {
+    color: "#0f172a",
+    fontSize: 12,
+    fontWeight: "900"
+  },
+  productionOrderRow: {
+    gap: 2
+  },
+  productionCustomer: {
+    color: "#334155",
+    fontSize: 12,
+    fontWeight: "800"
+  },
+  productionItems: {
+    color: "#475569",
+    fontSize: 12,
+    lineHeight: 17
   },
   emptyText: {
     color: "#64748b",

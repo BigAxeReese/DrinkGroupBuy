@@ -222,9 +222,11 @@ async function getPostgresOrderRevisionPaymentContext(database, orderRevisionId)
   const result = await database.query(`
     SELECT
       revision.id, revision.order_id, revision.status, revision.total_cups, revision.original_amount,
-      orders.customer_user_id, orders.payment_status, orders.authorization_status
+      orders.customer_user_id, orders.payment_status, orders.authorization_status,
+      activity.deadline_at
     FROM order_revisions revision
     JOIN orders ON orders.id = revision.order_id
+    JOIN group_buy_activities activity ON activity.id = orders.activity_id
     WHERE revision.id = $1
   `, [orderRevisionId]);
   const row = result.rows[0];
@@ -238,6 +240,7 @@ async function getPostgresOrderRevisionPaymentContext(database, orderRevisionId)
     customerUserId: row.customer_user_id,
     paymentStatus: row.payment_status,
     authorizationStatus: row.authorization_status,
+    deadlineAt: toIsoString(row.deadline_at),
   };
 }
 

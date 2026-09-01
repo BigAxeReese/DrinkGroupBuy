@@ -1,17 +1,34 @@
 ---
-updated: 2026-08-28
+updated: 2026-08-31
 ---
 
-## 身份驗證與角色 《第一階段》 [進行中]
-> 決定使用者是誰、能用哪些功能——例如是一般顧客還是店家老闆，登入之後系統要怎麼分辨身份。
-- Firebase Auth + Google 登入 [完成]
-  > 讓使用者可以直接用自己的 Google 帳號登入，不用另外設一組新密碼；背後用 Google 官方的身份驗證服務（Firebase Auth）確認身份是真的。
-  - Mobile 端 [完成] — Google 登入畫面，取得 Firebase ID token 送到 backend
-  - Backend 端 [完成] — 驗證 ID token，依 users/user_roles/merchant_users 判斷身份
-- Firebase Console／OAuth／UID mapping 與 Android 實機 E2E [待處理] — repository 只有設定需求與程式切片，沒有目前環境已完成端對端驗證的證據
-  > 正式上線前要在 Google 的管理後台（Firebase Console）完成登入相關設定，並且要用真的 Android 手機實際測試一次完整登入流程，不只是在電腦模擬器上測。
+## 功能總覽 [完成]
+> 一次性列出這個專案目前實際涵蓋的功能範圍，純粹給人看整個專案大致有哪些東西，不是要追蹤完成度的工作項目。
+- 顧客瀏覽附近店家與團購活動（地圖、距離與條件篩選）
+- 顧客加入團購並用 LINE Pay 付款
+- 顧客修改已加入的訂單內容
+- 顧客取貨（憑證核銷）
+- 顧客查看訂單與付款狀態
+- 商家建立與取消團購活動
+- 商家管理店內菜單
+- 商家標記訂單可取餐、查看待製作明細
+- 商家申請退款
+- 管理員網頁後台審核退款、取消團購
+- 系統截止結算（折扣試算、正式請款）
+- 系統付款背景可靠性機制（對帳、重試、告警）
 
-## 團購與活動探索 《第一階段》 [進行中]
+## 身份驗證與角色 [進行中]
+> 決定使用者是誰、能用哪些功能——例如是一般顧客還是店家老闆，登入之後系統要怎麼分辨身份。
+- Firebase Auth + Google 登入 [進行中]
+  > 讓使用者可以直接用自己的 Google 帳號登入，不用另外設一組新密碼；背後用 Google 官方的身份驗證服務（Firebase Auth）確認身份是真的。這個功能核心就是串接 Google／Firebase 這個第三方服務，不是自己設計的業務邏輯，所以底下不分「前端畫面」「後端 API」，直接歸類成第三方服務整合。
+  - Mobile 端（第三方服務整合） [完成] — Google 登入畫面，取得 Firebase ID token 送到 backend
+  - Backend 端（第三方服務整合） [完成] — 驗證 ID token，依 users/user_roles/merchant_users 判斷身份
+  - Firebase Console／OAuth／UID mapping 與 Android 實機 E2E（整合驗證） [待處理] — repository 只有設定需求與程式切片，沒有目前環境已完成端對端驗證的證據
+    > 正式上線前要在 Google 的管理後台（Firebase Console）完成登入相關設定，並且要用真的 Android 手機實際測試一次完整登入流程，不只是在電腦模擬器上測。
+- 登入狀態持久化（App 重開不用重新登入） [進行中] (8/29) — 真機測試發現 App 完全關閉重開後一定要重新登入，因為 `authToken` 原本只存在 JS 記憶體變數（`mobile/src/utils/apiClient.js`），沒有任何持久化機制。已補上：登入成功時把憑證存進 `expo-secure-store`（Android 專用的加密本機儲存，web 因瀏覽器沒有對應機制而略過）；App 啟動時讀回並呼叫新增的 `GET /api/auth/session`（見 [AI-api-candidates.md](docs/AI-api-candidates.md)）重新驗證，成功才略過登入畫面、失敗（401）則清掉本機憑證回到登入畫面。角色對應起始畫面的邏輯抽成共用的 [authRouting.js](mobile/src/utils/authRouting.js)，登入當下與 App 啟動還原共用同一份。`npm test` 93/93 全過，backend 新路由已用真實 HTTP 請求驗證（有效 token 回傳正確使用者、無效 token 回傳 401）。**尚未實機驗證**：需要真的關閉重開 App 確認能跳過登入畫面
+  > 手機上把 App 完全關掉再打開，應該要記得使用者剛剛登入過，直接進到對應的畫面，不用每次都重新登入一次。
+
+## 團購與活動探索 [進行中]
 > 顧客瀏覽附近有哪些店家、有哪些手搖飲團購活動可以參加的畫面與功能。
 - 店家地圖 [完成] (8/4)
   > 用地圖顯示附近有哪些店家，顧客可以直接在地圖上找店家、看活動。
@@ -53,7 +70,7 @@ updated: 2026-08-28
 - Android 地圖實機 E2E [待處理]
   > 拿真的 Android 手機把地圖相關功能從頭到尾操作一次，確認在真實裝置上沒問題，不只是在電腦上測試。
 
-## 金流 《第一階段》 [進行中]
+## 金流 [進行中]
 > 所有跟「錢」有關的功能：顧客付款、退款、商家收到錢的整個流程。
 - LINE Pay 付款 [進行中]
   > 用 LINE Pay（LINE 官方的行動支付服務）讓顧客付團購訂單的錢，是目前主要的付款方式。
@@ -66,6 +83,10 @@ updated: 2026-08-28
       > 拿真的 Android 手機實際打開訂單畫面，確認上面那些付款狀態文字排版顯示正常，不是只用程式測試檢查文字內容對不對。
     - 待付款訂單卡在「我的訂單」列表沒有付款入口 [完成] (8/25) — 真機測試發現：顧客送出訂單後若離開當下的付款頁（不論是不小心返回、還是單純先去逛逛），`order.paymentStatus === "pending"` 的訂單只有在剛送出訂單那一刻的自動導轉才碰得到付款畫面；之後從「我的訂單」列表點進同一筆訂單，[CustomerOrdersScreen.jsx](mobile/src/screens/CustomerOrdersScreen.jsx) 的 `OrderDetailCard` 原本只在 `paymentStatus === "failed"`（扣款失敗）跟 `reauthorizationReason === "order_amount_changed"`（金額變動）這兩種情況給重新付款的按鈕，從未授權過（單純 pending）的訂單完全沒有對應按鈕，只顯示「待付款」文字說明，等於卡死。已補上「前往付款」按鈕，導向既有 `paymentAuthorization` 畫面；Web 預覽以真實測試帳號重現整個情境（送出訂單→離開→從訂單列表重新進入→點「前往付款」→正確進入付款畫面且可正常操作）驗證通過，`npm test` 77/77 全過
       > 顧客訂單送出後如果沒有馬上付款、之後想從「我的訂單」回來繼續付，原本沒有任何按鈕可以按，只看得到一句「待付款」的說明文字，等於卡住。
+    - 顧客按了「前往付款」卻永久卡在「已有一筆進行中」 [完成] (8/29) — 真機測試發現：顧客開啟 LINE Pay 頁面後若未完成就退出 App，再點「付款」會被 [linePayService.js](backend/payments/linePayService.js) 永久擋下 409 `authorization_already_pending`，因為 LINE Pay 沒有提供「主動取消尚未確認的付款請求」API，只能等 LINE Pay 自己判定過期（等待時間未公開，查證過官方文件確認查無此資訊）。與使用者來回討論多輪、比較三種自訂逾時方案的風險後，改採「顧客重試時直接放棄舊的、建立新的」（參考真實上線 App 的作法），不額外設等待時間。安全性建立在既有的 `confirmLinePayAuthorizationUnlocked` 守門機制上：即使顧客事後回頭完成舊頁面，後端也會先檢查本地紀錄是否仍是 `pending` 才會呼叫 LINE Pay 正式確認，一旦已標記失敗就直接拒絕，不會產生顧客不知情的授權扣款。新舊訂單與改單（order revision）付款請求共用同一套邏輯。新增 1 個自動化測試驗證「先放棄舊的才建立新的」順序正確，`npm test` 93/93 全過，並完成一次安全審查（見 `docs/AI-security-review-log.md` 2026-08-29）。**尚未實機走過真實 LINE Pay 沙盒環境驗證**（開啟付款→退出→重新點付款→應拿到全新付款頁面），需要真機測試
+      > 顧客點了付款、跳去 LINE Pay 但還沒完成就跳出來，回到 App 想重新付款時，系統應該讓他順利拿到新的付款畫面，而不是永遠卡在「已經有一筆在處理中」動彈不得。
+    - 未付款訂單永遠卡在「進行中」、且截止後仍能發起新付款 [完成] (8/29) — 使用者回報有一筆從未點過付款的訂單，對應團購早就截止卻仍未出現在歷史訂單，追查後修好兩個獨立缺口：(1) [linePayService.js](backend/payments/linePayService.js) 的 `requestLinePayAuthorization` 完全沒有檢查團購截止時間，截止後仍能發起新的 LINE Pay 付款請求；已補上檢查，截止後回傳 `activity_deadline_passed`，Mobile 端顯示「這個團購已經截止，無法再付款。」(2) [getOrderLifecycleBucket](backend/db.js) 判斷「進行中／歷史」分類時，沒有處理「從未發起過付款」（`paymentStatus` 一直是 `pending`）的訂單，導致永遠留在進行中；已在截止結算（[groupBuySettlementRepository.js](backend/database/repositories/groupBuySettlementRepository.js) 與 SQLite 對應的 `createGroupBuySettlementPlan`）補上一步，把這類訂單標記為已取消，比照既有商家/顧客取消訂單的欄位組合（`status`／`pickup_status`／`merchant_acceptance_status` 皆設為 `cancelled`，付款狀態維持 `pending`），使其正確歸入歷史訂單。新增 2 個 `linePayService` 自動化測試（截止前／截止後各一）與 1 個 `group-buy-settlement-repository-smoke` 測試場景，`npm test` 95/95、smoke 測試全過，並完成一次安全審查（見 `docs/AI-security-review-log.md` 2026-08-29）。**尚未實機驗證**：需要真的等一個團購過期且有未付款訂單，確認它正確移入歷史訂單
+      > 團購過了截止時間後，理論上不該再讓人付款，也不該有訂單永遠卡在「進行中」看不到——這次把這兩個漏洞一起補上。
   - 核心請款流程 [進行中]
     > 顧客真正付款、系統處理這筆付款的核心邏輯，以及確保這個流程本身正確無誤的把關。
     - Backend 端：付款六階段處理模組 [完成]
@@ -102,7 +123,7 @@ updated: 2026-08-28
   - 管理員審核網頁後台 [完成] (8/22) — 原本的 `AdminRefundRequestsScreen`（手機 App 裡的開發用畫面）已移除，審核功能改在獨立的 `/admin/refund-requests` 網頁後台（見下方「管理員網頁後台」）；核准／駁回直接重用既有 `approveRefundRequest`／`rejectRefundRequest` 服務層函式，未改動審核邏輯本身
     > 平台營運人員審核退款申請、決定核准或駁回的網頁畫面，跟顧客/商家用的手機 App 是分開的。
 
-## 訂單流程 《第一階段》 [進行中]
+## 訂單流程 [進行中]
 > 顧客下單之後，訂單會經過的每個階段：選飲料、修改訂單、取貨、逾期沒取怎麼處理。
 - 截止後最終結算結果 [完成] (8/15)
   > 團購活動截止之後，系統會依照最後湊到的總杯數重新算一次正確的折扣跟金額，這是每張訂單最後確定要付多少錢的依據。
@@ -144,8 +165,19 @@ updated: 2026-08-28
     > 顧客取餐時要出示的憑證（類似取貨碼），系統會產生、驗證這張憑證是否有效，並自動排程檢查有沒有訂單超過取貨時間還沒被領走。
   - Android 實機 E2E [待處理]
     > 拿真的 Android 手機把取貨、逾期提示的整個流程實際操作一次確認沒問題。
+- 商家待製作明細 [完成] (8/29) — 使用者實機操作發現：[MerchantDashboardScreen.jsx](mobile/src/screens/MerchantDashboardScreen.jsx) 原本只顯示「已請款 N 筆」這種統計數字，跟一個「標記可取餐（N 筆）」整批按鈕，完全沒有任何地方列出這些訂單實際的飲料品項、數量、客製化內容，商家無從得知要做什麼。查證後端 API（`listMerchantStoreOrders` → `getPostgresOrderDetail`）其實早就有回傳完整品項與客製化資料，手機端同步時也已經存進 `appState.orders[].items`，純粹是這個畫面從沒有把它印出來；補上「待製作明細」區塊，列出每筆待製作訂單的顧客與品項（例如「午後百香果茶 x1（微糖、正常冰、椰果）」），放在「標記可取餐」按鈕之前，讓商家點下去之前能先看到要做什麼。純手機端 UI 改動，未動後端。已用開發控制台真實登入測試商家帳號、對真實 PostgreSQL 資料庫裡一筆已請款訂單驗證畫面正確顯示品項與客製化內容，`npm test` 95/95 全過
+  > 商家原本完全看不到「這些已經付款成功的訂單裡到底要做哪些飲料」，只看得到一句「已請款 N 筆」的數字，現在補上實際品項清單，讓商家知道要準備什麼。
 
-## 非主要產品功能 《第三階段》 [待處理]
+## UI/UX 打磨 [進行中]
+> 畫面好不好用、好不好懂、排版有沒有問題，跟功能邏輯對不對是分開的兩件事；這裡專門追蹤這類發現與修正，不歸在特定功能模組底下。
+- 商家菜單管理：客製化選項輸入框排版跑版 [完成] (8/30) — [MerchantMenuManagementScreen.jsx](mobile/src/screens/MerchantMenuManagementScreen.jsx) 尺寸／甜度／冰量／加料選項的「名稱」「加價」輸入框缺少排版設定（`minWidth: 0`），手機寬度下輸入框無法正確縮小，把「刪除」按鈕擠出畫面外。已修正，實測 375px 寬度下三個元件都完整顯示、不再跑版，`npm test` 95/95 全過
+  > 商家新增或編輯飲品的客製化選項時，畫面排版會壞掉，「刪除」按鈕被擠到畫面外看不到。
+- 商家菜單管理：分類欄位不清楚要填什麼 [完成] (8/30) — 「分類代碼」欄位原本標籤模糊、預設值是英文的 `tea`，商家不知道這格是做什麼用的，而且填的內容會直接顯示成顧客選飲料畫面上的分類頁籤文字。已把標籤改成清楚說明會顯示給顧客看、請填中文，預設值改成中文範例「茶類」，並新增「這家店目前已用過的分類」快速選取按鈕，避免商家重複輸入或打出不一致的分類名稱
+  > 商家不知道「分類代碼」這欄要填什麼，填錯或用英文，顧客端就會看到奇怪的英文分類名稱。
+- 全面性 UI/UX 檢視 [待處理]
+  > 目前這裡列出的問題，都是使用者實際操作時偶然發現的，還沒有系統性走過每個畫面，逐一確認排版、文案、操作流程是否清楚合理。
+
+## 非主要產品功能 [待處理]
 > 不影響第一階段團購、下單、付款與取餐主流程，但可在核心功能穩定後補充使用體驗的次要功能。
 - 討論區 [待處理] — 目前只有底部導覽入口與靜態佔位畫面；討論需求、資料保存方式、後端服務與正式畫面尚未設計
   > 讓顧客針對團購活動留言、揪團討論或向店家提問。
@@ -158,7 +190,7 @@ updated: 2026-08-28
   - 會員資料編輯（暱稱／電話） [待處理]
   - 帳號關閉／去識別化流程 [待處理] — 規則已於 `docs/AI-database-candidates.md` 定義，API 與權限尚未實作
 
-## 平台維運 《第二階段》 [進行中]
+## 平台維運 [進行中]
 > 讓整個系統長期穩定運作的後勤工作：資料庫搬家、資安檢查、套件更新——不是顧客/商家直接看得到的功能，但影響系統穩不穩、安不安全。
 - PostgreSQL 遷移 [進行中]
   > 開發階段先用輕量的 SQLite 資料庫，正式上線前要把所有資料搬到功能更完整、適合正式營運的 PostgreSQL 資料庫，這整個搬家工程就叫「遷移」。
@@ -223,7 +255,7 @@ updated: 2026-08-28
   - Expo SDK 57 升級 [暫緩] (8/19) — 套件相容性、`expo-doctor`、測試全過，但地圖套件（react-native-maps）在新版渲染架構下無法正常顯示地圖（Android 實機驗證發現地圖畫面完全空白），已退回 SDK 54；SDK 54 已符合 Google Play 2026/8/31 起的最低版本要求（Android 16 / API 36），非上架必要項目，暫不繼續往上升
     > 把開發這個手機 App 用的框架（Expo／React Native）從目前使用的 54 版升級到最新的 57 版。
 
-## 系統分析書 《不分階段》 [進行中]
+## 系統分析書 [進行中]
 > 一份完整說明整個系統設計、有哪些功能、每個功能怎麼運作的文件，通常給老師、審查人員或團隊自己參考用。
 - 五大功能分類與描述性綱目 [完成]
   > 把整個系統的功能分成五大類，並列出每一類底下大概有哪些東西的文件大綱。
@@ -232,18 +264,32 @@ updated: 2026-08-28
 
 ## 非正式與備援功能 [進行中]
 > 不是給一般顧客/商家用的正式功能，是開發測試用的小工具，或是正式方案掛掉時的備用方案。
-- 本機開發身份切換器（dev-only） 《不分階段》 [完成] — Backend 與 Mobile 都有 environment gate，且 README 明講「這不是正式產品角色選擇」
+- 本機開發身份切換器（dev-only） [完成] — Backend 與 Mobile 都有 environment gate，且 README 明講「這不是正式產品角色選擇」
   > 開發時為了方便測試不同身份（顧客/商家）用的快速切換工具，只有開發環境能用，正式上線的版本裡不會出現，不算是真正的登入功能。管理員身份不在這個清單裡，改走下面的「管理員網頁後台」。
   - Mobile 端 [完成] — 本機測試身份下拉選單（8/22 起排除管理員身份，管理員不再有任何手機 App 入口）
   - Backend 端 [完成] — `AUTH_DEV_MODE` 閘門與 dev-session API
-- 管理員網頁後台 《第二階段》 [完成] (8/22) — 伺服器直接輸出 HTML／表單（無另外的前端專案或建置流程），密碼登入寫在 `backend/.env` 的 `ADMIN_WEB_PASSWORDS`（逗號分隔，可設多組密碼給不同人用，登入後都對應到同一個管理員身份；與 `AUTH_DEV_MODE` 無關，正式環境也能用）；session 沿用既有 `createAuthToken`／`verifyAuthToken` 簽章機制存進 HttpOnly cookie，取消團購／核准退款／駁回退款都直接重用既有服務層函式，未新增或修改任何業務邏輯；每個會改資料的表單都帶一次性 CSRF token，已用真實 HTTP 請求驗證登入、未帶 CSRF token 會被拒絕（403）、以及對不存在的活動 ID 觸發取消會正確回傳錯誤訊息。原本手機 App 裡的 `AdminDashboardScreen`／`AdminRefundRequestsScreen` 已移除。事後跑過一次 `/code-review`（xhigh 強度，10 個角度）並全數修復其 15 個發現，包含 2 個真的邏輯缺口（取消團購時若有訂單付款作廢失敗，原本會誤顯示成功；退款審核列表頁原本漏掉資料庫執行模式一致性檢查）與其餘重複程式碼／效率問題；修復過程與驗證方式記錄於 `docs/AI-security-review-log.md` 2026-08-22 追加的那筆
+- 管理員網頁後台 [完成] (8/22) — 伺服器直接輸出 HTML／表單（無另外的前端專案或建置流程），密碼登入寫在 `backend/.env` 的 `ADMIN_WEB_PASSWORDS`（逗號分隔，可設多組密碼給不同人用，登入後都對應到同一個管理員身份；與 `AUTH_DEV_MODE` 無關，正式環境也能用）；session 沿用既有 `createAuthToken`／`verifyAuthToken` 簽章機制存進 HttpOnly cookie，取消團購／核准退款／駁回退款都直接重用既有服務層函式，未新增或修改任何業務邏輯；每個會改資料的表單都帶一次性 CSRF token，已用真實 HTTP 請求驗證登入、未帶 CSRF token 會被拒絕（403）、以及對不存在的活動 ID 觸發取消會正確回傳錯誤訊息。原本手機 App 裡的 `AdminDashboardScreen`／`AdminRefundRequestsScreen` 已移除。事後跑過一次 `/code-review`（xhigh 強度，10 個角度）並全數修復其 15 個發現，包含 2 個真的邏輯缺口（取消團購時若有訂單付款作廢失敗，原本會誤顯示成功；退款審核列表頁原本漏掉資料庫執行模式一致性檢查）與其餘重複程式碼／效率問題；修復過程與驗證方式記錄於 `docs/AI-security-review-log.md` 2026-08-22 追加的那筆
   > 平台營運人員用來取消團購、審核退款的網頁工具，跟顧客/商家用的手機 App 完全分開；原本這兩件事是手機 App 裡工程師專用的開發畫面，現在搬成獨立網頁，比較符合「管理員不是正式 App 的一般角色」這個既有決議（`docs/open-questions.md`）。
-- 本機測試控制台併入主 Backend 《不分階段》 [完成] (8/23，8/24 補上密碼登入) — 原本是獨立跑在 3100 埠、不進 Git 的 `local-dev-console/`（控制測試顧客的模擬定位、全域模擬業務時間），使用者要求跟管理員後台「整合成同一個工具」後，改為 `backend/devConsole/`，掛在主 Backend 底下的 `/dev-console`；狀態儲存搬到 `backend/data/dev-console-state.json`（沿用同樣不進 Git 的規則）。保留原本「只接受本機（loopback）連線」的邊界不變（用同一個 `isLoopbackRequest` 檢查），不因為併到同一台伺服器就讓區網（例如真手機）連得到；`/admin`、`/dev-console` 兩個頁面互相加了導覽連結。啟動器 `04-start-console.cmd` 改成只開瀏覽器分頁，不再啟動獨立程序；`local-dev-console/` 資料夾保留文件當歷史紀錄，程式不再執行。8/24：使用者確認本機測試控制台「算後台的一部分」，人看的頁面與控制 API 額外要求 `/admin` 的登入 session（loopback 限制照舊，密碼是疊加上去，不是取代），只有 Mobile App 直接呼叫、模擬定位用的 `GET /dev-console/api/app/config`／`POST /dev-console/api/app/report` 兩支維持原本不需密碼；已用真實 HTTP 請求驗證頁面／靜態檔／全部 API（狀態、帳號列表、定位設定讀寫重置、事件紀錄、業務時間讀寫、App 回報）皆正常，`npm test` 70/70 通過（未改動任何被測邏輯），`/security-review` 記錄於 `docs/AI-security-review-log.md` 2026-08-24 這筆
+  - 金流資訊總覽頁面 [待處理]
+    > 讓管理員在網頁後台能查看每筆訂單完整的付款過程（預授權、確認、請款、退款）與對應金額。這些資料目前都已經存在資料庫裡，只是沒有畫面可以瀏覽，只能直接查資料庫。
+    - 畫面需求草稿 《需求》 [待處理]
+      > 先畫一個不接真實資料的假畫面，確認這頁該顯示哪些欄位、管理員需要哪些篩選或操作，畫完即丟，不會變成正式畫面的一部分。
+    - 開發 《開發》 [待處理]
+      > 標籤標在這個中間層，底下子項目自動視為同一階段，不用每個細項各自重複標記。
+      - 付款資料查詢邏輯（資料庫） [待處理]
+        > 設計要從既有的預授權、請款、退款這幾張資料表撈出哪些欄位，怎麼組合成一筆完整的金流時間軸。
+      - 查詢 API（後端） [待處理]
+        > 提供給網頁後台呼叫的介面，回傳一筆訂單完整的付款過程資料。
+      - 網頁後台顯示畫面（前端） [待處理]
+        > 在 `/admin` 網頁後台新增這個查詢頁面，正式接上查詢 API 顯示真實資料。
+    - 真實資料人工驗證 《測試》 [待處理]
+      > 用真實 PostgreSQL 資料庫裡的訂單，實際打開這個頁面，確認顯示的付款軌跡跟資料庫紀錄一致。
+- 本機測試控制台併入主 Backend [完成] (8/23，8/24 補上密碼登入) — 原本是獨立跑在 3100 埠、不進 Git 的 `local-dev-console/`（控制測試顧客的模擬定位、全域模擬業務時間），使用者要求跟管理員後台「整合成同一個工具」後，改為 `backend/devConsole/`，掛在主 Backend 底下的 `/dev-console`；狀態儲存搬到 `backend/data/dev-console-state.json`（沿用同樣不進 Git 的規則）。保留原本「只接受本機（loopback）連線」的邊界不變（用同一個 `isLoopbackRequest` 檢查），不因為併到同一台伺服器就讓區網（例如真手機）連得到；`/admin`、`/dev-console` 兩個頁面互相加了導覽連結。啟動器 `04-start-console.cmd` 改成只開瀏覽器分頁，不再啟動獨立程序；`local-dev-console/` 資料夾保留文件當歷史紀錄，程式不再執行。8/24：使用者確認本機測試控制台「算後台的一部分」，人看的頁面與控制 API 額外要求 `/admin` 的登入 session（loopback 限制照舊，密碼是疊加上去，不是取代），只有 Mobile App 直接呼叫、模擬定位用的 `GET /dev-console/api/app/config`／`POST /dev-console/api/app/report` 兩支維持原本不需密碼；已用真實 HTTP 請求驗證頁面／靜態檔／全部 API（狀態、帳號列表、定位設定讀寫重置、事件紀錄、業務時間讀寫、App 回報）皆正常，`npm test` 70/70 通過（未改動任何被測邏輯），`/security-review` 記錄於 `docs/AI-security-review-log.md` 2026-08-24 這筆
   > 本機開發測試用的工具，可以模擬測試顧客目前在哪裡（方便測試地圖／距離篩選功能）、可以把系統目前的模擬時間往前後調（方便測試截止/取餐時限），只有開發者自己的電腦連得到，正式環境不會出現。
-- ECPay 信用卡付款（備援） 《第三階段》 [完成] (8/27) — 2026-08-26 發現 webhook 缺少 `RtnCode` 檢查與 stage 金鑰 fallback 兩個安全問題、先加總開關暫停；8/27 使用者確認後改為整個移除而非修復——`ecpayService.js`／`ecpayClient.js`／`ecpayAuthorizationRepository.js` 與對應 mobile UI、smoke test、schema CHECK constraint 允許值全部刪除或收回，兩個安全問題隨程式碼刪除一併解決（問題所在的程式碼本身不存在了，不是留著加強防護）；`npm test` 84/84、實際啟動 backend 對真實 PostgreSQL 驗證正常，詳見 `docs/AI-security-review-log.md` 2026-08-26／2026-08-27 兩筆
+- ECPay 信用卡付款（備援） [完成] (8/27) — 2026-08-26 發現 webhook 缺少 `RtnCode` 檢查與 stage 金鑰 fallback 兩個安全問題、先加總開關暫停；8/27 使用者確認後改為整個移除而非修復——`ecpayService.js`／`ecpayClient.js`／`ecpayAuthorizationRepository.js` 與對應 mobile UI、smoke test、schema CHECK constraint 允許值全部刪除或收回，兩個安全問題隨程式碼刪除一併解決（問題所在的程式碼本身不存在了，不是留著加強防護）；`npm test` 84/84、實際啟動 backend 對真實 PostgreSQL 驗證正常，詳見 `docs/AI-security-review-log.md` 2026-08-26／2026-08-27 兩筆
   > ECPay 原本是 LINE Pay 審核卡關時的備用付款方式；LINE Pay 核准後優先度降低，2026-08-26 發現安全問題後，使用者確認直接整個移除而非修復。目前只有 LINE Pay 一種付款方式。
 
-## 開發協作 《不分階段》 [完成]
+## 開發協作 [完成]
 > 跟寫程式碼本身無關，是幫助多個 AI 助理／開發者之間順利交接、理解專案現況的文件跟規則整理工作。
 - AI Agent 漸進式 Context [完成] (8/16) — 已整理 `AGENTS.md`、Claude／Replit 入口、穩定產品 Context 與按需架構文件；Markdown 連結、Context 路由與 `git diff --check` 已驗證
   > 整理一套文件架構，讓不同的 AI 寫程式助理（例如 Claude Code、Codex）進到這個專案時，只需要先讀最基本的規則，需要深入某個主題（例如金流、資料庫）才去讀對應的詳細文件，不用每次都把所有文件全部讀一遍。

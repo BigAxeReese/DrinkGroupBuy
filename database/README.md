@@ -1,29 +1,29 @@
 # DrinkGroupBuy 資料庫
 
-這個資料夾放 DrinkGroupBuy 的本機開發資料庫設計與初始化腳本。
+這個資料夾放 DrinkGroupBuy 的 PostgreSQL migration、開發 seed，以及 SQLite 相容性測試工具。
 
-目前 backend runtime 預設與多數流程使用 SQLite，主要目的是讓開發階段可以先把資料流程跑起來。
+PostgreSQL 是目前本機開發 Backend 與正式多人環境的主要 runtime。`database/migrations/` 保存版本化 schema，`backend/.env` 已將全部 repository runtime 永久設定為 PostgreSQL；交易流程不雙寫。
 
-PostgreSQL 是未來正式資料庫方向。`database/migrations/` 保存 schema/seed draft，`backend/database/` 已有隔離 adapter；三個唯讀切片、商家建團、商家菜單與顧客首次建單已可受控切換，`backend/db.js` 尚未整體切換。
+SQLite schema、初始化腳本與本機資料庫檔案僅保留給明確隔離的相容性測試，不是目前 Backend 的主要資料來源。
 
 ## 目前用途
 
-- 建立本機開發用 SQLite 資料庫。
-- 保存團購活動、訂單、付款授權、狀態歷史等資料。
-- 作為後端 API 的資料來源。
-- 協助整理正式資料庫 schema 的方向。
+- 保存 PostgreSQL 版本化 schema 與開發 seed。
+- 保存團購活動、訂單、付款授權、狀態歷史等資料結構。
+- 作為 Backend API 主要資料庫的 migration 來源。
+- 提供隔離的 SQLite 相容性測試工具。
 
 ## 重要檔案
 
 | 檔案 | 用途 |
 | --- | --- |
-| `schema.sql` | 目前開發用資料表結構 |
-| `seed-dev.sql` | 開發用初始資料 |
+| `schema.sql` | SQLite 相容性測試用資料表結構 |
+| `seed-dev.sql` | SQLite 相容性測試用初始資料 |
 | `init-dev-db.js` | 依照 `schema.sql` 重建 SQLite 資料庫 |
 | `seed-dev-db.js` | 匯入 `seed-dev.sql` |
 | `drink-group-buy-dev.sqlite` | 產生出的本機資料庫檔案，不應上傳 Git |
-| `migrations/001_initial_postgres.sql` | PostgreSQL v1 schema draft，含付款可靠性工作與 operation lease |
-| `migrations/002_seed_dev_postgres.sql` | PostgreSQL dev seed；供 auth、菜單與團購活動讀寫 runtime 驗證使用 |
+| `migrations/001_initial_postgres.sql` | PostgreSQL v1 基礎 schema，含付款可靠性工作與 operation lease |
+| `migrations/002_seed_dev_postgres.sql` | PostgreSQL dev seed；供本機開發與驗證使用 |
 | `migrate.js` | 統一 PostgreSQL migration runner；依檔名數字前綴順序套用 `migrations/` 內尚未套用的檔案，並記錄於 `schema_migrations` |
 | `docker-compose.postgres.yml` | 本機 PostgreSQL dev container 設定 |
 | `test/` | 測試/展示用資料，不是正式 schema 來源 |
@@ -45,9 +45,9 @@ database/drink-group-buy-dev.sqlite
 
 注意：`db:init` 會重建資料庫，原本本機資料會被清掉。
 
-## PostgreSQL draft 驗證方式
+## PostgreSQL 開發與驗證方式
 
-目前 PostgreSQL 已用於 schema／seed、adapter、唯讀切片、商家建團、菜單管理、顧客首次建單與付款 request／confirm／cancel／一般 void／顧客取消。capture／settlement repositories 已完成真實 PostgreSQL proof，但尚未接入 server route／scheduler。
+目前 Backend 的 auth、菜單、活動、訂單、付款、結算、改單、退款與取餐資料流程皆以 PostgreSQL 為主要 runtime。下列工具用於啟動資料庫、套用 migration 與執行驗證。
 
 先用 Docker 啟動本機 PostgreSQL container：
 
@@ -69,7 +69,7 @@ docker compose -f database/docker-compose.postgres.yml down -v
 docker compose -f database/docker-compose.postgres.yml up -d
 ```
 
-本機 PostgreSQL draft 連線字串：
+本機 PostgreSQL 開發連線字串：
 
 ```text
 postgres://drink_group_buy:drink_group_buy_dev_password@localhost:5432/drink_group_buy
@@ -90,9 +90,9 @@ npm run postgres-reliability:multiprocess
 
 - 2026-07-02：`001_initial_postgres.sql` 已成功在 Docker PostgreSQL dev container 執行。
 - 2026-07-02：`002_seed_dev_postgres.sql` 已成功在同一個 fresh dev database 執行。
-- 2026-07-02：PostgreSQL draft 已調整為 `users` + `user_private_profiles` + `user_public_profiles`，並已重新用 fresh dev database 驗證。
-- 2026-07-02：PostgreSQL draft 已調整為每個商家帳號只綁定一間 `stores`，並已重新用 fresh dev database 驗證。
-- 2026-07-03：PostgreSQL seed draft 已補上 96 customization_options，並已重新用 fresh dev database 驗證。
+- 2026-07-02：當時的 PostgreSQL schema 已調整為 `users` + `user_private_profiles` + `user_public_profiles`，並已重新用 fresh dev database 驗證。
+- 2026-07-02：當時的 PostgreSQL schema 已調整為每個商家帳號只綁定一間 `stores`，並已重新用 fresh dev database 驗證。
+- 2026-07-03：PostgreSQL dev seed 已補上 96 customization_options，並已重新用 fresh dev database 驗證。
 - 驗證後 baseline 資料為 12 users、12 user_private_profiles、12 user_public_profiles、12 user_roles、7 merchants、7 merchant_users、7 stores、8 menu_items、96 customization_options。
 - 2026-07-30：PostgreSQL schema 已補上 `payment_reliability_jobs` 與 `operation_locks`。
 - 2026-07-30：本機 PostgreSQL 16 已重新套用 `001`／`002`，`npm run database-adapter:smoke` 與真實 `npm run postgres-runtime:smoke` 均通過；服務只監聽 `localhost`。
@@ -113,10 +113,10 @@ npm run postgres-reliability:multiprocess
 - `user_public_profiles`：使用者對外顯示資料，例如匿名顧客代稱。
 - `user_roles`：使用者角色，例如顧客、商家、管理員。
 - `merchants`：商家。
-- `merchant_users`：商家帳號與分店關係；PostgreSQL draft 中每個帳號只管理一間分店。
+- `merchant_users`：商家帳號與分店關係；目前每個帳號只管理一間分店。
 - `stores`：店家門市與地圖座標。
 - `menu_items`：飲品品項。
-- `customization_options`：甜度、冰塊、加料、尺寸等選項。
+- `customization_options`：甜度、冰量、配料、尺寸等選項。
 - `group_buy_activities`：商家建立的團購活動。
 - `promotion_tiers`：優惠杯數級距，例如 20 杯折 200。
 - `orders`：顧客訂單。
@@ -134,7 +134,7 @@ npm run postgres-reliability:multiprocess
 
 ## 目前與後端的關係
 
-後端預設與多數流程仍讀寫 SQLite；auth、公開菜單、活動讀寫、商家菜單與顧客首次建單已有 PostgreSQL repositories。三個寫入切片需一起切換且不雙寫；訂單後續、付款與 `backend/db.js` 其餘流程尚未整體搬移。
+後端目前透過 runtime-aware repositories 讀寫 PostgreSQL；auth、公開菜單、活動、商家菜單、訂單、付款、結算、改單、退款與取餐流程均已切換。相依 repositories 必須一致使用 PostgreSQL 且不雙寫；`backend/db.js` 僅保留給明確隔離的 SQLite 相容性測試。
 
 目前已接上的資料流程：
 

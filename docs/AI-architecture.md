@@ -16,9 +16,9 @@ React Native / Expo Mobile
 backend/server.js (Node.js built-in HTTP)
   ├─ auth / route authorization
   ├─ payment, pricing, pickup, reliability services
-  └─ repository or SQLite gateway
+  └─ runtime-aware repositories
           ↓                         ↓
-SQLite development runtime    PostgreSQL controlled slices
+PostgreSQL primary runtime    Isolated SQLite test compatibility
           ↓                         ↓
 LINE Pay / Firebase Admin / scheduler workers
 ```
@@ -38,15 +38,15 @@ Mobile 不直接連資料庫或付款 provider。Backend 是身份、價格、�
 
 - `backend/server.js` 使用 `node:http` 建立 server，集中做 path/method dispatch、輸入解析、authentication、role/store authorization、runtime 一致性檢查與錯誤回應；目前沒有 Express 或其他 Web framework。
 - 核心領域邏輯分到 `backend/payments/`、`backend/pricing/`、`backend/pickup/`、`backend/reliability/`。新的複雜規則應維持 service／repository 邊界，不再把整段流程塞回 route dispatcher。
-- `backend/db.js` 是既有 SQLite gateway，包含 schema compatibility 與多數交易操作。`backend/database/repositories/` 為可切換 SQLite／PostgreSQL 的切片；adapter 介面在 `backend/database/`。
+- `backend/db.js` 是既有 SQLite gateway，保留給明確隔離的相容性測試。正式 Backend 資料路徑由 `backend/database/repositories/` 的 runtime-aware repositories 存取 PostgreSQL；adapter 介面在 `backend/database/`。
 - Server 啟動後可執行 payment reconciliation、deadline settlement 與 pickup expiration scheduler。這些 worker 會處理長時間付款／結算狀態，不能以 Mobile 是否開啟作為可靠性前提。
 - `backend/devConsole/` 是本機開發測試控制台（模擬顧客定位、模擬業務時間），掛在 `/dev-console`；2026-08-23 從獨立的 `local-dev-console/`（3100 埠）併入。只接受 loopback 連線（`isLoopbackRequest`）且要求 `AUTH_DEV_MODE=true`，區網 IP（例如真手機用 LAN IP 連）不會因為同一台伺服器就連得到；真手機要連只能透過 `adb reverse tcp:3001 tcp:3001` 把 USB 接線當隧道，讓手機自己的 `127.0.0.1:3001` 請求送回電腦本機（伺服器端看起來就是 loopback 連線），這不是放寬邊界，是同一個 loopback-only 規則下唯一能讓真手機也符合條件的方式（`mobile/.env` 的 `EXPO_PUBLIC_DEV_CONSOLE_URL` 需設成 `http://127.0.0.1:3001/dev-console`，不能設 LAN IP）。2026-08-24 起併入 `/admin` 的登入狀態：人看的頁面與控制 API 額外要求 `/admin` 的登入 session（同一顆 cookie，`Path=/`），只有 Mobile App 直接呼叫、模擬定位用的 `GET /dev-console/api/app/config` 與 `POST /dev-console/api/app/report` 兩支例外，仍只靠 loopback + `AUTH_DEV_MODE` 把關，不需要 App 本身登入 `/admin`。
 
 ## Database 與 runtime 切換
 
-- SQLite schema 的權威檔是 `database/schema.sql`，預設本機檔案是被 Git 忽略的 `database/drink-group-buy-dev.sqlite`。精確欄位說明只維護在 `docs/AI-database-field-spec.md`。
-- PostgreSQL migrations 在 `database/migrations/`，由 `database/migrate.js` 依版本套用。`database/test/` 只是測試／匯出工具，不是正式 schema source。
-- Repository 以各自的 `*_RUNTIME` 變數選擇 SQLite 或 PostgreSQL。Server 會要求相依的 read/write/payment slices 一致切換；設計目標是不雙寫，也不讓單一交易跨兩個 runtime 拼接。
+- PostgreSQL schema 的權威來源是 `database/migrations/`，由 `database/migrate.js` 依版本套用；精確欄位說明只維護在 `docs/AI-database-field-spec.md`。
+- `database/schema.sql` 與被 Git 忽略的 `database/drink-group-buy-dev.sqlite` 保留給 SQLite 相容性測試；`database/test/` 只是測試／匯出工具，不是正式 schema source。
+- Repository 仍保留各自的 `*_RUNTIME` 選擇能力，但本機開發 Backend 已將全部 runtime 永久設定為 PostgreSQL。Server 會要求相依的 read/write/payment repositories 一致，不雙寫，也不讓單一交易跨兩個 runtime 拼接。
 - `DATABASE_RUNTIME` 是通用 adapter 的選擇值，但實際 server 行為仍要檢查各 repository 的 runtime consumer，不能只看一個環境變數或文件敘述。
 - `db:init`、`db:seed` 與部分 smoke scripts 會替換本機開發 SQLite。Inspection 一律唯讀；任何 mutation 先備份，完成後跑 integrity 與 foreign-key checks。
 
@@ -83,4 +83,4 @@ Mobile 不直接連資料庫或付款 provider。Backend 是身份、價格、�
 
 - `AppNavigator.js` 與 `backend/db.js` 都是大型集中檔案；這是目前實作現況，不等於每次任務都應順便重構。
 - Mobile 同時存在 Backend-synced state、prototype cache 與少量 fixture；功能稽核必須逐條追蹤資料來源。
-- SQLite 仍是開發預設，PostgreSQL 是受控切片方向；在正式多人環境、真金流或 production deployment 前，仍需逐環境驗證 runtime 組合、備份、rollback 與啟用 gate。
+- PostgreSQL 是目前開發 Backend 的主要 runtime；在正式多人環境、真金流或 production deployment 前，仍需逐環境驗證連線設定、migration、備份、rollback 與啟用 gate。SQLite 相容路徑不得與 PostgreSQL 混用於同一筆交易。

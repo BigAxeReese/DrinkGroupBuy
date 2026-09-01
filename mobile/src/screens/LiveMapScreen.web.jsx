@@ -33,7 +33,6 @@ export function LiveMapScreen({ navigation, appState, selectedAuthUserId }) {
     filters,
     visibleMapStores,
     visibleStoreIds,
-    statusText,
     filterPanelVisible,
     openFilterPanel,
     closeFilterPanel,
@@ -41,12 +40,6 @@ export function LiveMapScreen({ navigation, appState, selectedAuthUserId }) {
   } = useActivityMapFilters(mapStores, userPosition);
 
   const selectedStore = mapStores.find((store) => store.id === selectedStoreId);
-  const storeSyncStatus = appState?.storeSyncStatus ?? "idle";
-  const storeStatusText = storeSyncStatus === "error"
-    ? "店家資料載入失敗"
-    : storeSyncStatus === "loading" && mapStores.length === 0
-      ? "店家資料載入中..."
-      : statusText;
   const apiKey = (process.env.EXPO_PUBLIC_GOOGLE_MAPS_API_KEY
     || Constants.expoConfig?.extra?.googleMapsWebApiKey
     || Constants.manifest2?.extra?.expoClient?.extra?.googleMapsWebApiKey
@@ -55,9 +48,8 @@ export function LiveMapScreen({ navigation, appState, selectedAuthUserId }) {
     lat: userPosition.latitude,
     lng: userPosition.longitude
   }), [userPosition.latitude, userPosition.longitude]);
-  const locationName = config.locationMode === "live" && locationPermission === "granted"
-    ? "瀏覽器即時位置"
-    : config.fixedLocation.name;
+  const hasRealLocation = config.locationMode === "live" && locationPermission === "granted";
+  const locationName = hasRealLocation ? "瀏覽器即時位置" : config.fixedLocation.name;
 
   useEffect(() => {
     if (selectedStoreId && !visibleStoreIds.has(selectedStoreId)) {
@@ -142,6 +134,10 @@ export function LiveMapScreen({ navigation, appState, selectedAuthUserId }) {
           mapTypeControl: false,
           streetViewControl: false,
           fullscreenControl: false,
+          panControl: false,
+          rotateControl: false,
+          scaleControl: false,
+          cameraControl: false,
           clickableIcons: false,
           gestureHandling: "greedy",
           scrollwheel: true,
@@ -281,23 +277,13 @@ export function LiveMapScreen({ navigation, appState, selectedAuthUserId }) {
         </View>
       ) : null}
 
-      <View style={styles.overlay}>
-        <Text style={styles.title}>即時地圖</Text>
-        <Text style={styles.subtitle}>{storeStatusText}</Text>
-        <View style={styles.legendRow}>
-          <LegendDot color="#2563eb" label="沒有可加入活動" />
-          <LegendDot color="#facc15" label="有可加入活動" />
-        </View>
-        <View style={styles.filterRow} pointerEvents="auto">
-          <Pressable
-            accessibilityRole="button"
-            onPress={openFilterPanel}
-            style={({ pressed }) => [styles.filterButton, pressed && styles.pressed]}
-          >
-            <Text style={styles.filterButtonText}>篩選</Text>
-          </Pressable>
-        </View>
-      </View>
+      <Pressable
+        accessibilityRole="button"
+        onPress={openFilterPanel}
+        style={({ pressed }) => [styles.filterButton, pressed && styles.pressed]}
+      >
+        <Text style={styles.filterButtonText}>篩選</Text>
+      </Pressable>
 
       {mapError ? (
         <View style={styles.errorCard}>
@@ -343,6 +329,7 @@ export function LiveMapScreen({ navigation, appState, selectedAuthUserId }) {
         filters={filters}
         onApply={applyFilters}
         onClose={closeFilterPanel}
+        hasLocation={hasRealLocation}
       />
     </View>
   );
@@ -510,15 +497,6 @@ function createStoreOverlayMarker({ googleMaps, map, position, title, color, mar
   return marker;
 }
 
-function LegendDot({ color, label }) {
-  return (
-    <View style={styles.legendItem}>
-      <View style={[styles.legendDot, { backgroundColor: color }]} />
-      <Text style={styles.legendText}>{label}</Text>
-    </View>
-  );
-}
-
 const styles = StyleSheet.create({
   screen: {
     flex: 1,
@@ -533,44 +511,17 @@ const styles = StyleSheet.create({
     left: 0,
     backgroundColor: "#dbe4ef"
   },
-  overlay: {
-    position: "absolute",
-    top: 14,
-    left: 14,
-    right: 14,
-    gap: 2,
-    borderRadius: 16,
-    backgroundColor: "rgba(255,255,255,0.94)",
-    paddingHorizontal: 14,
-    paddingVertical: 11,
-    pointerEvents: "none"
-  },
-  title: {
-    color: "#0f172a",
-    fontSize: 18,
-    fontWeight: "900"
-  },
-  subtitle: {
-    color: "#334155",
-    fontSize: 12,
-    fontWeight: "800"
-  },
-  legendRow: {
-    flexDirection: "row",
-    gap: 12,
-    marginTop: 5
-  },
-  filterRow: {
-    marginTop: 6
-  },
   filterButton: {
-    alignSelf: "flex-start",
+    position: "absolute",
+    bottom: 44,
+    right: 14,
     minHeight: 34,
     borderRadius: 12,
     alignItems: "center",
     justifyContent: "center",
     backgroundColor: "#eef2f7",
-    paddingHorizontal: 16
+    paddingHorizontal: 16,
+    boxShadow: "0 6px 18px rgba(15,23,42,0.24)"
   },
   filterButtonText: {
     color: "#0f172a",
@@ -579,21 +530,6 @@ const styles = StyleSheet.create({
   },
   pressed: {
     opacity: 0.75
-  },
-  legendItem: {
-    flexDirection: "row",
-    alignItems: "center",
-    gap: 5
-  },
-  legendDot: {
-    width: 9,
-    height: 9,
-    borderRadius: 5
-  },
-  legendText: {
-    color: "#475569",
-    fontSize: 10,
-    fontWeight: "800"
   },
   errorCard: {
     position: "absolute",

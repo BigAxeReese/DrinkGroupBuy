@@ -73,7 +73,7 @@ Do not commit the Firebase service account JSON. Each Firebase Google test accou
 
 ## 開發測試登入
 
-正式登入方向仍是 Firebase Google Login。若本機只有一個 Google 帳號，可把 `backend/.env` 設成 `AUTH_DEV_MODE=true`，並把 `mobile/.env` 設成 `EXPO_PUBLIC_AUTH_MODE=dev`；mobile 登入頁會顯示「本機測試身份」下拉選單，選項來自 SQLite 內的有效顧客、商家與開發補救身份。
+正式登入方向仍是 Firebase Google Login。若本機只有一個 Google 帳號，可把 `backend/.env` 設成 `AUTH_DEV_MODE=true`，並把 `mobile/.env` 設成 `EXPO_PUBLIC_AUTH_MODE=dev`；mobile 登入頁會顯示「本機測試身份」下拉選單，選項由目前 PostgreSQL runtime 內的有效顧客、商家與開發補救身份產生。
 
 舊版帳密登入端點仍暫時保留作開發相容，但不屬於正式產品流程。
 
@@ -200,7 +200,7 @@ PostgreSQL 版的對應驗收見 `database/README.md`（`npm run postgres-reliab
 
 ## PostgreSQL runtime 垂直切片
 
-大部分業務資料仍使用 SQLite；公開菜單、團購活動列表、登入／bearer token 權限解析、商家建立團購、商家完整菜單查詢／修改，以及顧客首次建單，已可透過 repository 切換 SQLite 或 PostgreSQL，不會雙寫。前三項是唯讀切片；後三項是受控 PostgreSQL 寫入切片。訂單後續操作與付款仍固定使用 SQLite。
+目前本機開發 Backend 的業務資料以 PostgreSQL 為主要 runtime。各 repository 仍保留 SQLite 相容分支供隔離測試，但正式資料流程不雙寫，也不允許同一筆交易混用兩種資料庫。
 
 - `backend/database/sqliteAdapter.js`
 - `backend/database/postgresAdapter.js`
@@ -218,26 +218,7 @@ PostgreSQL 版的對應驗收見 `database/README.md`（`npm run postgres-reliab
 - `backend/database/repositories/manualLinePayRepaymentRepository.js`
 - `backend/database/repositories/paymentReliabilityJobRepository.js`（重用 `groupBuySettlementRepository.js` 的通用 job-queue 函式，同一張 `payment_reliability_jobs` 表依 `job_type` 區分）
 
-預設不改變目前行為：
-
-```env
-STORE_MENU_READ_RUNTIME=sqlite
-STORE_DIRECTORY_READ_RUNTIME=sqlite
-GROUP_BUY_ACTIVITY_READ_RUNTIME=sqlite
-GROUP_BUY_ACTIVITY_WRITE_RUNTIME=sqlite
-MERCHANT_MENU_RUNTIME=sqlite
-CUSTOMER_ORDER_WRITE_RUNTIME=sqlite
-CUSTOMER_ORDER_READ_RUNTIME=sqlite
-PAYMENT_AUTHORIZATION_REQUEST_RUNTIME=sqlite
-PAYMENT_AUTHORIZATION_CONFIRM_RUNTIME=sqlite
-PAYMENT_AUTHORIZATION_CANCEL_RUNTIME=sqlite
-CUSTOMER_ORDER_CANCEL_RUNTIME=sqlite
-AUTH_PROFILE_READ_RUNTIME=sqlite
-MANUAL_LINE_PAY_REPAYMENT_RUNTIME=sqlite
-PAYMENT_RELIABILITY_JOB_RUNTIME=sqlite
-```
-
-已套用 PostgreSQL migrations／seed 並設定 `DATABASE_URL` 後，才可把個別切片切成：
+本機開發 Backend 已永久使用 PostgreSQL。套用 PostgreSQL migrations／seed 並設定 `DATABASE_URL` 後，各 repository runtime 應一致設定為：
 
 ```env
 STORE_MENU_READ_RUNTIME=postgres
@@ -254,9 +235,15 @@ CUSTOMER_ORDER_CANCEL_RUNTIME=postgres
 AUTH_PROFILE_READ_RUNTIME=postgres
 MANUAL_LINE_PAY_REPAYMENT_RUNTIME=postgres
 PAYMENT_RELIABILITY_JOB_RUNTIME=postgres
+PAYMENT_CAPTURE_RUNTIME=postgres
+GROUP_BUY_SETTLEMENT_RUNTIME=postgres
+PICKUP_CREDENTIAL_RUNTIME=postgres
+PAYMENT_REFUND_RUNTIME=postgres
+ORDER_REVISION_RUNTIME=postgres
+MERCHANT_ACTIVITY_CANCEL_RUNTIME=postgres
 ```
 
-啟用 PostgreSQL 訂單切片時，Backend 會要求 auth、公開菜單、活動讀取／寫入、商家菜單、顧客建單、訂單讀取、authorization request／confirm／cancel 與顧客取消全部使用 PostgreSQL。顧客建單、confirm、cancel redirect、一般 void 與顧客取消交易皆採 activity-first row lock；付款生命週期以 `operation_locks` 防止跨執行個體重複執行。cancel redirect 會交易式寫入失敗狀態、provider event、history、audit 並取消 reconciliation job；已授權訂單取消必須先 void 成功才會取消訂單，provider void 失敗會保留原訂單並留下 event／audit。訂單送出後、預授權前的顧客編輯（`PATCH /api/orders/:orderId`）已隨顧客建單一併支援 PostgreSQL，同樣走 row lock 並重算計價／折扣／容量。LINE Pay 人工重新請款（`manualLinePayRepaymentRepository`）與對帳背景排程（`paymentReliabilityJobRepository`，`reliabilityService.js`）現在都已支援 PostgreSQL：確認回跳（`GET /api/payments/line-pay/confirm`）、發起重新請款（`POST /api/payments/line-pay/repay`）、`enqueuePendingAuthorizationReconciliation` 排入的對帳背景排程三者共用同一組 repository，只有全部（`PAYMENT_AUTHORIZATION_CONFIRM_RUNTIME`、`PAYMENT_AUTHORIZATION_CANCEL_RUNTIME`、`PAYMENT_AUTHORIZATION_REQUEST_RUNTIME`、`PAYMENT_CAPTURE_RUNTIME`、`MANUAL_LINE_PAY_REPAYMENT_RUNTIME`、`PAYMENT_RELIABILITY_JOB_RUNTIME`）都切到 postgres 時，`/api/payments/line-pay/repay` 才會放行、對帳排程才會啟用，任一沒切齊都維持原本的 SQLite 行為或 `503`。revision payment、refund、pickup 與 settlement 仍回 `503 customer_order_runtime_mismatch`。受控 PostgreSQL 訂單模式仍會自動停用仍依賴 SQLite 的 settlement／pickup scheduler；因此目前不是完整付款 E2E runtime。
+Backend 會要求 auth、公開菜單、活動讀取／寫入、商家菜單、訂單、付款、revision、refund、pickup 與 settlement repositories 一致使用 PostgreSQL。顧客建單、confirm、cancel redirect、一般 void 與顧客取消交易皆採 activity-first row lock；付款生命週期以 `operation_locks` 防止跨執行個體重複執行。SQLite 僅供有明確隔離 runtime 的相容性測試，不得與 PostgreSQL 混用於同一筆交易。
 
 本機契約測試會驗證 SQLite 委派、adapter 與 PostgreSQL API 格式：
 
@@ -292,7 +279,7 @@ npm run payment-capture-postgres:smoke
 ```
 PostgreSQL HTTP proofs 會建立臨時資料並自動清除；活動、菜單與顧客建單寫入 proof 都使用第二條連線持有對應 row lock，確認請求等待、釋放後整筆 transaction 成功。建單 proof 另驗證重複訂單、即時改價、容量拒絕、item／option snapshots、history 與 audit。
 
-2026-07-31 已在本機 PostgreSQL 16 驗證訂單建立、列表、明細、authorization request／confirm／cancel、一般 void 與顧客取消，包含跨連線 activity lock、idempotency 與清理歸零。單筆 capture repository／service building block 也已完成真實 PostgreSQL mock-capture 成功、provider 暫時失敗、retry attempt、row lock 與清理歸零 proof；目前尚未接入 server 或 settlement scheduler，因此不構成可直接請款的新 API。所有開關預設仍是 SQLite，沒有雙寫；settlement orchestration、改單／revision、refund 與 pickup 尚未遷移。
+2026-08-20 已將本機 Backend 的全部 repository runtime 永久切換為 PostgreSQL，並以真實 PostgreSQL 16 驗證主要讀寫、付款、結算、改單、退款與取餐流程；詳細證據以 `PROGRESS.md` 與 `database/README.md` 的 2026-08-20 後續記錄為準。SQLite 保留作隔離測試，沒有雙寫。
 
 
 
@@ -336,7 +323,7 @@ npm run order-api:smoke
 - 已授權訂單修改 API、mobile 重新預授權、provider request status reconciliation 與持久化 retry job 已完成第一版；仍需更完整的錯誤提示與 sandbox 人工驗證。
 - LINE Pay refund 目前只有管理員後端 API 與 smoke test，尚未做正式操作 UI、退款失敗重試 queue 與正式 sandbox 人工端對端測試。
 - LINE Pay webhook 第一版不列為必要入口；付款同步先以 confirm/cancel redirect、資料庫狀態與後續 provider 狀態查詢為主。
-- Deadline 自動結算已改用持久化 job，settlement、provider、cancel、repay 與 pickup 使用 DB lease；兩程序競爭／接管測試已通過，仍需正式通知管道與 PostgreSQL row-lock 驗收。
-- 目前仍是開發資料庫，不是 production migration。
+- Deadline 自動結算已改用持久化 job，settlement、provider、cancel、repay 與 pickup 使用 DB lease；PostgreSQL 兩程序競爭／接管驗證已通過，仍需正式通知管道。
+- 目前使用 PostgreSQL development database 與版本化 migration，尚未完成 production deployment、備份／還原演練及正式環境驗收。
 - 顧客與商家菜單 API、商家菜單管理 mobile 第一版、明確客製化選擇上限及訂單後端價格重算已完成；仍需完整 Android 裝置 E2E 與更細的菜單異動衝突修正 UX。
 - 取貨逾期排程、取貨憑證建立／驗證 API 與顧客／商家第一版串接已完成；仍需完整 Android E2E 與補救權限流程。

@@ -656,6 +656,21 @@ const server = http.createServer(async (request, response) => {
       return;
     }
 
+    if (request.method === "GET" && url.pathname === "/api/auth/session") {
+      // Mobile calls this once at app startup to check whether a token it restored from local
+      // storage (see mobile/src/utils/authSession.js) is still valid, without needing to guess
+      // from the first unrelated API call's error shape. Deliberately returns the same current
+      // user data as login, so the client can re-derive its role/route the same way it does
+      // right after a fresh login instead of trusting stale cached profile fields.
+      const authUser = await getAuthenticatedUser(request);
+      if (!authUser) {
+        sendJson(response, 401, { error: "Authentication required" });
+        return;
+      }
+      sendJson(response, 200, { user: toPublicUserResponse(authUser) });
+      return;
+    }
+
     if (request.method === "POST" && url.pathname === "/api/auth/login") {
       if (!isDevAuthModeEnabled()) {
         sendJson(response, 404, { error: "Not found" });
@@ -1400,7 +1415,9 @@ const server = http.createServer(async (request, response) => {
         const result = await requestLinePayAuthorization({
           authUser,
           body,
+          now: businessClock.nowIso(),
           authorizationRequestRepository: paymentAuthorizationRequestRepository,
+          authorizationCancelRepository: paymentAuthorizationCancelRepository,
           orderRevisionRepository,
           reliabilityJobRepository
         });

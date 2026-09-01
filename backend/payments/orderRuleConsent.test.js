@@ -138,6 +138,126 @@ test("admin cannot record consent on behalf of a customer", async () => {
   );
 });
 
+test("LINE Pay request abandons a stale pending authorization instead of blocking retry", async () => {
+  const previousCaptureSeparated = process.env.LINE_PAY_CAPTURE_SEPARATED;
+  process.env.LINE_PAY_CAPTURE_SEPARATED = "true";
+  const cancelCalls = [];
+  let providerCalled = false;
+
+  try {
+    const result = await requestLinePayAuthorization({
+      authUser: { id: "customer-1", roles: ["customer"] },
+      body: createRequestBody("order-abandoned-retry"),
+      authorizationRequestRepository: createRepository({
+        getLatestAuthorizationForOrder: async () => ({
+          id: "authorization-stale",
+          status: "pending",
+          providerAuthorizationId: "provider-transaction-stale"
+        })
+      }),
+      authorizationCancelRepository: {
+        cancelPendingAuthorization: async (input) => {
+          cancelCalls.push(input);
+          return { id: "authorization-stale", status: "failed" };
+        }
+      },
+      requestPayment: async () => {
+        // The stale authorization must be cancelled before a new provider request is made --
+        // otherwise a customer could end up with two live LINE Pay requests for one order.
+        assert.equal(cancelCalls.length, 1);
+        providerCalled = true;
+        return {
+          info: {
+            transactionId: "provider-transaction-new",
+            paymentUrl: { web: "https://example.test/pay-again" }
+          }
+        };
+      }
+    });
+
+    assert.equal(providerCalled, true);
+    assert.equal(result.status, "payment_url_created");
+    assert.equal(cancelCalls.length, 1);
+    assert.equal(cancelCalls[0].orderId, "order-abandoned-retry");
+    assert.equal(cancelCalls[0].providerTransactionId, "provider-transaction-stale");
+    assert.equal(cancelCalls[0].reason, "customer_retried_before_confirmation");
+  } finally {
+    restoreEnv("LINE_PAY_CAPTURE_SEPARATED", previousCaptureSeparated);
+  }
+});
+
+test("LINE Pay request is rejected once the activity deadline has passed", async () => {
+  const previousCaptureSeparated = process.env.LINE_PAY_CAPTURE_SEPARATED;
+  process.env.LINE_PAY_CAPTURE_SEPARATED = "true";
+  let providerCalled = false;
+
+  try {
+    await assert.rejects(
+      requestLinePayAuthorization({
+        authUser: { id: "customer-1", roles: ["customer"] },
+        body: createRequestBody("order-deadline-passed"),
+        now: "2026-01-01T00:10:00.000Z",
+        authorizationRequestRepository: createRepository({
+          getOrderPaymentContext: async (orderId) => ({
+            id: orderId,
+            customerUserId: "customer-1",
+            originalAmount: 100,
+            paymentStatus: "pending",
+            authorizationStatus: "pending",
+            deadlineAt: "2026-01-01T00:00:00.000Z"
+          })
+        }),
+        requestPayment: async () => {
+          providerCalled = true;
+          return {};
+        }
+      }),
+      (error) => error instanceof PaymentServiceError
+        && error.payload.status === "activity_deadline_passed"
+    );
+    assert.equal(providerCalled, false);
+  } finally {
+    restoreEnv("LINE_PAY_CAPTURE_SEPARATED", previousCaptureSeparated);
+  }
+});
+
+test("LINE Pay request still succeeds before the activity deadline", async () => {
+  const previousCaptureSeparated = process.env.LINE_PAY_CAPTURE_SEPARATED;
+  process.env.LINE_PAY_CAPTURE_SEPARATED = "true";
+  let providerCalled = false;
+
+  try {
+    const result = await requestLinePayAuthorization({
+      authUser: { id: "customer-1", roles: ["customer"] },
+      body: createRequestBody("order-deadline-not-yet"),
+      now: "2025-12-31T23:50:00.000Z",
+      authorizationRequestRepository: createRepository({
+        getOrderPaymentContext: async (orderId) => ({
+          id: orderId,
+          customerUserId: "customer-1",
+          originalAmount: 100,
+          paymentStatus: "pending",
+          authorizationStatus: "pending",
+          deadlineAt: "2026-01-01T00:00:00.000Z"
+        })
+      }),
+      requestPayment: async () => {
+        providerCalled = true;
+        return {
+          info: {
+            transactionId: "provider-transaction-before-deadline",
+            paymentUrl: { web: "https://example.test/pay" }
+          }
+        };
+      }
+    });
+    assert.equal(providerCalled, true);
+    assert.equal(result.status, "payment_url_created");
+  } finally {
+    restoreEnv("LINE_PAY_CAPTURE_SEPARATED", previousCaptureSeparated);
+  }
+});
+
 function createRequestBody(orderId) {
   return {
     orderId,

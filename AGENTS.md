@@ -2,7 +2,7 @@
 
 ## 專案摘要
 
-DrinkGroupBuy 是仍在開發中的 Android-first 手搖飲團購系統：`mobile/` 為 React Native + Expo App，`backend/` 為 Node.js HTTP API，開發 runtime 預設使用 SQLite，PostgreSQL 以 repository 切片逐步導入（目前全部切片已切至 PostgreSQL 為永久預設）。正式身份方向是 Firebase Auth + Google Login；付款只有 LINE Pay 分離式請款一種方案（ECPay 備援方案已於 2026-08-27 完全移除，見 `docs/AI-security-review-log.md`）。
+DrinkGroupBuy 是仍在開發中的 Android-first 手搖飲團購系統：`mobile/` 為 React Native + Expo App，`backend/` 為 Node.js HTTP API；目前本機開發 Backend 的全部 repository runtime 已永久切換至 PostgreSQL，SQLite 僅保留給明確隔離的相容性測試。正式身份方向是 Firebase Auth + Google Login；付款只有 LINE Pay 分離式請款一種方案（ECPay 備援方案已於 2026-08-27 完全移除，見 `docs/AI-security-review-log.md`）。
 
 延續現有 `mobile/`、`backend/`、`database/`、`docs/` 架構。除非使用者明確要求，不得恢復已刪除的 root `frontend/`、`server.js`、`src/` 或 `data/`。
 

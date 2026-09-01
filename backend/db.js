@@ -1115,6 +1115,20 @@ function createGroupBuySettlementPlan(activityId, input = {}) {
         AND payment_status = 'authorized'
     `).run(now, activityId);
 
+    // Orders whose customer never even attempted LINE Pay (payment_status stays 'pending'
+    // forever) are otherwise invisible to settlement -- they'd sit as "active" indefinitely
+    // since getOrderLifecycleBucket has no pending-forever branch. Resolve them to cancelled
+    // now that the deadline has passed, using the same field set the merchant/customer cancel
+    // paths use elsewhere in this file, so they correctly reclassify into order history.
+    const neverPaidOrderCount = database.prepare(`
+      UPDATE orders
+      SET status = 'cancelled', pickup_status = 'cancelled', merchant_acceptance_status = 'cancelled',
+          updated_at = ?
+      WHERE activity_id = ?
+        AND status = 'submitted'
+        AND payment_status = 'pending'
+    `).run(now, activityId).changes;
+
     database.prepare(`
       INSERT INTO audit_logs (
         id,
@@ -1137,7 +1151,8 @@ function createGroupBuySettlementPlan(activityId, input = {}) {
         discountPerCup,
         allocatedDiscountAmount: discountSummary.estimatedAllocatedDiscountAmount,
         undistributedDiscountAmount: discountSummary.estimatedUndistributedDiscountAmount,
-        discountFunder: "merchant"
+        discountFunder: "merchant",
+        neverPaidOrderCount
       }),
       now
     );
@@ -1155,6 +1170,7 @@ function createGroupBuySettlementPlan(activityId, input = {}) {
       undistributedDiscountAmount: discountSummary.estimatedUndistributedDiscountAmount,
       discountFunder: "merchant",
       capturedOrderCount,
+      neverPaidOrderCount,
       orders: settlementOrders
     };
   } catch (error) {
@@ -2401,15 +2417,17 @@ function getOrderPaymentContext(orderId) {
   try {
     const order = database.prepare(`
       SELECT
-        id,
-        activity_id,
-        customer_user_id,
-        total_cups,
-        original_amount,
-        payment_status,
-        authorization_status
+        orders.id,
+        orders.activity_id,
+        orders.customer_user_id,
+        orders.total_cups,
+        orders.original_amount,
+        orders.payment_status,
+        orders.authorization_status,
+        activity.deadline_at
       FROM orders
-      WHERE id = ?
+      JOIN group_buy_activities activity ON activity.id = orders.activity_id
+      WHERE orders.id = ?
     `).get(orderId);
 
     return order ? mapOrderPaymentContext(order) : null;
@@ -2483,9 +2501,11 @@ function getOrderRevisionPaymentContext(orderRevisionId) {
         revision.original_amount,
         orders.customer_user_id,
         orders.payment_status,
-        orders.authorization_status
+        orders.authorization_status,
+        activity.deadline_at
       FROM order_revisions revision
       JOIN orders ON orders.id = revision.order_id
+      JOIN group_buy_activities activity ON activity.id = orders.activity_id
       WHERE revision.id = ?
     `).get(orderRevisionId);
 
@@ -2497,7 +2517,8 @@ function getOrderRevisionPaymentContext(orderRevisionId) {
       originalAmount: revision.original_amount,
       customerUserId: revision.customer_user_id,
       paymentStatus: revision.payment_status,
-      authorizationStatus: revision.authorization_status
+      authorizationStatus: revision.authorization_status,
+      deadlineAt: revision.deadline_at
     } : null;
   } finally {
     database.close();
@@ -6086,7 +6107,8 @@ function mapOrderPaymentContext(row) {
     totalCups: row.total_cups,
     originalAmount: row.original_amount,
     paymentStatus: row.payment_status,
-    authorizationStatus: row.authorization_status
+    authorizationStatus: row.authorization_status,
+    deadlineAt: row.deadline_at
   };
 }
 

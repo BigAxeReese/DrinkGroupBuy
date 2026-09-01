@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from "react";
-import { AppState, Linking, View, StyleSheet } from "react-native";
+import * as Location from "expo-location";
+import { ActivityIndicator, AppState, BackHandler, Linking, View, StyleSheet } from "react-native";
 import { BottomNav } from "../components/BottomNav";
 import { orders as initialOrders } from "../mock/orders";
 import { paymentAuthorizations as initialPaymentAuthorizations } from "../mock/paymentAuthorizations";
@@ -44,8 +45,11 @@ import {
   markGroupBuyActivityReadyForPickup,
   redeemPickupCredential as redeemPickupCredentialApi,
   setAuthToken,
-  updateOrder
+  updateOrder,
+  verifyAuthSession
 } from "../utils/apiClient";
+import { clearAuthSession, loadAuthSession } from "../utils/authSession";
+import { getRouteForUser } from "../utils/authRouting";
 import { signOutFirebaseUser } from "../utils/firebaseAuth";
 
 const initialRoute = { name: "roleSelect", params: {} };
@@ -359,6 +363,7 @@ function parseLinePayResultDeepLink(rawUrl) {
 export function AppNavigator() {
   const businessTime = useDevBusinessTime();
   const [stack, setStack] = useState([initialRoute]);
+  const [sessionRestoreStatus, setSessionRestoreStatus] = useState("checking");
   const [currentRole, setCurrentRole] = useState(null);
   const [currentUserProfile, setCurrentUserProfile] = useState(null);
   const [selectedCustomerId, setSelectedCustomerId] = useState("customer-yinji");
@@ -473,6 +478,13 @@ export function AppNavigator() {
       if (role === "customer" && params.userId) {
         setSelectedCustomerId(params.userId);
       }
+      if (role === "customer") {
+        // Fires the OS location prompt right at login instead of waiting for the customer to
+        // open 即時地圖 -- a no-op if already granted/denied from a prior request (only the very
+        // first call after install actually shows the system dialog). LiveMapScreen still does
+        // its own permission check/position fetch on mount; this just moves the prompt earlier.
+        Location.requestForegroundPermissionsAsync().catch(() => {});
+      }
       setStack([{ name: routeName, params: {} }]);
     },
     go(name, params = {}) {
@@ -486,6 +498,7 @@ export function AppNavigator() {
     },
     logout() {
       setAuthToken(null);
+      clearAuthSession().catch(() => {});
       signOutFirebaseUser().catch(() => {});
       setCurrentRole(null);
       setCurrentUserProfile(null);
@@ -493,7 +506,7 @@ export function AppNavigator() {
       setSelectedCustomerId("customer-yinji");
       setSelectedMerchantStoreId("store-001");
       // Cart/orders/payment records are cached locally under a small hardcoded customerId
-      // bucket (see backendCustomerToPrototypeCustomer in RoleSelectScreen.jsx), so a second
+      // bucket (see backendCustomerToPrototypeCustomer in ../utils/authRouting.js), so a second
       // real account logging in on the same device after this one logs out would otherwise land
       // in the same bucket and see this account's cart and order history.
       setOrders(initialOrders);
@@ -502,6 +515,60 @@ export function AppNavigator() {
       setStack([initialRoute]);
     }
   }), []);
+
+  useEffect(() => {
+    // Without this, Android's hardware back button falls through to its OS default (exit the
+    // Activity) since this app has its own in-memory navigation stack, not React Navigation
+    // (which wires this up itself).
+    const subscription = BackHandler.addEventListener("hardwareBackPress", () => {
+      if (stack.length > 1) {
+        navigation.back();
+        return true;
+      }
+      // At a tab root there's nothing of ours left to unwind via back(). Per-role, jump to the
+      // bottom nav's home tab instead of falling through to the OS default (exit) -- except when
+      // already on that home tab, or before a role is picked (login screen), where exiting is
+      // the expected behavior.
+      const homeRoute = currentRole === "merchant" ? "merchantDashboard" : currentRole === "customer" ? "nearby" : null;
+      if (!homeRoute || stack[0]?.name === homeRoute) return false;
+      navigation.replace(homeRoute);
+      return true;
+    });
+    return () => subscription.remove();
+  }, [stack, navigation, currentRole]);
+
+  useEffect(() => {
+    let active = true;
+    (async () => {
+      const session = await loadAuthSession();
+      if (!session) {
+        if (active) setSessionRestoreStatus("done");
+        return;
+      }
+      setAuthToken(session.token);
+      try {
+        // Re-verify with the backend (and re-derive the route from the fresh user record)
+        // instead of trusting the cached copy -- roles/store assignments could have changed
+        // server-side since this session was saved, and the token itself may have expired.
+        const { user } = await verifyAuthSession();
+        if (!active) return;
+        const route = getRouteForUser(user);
+        navigation.selectRole(route.role, route.routeName, route.params, user);
+      } catch (error) {
+        setAuthToken(null);
+        if (error?.status === 401) {
+          await clearAuthSession();
+        }
+        // Any other error (e.g. no network) leaves the stored session in place -- worth
+        // retrying next launch -- and just falls through to the normal login screen for now.
+      } finally {
+        if (active) setSessionRestoreStatus("done");
+      }
+    })();
+    return () => {
+      active = false;
+    };
+  }, [navigation]);
 
   const actions = useMemo(() => ({
     async syncStores() {
@@ -1213,6 +1280,14 @@ export function AppNavigator() {
     return () => subscription?.remove?.();
   }, [actions, navigation]);
 
+  if (sessionRestoreStatus === "checking") {
+    return (
+      <View style={[styles.container, styles.sessionCheckContainer]}>
+        <ActivityIndicator size="large" color="#1f6feb" />
+      </View>
+    );
+  }
+
   const appState = {
     groupBuyActivities,
     groupBuyActivitySyncStatus,
@@ -1276,5 +1351,10 @@ const styles = StyleSheet.create({
   },
   screen: {
     flex: 1
+  },
+  sessionCheckContainer: {
+    alignItems: "center",
+    justifyContent: "center",
+    backgroundColor: "#f6f8fb"
   }
 });

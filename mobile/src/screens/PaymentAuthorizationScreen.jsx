@@ -497,22 +497,6 @@ async function startPaymentAuthorization({
       return;
     }
 
-    if (error.payload?.status === "authorization_already_pending") {
-      setLinePayStatus("ready");
-      setLinePayMessage(`此訂單已有一筆${providerLabel}授權流程進行中，會自動等待結果。`);
-      startLinePaySyncPolling({
-        orderId: payment.orderId,
-        orderRevisionId: revisionPayment?.id,
-        actions,
-        pollIntervalRef,
-        pollTimeoutRef,
-        pollInFlightRef,
-        setSyncStatus,
-        setSyncMessage
-      });
-      return;
-    }
-
     setLinePayStatus("error");
     setLinePayMessage(getLinePayErrorMessage(error));
   }
@@ -594,8 +578,8 @@ function getLinePayErrorMessage(error) {
   if (error.payload?.status === "already_authorized") {
     return "此訂單已完成 LINE Pay 授權，不需要重複付款。";
   }
-  if (error.payload?.status === "authorization_already_pending") {
-    return "此訂單已有一筆進行中的 LINE Pay 授權，請先完成該付款流程或稍後再試。";
+  if (error.payload?.status === "activity_deadline_passed") {
+    return "這個團購已經截止，無法再付款。";
   }
   return error.message;
 }

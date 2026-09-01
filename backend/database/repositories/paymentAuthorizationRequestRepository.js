@@ -114,15 +114,17 @@ async function withPostgresAuthorizationRequestLock(database, orderId, operation
 async function getPostgresOrderPaymentContext(database, orderId) {
   const result = await database.query(`
     SELECT
-      id,
-      activity_id,
-      customer_user_id,
-      total_cups,
-      original_amount,
-      payment_status,
-      authorization_status
+      orders.id,
+      orders.activity_id,
+      orders.customer_user_id,
+      orders.total_cups,
+      orders.original_amount,
+      orders.payment_status,
+      orders.authorization_status,
+      activity.deadline_at
     FROM orders
-    WHERE id = $1
+    JOIN group_buy_activities activity ON activity.id = orders.activity_id
+    WHERE orders.id = $1
   `, [orderId]);
   return result.rows[0] ? mapOrderPaymentContext(result.rows[0]) : null;
 }
@@ -346,6 +348,7 @@ function mapOrderPaymentContext(row) {
     originalAmount: Number(row.original_amount),
     paymentStatus: row.payment_status,
     authorizationStatus: row.authorization_status,
+    deadlineAt: toIsoString(row.deadline_at),
   };
 }
 

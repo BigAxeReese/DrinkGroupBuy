@@ -49,7 +49,9 @@ async function verifyPostgresPlanAndCompletion() {
   assert.equal(plan.allocatedDiscountAmount, 99);
   assert.equal(plan.undistributedDiscountAmount, 1);
   assert.equal(plan.orders[0].captureAmount, 126);
+  assert.equal(plan.neverPaidOrderCount, 2);
   assert.ok(calls.some((call) => call.sql.includes("FOR UPDATE OF order_record")));
+  assert.ok(calls.some((call) => call.sql.includes("payment_status = 'pending'")));
 
   const completion = await repository.completeSettlement({
     activityId: "activity-001",
@@ -126,6 +128,9 @@ function createRepository(calls) {
       return { rows: [settlementRow()] };
     }
     if (sql.includes("WITH claimable AS")) return { rows: [jobRow()] };
+    if (sql.includes("payment_status = 'pending'")) {
+      return { rows: [{ id: "order-never-paid-1" }, { id: "order-never-paid-2" }] };
+    }
     if (sql.includes("UPDATE") || sql.includes("INSERT INTO")) return { rows: [], rowCount: 1 };
     throw new Error(`Unexpected SQL: ${sql}`);
   }

@@ -546,3 +546,60 @@
 | 是否意外弱化商家自助取消原本的保護 | smoke test 新增情境 7 明確驗證：同樣的非 recruiting 狀態，商家自助取消（不傳 `unconditional`）仍然照舊被 `activity_not_cancellable` 擋下 |
 
 **驗證限制**：`npm test` 92/92 全過；`merchant-activity-cancel-service:smoke`（會重建本機 SQLite dev 資料庫）經使用者明確同意後執行，執行前已備份、執行後確認 `integrity_check=ok` 且 0 筆 foreign key 違反。另外用瀏覽器實際登入 `/admin` 對**真實 PostgreSQL dev 資料庫**操作驗證了取消 `ordering`／`failed` 狀態團購兩種情境，過程中不慎誤解了這個專案的實際 runtime（以為團購讀寫走 SQLite，其實永久走 PostgreSQL），導致兩筆真實種子測試資料被意外取消；已在使用者確認後用一次性、範圍精確的 SQL 修正腳本把這兩筆活動的 `status`／`cancellation_reason`／`updated_at` 還原，並刪除因此多出的 `status_history`／`audit_logs` 紀錄，還原後重新讀取確認資料與異動前一致。
+
+## 2026-08-29 — 顧客放棄 LINE Pay 付款後卡死無法重試
+
+**範圍**：`backend/payments/linePayService.js`（`requestLinePayAuthorizationUnlocked` 的既有授權檢查邏輯）、`backend/payments/orderRuleConsent.test.js`（新增一個自動化測試情境）、`backend/server.js`（把既有的 `paymentAuthorizationCancelRepository` 多傳一個進去）、以及幾個純 UI 改動（`mobile/src/components/ActivityFilterPanel.jsx`、`mobile/src/navigation/AppNavigator.js`、`mobile/src/screens/CustomerOrdersScreen.jsx`、`LiveMapScreen.native.jsx`／`.web.jsx`、`MerchantMenuManagementScreen.jsx`、`PaymentAuthorizationScreen.jsx`）
+**觸發原因**：使用者實機操作回報——顧客點「付款」跳轉到 LINE Pay 後，如果沒完成就退出 App，之後再點「付款」會被永久擋下「已有一筆進行中」，訂單卡死。這是金流相關改動，依 CLAUDE.md 規則主動跑這次審查
+
+### 設計決策（跟使用者來回討論多輪、逐步驗證後才定案，不是我單方面假設）
+
+問題根因：LINE Pay 對「還沒確認的付款請求」沒有提供「主動取消」的 API（只有已確認的授權才能撤銷），系統只能等 LINE Pay 自己判定過期，但 LINE Pay 官方文件沒有公開這個等待時間有多長（實際上網查證過官方文件，確認查無此資訊）。討論過三種「自訂等待上限」的做法（純即時查詢不設上限、自訂等待幾分鐘、立刻放棄），使用者最後決定：**放棄舊的、立刻讓顧客重新開一筆**，不特別設等待時間，理由是參考了另一個真實上線 App 的行為（退出付款頁面就直接視為放棄）。
+
+實作前先確認了一個關鍵安全網：即使顧客後來真的跑回去把舊的 LINE Pay 頁面完成，本檔案 `confirmLinePayAuthorizationUnlocked` 裡本來就有一道既有守門（`authorization_not_pending` 檢查），會在呼叫 LINE Pay 正式確認 API **之前**先確認本地紀錄還是不是 `pending`；一旦我們已經把舊的標記失敗，這道守門會直接擋下，系統**不會**真的去跟 LINE Pay 說「請正式扣住這筆錢」，所以不會有真的授權成功卻沒人知道的情況。改動重用背景對帳排程本來就在用、已經測試過的同一個「標記放棄」函式，改單（order revision）情境也走同一套邏輯。
+
+### 發現
+
+沒有找到信心度達到門檻（8/10 以上）的漏洞。
+
+### 沒發現問題的部分（已交叉驗證）
+
+| 面向 | 檢查結果 |
+|------|----------|
+| 會不會有人取消別人的付款請求 | 訂單歸屬檢查（`order.customerUserId !== authUser.id`）在新邏輯之前就先執行；改單情境下 `order.id` 是從已驗證過的 `revision.orderId` 來的，不是直接信任前端傳來的值；傳給取消函式的交易 ID 也是從資料庫讀回來的既有紀錄，不是使用者自己填的 |
+| 顧客手速很快連點兩次「付款」會不會同時生出兩筆 | 這個函式本來就被「同一筆訂單一次只能處理一個付款動作」的鎖包住，這次沒有改動這道鎖，也沒有繞過它 |
+| 標記舊的失敗會不會不小心點錯、影響到明明還有效的付款 | 狀態判斷條件跟欄位存取都逐行核對過，沒有邏輯錯誤；重用的資料庫函式本身在真正寫入前還會在交易鎖裡再檢查一次目前狀態，就算被重複呼叫也不會出錯或留下重複紀錄 |
+| 菜單管理畫面重構（自由文字改成逐項輸入）的加價欄位是否還是安全的數字 | 逐項輸入的「加價」欄位套用跟既有「基本價格」欄位一樣的逐字元過濾（只允許數字），從輸入當下就不可能打進非數字字元，不是靠事後解析失敗才擋下 |
+| 其他改動（篩選面板、地圖畫面、返回鍵）是否引入新的注入或資料外洩 | 都是純畫面邏輯調整，沒有新增對外部資料的存取路徑，沒有把使用者輸入直接組進畫面或查詢 |
+
+**驗證限制**：新增了一個自動化測試直接驗證「先放棄舊的、才建立新的」這個順序沒有反過來；另外重跑了負責「確認付款」與「取消付款」這兩塊的既有 smoke test（純記憶體模擬、沒有真實資料庫），確認我依賴的那道安全防線沒有被連帶改壞；`npm test` 93/93 全過。這個改動的核心價值（顧客真的能重新拿到一個可以完成付款的新頁面）需要實際走一次 LINE Pay 沙盒環境才能徹底驗證，這部分還沒有透過真機操作確認，記錄在待辦裡。
+
+---
+
+## 2026-08-29（同日追加）— 未付款訂單卡在進行中 + 截止後仍可發起新付款
+
+**範圍**：`backend/payments/linePayService.js`（`requestLinePayAuthorizationUnlocked` 新增截止時間檢查）、`backend/database/repositories/groupBuySettlementRepository.js`（`createPostgresSettlementPlan` 新增「未付款訂單」結算清理）、`backend/db.js`（SQLite 對應的 `createGroupBuySettlementPlan`）、`backend/database/repositories/paymentAuthorizationRequestRepository.js`、`backend/database/repositories/orderRevisionRepository.js`（兩者的付款情境查詢補上 `deadlineAt`）、`backend/server.js`（呼叫端多傳 `now`）、`backend/payments/orderRuleConsent.test.js`（新增 2 個測試）、`scripts/group-buy-settlement-repository-smoke.js`（新增 1 個測試情境）、`mobile/src/screens/PaymentAuthorizationScreen.jsx`（新增錯誤訊息對應）
+**觸發原因**：使用者實機操作回報——有一筆從未點過付款的訂單，對應團購早就截止卻沒有出現在歷史訂單。這是金流相關改動，依 CLAUDE.md 規則主動跑這次審查
+
+### 背景（呼應上一筆 2026-08-29「顧客放棄 LINE Pay 付款後卡死無法重試」）
+
+追查使用者回報的問題時，發現兩個獨立但都跟「團購截止時間」有關的缺口，與上一筆記錄的改動屬於同一批還沒 commit 的付款相關修改，但是不同的根因：
+
+1. **`requestLinePayAuthorizationUnlocked` 完全沒有檢查團購截止時間**——理論上截止後（甚至已經結算完）仍能發起全新的 LINE Pay 付款請求。修法：讀取訂單所屬活動的 `deadlineAt`，跟呼叫端傳入的 `now`（統一用 `businessClock.nowIso()`，跟其他截止時間檢查同一個時鐘來源）比較，一旦逾期就回傳 409 `activity_deadline_passed`，不呼叫 LINE Pay provider。
+2. **`getOrderLifecycleBucket`（判斷訂單該歸「進行中」還是「歷史」）沒有處理「從未發起過付款」的訂單**——這類訂單的 `paymentStatus` 永遠停在 `pending`，不會被既有的 `failed` 分支（15 分鐘取餐緩衝）或結算流程碰到，等於永遠卡在「進行中」。修法：截止結算時新增一步，把這類訂單標記為已取消（`status`／`pickup_status`／`merchant_acceptance_status` 皆設為 `cancelled`），比照既有商家/顧客取消訂單的欄位組合，付款狀態維持 `pending` 不動——這個決定是照抄 `merchantGroupBuyActivityCancelRepository.js`／`customerOrderCancelRepository.js` 既有的取消欄位組合，不是我新發明的狀態語意。
+
+### 發現
+
+沒有找到信心度達到門檻（8/10 以上）的漏洞。
+
+### 沒發現問題的部分（已交叉驗證，方法：讀完整 diff＋追過呼叫路徑，不只看 diff 片段）
+
+| 面向 | 檢查結果 |
+|------|----------|
+| 截止時間比對邏輯會不會因為資料缺失而悄悄失效、變成漏洞 | `Date.parse` 對缺失/格式錯誤的 `deadlineAt`／`now` 會直接跳過檢查（fail open）；但追過 `database/schema.sql`，`group_buy_activities.deadline_at` 是 `NOT NULL`，且訂單一定透過 `activity_id` 外鍵關聯到活動，兩個 repository 都改成 `JOIN`（不是 `LEFT JOIN`）取得活動列，實務上不會出現訂單有效但 `deadlineAt` 缺失的情況；`now` 只有伺服器端 `businessClock.nowIso()` 一個來源，不是使用者可控輸入 |
+| 新訂單與改單（order revision）兩條路徑是否都套用了截止檢查，會不會有一條漏掉變成繞過 | 兩條路徑最後都會進到同一個 `requestLinePayAuthorizationUnlocked`；`orderRevisionRepository.js` 的 `getPostgresOrderRevisionPaymentContext` 跟訂單路徑一樣補上了 `deadlineAt`，兩邊處理方式一致，沒有漏掉 |
+| 結算時把「未付款訂單」標記取消的 UPDATE 會不會不小心波及已經有效付款的訂單 | 這個 UPDATE 用 `activity_id + status = 'submitted' + payment_status = 'pending'` 限定範圍，跟旁邊既有「鎖定已授權訂單」那條 UPDATE 用的 `payment_status = 'authorized'` 互斥，兩者不會重疊；也追查過一個看似可能的競態（顧客在截止前一刻打開 LINE Pay，付款狀態還沒變成 authorized，結算掃描就先跑並把訂單取消掉）——但既有的 `confirmLinePayAuthorizationUnlocked`／SQLite 對應邏輯本來就會在 confirm 當下重新比對截止時間，逾期一律視為逾時失敗，不論訂單當下的 `status` 欄位是什麼，所以這個競態不會讓顧客「假裝沒付款但其實扣到錢」，取消是正確的終態，不是繞過收費的破口 |
+| 新的 `GET /api/auth/session`（上一批改動就存在，這次沒有再改動，但因為同批一起審查所以一併確認）是否會讓人查到別人的 session | 沿用既有 `getAuthenticatedUser`（同一套 bearer token 驗證），失敗回 401，成功只回傳呼叫者自己的 `toPublicUserResponse`，跟登入路由回傳的形狀完全一致，沒有額外欄位、沒有跨使用者查詢 |
+| `expo-secure-store` 的登入狀態還原會不會信任本機快取的角色/權限而繞過伺服器驗證 | 追過 `AppNavigator.js`：還原流程呼叫 `verifyAuthSession()`，用**伺服器回傳的最新 user 物件**（不是本機快取的 `session.user`）決定要導去哪個畫面；401 會清掉本機憑證，其他錯誤（例如離線）會保留憑證但停在載入畫面、不會直接放行進入任何已登入畫面 |
+
+**驗證限制**：新增 2 個 `linePayService` 自動化測試（截止前成功／截止後拒絕）與 1 個 `group-buy-settlement-repository-smoke` 測試情境（驗證未付款訂單計數正確回傳），皆為記憶體模擬、非真實資料庫；`npm test` 95/95 全過。**尚未實機驗證**：需要真的讓一個團購走到截止、底下有一筆從未付款的訂單，確認結算後它正確被標記取消並移入歷史訂單分頁；也還沒有真的在截止後嘗試發起 LINE Pay 付款、確認前端正確顯示「這個團購已經截止，無法再付款。」。

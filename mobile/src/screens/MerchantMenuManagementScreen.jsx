@@ -9,11 +9,40 @@ import {
 } from "../utils/apiClient";
 import { formatCurrency } from "../utils/calculations";
 
-const defaultOptionText = {
-  sweetness: "正常糖:0, 半糖:0, 微糖:0, 無糖:0",
-  ice: "正常冰:0, 少冰:0, 微冰:0, 去冰:0",
-  size: "中杯:0, 大杯:10",
-  topping: "珍珠:10, 椰果:10"
+let nextLocalRowId = 1;
+function createLocalRowId() {
+  nextLocalRowId += 1;
+  return `row-${nextLocalRowId}`;
+}
+
+const defaultOptionRows = {
+  sweetness: [
+    { label: "正常糖", priceDeltaText: "0" },
+    { label: "半糖", priceDeltaText: "0" },
+    { label: "微糖", priceDeltaText: "0" },
+    { label: "無糖", priceDeltaText: "0" }
+  ],
+  ice: [
+    { label: "正常冰", priceDeltaText: "0" },
+    { label: "少冰", priceDeltaText: "0" },
+    { label: "微冰", priceDeltaText: "0" },
+    { label: "去冰", priceDeltaText: "0" }
+  ],
+  size: [
+    { label: "中杯", priceDeltaText: "0" },
+    { label: "大杯", priceDeltaText: "10" }
+  ],
+  topping: [
+    { label: "珍珠", priceDeltaText: "10" },
+    { label: "椰果", priceDeltaText: "10" }
+  ]
+};
+
+const OPTION_TYPE_LABELS = {
+  size: "尺寸選項",
+  sweetness: "甜度選項",
+  ice: "冰量選項",
+  topping: "加料選項"
 };
 
 export function MerchantMenuManagementScreen({ navigation, memberAction, selectedMerchantStoreId }) {
@@ -41,8 +70,12 @@ export function MerchantMenuManagementScreen({ navigation, memberAction, selecte
 
   const title = editingItem ? `編輯：${editingItem.name}` : "新增飲品";
   const availableToppingCount = useMemo(
-    () => parseOptionText(form.optionTexts.topping, []).length,
-    [form.optionTexts.topping]
+    () => form.optionLists.topping.filter((row) => row.label.trim()).length,
+    [form.optionLists.topping]
+  );
+  const existingCategories = useMemo(
+    () => [...new Set((menu?.menuItems || []).map((item) => item.category).filter(Boolean))],
+    [menu?.menuItems]
   );
 
   function beginCreate() {
@@ -55,6 +88,41 @@ export function MerchantMenuManagementScreen({ navigation, memberAction, selecte
     setEditingItem(item);
     setForm(formFromMenuItem(item));
     setNotice(null);
+  }
+
+  function addOptionRow(optionType) {
+    setForm((current) => ({
+      ...current,
+      optionLists: {
+        ...current.optionLists,
+        [optionType]: [
+          ...current.optionLists[optionType],
+          { localId: createLocalRowId(), id: undefined, label: "", priceDeltaText: "0" }
+        ]
+      }
+    }));
+  }
+
+  function removeOptionRow(optionType, localId) {
+    setForm((current) => ({
+      ...current,
+      optionLists: {
+        ...current.optionLists,
+        [optionType]: current.optionLists[optionType].filter((row) => row.localId !== localId)
+      }
+    }));
+  }
+
+  function updateOptionRow(optionType, localId, field, value) {
+    setForm((current) => ({
+      ...current,
+      optionLists: {
+        ...current.optionLists,
+        [optionType]: current.optionLists[optionType].map((row) => (
+          row.localId === localId ? { ...row, [field]: value } : row
+        ))
+      }
+    }));
   }
 
   async function saveItem() {
@@ -78,8 +146,16 @@ export function MerchantMenuManagementScreen({ navigation, memberAction, selecte
     }
 
     const customizationGroups = ["size", "sweetness", "ice", "topping"].map((optionType) => {
-      const existingGroup = editingItem?.customizationGroups?.find((group) => group.optionType === optionType);
-      const options = parseOptionText(form.optionTexts[optionType], existingGroup?.options || []);
+      const options = form.optionLists[optionType]
+        .filter((row) => row.label.trim())
+        .map((row) => ({
+          id: row.id,
+          label: row.label.trim(),
+          // priceDeltaText only ever contains digits typed via a number-pad input (see
+          // digitsOnly()), so this can never be NaN -- no silent fallback to 0 needed here.
+          priceDelta: row.priceDeltaText === "" ? 0 : Number(row.priceDeltaText),
+          isAvailable: true
+        }));
       const singleChoice = optionType !== "topping";
       return {
         optionType,
@@ -147,13 +223,33 @@ export function MerchantMenuManagementScreen({ navigation, memberAction, selecte
 
       <Section title={title}>
         <Field label="品名" value={form.name} onChangeText={(value) => setFormField(setForm, "name", value)} />
-        <Field label="分類代碼" value={form.category} onChangeText={(value) => setFormField(setForm, "category", value)} />
+        <Field
+          label="分類名稱（會直接顯示給顧客看，請填中文，例如：奶茶類、茶類、果汁類；同一家店建議固定用同幾種）"
+          value={form.category}
+          onChangeText={(value) => setFormField(setForm, "category", value)}
+        />
+        {existingCategories.length > 0 ? (
+          <View style={styles.categoryChipRow}>
+            {existingCategories.map((category) => (
+              <Pressable
+                key={category}
+                accessibilityRole="button"
+                onPress={() => setFormField(setForm, "category", category)}
+                style={[styles.categoryChip, form.category === category && styles.categoryChipActive]}
+              >
+                <Text style={[styles.categoryChipText, form.category === category && styles.categoryChipTextActive]}>
+                  {category}
+                </Text>
+              </Pressable>
+            ))}
+          </View>
+        ) : null}
         <Field label="說明" value={form.description} onChangeText={(value) => setFormField(setForm, "description", value)} multiline />
         <Field label="基本價格" value={form.basePrice} onChangeText={(value) => setFormField(setForm, "basePrice", digitsOnly(value))} keyboardType="number-pad" />
-        <OptionTextField label="尺寸選項（名稱:加價）" optionType="size" form={form} setForm={setForm} />
-        <OptionTextField label="甜度選項（名稱:加價）" optionType="sweetness" form={form} setForm={setForm} />
-        <OptionTextField label="冰量選項（名稱:加價）" optionType="ice" form={form} setForm={setForm} />
-        <OptionTextField label="加料選項（名稱:加價）" optionType="topping" form={form} setForm={setForm} />
+        <OptionRowsField optionType="size" rows={form.optionLists.size} onAdd={addOptionRow} onRemove={removeOptionRow} onUpdate={updateOptionRow} />
+        <OptionRowsField optionType="sweetness" rows={form.optionLists.sweetness} onAdd={addOptionRow} onRemove={removeOptionRow} onUpdate={updateOptionRow} />
+        <OptionRowsField optionType="ice" rows={form.optionLists.ice} onAdd={addOptionRow} onRemove={removeOptionRow} onUpdate={updateOptionRow} />
+        <OptionRowsField optionType="topping" rows={form.optionLists.topping} onAdd={addOptionRow} onRemove={removeOptionRow} onUpdate={updateOptionRow} />
         <Field
           label={`每杯加料上限（目前 ${availableToppingCount} 種）`}
           value={form.toppingMaxSelections}
@@ -189,37 +285,66 @@ function Field({ label, ...props }) {
   );
 }
 
-function OptionTextField({ label, optionType, form, setForm }) {
+function OptionRowsField({ optionType, rows, onAdd, onRemove, onUpdate }) {
   return (
-    <Field
-      label={label}
-      value={form.optionTexts[optionType]}
-      onChangeText={(value) => setForm((current) => ({
-        ...current,
-        optionTexts: { ...current.optionTexts, [optionType]: value }
-      }))}
-      multiline
-    />
+    <View style={styles.field}>
+      <Text style={styles.label}>{OPTION_TYPE_LABELS[optionType]}</Text>
+      {rows.map((row) => (
+        <View key={row.localId} style={styles.optionRow}>
+          <TextInput
+            value={row.label}
+            onChangeText={(value) => onUpdate(optionType, row.localId, "label", value)}
+            placeholder="名稱"
+            placeholderTextColor="#94a3b8"
+            style={[styles.input, styles.optionRowLabelInput]}
+          />
+          <TextInput
+            value={row.priceDeltaText}
+            onChangeText={(value) => onUpdate(optionType, row.localId, "priceDeltaText", digitsOnly(value))}
+            placeholder="加價"
+            placeholderTextColor="#94a3b8"
+            keyboardType="number-pad"
+            style={[styles.input, styles.optionRowPriceInput]}
+          />
+          <Pressable
+            accessibilityRole="button"
+            accessibilityLabel={`刪除${row.label || "此"}選項`}
+            onPress={() => onRemove(optionType, row.localId)}
+            style={styles.optionRowRemoveButton}
+          >
+            <Text style={styles.optionRowRemoveText}>刪除</Text>
+          </Pressable>
+        </View>
+      ))}
+      <PrimaryButton label="＋ 新增選項" variant="secondary" onPress={() => onAdd(optionType)} />
+    </View>
   );
 }
 
 function createEmptyForm() {
   return {
     name: "",
-    category: "tea",
+    category: "茶類",
     description: "",
     basePrice: "0",
     isAvailable: true,
     toppingMaxSelections: "2",
-    optionTexts: { ...defaultOptionText }
+    optionLists: buildOptionLists(defaultOptionRows)
   };
 }
 
 function formFromMenuItem(item) {
-  const optionTexts = {};
+  const optionLists = {};
   for (const optionType of ["size", "sweetness", "ice", "topping"]) {
     const group = item.customizationGroups.find((candidate) => candidate.optionType === optionType);
-    optionTexts[optionType] = formatOptions(group?.options || []);
+    optionLists[optionType] = (group?.options || [])
+      .filter((option) => option.isAvailable)
+      .map((option) => ({
+        localId: createLocalRowId(),
+        id: option.id,
+        label: option.label,
+        priceDeltaText: String(option.priceDelta)
+      }));
   }
   const toppingGroup = item.customizationGroups.find((group) => group.optionType === "topping");
   return {
@@ -229,31 +354,21 @@ function formFromMenuItem(item) {
     basePrice: String(item.basePrice),
     isAvailable: item.isAvailable,
     toppingMaxSelections: String(toppingGroup?.maxSelections ?? 0),
-    optionTexts
+    optionLists
   };
 }
 
-function formatOptions(options) {
-  return options.filter((option) => option.isAvailable).map((option) => `${option.label}:${option.priceDelta}`).join(", ");
-}
-
-function parseOptionText(value, existingOptions) {
-  return String(value || "")
-    .split(/[,\n]/)
-    .map((entry) => entry.trim())
-    .filter(Boolean)
-    .map((entry) => {
-      const separator = entry.lastIndexOf(":");
-      const label = (separator >= 0 ? entry.slice(0, separator) : entry).trim();
-      const parsedPrice = Number(separator >= 0 ? entry.slice(separator + 1).trim() : 0);
-      const existing = existingOptions.find((option) => option.label === label);
-      return {
-        id: existing?.id,
-        label,
-        priceDelta: Number.isInteger(parsedPrice) && parsedPrice >= 0 ? parsedPrice : 0,
-        isAvailable: true
-      };
-    });
+function buildOptionLists(rowsByType) {
+  const optionLists = {};
+  for (const optionType of Object.keys(rowsByType)) {
+    optionLists[optionType] = rowsByType[optionType].map((row) => ({
+      localId: createLocalRowId(),
+      id: undefined,
+      label: row.label,
+      priceDeltaText: row.priceDeltaText
+    }));
+  }
+  return optionLists;
 }
 
 function setFormField(setForm, field, value) {
@@ -274,8 +389,18 @@ const styles = StyleSheet.create({
   unavailable: { color: "#b91c1c", fontSize: 12, fontWeight: "900" },
   field: { gap: 5 },
   label: { color: "#334155", fontSize: 12, fontWeight: "800" },
+  categoryChipRow: { flexDirection: "row", flexWrap: "wrap", gap: 6, marginTop: -2 },
+  categoryChip: { minHeight: 32, paddingHorizontal: 12, justifyContent: "center", borderRadius: 999, borderWidth: 1, borderColor: "#cbd5e1", backgroundColor: "#f8fafc" },
+  categoryChipActive: { borderColor: "#1f6feb", backgroundColor: "#dbeafe" },
+  categoryChipText: { color: "#475569", fontSize: 12, fontWeight: "700" },
+  categoryChipTextActive: { color: "#1f6feb" },
   input: { minHeight: 46, borderWidth: 1, borderColor: "#cbd5e1", borderRadius: 10, backgroundColor: "#fff", color: "#0f172a", paddingHorizontal: 11, paddingVertical: 9 },
   multiline: { minHeight: 72, textAlignVertical: "top" },
+  optionRow: { flexDirection: "row", gap: 6, alignItems: "center" },
+  optionRowLabelInput: { flex: 2, minWidth: 0 },
+  optionRowPriceInput: { flex: 1, minWidth: 0 },
+  optionRowRemoveButton: { minHeight: 46, paddingHorizontal: 10, alignItems: "center", justifyContent: "center", borderRadius: 10, backgroundColor: "#fee2e2" },
+  optionRowRemoveText: { color: "#b91c1c", fontSize: 12, fontWeight: "900" },
   toggle: { minHeight: 44, alignItems: "center", justifyContent: "center", borderRadius: 10, backgroundColor: "#fee2e2" },
   toggleActive: { backgroundColor: "#dcfce7" },
   toggleText: { color: "#991b1b", fontWeight: "900" },
