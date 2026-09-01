@@ -67,12 +67,7 @@ http://localhost:3000
 
 ### 初始化資料庫
 
-第一次開專案或想重建測試資料時：
-
-```powershell
-npm run db:init
-npm run db:seed
-```
+第一次開專案或想重建本機資料庫時，見下方「初始化開發資料庫」一節。
 
 ### 開發測試切換角色
 
@@ -101,7 +96,7 @@ npm run mobile:android
 DrinkGroupBuy/
 ├── mobile/      React Native + Expo 手機 App
 ├── backend/     Node.js backend API
-├── database/    開發用 SQLite schema、seed 與 PostgreSQL draft
+├── database/    PostgreSQL migrations、開發 seed 與 SQLite 相容性測試工具
 ├── docs/        專案文件、規則、資料表與流程紀錄
 └── package.json 根目錄啟動指令
 ```
@@ -110,7 +105,7 @@ DrinkGroupBuy/
 
 - 手機 App：`mobile/`
 - 後端 API：`backend/`
-- 開發資料庫：`database/drink-group-buy-dev.sqlite`
+- 開發資料庫：PostgreSQL（本機用 `database/docker-compose.postgres.yml` 啟動）
 
 ## 需要先安裝
 
@@ -119,6 +114,7 @@ DrinkGroupBuy/
 - Node.js
 - npm
 - Git
+- PostgreSQL 16 — Backend 主要資料庫，可以用 Docker 啟動（見下方「初始化開發資料庫」），也可以原生安裝
 - 瀏覽器，例如 Chrome 或 Edge
 
 如果要用 Android 模擬器或手機預覽，還需要：
@@ -176,14 +172,32 @@ EXPO_PUBLIC_BACKEND_URL=http://localhost:3000
 
 ## 初始化開發資料庫
 
-第一次執行或想重建測試資料時：
+Backend 主要資料庫是 PostgreSQL。第一次開專案或想重建本機資料庫時，先用 Docker 啟動 PostgreSQL 容器，再套用 migration：
+
+Windows（PowerShell）：
+
+```powershell
+docker compose -f database/docker-compose.postgres.yml up -d
+$env:DATABASE_URL='postgres://drink_group_buy:drink_group_buy_dev_password@localhost:5432/drink_group_buy'
+npm run postgres:migrate
+```
+
+macOS／Linux（bash／zsh）：
+
+```bash
+docker compose -f database/docker-compose.postgres.yml up -d
+export DATABASE_URL='postgres://drink_group_buy:drink_group_buy_dev_password@localhost:5432/drink_group_buy'
+npm run postgres:migrate
+```
+
+上面的連線字串是本機開發用預設值，不可用於正式環境。詳細設定、重建方式與既有驗證紀錄見 [`database/README.md`](./database/README.md)。
+
+另外還有一份獨立的 SQLite 相容性測試資料庫，只給明確隔離的測試腳本使用，不是 Backend 的主要資料來源：
 
 ```powershell
 npm run db:init
 npm run db:seed
 ```
-
-這會建立並填入開發用 SQLite 資料庫。
 
 ## 啟動 backend
 
@@ -290,8 +304,9 @@ npm run auth:map:admin
 ```powershell
 npm install
 npm --prefix mobile install
-npm run db:init
-npm run db:seed
+docker compose -f database/docker-compose.postgres.yml up -d
+$env:DATABASE_URL='postgres://drink_group_buy:drink_group_buy_dev_password@localhost:5432/drink_group_buy'
+npm run postgres:migrate
 npm run backend:start
 npm run mobile:web
 ```

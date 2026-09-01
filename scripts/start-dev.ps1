@@ -16,9 +16,11 @@ $mobileRoot = Join-Path $projectRoot "mobile"
 $backendEnvPath = Join-Path $projectRoot "backend\.env"
 $mobileEnvPath = Join-Path $mobileRoot ".env"
 $databasePath = Join-Path $projectRoot "database\drink-group-buy-dev.sqlite"
+$postgresComposeFile = Join-Path $projectRoot "database\docker-compose.postgres.yml"
 $appPackage = "com.drinkgroupbuy.prototype"
 $metroPort = 8081
 $webPort = 8083
+$postgresPort = 5432
 
 function Write-Step {
   param([string]$Message)
@@ -224,6 +226,39 @@ function Ensure-NodeDependencies {
   }
 }
 
+function Ensure-PostgresDatabase {
+  if (Test-TcpPort -Port $postgresPort) {
+    Write-Step "PostgreSQL already listening on port $postgresPort"
+  } else {
+    if (-not (Get-Command docker -ErrorAction SilentlyContinue)) {
+      throw "PostgreSQL is not reachable on port $postgresPort, and Docker was not found. Start PostgreSQL manually (see database/README.md) or install Docker Desktop and reopen this launcher."
+    }
+
+    Write-Step "Starting PostgreSQL dev container with Docker"
+    & docker compose -f $postgresComposeFile up -d
+    if ($LASTEXITCODE -ne 0) {
+      throw "docker compose up failed with exit code $LASTEXITCODE. Check that Docker Desktop is running."
+    }
+
+    if (-not (Wait-TcpPort -Port $postgresPort -TimeoutSeconds 30)) {
+      throw "PostgreSQL did not become reachable on port $postgresPort within 30 seconds. Check 'docker compose -f database/docker-compose.postgres.yml logs'."
+    }
+  }
+
+  $databaseUrl = Get-EnvValue -Path $backendEnvPath -Name "DATABASE_URL" -DefaultValue "postgres://drink_group_buy:drink_group_buy_dev_password@localhost:$postgresPort/drink_group_buy"
+
+  Write-Step "Applying PostgreSQL migrations"
+  $previousDatabaseUrl = $env:DATABASE_URL
+  $env:DATABASE_URL = $databaseUrl
+  try {
+    Invoke-NpmCommand -WorkingDirectory $projectRoot -Arguments @("run", "postgres:migrate")
+  } catch {
+    throw "PostgreSQL migration failed. Check that backend/.env's DATABASE_URL matches your local PostgreSQL credentials (see database/README.md). Original error: $_"
+  } finally {
+    $env:DATABASE_URL = $previousDatabaseUrl
+  }
+}
+
 function Ensure-DevelopmentDatabase {
   if (Test-Path -LiteralPath $databasePath) {
     return
@@ -420,6 +455,7 @@ if (-not [int]::TryParse($backendPortText, [ref]$backendPort) -or $backendPort -
 }
 
 if ($LaunchTarget -eq "Server") {
+  Ensure-PostgresDatabase
   Ensure-DevelopmentDatabase
   Start-Backend -Port $backendPort
 

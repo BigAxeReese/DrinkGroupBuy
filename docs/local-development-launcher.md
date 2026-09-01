@@ -29,8 +29,9 @@ Windows 組員完成一次性環境設定後，可以在專案根目錄依需求
 
 1. 使用 VS Code 開啟目前專案；若 `code` 指令不在 PATH，只略過這一步。
 2. 缺少 Backend `node_modules` 時，使用 lockfile 執行 `npm ci`。
-3. 僅在開發 SQLite 不存在時執行 `db:init` 與 `db:seed`；既有資料庫不會被重建。
-4. 依 `backend/.env` 的 `PORT` 啟動 Backend。
+3. 確認本機 PostgreSQL（Backend 主要資料庫）在 5432 port 可連線；還沒有的話，用 Docker 啟動 `database/docker-compose.postgres.yml`（未安裝 Docker 且沒有其他方式已啟動 PostgreSQL 時會停止並提示），接著套用尚未套用的 migration。
+4. 僅在開發 SQLite 相容性測試資料庫不存在時執行 `db:init` 與 `db:seed`；既有資料庫不會被重建。
+5. 依 `backend/.env` 的 `PORT` 啟動 Backend。
 
 這個視窗需要保持開啟。它不會啟動 Metro、Android、網頁預覽或後台控制台。
 
