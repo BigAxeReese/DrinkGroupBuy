@@ -26,6 +26,7 @@
     "postgres-settlement-snapshot:smoke": "node scripts/postgres-settlement-snapshot-migration-smoke.js",
     "pickup-credential-postgres:smoke": "node scripts/pickup-credential-postgres-smoke.js",
     "payment-refund-postgres:smoke": "node scripts/payment-refund-postgres-smoke.js",
+    "merchant-payout-postgres:smoke": "node scripts/merchant-payout-postgres-smoke.js",
     "order-revision-postgres:smoke": "node scripts/order-revision-postgres-smoke.js",
     "group-buy-settlement:smoke": "node scripts/group-buy-settlement-repository-smoke.js",
     "group-buy-settlement-postgres:smoke": "node scripts/group-buy-settlement-postgres-smoke.js",

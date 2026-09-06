@@ -174,6 +174,14 @@ const {
 const {
   createPaymentReliabilityJobRepository
 } = require("./database/repositories/paymentReliabilityJobRepository");
+const {
+  createMerchantPayoutRepository
+} = require("./database/repositories/merchantPayoutRepository");
+const {
+  adminRunMerchantPayoutBatch,
+  listMerchantPayoutsForAdmin,
+  listMerchantPayoutsForStore
+} = require("./payments/merchantPayoutService");
 const { businessClock } = require("./time/businessClock");
 
 const port = Number(process.env.PORT ?? 3000);
@@ -316,6 +324,12 @@ const reliabilityJobRepository = createPaymentReliabilityJobRepository({
     listAlerts: (value) => listPaymentReliabilityAlerts(value),
   },
 });
+// Simulated merchant payout has no SQLite implementation (see merchantPayoutRepository.js
+// for why), so unlike every other repository above it is not constructed unconditionally --
+// doing so would require DATABASE_URL just to require() this file. It stays null, and every
+// route below returns 503, until an operator explicitly opts in.
+const merchantPayoutEnabled = readBooleanEnv(process.env.MERCHANT_PAYOUT_ENABLED, false);
+const merchantPayoutRepository = merchantPayoutEnabled ? createMerchantPayoutRepository({}) : null;
 if (
   groupBuyActivityWriteRepository.kind === "postgres"
   || merchantMenuRepository.kind === "postgres"
@@ -434,6 +448,20 @@ if (refundPostgresReady) {
     throw new Error(
       "PostgreSQL refunds in production requires an explicit, separate opt-in: "
       + "set PAYMENT_CAPTURE_RUNTIME_ALLOW_PRODUCTION=true."
+    );
+  }
+}
+
+// Merchant payout reads payment_captures/payment_refunds, and its post-refund adjustment
+// hook is called from the same approveRefundRequest flow refund-postgres gates above -- so
+// it can only be enabled once capture and refund are both genuinely on PostgreSQL, or it
+// would silently compute payouts from an empty/stale table.
+if (merchantPayoutEnabled) {
+  if (paymentCaptureRepository.kind !== "postgres" || paymentRefundRepository.kind !== "postgres") {
+    throw new Error(
+      "MERCHANT_PAYOUT_ENABLED requires PAYMENT_CAPTURE_RUNTIME and PAYMENT_REFUND_RUNTIME "
+      + "to both be postgres, since simulated payouts are computed from the same "
+      + "payment_captures/payment_refunds rows those write."
     );
   }
 }
@@ -1664,6 +1692,81 @@ const server = http.createServer(async (request, response) => {
       return;
     }
 
+    if (request.method === "POST" && url.pathname === "/api/admin/merchant-payouts/run") {
+      const authUser = await getAuthenticatedUser(request);
+      if (!authUser) {
+        sendJson(response, 401, { error: "Authentication required" });
+        return;
+      }
+      const body = await readJsonBody(request);
+      try {
+        const result = await adminRunMerchantPayoutBatch({
+          authUser,
+          body,
+          now: businessClock.nowIso(),
+          merchantPayoutRepository
+        });
+        sendJson(response, 200, result);
+      } catch (error) {
+        if (error instanceof PaymentServiceError) {
+          sendJson(response, error.statusCode, error.payload);
+          return;
+        }
+        throw error;
+      }
+      return;
+    }
+
+    if (request.method === "GET" && url.pathname === "/api/admin/merchant-payouts") {
+      const authUser = await getAuthenticatedUser(request);
+      if (!authUser) {
+        sendJson(response, 401, { error: "Authentication required" });
+        return;
+      }
+      try {
+        const result = await listMerchantPayoutsForAdmin({
+          authUser,
+          query: {
+            storeId: url.searchParams.get("storeId") || undefined,
+            periodStart: url.searchParams.get("periodStart") || undefined
+          },
+          merchantPayoutRepository
+        });
+        sendJson(response, 200, result);
+      } catch (error) {
+        if (error instanceof PaymentServiceError) {
+          sendJson(response, error.statusCode, error.payload);
+          return;
+        }
+        throw error;
+      }
+      return;
+    }
+
+    const merchantPayoutsMatch = url.pathname.match(/^\/api\/merchant\/stores\/([^/]+)\/payouts$/);
+    if (request.method === "GET" && merchantPayoutsMatch) {
+      const authUser = await getAuthenticatedUser(request);
+      if (!authUser) {
+        sendJson(response, 401, { error: "Authentication required" });
+        return;
+      }
+      try {
+        const result = await listMerchantPayoutsForStore({
+          authUser,
+          storeId: merchantPayoutsMatch[1],
+          merchantPayoutRepository
+        });
+        sendJson(response, 200, result);
+      } catch (error) {
+        if (error instanceof PaymentServiceError) {
+          sendJson(response, error.statusCode, error.payload);
+          return;
+        }
+        throw error;
+      }
+      return;
+    }
+
     if (request.method === "GET" && url.pathname === "/api/admin/refund-requests") {
       const authUser = await getAuthenticatedUser(request);
       if (!authUser) return sendJson(response, 401, { error: "Authentication required" });
@@ -1692,7 +1795,8 @@ const server = http.createServer(async (request, response) => {
           authUser,
           requestId: approveRefundRequestMatch[1],
           body,
-          paymentRefundRepository: refundPostgresReady ? paymentRefundRepository : undefined
+          paymentRefundRepository: refundPostgresReady ? paymentRefundRepository : undefined,
+          merchantPayoutRepository
         });
         sendJson(response, 200, result);
       } catch (error) {
@@ -2851,7 +2955,10 @@ function isSqliteOrderDependentRoute(method, pathname) {
     || pathname === "/api/admin/refund-requests"
     || /^\/api\/admin\/refund-requests\/[^/]+\/(approve|reject)$/.test(pathname)
     || pathname === "/admin/refund-requests"
-    || /^\/admin\/refund-requests\/[^/]+\/(approve|reject)$/.test(pathname);
+    || /^\/admin\/refund-requests\/[^/]+\/(approve|reject)$/.test(pathname)
+    || pathname === "/api/admin/merchant-payouts/run"
+    || pathname === "/api/admin/merchant-payouts"
+    || /^\/api\/merchant\/stores\/[^/]+\/payouts$/.test(pathname);
 }
 
 // NOTE: despite the name, this covers every postgres-gated follow-up domain (settlement,
@@ -2909,6 +3016,16 @@ function isSettlementRouteReadyForPostgres(method, pathname) {
     && paymentAuthorizationCancelRepository.kind === "postgres"
     && paymentAuthorizationRequestRepository.kind === "postgres"
     && reliabilityJobRepository.kind === "postgres"
+  ) {
+    return true;
+  }
+  if (
+    merchantPayoutRepository?.kind === "postgres"
+    && (
+      (method === "POST" && pathname === "/api/admin/merchant-payouts/run")
+      || (method === "GET" && pathname === "/api/admin/merchant-payouts")
+      || (method === "GET" && /^\/api\/merchant\/stores\/[^/]+\/payouts$/.test(pathname))
+    )
   ) {
     return true;
   }

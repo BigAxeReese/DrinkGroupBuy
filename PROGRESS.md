@@ -1,5 +1,5 @@
 ---
-updated: 2026-08-31
+updated: 2026-09-06
 ---
 
 ## 功能總覽 [完成]
@@ -122,6 +122,8 @@ updated: 2026-08-31
     > 商家在後台看到、提出退款申請的畫面。
   - 管理員審核網頁後台 [完成] (8/22) — 原本的 `AdminRefundRequestsScreen`（手機 App 裡的開發用畫面）已移除，審核功能改在獨立的 `/admin/refund-requests` 網頁後台（見下方「管理員網頁後台」）；核准／駁回直接重用既有 `approveRefundRequest`／`rejectRefundRequest` 服務層函式，未改動審核邏輯本身
     > 平台營運人員審核退款申請、決定核准或駁回的網頁畫面，跟顧客/商家用的手機 App 是分開的。
+- 商家撥款（模擬）[完成] (9/6) — 資金收付確定維持「平台代收」模式（單一 LINE Pay Channel，不改成每店家各自申請），營運方式改為平台抽成＋按自然月結算撥款給商家；因為是畢業專題非正式營運，撥款採模擬（只寫資料庫紀錄，不呼叫真實銀行 API）。新增 `merchant_payouts`／`merchant_payout_adjustments`／`merchant_payout_adjustment_applications` 三張表（`database/migrations/007_merchant_payouts_postgres.sql`）與 `backend/database/repositories/merchantPayoutRepository.js`（僅 PostgreSQL，本機開發已永久切換 PostgreSQL 後才新增的功能，不補 SQLite 相容層）；抽成基準為實際付款金額（`capture_amount`，折扣後）、`floor(gross × PLATFORM_COMMISSION_RATE_BP)`，LINE Pay 手續費由平台從抽成中吸收；已撥款期間才發生的退款記錄為 `merchant_payout_adjustments`，從商家未來各期撥款依序扣回直到扣完，同期內發生的退款則直接淨額扣除；新增 admin 觸發批次（`POST /api/admin/merchant-payouts/run`）與查詢（`GET /api/admin/merchant-payouts`）、商家查詢自己店撥款紀錄（`GET /api/merchant/stores/:storeId/payouts`）三支路由，僅在 `MERCHANT_PAYOUT_ENABLED=true` 且 `PAYMENT_CAPTURE_RUNTIME`／`PAYMENT_REFUND_RUNTIME` 均為 postgres 時啟用，否則後端拒絕啟動或路由回 503。已用真實 PostgreSQL 16（本機另建的 scratch 測試資料庫，非使用者既有開發資料庫）驗證：`npm run merchant-payout-postgres:smoke` 涵蓋跨月結轉扣款、冪等重跑、權限（商家越權查詢別店 403、非 admin 觸發批次 403）、期間尚未結束時觸發批次 409、`periodStart` 非月初時 400；另外實際啟動 backend 對真實 PostgreSQL 走過完整 HTTP 流程（登入、觸發批次、查詢、越權拒絕）驗證一致。既有 `npm run payment-refund-postgres:smoke`（因為改動了退款核准流程，補上撥款調整鉤子）與 `npm test` 92 項全數重跑通過（另有 3 項與此次改動無關的既有失敗，經 `git stash` 對照確認在改動前就已存在，屬本機沙盒環境缺少 SQLite 開發資料庫所致，非本次引入）。已完成一次安全審查，見 `docs/AI-security-review-log.md` 2026-09-06。**尚未驗證**：真實正式費率、真實銀行撥款、代收代付法遵定性皆刻意排除在畢業專題範圍外，見 `docs/payment-rules-and-flow.md`「尚未決定」；也還沒有商家/admin 對應的手機或後台查詢畫面，目前只有 API。
+  > 平台向顧客代收的錢，定期（每個月）結算後扣掉平台抽成，把剩下的錢記一筆「應撥給這間店多少錢」的紀錄——目前是畢業專題示範，只會在資料庫留下紀錄，不會真的把錢轉進店家的銀行帳戶。
 
 ## 訂單流程 [進行中]
 > 顧客下單之後，訂單會經過的每個階段：選飲料、修改訂單、取貨、逾期沒取怎麼處理。

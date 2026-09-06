@@ -1,6 +1,6 @@
 # 付款規則與流程
 
-最後更新：2026-08-29
+最後更新：2026-09-06
 
 本文件紀錄目前已確認的付款商業規則，作為下一階段 LINE Pay 實作依據。
 
@@ -11,6 +11,12 @@
 信用卡（綠界 ECPay）曾於 2026-08-05 新增作為第二個 provider，唯一原因是當時 LINE Pay 分離式請款官方審核進度不確定；該原因已隨核准與驗證完成而解除，ECPay 於 2026-08-27 完全移除（見 `docs/AI-security-review-log.md` 2026-08-26／2026-08-27 兩筆記錄），不再是備援選項。本文件其餘規則（預授權、截止結算才請款、折扣分攤等）維持 provider 中立的寫法，日後若要新增其他 provider 仍可套用。
 
 LINE Pay 實作與驗證進度詳見 `docs/AI-current-progress.md`「2026-08-08 LINE Pay 分離式請款 Sandbox 人工端對端驗證完成」與 `docs/line-pay-separated-capture-sandbox-checklist.md`。
+
+## 資金收付模式（平台代收 + 模擬撥款）
+
+本專案是大學畢業專題，資金收付採「平台代收」模式：整個後端只有一組 LINE Pay Channel（`backend/payments/linePayClient.js` 讀取單一 `LINE_PAY_CHANNEL_ID`／`LINE_PAY_CHANNEL_SECRET`），所有店家的請款都進同一個平台帳戶，不是每間店家各自申請、直接收款。營運方式為平台向商家收取抽成，其餘款項按月結算撥給商家。
+
+因為是畢業專題、非正式營運，撥款採**模擬撥款**：`backend/database/repositories/merchantPayoutRepository.js` 只在資料庫寫入撥款紀錄，不呼叫任何真實銀行 API。若未來要接真實金流撥款，需要另外評估「代收代付」在電子支付機構管理條例下的定性（是否需要執照、或透過已持牌服務商的多角經營／分帳服務），本文件與程式碼皆不涉及這部分。詳細規則見下方「商家撥款（模擬）」。
 
 ## 已確認規則
 
@@ -141,6 +147,21 @@ LINE Pay 實作與驗證進度詳見 `docs/AI-current-progress.md`「2026-08-08 
 7. 退款成功與失敗都必須寫入 `payment_refunds`、`payment_provider_events` 與 `audit_logs`。
 8. 第一版退款 API 先作為 admin / dev 後端操作，不先提供顧客或店家 App 操作入口。
 
+### 商家撥款（模擬）
+
+1. 撥款週期為自然月：每月 1 號 00:00（UTC）到下月 1 號 00:00（UTC）前，admin 可在該期間結束後手動觸發撥款批次（`POST /api/admin/merchant-payouts/run`）。
+2. 抽成基準是實際付款金額（`payment_captures.capture_amount`，也就是折扣後金額），不是訂單原價。
+3. 每期每店淨撥款金額 = 該期 `capture_amount` 加總 − 該期內發生的退款 − 平台抽成 − 從前期結轉的扣款，三者皆不得為負，抽成採 `floor(gross_amount × 抽成比例)`。
+4. 抽成比例由 `PLATFORM_COMMISSION_RATE_BP`（basis points，1500 = 15%）設定，是畢業專題示範用預設值，非正式費率。
+5. LINE Pay 交易手續費由平台吸收，直接算進抽成裡，不會再另外從商家撥款淨額中扣一次。
+6. 若退款發生在該筆訂單所屬期間**已經**撥款完成之後，無法再從已關閉的那一期倒扣，改記錄一筆 `merchant_payout_adjustments`，從商家未來的撥款中依序（先發生的先扣）扣回，扣完為止；若退款發生在該期**尚未**撥款，直接在該期計算時淨額扣除，不產生額外紀錄。
+7. 每期每店的撥款只計算與寫入一次（`merchant_payouts` 以 `(store_id, period_start, period_end)` 唯一鍵防止重複），重複觸發批次視為冪等、不重算不重複建立。
+8. 撥款是**模擬**：只寫入資料庫紀錄，不呼叫任何真實銀行轉帳 API，畫面與文件皆須清楚標示「模擬撥款」。
+9. 每次撥款計算與扣款結轉都寫入 `audit_logs`，可追溯是誰、何時觸發、金額如何組成。
+10. 商家只能查詢自己店的撥款紀錄（`GET /api/merchant/stores/:storeId/payouts`）；admin 可查詢全部（`GET /api/admin/merchant-payouts`）與觸發批次。
+11. 本功能只在 `MERCHANT_PAYOUT_ENABLED=true` 時啟用，且要求 `PAYMENT_CAPTURE_RUNTIME`／`PAYMENT_REFUND_RUNTIME` 均為 postgres，否則後端啟動時直接拒絕啟動；未開啟時所有撥款路由回傳 503。
+12. `backend/database/repositories/merchantPayoutRepository.js` 僅支援 PostgreSQL，沒有 SQLite 對應實作（本機開發已永久切換 PostgreSQL，這是切換後才新增的功能，不需要回頭補 SQLite 相容層）。
+
 ### 結算失敗與自動重試
 
 1. 第一版以系統自動重試為主，不做人工處理介面。
@@ -218,3 +239,4 @@ LINE Pay 實作與驗證進度詳見 `docs/AI-current-progress.md`「2026-08-08 
 
 1. void 失敗時的具體重試間隔、最大重試時間與告警方式尚未設計。
 2. Deadline settlement 已使用持久化 job 與 DB lease；兩程序 claim／lease takeover 測試已通過。PostgreSQL row-lock 驗收（8/20）與正式告警通知管道（8/24，`ALERT_WEBHOOK_URL`）皆已完成，細節見 `PROGRESS.md`。
+3. 商家撥款目前僅為畢業專題示範用的模擬撥款，正式費率（`PLATFORM_COMMISSION_RATE_BP`）、真實銀行撥款機制、「代收代付」在電子支付機構管理條例下是否需要執照或需透過持牌服務商的多角經營／分帳服務、撥款相關發票開立主體，皆尚未決定，也不在本專案範圍內處理。

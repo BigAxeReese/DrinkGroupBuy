@@ -61,7 +61,9 @@ async function createMerchantRefundRequest({ authUser, orderId, body, paymentRef
   return result;
 }
 
-async function approveRefundRequest({ authUser, requestId, body, paymentRefundRepository } = {}) {
+async function approveRefundRequest({
+  authUser, requestId, body, paymentRefundRepository, merchantPayoutRepository
+} = {}) {
   if (!authUser?.roles?.includes("admin")) {
     throw new PaymentServiceError(403, { error: "Admin role required" });
   }
@@ -110,7 +112,25 @@ async function approveRefundRequest({ authUser, requestId, body, paymentRefundRe
     ? await paymentRefundRepository.approveRefundRequest(approveInput)
     : approveRefundRequestInDatabase(approveInput);
 
-  return { refundRequest: approvedRequest, refund: refundResult };
+  // The refund itself has already succeeded at this point -- a failure here must not
+  // roll it back or fail the whole approval. It only affects whether the store's next
+  // simulated payout correctly deducts this refund; surface the failure in the response
+  // instead of hiding it so it's visible for manual follow-up.
+  let payoutAdjustment;
+  if (merchantPayoutRepository && refundResult.refund?.id && refundResult.refund?.paymentCaptureId) {
+    try {
+      payoutAdjustment = await merchantPayoutRepository.recordPostPayoutRefundAdjustment({
+        paymentRefundId: refundResult.refund.id,
+        paymentCaptureId: refundResult.refund.paymentCaptureId,
+        refundAmount: refundResult.refund.refundAmount,
+        actorUserId: authUser.id
+      });
+    } catch (error) {
+      payoutAdjustment = { error: error.message };
+    }
+  }
+
+  return { refundRequest: approvedRequest, refund: refundResult, payoutAdjustment };
 }
 
 async function rejectRefundRequest({ authUser, requestId, body, paymentRefundRepository } = {}) {

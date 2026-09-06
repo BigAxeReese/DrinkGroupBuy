@@ -603,3 +603,42 @@
 | `expo-secure-store` 的登入狀態還原會不會信任本機快取的角色/權限而繞過伺服器驗證 | 追過 `AppNavigator.js`：還原流程呼叫 `verifyAuthSession()`，用**伺服器回傳的最新 user 物件**（不是本機快取的 `session.user`）決定要導去哪個畫面；401 會清掉本機憑證，其他錯誤（例如離線）會保留憑證但停在載入畫面、不會直接放行進入任何已登入畫面 |
 
 **驗證限制**：新增 2 個 `linePayService` 自動化測試（截止前成功／截止後拒絕）與 1 個 `group-buy-settlement-repository-smoke` 測試情境（驗證未付款訂單計數正確回傳），皆為記憶體模擬、非真實資料庫；`npm test` 95/95 全過。**尚未實機驗證**：需要真的讓一個團購走到截止、底下有一筆從未付款的訂單，確認結算後它正確被標記取消並移入歷史訂單分頁；也還沒有真的在截止後嘗試發起 LINE Pay 付款、確認前端正確顯示「這個團購已經截止，無法再付款。」。
+
+---
+
+## 2026-09-06 — 商家撥款（模擬）新功能
+
+**範圍**：新檔 `backend/database/repositories/merchantPayoutRepository.js`、`backend/payments/merchantPayoutService.js`、`scripts/merchant-payout-postgres-smoke.js`、`database/migrations/007_merchant_payouts_postgres.sql`；改動 `backend/server.js`（新增三支路由、repository 建構、開機一致性檢查、`isSqliteOrderDependentRoute`／`isSettlementRouteReadyForPostgres` 白名單）、`backend/payments/refundRequestService.js`（`approveRefundRequest` 補上撥款調整鉤子）、`database/schema.sql`、`.env.example`、`package.json`
+**觸發原因**：CLAUDE.md 規則自動觸發——新功能會計算並記錄要撥給商家多少錢（雖然是模擬撥款、不呼叫真實銀行 API，但金額計算本身、退款扣回邏輯與 admin/商家權限仍屬付款/金流範圍，依規則主動跑一次
+
+### 背景（承接同一天稍早的討論）
+
+使用者是大學畢業專題，先前討論過「商家各自申請 LINE Pay」與「平台代收＋隔月撥款」兩個方向，最後拍板：維持平台代收（單一 LINE Pay Channel，`backend/payments/linePayClient.js` 本來就是這樣設計，未改動），營運方式改為平台抽成＋按自然月結算撥款給商家；因為是畢業專題非正式營運，明確要求撥款可以先做「模擬」（只寫資料庫紀錄，不呼叫真實銀行轉帳 API）。抽成基準（實際付款金額）、LINE Pay 手續費歸屬（平台吸收，從抽成裡扣）、結算週期（自然月）、撥款後才退款如何處理（從下一期扣回）四項規則皆已用 `AskUserQuestion` 逐一跟使用者確認過，不是自行假設。
+
+### 發現
+
+沒有找到信心度達到門檻（8/10 以上）的漏洞。
+
+| 面向 | 檢查結果 |
+|------|----------|
+| SQL injection | `merchantPayoutRepository.js` 全部新查詢一律用 `$1/$2...` 參數化；唯一出現 `${...}` 樣板字串的地方是 `requiredString`／`toPositiveInteger` 的 Error 訊息組字串，不是 SQL 文字，已用 grep 逐一核對過整支檔案排除字串拼接 SQL 的可能 |
+| 權限（admin 觸發批次／查詢全部） | `adminRunMerchantPayoutBatch`／`listMerchantPayoutsForAdmin` 皆檢查 `authUser.roles.includes("admin")`；已用真實 HTTP 請求驗證非 admin（`merchant` 角色）呼叫 `POST /api/admin/merchant-payouts/run` 回 403 |
+| 權限（商家查詢自己店撥款紀錄，IDOR） | `listMerchantPayoutsForStore` 檢查 `authUser.merchantStores.some((store) => store.id === storeId)`；已用真實 HTTP 請求驗證 `user-merchant-001`（管理 store-001）查詢 `store-002` 回 403、查詢自己的 `store-001` 回 200 |
+| 金額竄改 | `gross_amount`／`refund_within_period_amount` 一律從 `payment_captures`／`payment_refunds` 資料庫重新加總計算，不接受任何前端傳入金額；`commissionRateBp` 只從伺服器端 `PLATFORM_COMMISSION_RATE_BP` 環境變數讀取，`adminRunMerchantPayoutBatch` 完全沒有讀取 `body` 裡任何跟金額/費率相關的欄位，client 無法用 request body 覆寫抽成比例 |
+| 退款調整歸屬（IDOR） | `recordPostgresPostPayoutRefundAdjustment` 的 `store_id` 是從 `payment_captures → orders → group_buy_activities` JOIN 出來的權威資料，不是從呼叫方傳入，也不接受 client 指定；呼叫方（`refundRequestService.js`）傳入的 `paymentCaptureId`／`paymentRefundId` 來自剛完成、已通過既有審核流程的 `refundResult.refund` 物件（伺服器端算出來的），不是直接信任 HTTP request body |
+| 冪等性／併發 | `calculateAndRecordPostgresPayout` 用 `operation_locks`（`merchant-payout:{storeId}:{periodStart}:{periodEnd}` 鎖鍵，與既有 `settlement:activity:*`／`order:*:payment-lifecycle` 命名空間不重疊）序列化同店同期間的重跑，加上 `merchant_payouts` 的 `(store_id, period_start, period_end)` UNIQUE 約束做第二層防線；已用 smoke test 驗證重跑回傳同一筆既有紀錄、不重算不重複插入；`recordPostgresPostPayoutRefundAdjustment` 用 `payment_refund_id` 的 UNIQUE 約束＋`ON CONFLICT DO NOTHING` 防止同一筆退款被記錄成兩筆調整；消費未扣完的舊調整時對 `merchant_payout_adjustments` 下 `FOR UPDATE`，避免兩個並行批次重複扣同一筆調整 |
+| 淨額會不會算成負數（資料完整性） | `net_payout_amount` 有 `CHECK (>= 0)`；JS 端 `carriedDeductionAmount` 由 `Math.min(remainingAvailable, remainingOnAdjustment)` 逐筆累加、且每次扣完就從 `remainingAvailable` 扣除，數學上不可能超過 `availableBeforeDeduction`，已用 smoke test 的跨月結轉案例（900 可扣 200、淨額 700）實際驗證 |
+| 業務規則參數是否可被 client 繞過 | 結算週期強制自然月：`resolvePeriodStart` 檢查 `periodStart` 必須是 UTC 月初整點，否則回 400；批次觸發要求該期間已經結束（`periodEnd <= now`，`now` 來自伺服器 `businessClock`），否則回 409；皆已用 smoke test／真實 HTTP 請求驗證兩種拒絕情境 |
+| 開機一致性檢查會不會被繞過、悄悄用到不一致的 runtime | `MERCHANT_PAYOUT_ENABLED=true` 時要求 `PAYMENT_CAPTURE_RUNTIME`／`PAYMENT_REFUND_RUNTIME` 皆為 postgres，否則直接拋錯讓伺服器無法啟動；已用 `node -e "require('./backend/server.js')"` 實際驗證只設 `MERCHANT_PAYOUT_ENABLED` 未設其餘 RUNTIME 時會在啟動當下丟出明確錯誤訊息，不會帶著矛盾設定跑起來 |
+| 機密與資料外洩 | 撥款查詢 API 回傳欄位只有金額／期間／`triggeredByUserId`（admin 自己的 user id），不含顧客帳號、Firebase UID、LINE Pay provider 機密或交易序號；`merchantPayoutRepository.js` 沒有新增任何硬式編碼密鑰 |
+
+### 沒發現問題的部分（已交叉驗證）
+
+| 面向 | 檢查結果 |
+|------|----------|
+| 是否有 SQLite 路徑遺漏、造成兩個 runtime 分裂 | 這支 repository 刻意不做 SQLite 對應實作（本機開發已永久切換 PostgreSQL 後才新增的功能），`createMerchantPayoutRepository` 只有 postgres 分支；`server.js` 只在 `MERCHANT_PAYOUT_ENABLED=true` 時才建構它（避免單純 `require("./server.js")` 就因為缺少 `DATABASE_URL` 而炸掉），未啟用時變數為 `null`，所有路由與 service 函式對 `null` 都有明確的 503 處理，不會出現「以為啟用了但其實查到空 repository」的情況 |
+| `approveRefundRequest` 新增的撥款調整鉤子失敗會不會讓退款本身變成不完整或可被利用 | 鉤子在退款已經成功寫入 `payment_refunds` 之後才呼叫，用 try/catch 包住，失敗只會讓回應多一個 `payoutAdjustment: {error}` 欄位、不會讓已成功的退款被回滾或重丟例外；退款本身的金額/狀態寫入邏輯（既有程式碼）完全沒被這次改動觸碰 |
+
+**驗證方式**：`npm run merchant-payout-postgres:smoke`（新增，涵蓋上表列出的所有情境）對本機另外起的一個 scratch PostgreSQL 16（`dgb_scratch_test`，非使用者既有開發資料庫，跑完會清空自己寫入的資料並確認 0 筆殘留）重跑兩次皆通過，證明可重複執行、無殘留；額外啟動一份完整 backend（21 個 `*_RUNTIME` 全設為 postgres＋`MERCHANT_PAYOUT_ENABLED=true`）對同一個 scratch 資料庫走真實 HTTP 請求，驗證登入、觸發批次、期間未結束時 409、查詢、商家越權查詢 403、未登入 401 皆符合預期後關閉。既有 `npm run payment-refund-postgres:smoke`（因為改到 `approveRefundRequest`）與 `npm test`（92 passed）皆重新跑過確認未被這次改動影響；另有 3 項與此次改動完全無關的既有失敗（`orderRuleConsent.test.js` 內，因本機沙盒環境沒有預先建置 SQLite 開發資料庫），已用 `git stash` 切回改動前的版本重跑同一支測試檔案確認同樣失敗，證實不是這次引入的迴歸。
+
+**驗證限制**：沒有機會對接使用者自己本機真正在跑的 PostgreSQL 開發資料庫（這次全部驗證都在這個工作階段另外起的 scratch 資料庫上進行），也還沒有商家或 admin 對應的手機/後台查詢畫面（目前只有 API），因此沒有 UI 層級的人工操作驗證。
