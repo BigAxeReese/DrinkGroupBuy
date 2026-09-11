@@ -82,6 +82,29 @@ export async function loginWithFirebaseIdToken(idToken) {
   return payload;
 }
 
+// Not a login -- this only proves the applicant controls a real Google account, so it
+// deliberately does not call setAuthToken/saveAuthSession the way the login functions above do.
+export async function submitMerchantApplication(input) {
+  const response = await fetch(`${backendBaseUrl}/api/merchant-applications`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({
+      idToken: input.idToken,
+      storeName: input.storeName,
+      address: input.address,
+      contactPhone: input.contactPhone
+    })
+  });
+  const payload = await response.json();
+  if (!response.ok) {
+    const error = new Error(payload.error ?? "Merchant application failed");
+    error.status = response.status;
+    error.payload = payload;
+    throw error;
+  }
+  return payload;
+}
+
 export async function listDevAuthUsers() {
   const response = await fetch(`${backendBaseUrl}/api/auth/dev-users`);
   const payload = await response.json();

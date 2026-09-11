@@ -5,15 +5,13 @@ import { DistanceRadiusFilter } from "../components/DistanceRadiusFilter";
 import { MobileScreen, Section } from "../components/MobileScreen";
 import { DiscountSummaryCard } from "../components/DiscountSummaryCard";
 import { useDevLocationConfig } from "../hooks/useDevLocationConfig";
-import { customerUsers } from "../mock/customerUsers";
 import { calculateDistanceKm, formatDistanceKm } from "../utils/distance";
 import { getGroupBuyActivityStore } from "../utils/groupBuyActivityStores";
 import { getGroupBuyActivityProgress } from "../utils/groupBuyActivityProgress";
 
-export function NearbyGroupBuyActivitiesScreen({ navigation, appState, actions, memberAction, selectedCustomerId, selectedAuthUserId }) {
+export function NearbyGroupBuyActivitiesScreen({ navigation, appState, actions, currentUserProfile, selectedCustomerId, selectedAuthUserId }) {
   const { groupBuyActivities, orders } = appState;
   const activitySyncStatus = appState.groupBuyActivitySyncStatus ?? "idle";
-  const currentCustomer = customerUsers.find((user) => user.id === selectedCustomerId) ?? customerUsers[0];
   const [radiusKm, setRadiusKm] = useState(null);
   const { config: locationConfig } = useDevLocationConfig(selectedAuthUserId);
   const [userPosition, setUserPosition] = useState(locationConfig.fixedLocation);
@@ -89,15 +87,12 @@ export function NearbyGroupBuyActivitiesScreen({ navigation, appState, actions, 
       <View style={styles.hero}>
         <View style={styles.heroTop}>
           <View style={styles.avatar}>
-            <Text style={styles.avatarText}>{currentCustomer.avatarText}</Text>
+            <Text style={styles.avatarText}>{(currentUserProfile?.displayName || "會").slice(0, 1)}</Text>
           </View>
           <View style={styles.memberInfo}>
-            <Text style={styles.memberName}>{currentCustomer.name}</Text>
-            <Text style={styles.memberSubtitle}>{currentCustomer.subtitle}</Text>
+            <Text style={styles.memberName}>{currentUserProfile?.displayName || "顧客"}</Text>
+            <Text style={styles.memberSubtitle}>{currentUserProfile?.email || ""}</Text>
           </View>
-          <Pressable accessibilityRole="button" onPress={memberAction} style={styles.memberPill}>
-            <Text style={styles.memberPillText}>會員</Text>
-          </Pressable>
         </View>
       </View>
 
@@ -255,19 +250,6 @@ const styles = StyleSheet.create({
     fontSize: 12,
     fontWeight: "700",
     marginTop: 3
-  },
-  memberPill: {
-    minHeight: 36,
-    borderRadius: 999,
-    alignItems: "center",
-    justifyContent: "center",
-    backgroundColor: "rgba(255,255,255,0.18)",
-    paddingHorizontal: 12
-  },
-  memberPillText: {
-    color: "#ffffff",
-    fontSize: 13,
-    fontWeight: "900"
   },
   sectionHeader: {
     flexDirection: "row",

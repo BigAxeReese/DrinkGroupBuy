@@ -1,6 +1,6 @@
 import { Pressable, ScrollView, StyleSheet, Text, View } from "react-native";
 
-export function MobileScreen({ title, subtitle, children, onBack, backLabel = "返回", onMemberPress, compactHeader = false }) {
+export function MobileScreen({ title, subtitle, children, onBack, backLabel = "返回", compactHeader = false }) {
   return (
     <ScrollView contentContainerStyle={styles.content}>
       <View style={[styles.header, compactHeader && styles.compactHeader]}>
@@ -14,15 +14,6 @@ export function MobileScreen({ title, subtitle, children, onBack, backLabel = "�
               <Text style={styles.backText}>← {backLabel}</Text>
             </Pressable>
           ) : <View style={styles.topSpacer} />}
-          {onMemberPress ? (
-            <Pressable
-              accessibilityRole="button"
-              onPress={onMemberPress}
-              style={({ pressed }) => [styles.memberButton, pressed && styles.backButtonPressed]}
-            >
-              <Text style={styles.memberText}>會員</Text>
-            </Pressable>
-          ) : null}
         </View>
         {title ? <Text style={styles.title}>{title}</Text> : null}
         {subtitle ? <Text style={styles.subtitle}>{subtitle}</Text> : null}
@@ -80,20 +71,6 @@ const styles = StyleSheet.create({
   },
   backText: {
     color: "#0f172a",
-    fontSize: 13,
-    fontWeight: "900"
-  },
-  memberButton: {
-    minHeight: 38,
-    minWidth: 58,
-    borderRadius: 999,
-    alignItems: "center",
-    justifyContent: "center",
-    backgroundColor: "#1f6feb",
-    paddingHorizontal: 12
-  },
-  memberText: {
-    color: "#ffffff",
     fontSize: 13,
     fontWeight: "900"
   },

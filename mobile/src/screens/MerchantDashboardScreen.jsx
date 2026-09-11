@@ -9,7 +9,7 @@ import { StatusBadge } from "../components/StatusBadge";
 import { useOrderListSync } from "../hooks/useOrderListSync";
 import { formatCurrency, getStoreById, isWithdrawalLocked } from "../utils/calculations";
 
-export function MerchantDashboardScreen({ navigation, appState, actions, memberAction, selectedMerchantStoreId }) {
+export function MerchantDashboardScreen({ navigation, appState, actions, selectedMerchantStoreId }) {
   const [pickupCode, setPickupCode] = useState("");
   const [pickupLookup, setPickupLookup] = useState(null);
   const [pickupNotice, setPickupNotice] = useState(null);
@@ -167,9 +167,6 @@ export function MerchantDashboardScreen({ navigation, appState, actions, memberA
             <Text style={styles.storeName}>{merchantStore?.name ?? "我的店家"}</Text>
             <Text style={styles.storeSubtitle}>商家首頁</Text>
           </View>
-          <Pressable accessibilityRole="button" onPress={memberAction} style={styles.memberPill}>
-            <Text style={styles.memberPillText}>會員</Text>
-          </Pressable>
         </View>
         <View style={styles.metricRow}>
           <MetricCard label="進行中活動" value={activeGroupBuyActivities.length} />
@@ -516,19 +513,6 @@ const styles = StyleSheet.create({
     fontSize: 11,
     fontWeight: "700",
     marginTop: 3
-  },
-  memberPill: {
-    minHeight: 36,
-    borderRadius: 999,
-    alignItems: "center",
-    justifyContent: "center",
-    backgroundColor: "rgba(255,255,255,0.18)",
-    paddingHorizontal: 12
-  },
-  memberPillText: {
-    color: "#ffffff",
-    fontSize: 13,
-    fontWeight: "900"
   },
   metricRow: {
     flexDirection: "row",

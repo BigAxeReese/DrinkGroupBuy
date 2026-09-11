@@ -14,6 +14,7 @@ DrinkGroupBuy 是 Android-first 的手搖飲團購 App，讓顧客探索附近�
 - 店家：管理所屬門市菜單與團購、查看訂單、標記可取餐、核銷取餐及提出退款申請。
 - 營運／補救身份：處理退款審核、活動取消、手動結算等敏感補救操作；不是第一階段正式 App 的一般角色。
 - 正式登入方向是 Firebase Auth + Google Login。Mobile 只取得 Firebase ID token；角色與門市權限由 Backend 根據 `users`、`user_roles`、`merchant_users` 判斷，不由前端選擇。
+- 同一個一般帳號同時只啟用顧客或商家其中一種介面。管理員可在 `/admin/accounts` 切換；切換只停用另一角色及商家登入關聯，不刪除 `users`、顧客訂單／個人資料、商家、門市或歷史紀錄。首次成為商家仍需先完成商家申請審核，建立門市關聯後才能切換。
 - `AUTH_DEV_MODE`／`EXPO_PUBLIC_AUTH_MODE=dev` 的身份切換器只供本機開發，production 不得啟用。
 
 ## 核心流程

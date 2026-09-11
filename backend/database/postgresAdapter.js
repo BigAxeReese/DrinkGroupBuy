@@ -1,5 +1,7 @@
 "use strict";
 
+const { createPostgresConnectionOptions } = require("./postgresConnection");
+
 function createPostgresAdapter(input = {}) {
   const env = input.env || process.env;
   const connectionString = input.connectionString || env.DATABASE_URL;
@@ -49,15 +51,9 @@ function createPostgresAdapter(input = {}) {
 function createPool(connectionString, env) {
   const { Pool } = require("pg");
   return new Pool({
-    connectionString,
-    ssl: readBoolean(env.DATABASE_SSL, false) ? { rejectUnauthorized: false } : undefined,
+    ...createPostgresConnectionOptions({ connectionString, env }),
     max: positiveInteger(env.DATABASE_POOL_MAX, 10),
   });
-}
-
-function readBoolean(value, fallback) {
-  if (value == null || value === "") return fallback;
-  return ["1", "true", "yes", "on"].includes(String(value).toLowerCase());
 }
 
 function positiveInteger(value, fallback) {

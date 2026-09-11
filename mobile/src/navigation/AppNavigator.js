@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import * as Location from "expo-location";
-import { ActivityIndicator, AppState, BackHandler, Linking, View, StyleSheet } from "react-native";
+import * as Updates from "expo-updates";
+import { ActivityIndicator, Alert, AppState, BackHandler, Linking, View, StyleSheet } from "react-native";
 import { BottomNav } from "../components/BottomNav";
 import { orders as initialOrders } from "../mock/orders";
 import { paymentAuthorizations as initialPaymentAuthorizations } from "../mock/paymentAuthorizations";
@@ -15,6 +16,7 @@ import { MerchantGroupBuyActivityCreateScreen } from "../screens/MerchantGroupBu
 import { MerchantDashboardScreen } from "../screens/MerchantDashboardScreen";
 import { MerchantMenuManagementScreen } from "../screens/MerchantMenuManagementScreen";
 import { MerchantRefundRequestsScreen } from "../screens/MerchantRefundRequestsScreen";
+import { MerchantApplyScreen } from "../screens/MerchantApplyScreen";
 import { CustomerPlaceholderScreen } from "../screens/CustomerPlaceholderScreen";
 import { ProfileScreen } from "../screens/ProfileScreen";
 import { CustomerOrdersScreen } from "../screens/CustomerOrdersScreen";
@@ -380,6 +382,36 @@ export function AppNavigator() {
   const [storageLoaded, setStorageLoaded] = useState(false);
   const handledDeepLinkRef = useRef(null);
   const current = stack[stack.length - 1];
+
+  useEffect(() => {
+    // Updates.isEnabled is false on web and in dev/Expo Go builds -- nothing to check there.
+    if (!Updates.isEnabled) return;
+    Updates.checkForUpdateAsync()
+      .then((result) => {
+        if (!result.isAvailable) return;
+        Alert.alert(
+          "有新版本可用",
+          "偵測到新版本，是否要立即更新？",
+          [
+            { text: "稍後", style: "cancel" },
+            {
+              text: "立即更新",
+              onPress: () => {
+                Updates.fetchUpdateAsync()
+                  .then(() => Updates.reloadAsync())
+                  .catch((error) => {
+                    Alert.alert("更新失敗", error.message || "請稍後再試一次。");
+                  });
+              }
+            }
+          ]
+        );
+      })
+      .catch(() => {
+        // No network, or the check itself failed -- the app still works fine on the bundle
+        // it already has, so this stays silent rather than nagging the user about it.
+      });
+  }, []);
 
   useEffect(() => {
     clearPrototypeStateOnce("2026-07-29-clear-all-group-buys-orders-cart");
@@ -1315,6 +1347,7 @@ export function AppNavigator() {
       <DevBusinessTimeBanner businessTime={businessTime} />
       <View style={styles.screen}>
         {current.name === "roleSelect" && <RoleSelectScreen {...screenProps} />}
+        {current.name === "merchantApply" && <MerchantApplyScreen {...screenProps} />}
         {current.name === "nearby" && <NearbyGroupBuyActivitiesScreen {...screenProps} />}
         {current.name === "liveMap" && <LiveMapScreen {...screenProps} />}
         {current.name === "storeMenu" && <StoreMenuScreen {...screenProps} />}
@@ -1333,7 +1366,7 @@ export function AppNavigator() {
         {current.name === "customerOrders" && <CustomerOrdersScreen {...screenProps} />}
         {current.name === "profile" && <ProfileScreen {...screenProps} />}
       </View>
-      {current.name !== "roleSelect" ? (
+      {current.name !== "roleSelect" && current.name !== "merchantApply" ? (
         <BottomNav
           current={current.name}
           currentParams={current.params}

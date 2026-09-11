@@ -382,6 +382,8 @@ PostgreSQL 遷移後，以下流程需要 transaction：
 
 ## 2026-08-20 正式環境部署與真實資料起始方案
 
+> 2026-09-10 補充：以下「自架伺服器」是當時確認的 **production 正式營運方案**。目前新增的課堂展示環境改採 Azure App Service ＋ Azure Database for PostgreSQL Flexible Server；展示環境不取代 production 決策，也不開啟真金流。Azure 展示步驟見 `docs/azure-classroom-deployment.md`。
+
 決策（已與使用者確認）：
 
 1. **正式環境 PostgreSQL 主機**：自架伺服器（不是代管服務）。代管服務（Supabase/Neon/Railway 這類）原本可以把備份/還原變成內建功能；自架代表備份、監控、資安更新、故障復原都要自己顧，以下方案是基於這個前提設計。

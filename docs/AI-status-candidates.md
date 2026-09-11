@@ -168,6 +168,25 @@ pending -> approved
 
 需要 audit log：是，`refund_request_created`／`refund_request_approved`／`refund_request_rejected` 皆寫入 `audit_logs`。
 
+## 商家申請
+
+狀態值：`pending`、`approved`、`rejected`。此為 `merchant_applications` 資料表狀態，是這個專案第一個「執行期間會建立商家資料」的狀態機（其餘商家帳號都是一次性 seed SQL 建立的）。
+
+| 系統狀態   | 說明 |
+| ---------- | ---- |
+| `pending`  | 申請人已完成 Google 身份驗證並送出店家資料，等待管理員審核。同一個 Firebase UID 同時只允許一筆 `pending` 申請。 |
+| `approved` | 管理員已核准；同一個交易裡建立（或重用既有的）`users`、新增 `merchants`／`stores`／`merchant_users`／`user_roles`（role='merchant'）。`resulting_merchant_id`／`resulting_store_id`／`resulting_user_id` 指向新建立的資料。 |
+| `rejected` | 管理員駁回，不建立任何商家資料；`rejection_reason` 保存駁回原因。 |
+
+預期流程：
+
+```text
+pending -> approved
+      \--> rejected
+```
+
+需要 audit log：是，`merchant_application_submitted`／`merchant_application_approved`／`merchant_application_rejected` 皆寫入 `audit_logs`。
+
 ## 舊候選：商家接單
 
 狀態值：`pending`、`accepted`、`rejected`、`cancelled`。

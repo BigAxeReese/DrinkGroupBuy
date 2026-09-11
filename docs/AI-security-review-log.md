@@ -603,3 +603,196 @@
 | `expo-secure-store` 的登入狀態還原會不會信任本機快取的角色/權限而繞過伺服器驗證 | 追過 `AppNavigator.js`：還原流程呼叫 `verifyAuthSession()`，用**伺服器回傳的最新 user 物件**（不是本機快取的 `session.user`）決定要導去哪個畫面；401 會清掉本機憑證，其他錯誤（例如離線）會保留憑證但停在載入畫面、不會直接放行進入任何已登入畫面 |
 
 **驗證限制**：新增 2 個 `linePayService` 自動化測試（截止前成功／截止後拒絕）與 1 個 `group-buy-settlement-repository-smoke` 測試情境（驗證未付款訂單計數正確回傳），皆為記憶體模擬、非真實資料庫；`npm test` 95/95 全過。**尚未實機驗證**：需要真的讓一個團購走到截止、底下有一筆從未付款的訂單，確認結算後它正確被標記取消並移入歷史訂單分頁；也還沒有真的在截止後嘗試發起 LINE Pay 付款、確認前端正確顯示「這個團購已經截止，無法再付款。」。
+
+---
+
+## 2026-09-10 — 商家自助申請＋管理員審核（新功能）
+
+**範圍**：新功能，完全不碰金流／LINE Pay 程式碼。`database/migrations/007_merchant_applications_postgres.sql`（新）、`backend/database/repositories/merchantApplicationRepository.js`（新）、`backend/merchants/merchantApplicationService.js`（新）、`mobile/src/screens/MerchantApplyScreen.jsx`（新），以及 `backend/server.js`（新增 `POST /api/merchant-applications`、`/admin/merchant-applications` 三支路由與對應 HTML 渲染）、`mobile/src/utils/apiClient.js`、`mobile/src/screens/RoleSelectScreen.jsx`、`mobile/src/navigation/AppNavigator.js` 的相關新增段落。
+**觸發原因**：CLAUDE.md 規則自動觸發——這次改動雖然不是金流，但新增了「執行期間第一次會建立 `users` 資料列」這個 auth 相關的新路徑，比照高風險規則主動跑一次複查。
+**方法**：獨立 subagent 讀完 4 個新檔案全文＋`server.js`／`apiClient.js`／`RoleSelectScreen.jsx`／`AppNavigator.js` 的新增段落＋`backend/firebaseAuth.js` 全文，追過從公開申請端點到核准交易的完整呼叫路徑，比對既有 `refund_requests` 審核模式的授權/CSRF/交易鎖定慣例。
+
+### 發現
+
+沒有找到信心度達到門檻（8/10 以上）的漏洞。
+
+### 沒發現問題的部分（已交叉驗證）
+
+| 面向 | 檢查結果 |
+|------|----------|
+| SQL injection | `merchantApplicationRepository.js` 所有查詢（含新增的 `create`／`approve`／`reject`／`list`／audit）都用 `$1...$n` 參數化，包含管理員填寫的緯度／經度／駁回原因，沒有字串拼接 SQL |
+| 身份能不能被偽造，用別人的 Google 帳號送出申請 | `applicantFirebaseUid`／`applicantEmail`／`applicantDisplayName` 只取自 `verifyFirebaseIdToken`（真的呼叫 Firebase Admin SDK 驗證簽章/audience/expiry）解出來的 claims，從來不讀 request body；這條路徑沒有 `AUTH_DEV_MODE` 或任何後門繞過 |
+| 核准／駁回能不能被非管理員呼叫 | 三支 `/admin/merchant-applications*` 路由都先過既有的 `requireAdminWebUser`（cookie session）＋ CSRF 驗證，service 層又重複檢查一次 `authUser.roles.includes("admin")` |
+| 有沒有辦法讓申請流程拿到 admin 角色、或接到別人已經在用的商家／門市 | 核准交易一律用申請本身的 `store_name`／`address`／`contact_phone` 建新的 `merchants`／`stores`，`user_roles` 寫死 `role = 'merchant'`，整條路徑沒有任何欄位可以讓申請人或管理員指定角色或接到既有店家 |
+| 資料外洩／XSS | 送出申請的回應與「已有待審申請」的 409 錯誤都只回傳申請人自己的資料；後台清單／卡片渲染申請人填寫的所有欄位（店名、地址、電話、Email、顯示名稱、駁回原因）都有經過既有 `escapeHtml` |
+| 核准交易中途失敗（例如申請人其實已經是別間店的商家）會不會留下孤兒 `merchants`／`stores` 資料 | `FOR UPDATE` 鎖列＋`WHERE status='pending'` 擋掉重複核准；`merchant_users.user_id` UNIQUE 撞到時，整個 Postgres transaction 因為那個失敗的 INSERT 進入 aborted 狀態，外層 `transaction()` 直接變成 rollback，同一次嘗試裡已經送出的 `merchants`／`stores` INSERT 不會被 commit——已經用真實 Postgres 實際觸發這個情境驗證過（見下方驗證紀錄），確認沒有孤兒資料 |
+
+### 驗證紀錄（真實執行，非記憶體模擬）
+
+對本機真實 PostgreSQL 執行 `merchantApplicationRepository` 全部四個函式（不透過 HTTP，因為沒有真實 Firebase ID token 可用）：申請成功、同一 Firebase UID 重複送出待審申請被 partial unique index 正確擋下、核准後 `users`／`merchants`／`stores`／`merchant_users`／`user_roles`／`audit_logs` 皆正確各自新增一筆、重複核准正確 no-op、駁回路徑正確、已是商家的帳號再次核准正確觸發 `applicant_already_merchant` 且整個 transaction 正確 rollback（查證沒有孤兒 `merchants` 資料列）。另外透過瀏覽器實際登入 `/admin` 後台，完整跑過 `/admin/merchant-applications` 頁面渲染與核准表單的真實 HTTP 送出，並個別驗證兩個既有防護機制在新路由上仍然有效：沒有 session 存取回 302 到登入頁、有 session 但 CSRF token 錯誤回 403。過程中發現並修正一個真實 bug（不是安全漏洞，是 UX 問題）：`merchantApplicationService.js` 的錯誤物件屬性展開順序寫反，導致給管理員看的錯誤訊息被原始錯誤代碼蓋掉，已修正並重新驗證。測試資料驗證後已從資料庫清除。`npm test` 99/99 全過（未受影響）。
+
+**驗證限制**：完全沒辦法在這個環境模擬真實 Google 帳號登入，所以「申請人真的用手機 App 走完 Google 登入 → 填表 → 送出」這條路徑本身，以及核准後「這個 Google 帳號真的能重新登入看到自己的商家後台」這一步，都只驗證到「後端邏輯層」，沒有做到真正的手機端對端測試。
+
+---
+
+## 2026-09-11 — Firebase 首次登入自動註冊為顧客 ＋ 商家核准角色轉換
+
+**範圍**：`backend/database/repositories/customerRegistrationRepository.js`（新）、`backend/server.js`（`/api/auth/firebase-session` 的未對應 UID 分支，改成呼叫新 repository 而非直接回 403；新增 `deriveDisplayNameFromFirebaseUser` helper）、`backend/database/repositories/merchantApplicationRepository.js`（`approveApplicationPostgres` 新增「核准商家時，若這個帳號已有啟用中的顧客角色，一併停用」的角色轉換邏輯）、`mobile/src/screens/RoleSelectScreen.jsx`（按鈕文案、錯誤訊息對應）。
+**觸發原因**：AGENTS.md 規則自動觸發——這是這個專案第一個「一般使用者自己登入就會被寫進 `users` 資料表」的路徑（先前所有帳號都是一次性 SQL seed，商家申請雖然也會寫入但需要走管理員審核）；同時延伸並修改了 2026-09-10 那筆已審查過的商家審核交易邏輯，呼應該筆記錄，一併確認角色轉換有沒有引入新問題。
+**方法**：讀完新檔案全文＋`server.js`／`merchantApplicationRepository.js` 修改段落；追過從 Firebase token 驗證到寫入 `users`／`user_roles` 的完整交易路徑；針對「身份能否被偽造」「併發首次登入」「Email／UID 衝突」「停用帳號」「顧客轉商家角色轉換」逐一用真實本機 PostgreSQL 執行驗證（見下方）。
+
+### 發現
+
+沒有找到信心度達到門檻（8/10 以上）的漏洞。
+
+### 沒發現問題的部分
+
+| 面向 | 檢查結果 |
+|------|----------|
+| 身份能不能被偽造 | `firebaseUid`／`email`／`displayName` 只取自 `verifyFirebaseIdToken()`（真的驗證 Firebase 簽章／audience／expiry）解出來的 claims，從來不讀 request body；`deriveDisplayNameFromFirebaseUser` 的 fallback（email 前綴或「Google 使用者」）也只用驗證過 token 裡的欄位，沒有外部輸入 |
+| 能不能自己拿到 merchant／admin | 新帳號一律寫死 `role='customer'`，沒有任何欄位讓 client 指定角色；核准商家時的角色轉換邏輯只在既有 `approveApplicationPostgres`（本身已受 `requireAdminWebUser`＋CSRF＋service 層 `roles.includes("admin")` 三重保護）內觸發，client 端無法直接觸發角色轉換 |
+| SQL injection | 新 repository 全部查詢用 `$1...$n` 參數化；新增的 `UPDATE user_roles SET status='disabled' WHERE user_id=$1 AND role='customer' AND status='active'` 同樣參數化，沒有字串拼接 |
+| 併發首次登入 | 靠 `users.firebase_uid` 既有 UNIQUE 約束擋，不是另外自己實作鎖；兩個同時的首次登入其中一個會撞 `23505`（constraint 名稱已對真實資料庫查證為 `users_firebase_uid_key`），撞到的那個會回頭讀出贏家的 userId，不會建出兩筆帳號 |
+| Email 衝突時是否會誤連結或覆蓋既有帳號 | 不同 Firebase UID 但 email 撞到既有帳號（`users_email_key` 23505）一律回傳 `email_already_registered` 並且不建立任何新資料列，不嘗試自動連結、也不覆蓋既有那筆 |
+| disabled／deleted 帳號是否會被重新啟用 | 查找已對應的 `firebase_uid` 時刻意不加 `status='active'` 條件（跟既有 `authProfileReadRepository` 的查詢刻意不同），抓到非 active 帳號一律回傳 `account_disabled`，不會被自動改回 active、也不會另外建一筆新帳號 |
+| 顧客轉商家的角色轉換會不會被濫用 | 轉換只發生在既有、已受保護的 `approveApplicationPostgres` 交易內部，不是另開一個獨立可被呼叫的端點；只把 `customer` 角色的 `status` 改成 disabled，不刪除 `user_roles` 資料列本身，也不動 `users` 資料列，訂單／稽核歷史不受影響 |
+| 資料外洩 | 兩個新的錯誤回應（`account_disabled`／`email_already_registered`）都不包含其他帳號的任何欄位（email、user id、display name 都不回傳），只回傳固定的英文錯誤訊息 |
+
+### 驗證紀錄（真實執行，非記憶體模擬）
+
+對本機真實 PostgreSQL 直接執行 `customerRegistrationRepository`（不透過 HTTP，因為沒有真實 Firebase ID token 可用）：全新 UID 正確建立 `users`＋`user_roles(customer)` 兩筆資料；同一 UID 重複呼叫正確回傳同一個 userId、沒有建出重複資料列；模擬兩個同時的首次登入（平行呼叫）正確收斂成同一個 userId、資料庫只留一筆；不同 UID 但同 email 正確回傳 `email_already_registered` 且沒有建立新資料列；把一筆帳號標記 `disabled` 後重新呼叫正確回傳 `account_disabled`。另外完整跑過「顧客自動註冊 → 用同一個 Firebase UID 送出商家申請 → 管理員核准」全流程，核准後直接查資料庫確認：這個帳號的 `customer` 角色被停用（`status='disabled'`）、`merchant` 角色啟用，並透過真正的 `authProfileReadRepository.getByFirebaseUid()`（`/api/auth/firebase-session` 實際會呼叫的同一支函式）確認回傳的角色只剩 `["merchant"]`，不會兩個角色並存。測試資料驗證後已從資料庫清除（先刪 `audit_logs`／`merchant_applications`，再刪 `stores`／`merchants`，最後刪 `users`，確認零殘留）。`npm test` 99/99 全過，`check:sql-safety` 通過。
+
+**驗證限制**：跟 2026-09-10 那筆一樣，這個環境完全沒辦法模擬真實 Google 帳號登入，所以「使用者真的用手機 App 走完 Google 登入 → 後端自動建立顧客帳號 → 正常使用」這條路徑，只驗證到後端邏輯層與資料庫交易本身，沒有做到真正的手機端對端測試；`/api/auth/firebase-session` 這支路由本身的 HTTP 層（包含 `verifyFirebaseIdToken` 真的解析一個有效 token 之後接上這次新增的分支）也還沒有實際發過真的 HTTP request 驗證，只驗證了它呼叫的 repository 邏輯。
+
+---
+
+## 2026-09-11（同日追加）— 管理員可逆切換顧客／商家角色並保留資料
+
+**範圍**：`backend/accounts/adminAccountRoleService.js`、`backend/database/repositories/adminAccountRoleRepository.js`（新），`backend/server.js`（新增 `/admin/accounts` 清單與角色切換表單），以及對應測試與產品／架構文件。
+**觸發原因**：AGENTS.md 規則自動觸發——這次新增管理員可直接改變帳號有效權限的 auth／authorization 路徑；同時呼應上方 2026-09-11「Firebase 首次登入自動註冊為顧客＋商家核准角色轉換」那筆，確認可逆切換不會破壞既有身份、商家連結或歷史資料。
+**方法**：讀完整新 service／repository／測試與 `server.js` 路由、表單渲染；追過 `getUserFromToken`、`authProfileReadRepository`、手機端 `getRouteForUser` 與 session restore；檢查管理員授權、CSRF、輸入驗證、SQL、XSS、併發交易、資料保留、稽核與秘密外洩。
+
+### 發現
+
+沒有找到信心度達到門檻（8/10 以上）的漏洞。
+
+### 沒發現問題的部分
+
+| 面向 | 檢查結果 |
+|------|----------|
+| 非管理員能否切換角色 | GET／POST 路由都先經過既有 `requireAdminWebUser`；service 再檢查一次資料庫重新解析出的 `authUser.roles` 必須包含 `admin`。POST 另外使用既有 `readCsrfVerifiedAdminFormBody` 驗證 CSRF，本機 HTTP 實測偽造 token 回 403。 |
+| 能否把帳號升成 admin 或修改 admin 帳號 | `targetRole` 白名單只接受 `customer`／`merchant`；後台清單排除任何曾有 `admin` 角色的帳號，repository 在交易內鎖定並再次檢查目標帳號的全部角色，發現 `admin` 就拒絕，避免直接偽造 POST 繞過畫面限制。 |
+| 切成商家後是否可能沒有可管理門市 | 啟用 merchant 前必須已有 `merchant_users`→`stores`→`merchants` 關聯且商家主體為 active；一般顧客仍需先走商家申請審核，不能只靠角色切換取得一個無法使用的商家身份。 |
+| 資料是否真的保留 | 角色切換只 upsert／update `user_roles.status` 與 `merchant_users.status`，完整查詢與測試確認沒有 `DELETE`；不更新 `users` 身份欄位，也不碰顧客訂單、個人資料、商家、門市或歷史紀錄。切回原角色時重啟既有資料列與門市連結。 |
+| 同時切換是否可能留下雙重角色 | 目標 `users` 與 `user_roles` 都在同一個 PostgreSQL transaction 內 `FOR UPDATE` 鎖定；啟用目標角色後再停用另一個 customer／merchant 角色，交易提交前不會暴露半套狀態。重複切到已生效角色為 idempotent no-op，不重複寫稽核紀錄。 |
+| 舊 session 是否還能繼續使用被撤銷的 API 權限 | `getUserFromToken` 驗證 token 後會依 `sub` 呼叫 `authProfileReadRepository.getById()`，每次請求都重新讀取 active `user_roles`／`merchant_users`，不信任 token 內舊角色；因此後端撤銷立即生效。手機目前在登出重登或完全關閉後重開的 session restore 才重新路由到新介面，僅從背景切回前景不保證立刻換畫面，但舊介面的受保護 API 已無法通過。 |
+| SQL injection／XSS／資料外洩 | 搜尋、userId、角色及稽核資料全部使用 PostgreSQL 綁定參數；後台輸出的姓名、Email、ID、店名、通知與 CSRF 都經既有 `escapeHtml`，路徑 ID 經 `encodeURIComponent`。帳號清單只在已驗證管理員頁面顯示，沒有新增公開查詢端點。 |
+| 可追溯性與秘密 | 每次有效變更在同一交易寫入 `admin_account_role_changed`，含操作管理員、目標帳號、先前角色與目標角色；聚焦秘密掃描沒有在這批 feature 檔案發現密碼、資料庫連線字串、Firebase 私鑰或 session secret。 |
+
+### 驗證紀錄與限制
+
+新增 11 個 service／repository 自動化測試，涵蓋非管理員拒絕、角色白名單、admin 保護、商家資料必要條件、顧客→商家、商家→顧客、無 DELETE、角色互斥、稽核、idempotency 與搜尋輸入；完整 `npm test` 115/115 通過，`check:sql-safety` 通過，`node --check` 與 `git diff --check` 通過。本機 HTTP smoke 以現有管理員登入驗證 `/admin/accounts` 回 200、未登入導向登入頁、偽造 CSRF 的 POST 回 403。
+
+為避免未經同意修改現有資料，本次沒有對真實 PostgreSQL 帳號執行有效角色切換；也尚未部署到 Azure 或完成 Android 真機「顧客→商家→顧客」端對端驗證。因此目前可確認的是本機程式切片、權限邊界與 HTTP 守門，不能宣稱正式環境已上線。
+
+---
+
+## 2026-09-11（第二次追加）— 後台顯示全部已註冊帳號
+
+**範圍**：`backend/database/repositories/adminAccountRoleRepository.js`、對應測試與 `backend/server.js` 的帳號清單渲染。
+**觸發原因**：使用者要求管理後台看得到所有已註冊帳號，因此清單從原本排除 admin／deleted，改成顯示 `users` 中仍保留的全部帳號。這會擴大管理員頁面可見的個人資料範圍，且涉及管理員帳號保護，所以接續上一筆角色切換審查再做一次聚焦複查。
+
+### 發現與檢查結果
+
+沒有找到信心度達到門檻（8/10 以上）的漏洞。帳號清單仍只能通過 `requireAdminWebUser` 的管理員讀取，沒有新增 Mobile 或公開 API；搜尋仍使用 PostgreSQL 綁定參數，姓名、Email、ID、狀態與店名仍經 `escapeHtml`。admin 與非 active 帳號在 UI 禁用切換按鈕，但安全性不依賴按鈕：POST 路由仍有 session＋CSRF，service 仍要求 admin，repository 仍在交易鎖內拒絕任何具有 admin 角色或非 active 的目標帳號。這批修改沒有新增秘密或將帳號清單送往外部服務。
+
+**驗證限制**：自動化測試已改為確認 active、admin、deleted 三類帳號都能被映射，admin 會帶 `protectedAdmin=true`，同時確認 SQL 不再包含舊的排除條件；實際 Azure 後台尚未部署，沒有用正式帳號清單做畫面端對端驗證。
+
+---
+
+## 2026-09-11（第三次追加）— `/admin/login` 登入失敗鎖定機制
+
+**範圍**：`backend/server.js` 新增的 `adminLoginAttemptsByIp`、`getAdminLoginClientIp`、`getAdminLoginLockoutRemainingMs`、`recordAdminLoginFailure`、`clearAdminLoginFailures`，以及 `GET`/`POST /admin/login` 兩個既有路由的修改。
+**觸發原因**：使用者主動要求「登入失敗幾次就先鎖一段時間」，防止 `/admin/login` 被暴力猜密碼；這是新增的 auth 相關程式碼，依規則主動觸發複查。
+
+### 發現
+
+沒有找到信心度達到門檻（8/10 以上）的漏洞，但有兩個刻意接受的設計限制記錄如下（不是漏洞，是這次做法本身的已知取捨）。
+
+### 沒發現問題的部分
+
+| 面向 | 檢查結果 |
+|------|----------|
+| 繞過鎖定拿到有效 session | 鎖定檢查在密碼比對之前執行；鎖定中即使密碼正確也一律回 429，不會核發 token，已用真實 HTTP 請求驗證（見下方） |
+| SQL injection／資料寫入 | 這次改動完全是記憶體內計數（`Map`），沒有新增或修改任何 SQL 查詢 |
+| 資料外洩 | 鎖定訊息只顯示「還要等幾分鐘」，不透露輸入過的密碼、不透露是否有帳號存在（本來就只有單一組共用密碼，沒有帳號枚舉問題） |
+| 時間側錄攻擊 | 鎖定判斷在密碼比對之前直接短路，不會執行 `verifyAdminWebPassword`；由於回應狀態碼本身就已經直接告知「目前鎖定中」，短路提早返回不會比現有的 429 狀態碼洩漏更多資訊 |
+| 記憶體用量 | 一次只鍵值化少量課堂帳號的 IP，過期紀錄只在同一個 IP 下次查詢時順手清除，沒有主動清除迴圈；對這個規模的課堂展示是合理取捨，重啟後全部歸零 |
+
+### 刻意接受的限制（不是漏洞，是設計取捨）
+
+1. **鎖定用 `X-Forwarded-For` 標頭第一段判斷來源 IP**：這個值在沒有受信任反向代理的情況下可以被 client 偽造，任何人只要每次都夾帶不同的假 IP 就能繞過鎖定。Azure App Service 的前端閘道會如實附上真實來源 IP 且外部連線無法繞過閘道直連後端，所以在**這次要部署的 Azure 環境**下可信；但如果之後把這支程式改到沒有這種受信任代理的環境（例如直接把本機開發伺服器暴露到公網），這個防護會失效，需要重新評估。
+2. **同一個 IP 下的鎖定是共用的**：如果多個人（例如同一個學校 Wi-Fi NAT 出去是同一個公用 IP）共用一個對外 IP，其中一人惡意或不小心連續打錯密碼，會連帶鎖到同一個 IP 底下的其他人（包含真正的管理員）15 分鐘。這是這次選擇「用 IP 當 key」這個最簡單做法的已知代價，課堂規模下影響有限，之後如果真的造成困擾，可以考慮改成更細緻的 key（例如 IP + 裝置指紋）。
+
+### 驗證紀錄（真實執行，非記憶體模擬）
+
+啟動本機真實 backend，對 `/admin/login` 直接發真實 HTTP 請求驗證：全新狀態下第一次錯誤密碼正確回 302；連續 5 次錯誤後，第 6 次起正確回 429 且 `GET /admin/login` 頁面正確顯示「登入失敗次數過多，請於 15 分鐘後再試」；鎖定期間即使送出正確密碼也正確被擋在 429、沒有核發 token 或設定 session cookie。`npm test` 115/115 全過（未受影響），`node --check` 通過。
+
+**驗證限制**：沒有實際等滿 15 分鐘驗證鎖定會自動解除，這段是靠讀程式碼確認時間戳比較邏輯正確（`lockedUntil - Date.now()`），不是實際跑滿時間看到解鎖；也還沒有部署到 Azure 用真實 `X-Forwarded-For` 情境驗證。
+
+---
+
+## 2026-09-11（第四次追加）— Azure 課堂展示環境開啟金流相關排程與 LINE Pay sandbox
+
+**範圍**：不是程式碼改動，是 Azure App Service 環境變數設定——開啟 `SETTLEMENT_SCHEDULER_ENABLED`、`PAYMENT_RECONCILIATION_ENABLED`、`PAYMENT_RECONCILIATION_ALLOW_PRODUCTION`、`PICKUP_EXPIRATION_SCHEDULER_ENABLED`，並補上 LINE Pay sandbox 憑證（`LINE_PAY_CHANNEL_ID`／`LINE_PAY_CHANNEL_SECRET`／`LINE_PAY_MERCHANT_ID`／`LINE_PAY_CURRENCY`）與指向 Azure 網址的 `LINE_PAY_CONFIRM_URL`／`LINE_PAY_CANCEL_URL`。
+**觸發原因**：使用者要求課堂展示環境的開團、下單、付款成功／失敗、時間到期結算，都要跟正式版行為一致，不要因為展示環境而跳過真正的流程；這是金流相關基礎設施改動，依規則主動觸發複查。
+
+### 發現
+
+沒有找到信心度達到門檻（8/10 以上）的漏洞。
+
+### 沒發現問題的部分
+
+| 面向 | 檢查結果 |
+|------|----------|
+| 有沒有不小心開到正式金流 | 逐一讀過三個 production guard 的實際判斷條件（不是憑印象）：`SETTLEMENT_SCHEDULER_ALLOW_PRODUCTION`／`PAYMENT_CAPTURE_RUNTIME_ALLOW_PRODUCTION` 只在 `LINE_PAY_ENV === "production"` 時才有作用，這次維持 `LINE_PAY_ENV=sandbox` 不受影響；`PAYMENT_RECONCILIATION_ALLOW_PRODUCTION` 判斷的是 `NODE_ENV === "production"`（跟金流環境無關），Azure 本來就是 `NODE_ENV=production`，所以這個要設成 `true` 排程才會啟動，這點已經對照 `backend/payments/reliabilityService.js` 原始碼確認 |
+| LINE Pay 憑證是否為正式帳密 | `LINE_PAY_API_BASE_URL=https://sandbox-api-pay.line.me`，channel ID／secret 是 LINE Pay 官方提供的測試用 sandbox 憑證（跟本機開發用的是同一組），不是正式商家帳號，這組憑證能處理的請款都是 LINE Pay 自己認定的測試交易，不會動到真實金錢 |
+| 回呼網址是否正確 | `LINE_PAY_CONFIRM_URL`／`LINE_PAY_CANCEL_URL` 改成 Azure App Service 自己的 HTTPS 網址加上既有的 `/api/payments/line-pay/confirm`／`/api/payments/line-pay/cancel` 路徑，跟 `backend/server.js` 裡實際註冊的路由逐字核對過一致 |
+| 機密外洩 | 這幾個值透過 `az webapp config appsettings set` 指令直接設定，Azure CLI 本身在列出設定時會把值遮蔽成 `null`，沒有印出明文；channel secret 這類值只在使用者自己的 Cloud Shell 裡出現過 |
+
+### 驗證紀錄
+
+`az webapp config appsettings set` 執行後回傳完整設定清單，確認所有新增／修改的變數名稱都正確存在；套用後 App Service 自動重啟，`GET /health` 確認伺服器恢復正常回應。
+
+**驗證限制**：這次只驗證了「設定值正確寫入、伺服器沒有掛掉」，還沒有實際走一次「開團 → 下單 → LINE Pay sandbox 預授權 → 截止結算 → 請款」的完整流程驗證這些排程真的照預期運作；也還沒有實際觸發過一次「付款失敗」情境確認對帳排程正確處理。這些真實流程驗證留待使用者實際操作測試時一併確認。
+
+---
+
+## 2026-09-11（第五次追加）— `/admin` 本機一鍵登入 ＋ 每人獨立信箱密碼登入（Firebase）＋ 授予管理員角色腳本
+
+**範圍**：`backend/server.js`（`GET`/`POST /admin/login`、新增 `POST /admin/login/local-dev`、新增 `POST /admin/login/firebase`、`renderAdminLoginPage`、`resolveAdminWebSessionCookie`）、`backend/firebaseAuth.js`（新增匯出 `getFirebaseAuth`）、新檔案 `scripts/grant-admin-role.js`、`.env.example`（新增 `FIREBASE_WEB_*`）、`package.json`（新增 `admin-role:grant` script）。
+**觸發原因**：使用者要求（1）本機開發測試 `/admin` 不用每次輸入密碼；（2）讓管理員可以各自用自己的信箱＋密碼登入（不綁個人 Google 帳號），取代目前唯一一組共用密碼；兩者都是新增／修改的 auth 程式碼，依規則主動觸發複查。呼應上方「2026-09-11（第三次追加）— `/admin/login` 登入失敗鎖定機制」那筆：這次新增的兩個登入路徑（本機一鍵登入、Firebase 信箱登入）都重用同一套 `adminLoginAttemptsByIp` 鎖定機制，確認沒有繞過鎖定的新路徑。
+
+### 發現
+
+| 嚴重度 | 位置 | 問題 | 建議修法 | 狀態 |
+|--------|------|------|----------|------|
+| 中 | `backend/server.js`，`GET /admin/login` | 初版把本機一鍵登入寫成「符合本機＋開發模式條件時，單純 `GET /admin/login` 就自動核發 session」——`GET` 有side effect，任何被動載入的跨來源資源（`<img>`、背景 `fetch`）都能在開發者不知情下觸發，讓瀏覽器被強制登入，擴大了先前只有 `/dev-console`（調時間／模擬定位）才有的本機攻擊面 | 改成一顆需要真人點擊的按鈕，透過**同源** `fetch` POST 到新端點 `POST /admin/login/local-dev` 才核發 session；跨來源頁面无法從外部腳本觸發同源頁面裡的按鈕點擊，Same-Origin Policy 本身就擋掉了 | 已修（本次審查中直接修正，不是留給下次） |
+
+### 沒發現問題的部分
+
+| 面向 | 檢查結果 |
+|------|----------|
+| 自助登入是否能直接拿到管理員權限 | `POST /admin/login/firebase` 對「找不到對應帳號」的情況，重用既有 `customerRegistrationRepository.resolveOrRegisterCustomer`（與手機端 `/api/auth/firebase-session` 完全同一段邏輯），新帳號一律只拿到 `customer` 角色；核發 session 前另外檢查 `user.roles.includes("admin")`，身份建立與角色授予是兩個獨立、都通過才放行的步驟，自助建立帳號本身不授予任何權限 |
+| 信箱是否可能是假的 | `email_verified` 直接讀自剛驗證過的 Firebase ID token claim（不是前端自報的欄位），未驗證一律擋在 403；`scripts/grant-admin-role.js` 授予角色前另外呼叫 Firebase Admin SDK `getUserByEmail` 即時查證 `emailVerified`，兩處各自獨立檢查 |
+| 授予管理員角色的腳本是否可能被網路觸發 | `scripts/grant-admin-role.js` 沒有對應任何 HTTP 路由，只能在有資料庫連線與 Firebase Admin 憑證的本機／伺服器環境用 CLI 直接執行；`/admin/accounts` 既有的自助切換角色頁面白名單仍只接受 `customer`／`merchant`（見 2026-09-11 同日追加那筆），沒有因為這次改動被放寬 |
+| SQL injection | `grant-admin-role.js` 全部查詢使用 PostgreSQL 綁定參數（`$1`/`$2`），沒有字串拼接 |
+| 新登入路徑是否繞過既有鎖定 | `POST /admin/login/local-dev` 只在本機＋開發模式生效、與密碼鎖定無關；`POST /admin/login/firebase` 的無效 token、信箱未驗證、非管理員三種失敗都呼叫既有 `recordAdminLoginFailure`，成功才 `clearAdminLoginFailures`，跟密碼登入共用同一個以 IP 為鍵的鎖定計數，沒有開一條獨立、不受限的暴力嘗試路徑 |
+| 機密外洩 | 新增的 `FIREBASE_WEB_API_KEY`／`FIREBASE_WEB_AUTH_DOMAIN`／`FIREBASE_WEB_APP_ID` 是 Firebase 官方定義的公開網頁設定值（跟手機 App 打包進 bundle 的 `EXPO_PUBLIC_FIREBASE_*` 是同一組），不是密鑰；真正的私密憑證 `FIREBASE_SERVICE_ACCOUNT_JSON` 完全沒有被這次新增的任何路徑讀取或輸出 |
+| XSS | 內嵌進 `<script>` 的 Firebase 設定值經 `toInlineScriptJson`（`JSON.stringify` 後跳脫 `</`）處理，且來源是伺服器自己的環境變數，不是使用者輸入 |
+
+### 驗證紀錄
+
+本機啟動真實 backend（連本機 PostgreSQL 與本機已設定的 Firebase 專案）：`node --check` 全部通過；`npm test` 115/115 全過（未受影響）。用瀏覽器與 `curl` 實測：清空 cookie 後單純 `GET /admin/login` 不再核發任何 cookie（修正後的行為）；點擊「本機開發模式：一鍵登入」按鈕（對應 `POST /admin/login/local-dev`）成功核發 session 並可直接讀取 `/admin`；`POST /admin/login/firebase` 送無效 token 正確回 401 `invalid_token`；登入頁在沒有設定 `FIREBASE_WEB_*` 時維持原本純密碼表單、沒有殘留壞掉的 JS 區塊；設定假的 `FIREBASE_WEB_*` 值後，信箱密碼表單、登入／建立帳號切換、錯誤訊息顯示（真實 Firebase 400 錯誤被正確轉成中文提示）皆在瀏覽器人工操作驗證通過，主控台沒有未預期的例外。`scripts/grant-admin-role.js` 對不存在的 email 分別測試 `--revoke`（純資料庫查詢路徑）與一般授予（會先呼叫真實 Firebase Admin SDK 查證）兩種路徑，皆正確回報「找不到帳號」並以結束碼 1 結束。
+
+**驗證限制**：沒有申請真實可用的 Firebase 網頁設定值走完整條「用信箱建立帳號 → 收驗證信 → 點擊驗證 → `grant-admin-role.js` 授予角色 → 用該帳號登入 `/admin`」的端對端流程——這需要使用者自己的 Firebase 專案與真實信箱，屬於使用者需要另外執行的手動設定步驟；也還沒有部署到 Azure（Azure 上 `NODE_ENV=production` 會讓 `本機一鍵登入` 整條路徑直接失效，這點僅由程式碼判斷式確認，沒有部署後實測）。

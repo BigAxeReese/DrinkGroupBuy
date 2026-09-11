@@ -15,7 +15,14 @@ const authMode = process.env.EXPO_PUBLIC_AUTH_MODE || "firebase";
 module.exports = {
   name: "DrinkGroupBuy Prototype",
   slug: "drink-group-buy-mobile-prototype",
+  owner: "royor",
   version: "0.1.0",
+  updates: {
+    url: "https://u.expo.dev/834894ac-fe79-4a32-872f-6cee5edf2214"
+  },
+  runtimeVersion: {
+    policy: "appVersion"
+  },
   newArchEnabled: true,
   scheme: appScheme,
   orientation: "portrait",
@@ -71,6 +78,9 @@ module.exports = {
     googleIosClientId,
     googleWebClientId,
     appScheme,
-    authMode
+    authMode,
+    eas: {
+      projectId: "834894ac-fe79-4a32-872f-6cee5edf2214"
+    }
   }
 };

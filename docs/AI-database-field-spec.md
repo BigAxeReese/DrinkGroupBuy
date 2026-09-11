@@ -66,6 +66,8 @@ SQLite 相容 schema 在時間、布林與 JSON 型態上可能不同；本文�
 
 ## `user_roles`
 
+顧客／商家角色資料可以同時保留，但第一階段同時只允許其中一筆為 `active`。管理員切換介面時，目標角色設為 `active`、另一角色設為 `disabled`；不刪除角色 row，也不刪除該使用者的顧客資料、訂單或歷史紀錄。管理員角色不納入此切換。
+
 | No. | Field name   | 中文名稱   | Type | Key             | 規則 / 格式 / 範圍                      | Example                     |
 | --- | ------------ | ---------- | ---- | --------------- | --------------------------------------- | --------------------------- |
 | 1   | `id`         | 角色編號   | text        | PK              | 系統產生的唯一識別碼                    | `role_001`                  |
@@ -86,7 +88,7 @@ SQLite 相容 schema 在時間、布林與 JSON 型態上可能不同；本文�
 
 ## `merchant_users`
 
-PostgreSQL 直接連結 `store_id`，不保存舊 SQLite 相容 schema 的 `merchant_id` 與 `permission_level`；每個帳號只綁定一間門市。
+PostgreSQL 直接連結 `store_id`，不保存舊 SQLite 相容 schema 的 `merchant_id` 與 `permission_level`；每個帳號只綁定一間門市。切換成顧客介面時只將這筆關聯設為 `disabled`，門市與商家資料仍保留；切回商家介面時重新設為 `active`。
 
 | No. | Field name  | 中文名稱         | Type        | Key        | 規則 / 格式 / 範圍                     | Example                     |
 | --- | ----------- | ---------------- | ----------- | ---------- | -------------------------------------- | --------------------------- |
@@ -420,6 +422,29 @@ PostgreSQL 直接連結 `store_id`，不保存舊 SQLite 相容 schema 的 `merc
 | 13  | `resulting_payment_refund_id`   | 核准後對應的退款編號    | TEXT    | FK     | 核准前可為 NULL；References `payment_refunds(id)` | `pay_refund_001`   |
 | 14  | `created_at`                    | 建立時間                | timestamptz |        | ISO 8601 日期時間                        | `2026-08-04T15:59:00+08:00`  |
 | 15  | `updated_at`                    | 更新時間                | timestamptz |        | ISO 8601 日期時間                        | `2026-08-04T16:00:00+08:00`  |
+
+## `merchant_applications`
+
+2026-09-10 新增。保存商家自助申請的資料，供管理員在 `/admin/merchant-applications` 審核；核准時才在同一個交易裡建立 `merchants`／`stores`／`merchant_users`／`user_roles`（若申請人是全新的 Google 帳號，一併建立 `users`）。這是這個專案第一個會在執行期間（不是一次性 seed SQL）建立商家資料的路徑。緯度／經度不存在這張表，由管理員審核時直接手動填進 `stores.latitude`／`stores.longitude`（無 Geocoding 整合）。同一個 `applicant_firebase_uid` 同時只允許一筆 `status = 'pending'` 的申請（partial unique index）。
+
+| No. | Field name                | 中文名稱             | Type    | Key    | 規則 / 格式 / 範圍                          | Example                       |
+| --- | -------------------------- | -------------------- | ------- | ------ | -------------------------------------------- | ------------------------------ |
+| 1   | `id`                        | 申請編號              | TEXT    | PK     | 建議使用 `merchant-application-` 加唯一後綴  | `merchant-application-001`     |
+| 2   | `applicant_firebase_uid`    | 申請人 Firebase UID   | TEXT    |        | 必填；申請時驗證 Firebase ID token 取得      | `firebase-uid-abc123`          |
+| 3   | `applicant_email`           | 申請人 Email          | TEXT    |        | 可為 NULL                                    | `owner@example.com`            |
+| 4   | `applicant_display_name`    | 申請人顯示名稱        | TEXT    |        | 可為 NULL                                    | `王小明`                        |
+| 5   | `contact_phone`             | 聯絡電話              | TEXT    |        | 必填                                          | `04-1234-5678`                 |
+| 6   | `store_name`                | 申請店名              | TEXT    |        | 必填                                          | `青山手作茶 中科店`             |
+| 7   | `address`                   | 申請地址（純文字）    | TEXT    |        | 必填；不含經緯度                             | `台中市北區三民路三段...`      |
+| 8   | `status`                    | 申請狀態              | TEXT    |        | `pending`, `approved`, `rejected`            | `pending`                      |
+| 9   | `reviewed_by_user_id`       | 審核的管理員          | TEXT    | FK     | 審核前可為 NULL；References `users(id)`      | `user-admin-001`               |
+| 10  | `reviewed_at`                | 審核時間              | timestamptz |    | 審核前可為 NULL                              | `2026-09-10T16:00:00+08:00`    |
+| 11  | `rejection_reason`           | 駁回原因              | TEXT    |        | 僅駁回時填寫                                 | `店家資訊不完整`               |
+| 12  | `resulting_merchant_id`      | 核准後對應的商家編號  | TEXT    | FK     | 核准前可為 NULL；References `merchants(id)`  | `merchant-001`                 |
+| 13  | `resulting_store_id`         | 核准後對應的門市編號  | TEXT    | FK     | 核准前可為 NULL；References `stores(id)`     | `store-001`                    |
+| 14  | `resulting_user_id`          | 核准後對應的使用者編號| TEXT    | FK     | 核准前可為 NULL；References `users(id)`      | `user-001`                     |
+| 15  | `created_at`                 | 建立時間              | timestamptz |    | ISO 8601 日期時間                            | `2026-09-10T15:59:00+08:00`    |
+| 16  | `updated_at`                 | 更新時間              | timestamptz |    | ISO 8601 日期時間                            | `2026-09-10T16:00:00+08:00`    |
 
 ## `payment_provider_events`
 

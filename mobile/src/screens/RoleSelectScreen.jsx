@@ -144,7 +144,7 @@ function RoleSelectContent({ navigation, isDevAuthMode, googleLogin = null }) {
           <LoginOptionButton
             icon="G"
             iconStyle={styles.googleIcon}
-            label={isLoggingIn ? "登入中..." : "使用Google登入"}
+            label={isLoggingIn ? "登入中..." : "使用 Google 登入／註冊"}
             disabled={isLoggingIn}
             onPress={() => !isLoggingIn && login()}
           />
@@ -213,6 +213,14 @@ function RoleSelectContent({ navigation, isDevAuthMode, googleLogin = null }) {
         ) : null}
       </View>
 
+      <Pressable
+        accessibilityRole="button"
+        onPress={() => navigation.go("merchantApply")}
+        style={({ pressed }) => [styles.textButton, pressed && styles.pressed]}
+      >
+        <Text style={styles.textButtonLabel}>申請成為商家</Text>
+      </Pressable>
+
       <Text style={styles.terms}>
         登入代表你同意<Text style={styles.termsLink}>服務條款</Text>與<Text style={styles.termsLink}>隱私政策</Text>
       </Text>
@@ -271,14 +279,14 @@ function LoginOptionButton({ icon, iconStyle, label, onPress, disabled = false, 
 }
 
 function getLoginErrorMessage(error) {
-  if (error.payload?.nextStep) {
-    return `${error.message}. ${error.payload.nextStep}`;
-  }
   if (error.payload?.error === "Invalid Firebase ID token") {
     return "Firebase 登入驗證失敗，請重新登入 Google。";
   }
-  if (error.payload?.error === "Firebase user is not mapped to an active backend user") {
-    return "這個 Google 帳號尚未對應到本機使用者，請先把 Firebase UID 寫入資料庫。";
+  if (error.payload?.error === "This Google account is disabled") {
+    return "這個 Google 帳號已被停用，如有疑問請聯絡管理員。";
+  }
+  if (error.payload?.error?.startsWith("This email is already linked to another account")) {
+    return "這個 Email 已經連結到另一個帳號，請聯絡管理員處理。";
   }
   return error.message || "Google 登入失敗";
 }

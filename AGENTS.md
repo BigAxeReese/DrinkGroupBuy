@@ -45,6 +45,20 @@ DrinkGroupBuy 是仍在開發中的 Android-first 手搖飲團購系統：`mobil
 - 任何付款或 auth 程式碼改動完成後，聚焦複查注入、權限、金額竄改、機密與資料外洩，並依檔案頂端格式新增一筆 `docs/AI-security-review-log.md`；即使沒有發現也要記錄。
 - SQLite inspection 必須唯讀；不要為了查看現況執行 `db:init`、`db:seed`、migration 或會替換開發 DB 的 smoke script。資料庫 mutation 前先備份，完成後檢查 integrity 與 foreign keys。
 
+## 使用中的角色 Skill（TEAM）
+
+以下角色來自 Global Role Library（`C:\vscode\agency-agents`，來源 [msitarzewski/agency-agents](https://github.com/msitarzewski/agency-agents)），已針對本專案篩選確認為 Core，安裝為全域 Claude Code Skill（不是獨立 subagent，是同一個 Claude 切換的工作模式）。這張表只做路由，角色本身的完整 SOP 在各自的 Skill 檔案裡，不重複抄在這裡。
+
+| 任務類型 | 使用角色 Skill |
+| --- | --- |
+| 資料庫 schema／API 設計 | `backend-architect` |
+| React Native／Expo 畫面開發 | `mobile-app-builder` |
+| 驗證某個功能是否真的做完 | `evidence-collector` → `reality-checker`（兩道關卡都要過，不能只跑一個就算數） |
+| 一般 bug 修正／小改動 | `minimal-change-engineer`（預設模式：最小 diff、不順便重構、不做防禦性程式碼） |
+| 定期整個程式庫資安掃描（不限於這次 diff） | `ai-generated-code-security-auditor`（跟 `/security-review`互補：`/security-review` 只看這次改動的 diff，這個角色掃整個現有程式庫，抓既有、非本次新增的問題） |
+
+尚未安裝為 Skill、只列在分析階段的 Optional／Pre-launch／Future 角色，見對話紀錄中的 TEAM.md 提案；未經確認前不視為本專案的 Active Team 成員。
+
 ## 文件與協作
 
 - 欄位精確定義只維護在 `docs/AI-database-field-spec.md`；其他 database docs 連結它，不重抄欄位表。

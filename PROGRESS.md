@@ -1,5 +1,5 @@
 ---
-updated: 2026-08-31
+updated: 2026-09-11
 ---
 
 ## 功能總覽 [完成]
@@ -13,7 +13,8 @@ updated: 2026-08-31
 - 商家管理店內菜單
 - 商家標記訂單可取餐、查看待製作明細
 - 商家申請退款
-- 管理員網頁後台審核退款、取消團購
+- 管理員網頁後台審核退款、取消團購、審核商家申請
+- 管理員在網頁後台切換已註冊帳號的顧客／商家使用角色
 - 系統截止結算（折扣試算、正式請款）
 - 系統付款背景可靠性機制（對帳、重試、告警）
 
@@ -21,12 +22,35 @@ updated: 2026-08-31
 > 決定使用者是誰、能用哪些功能——例如是一般顧客還是店家老闆，登入之後系統要怎麼分辨身份。
 - Firebase Auth + Google 登入 [進行中]
   > 讓使用者可以直接用自己的 Google 帳號登入，不用另外設一組新密碼；背後用 Google 官方的身份驗證服務（Firebase Auth）確認身份是真的。這個功能核心就是串接 Google／Firebase 這個第三方服務，不是自己設計的業務邏輯，所以底下不分「前端畫面」「後端 API」，直接歸類成第三方服務整合。
-  - Mobile 端（第三方服務整合） [完成] — Google 登入畫面，取得 Firebase ID token 送到 backend
+  - Mobile 端（第三方服務整合） [完成] — Google 登入畫面，取得 Firebase ID token 送到 backend；按鈕文案已改為「使用 Google 登入／註冊」，反映第一次登入即完成註冊
   - Backend 端（第三方服務整合） [完成] — 驗證 ID token，依 users/user_roles/merchant_users 判斷身份
-  - Firebase Console／OAuth／UID mapping 與 Android 實機 E2E（整合驗證） [待處理] — repository 只有設定需求與程式切片，沒有目前環境已完成端對端驗證的證據
+  - 顧客首次登入自動註冊 [完成] (9/11)
+    > 第一次用 Google 帳號登入的人，系統自動幫他建立顧客帳號，不用工程師手動把這個 Google 帳號對應進資料庫。以前完全沒有這個功能：任何沒有被預先手動對應好的 Google 帳號登入一律被拒絕（回傳「帳號未對應」錯誤），這個專案第一次有「一般使用者自己登入就能建立正式帳號」的路徑。新帳號一律只拿到顧客角色，不能自己取得商家或管理員身份。
+    - 新增 `backend/database/repositories/customerRegistrationRepository.js`，接上 `/api/auth/firebase-session` 原本直接回錯的分支；同時修改既有商家審核交易（`merchantApplicationRepository.js`）：已自動註冊為顧客的帳號若之後申請商家並被核准，帳號會轉換成商家（停用顧客角色、啟用商家角色，同一個帳號 ID，不會兩個角色並存——這是與你確認過的政策）。已對真實 PostgreSQL 直接執行驗證：全新帳號建立、重複登入不重複建立、兩個同時的首次登入正確收斂成一筆、不同帳號同 email 正確擋下且不建立資料、停用帳號正確被拒絕、顧客轉商家的角色轉換正確生效且訂單／稽核歷史不受影響。測試資料已清除，`npm test` 99/99 全過，`check:sql-safety` 通過，安全審查記錄見 `docs/AI-security-review-log.md` 2026-09-11。**真機 Google 登入機制已驗證可用**：在真的 Android 手機上安裝課堂展示 APK，成功用真實 Google 帳號完成登入，證明 SHA-1／OAuth 憑證設定正確。但**這次登入實際上是登進舊的種子測試帳號**（`user-customer-yinji`，這個 Google 帳號先前已被手動綁定過），不是真的全新自動註冊，一開始誤判為自動註冊成功，已更正。已把該帳號的 `firebase_uid` 解除綁定，並在重新部署上述兩個 Mobile 端修正後，用真正的登出鍵登出、重新登入同一個帳號，**這次已確認真正成功建立全新帳號**：登入後畫面顯示的是真實 Google 姓名（不是裝飾假名），且 `/admin/accounts` 查到的帳號 ID 是全新產生的英數字格式（不是 `user-customer-yinji`）——兩項證據都對得上，這次不是誤判。過程中順手發現並修正兩個 Mobile 端真實問題：首頁原本顯示的是寫死的裝飾用假人設名稱（跟真實帳號無關，任何後端沒特別認得的帳號一律顯示成固定的「A」），已改成讀取後端真實的 `displayName`；同時移除首頁、個人中心、商家後台三處會把已登入使用者導回登入頁的「會員」按鈕（Firebase 登入上線前的舊功能殘留，正常情況不應該出現）。這兩處連同 Backend 都已重新打包成新版 APK 並實機驗證，`npm test` 115/115 全過；本機重新產生 Android 原生專案時發現舊版 APK 沒有正確接上 EAS Update（`expo.modules.updates.ENABLED` 是 false），已重新產生原生專案並確認新版 APK 的簽章 SHA-1 與 Google Cloud 登記的一致、JS 程式碼正確包進獨立可執行的發布版（release）APK 裡（不需要連開發電腦）。
+  - Firebase Console／OAuth／UID mapping 與 Android 實機 E2E（整合驗證） [完成] (9/11) — Firebase／Google Cloud 的 Android OAuth 用戶端已確認 SHA-1 憑證指紋與 APK 簽署金鑰一致；真正的「全新帳號自動註冊」已在真機上乾淨驗證成功（見上方說明）。管理員與預先寫死的商家 seed 帳號仍需要手動對應 Firebase UID，且既有的 `scripts/map-firebase-user.js` 只會改本機 SQLite 檔案，backend 已經永久切到 PostgreSQL 之後這支腳本對現在的 runtime 沒有作用——這部分維持已知的工具缺口，還沒有可以用的替代方案
     > 正式上線前要在 Google 的管理後台（Firebase Console）完成登入相關設定，並且要用真的 Android 手機實際測試一次完整登入流程，不只是在電腦模擬器上測。
 - 登入狀態持久化（App 重開不用重新登入） [進行中] (8/29) — 真機測試發現 App 完全關閉重開後一定要重新登入，因為 `authToken` 原本只存在 JS 記憶體變數（`mobile/src/utils/apiClient.js`），沒有任何持久化機制。已補上：登入成功時把憑證存進 `expo-secure-store`（Android 專用的加密本機儲存，web 因瀏覽器沒有對應機制而略過）；App 啟動時讀回並呼叫新增的 `GET /api/auth/session`（見 [AI-api-candidates.md](docs/AI-api-candidates.md)）重新驗證，成功才略過登入畫面、失敗（401）則清掉本機憑證回到登入畫面。角色對應起始畫面的邏輯抽成共用的 [authRouting.js](mobile/src/utils/authRouting.js)，登入當下與 App 啟動還原共用同一份。`npm test` 93/93 全過，backend 新路由已用真實 HTTP 請求驗證（有效 token 回傳正確使用者、無效 token 回傳 401）。**尚未實機驗證**：需要真的關閉重開 App 確認能跳過登入畫面
   > 手機上把 App 完全關掉再打開，應該要記得使用者剛剛登入過，直接進到對應的畫面，不用每次都重新登入一次。
+- 管理員帳號角色切換 [進行中] (9/11)
+  > 管理員可以在網頁後台把已有商家門市資料的帳號切換成商家或顧客使用模式。切換只停用目前不用的權限與介面，不刪除帳號、顧客訂單、個人資料、商家門市或歷史紀錄；後端權限立即生效，使用者登出重登或完全關閉 App 後重開，就會進入目前啟用的單一角色介面。第一次成為商家仍必須先完成商家申請審核，避免產生沒有門市可管理的商家身份。
+  - 《開發》Backend 角色交易與管理後台 [完成] — 新增 `/admin/accounts` 搜尋／切換頁面、service 與 PostgreSQL repository；清單顯示資料庫保留的所有已註冊帳號（含啟用、停用、已刪除與管理員），管理員及非啟用帳號只讀。顧客／商家角色在同一個交易內互斥切換，`merchant_users` 連結只停用／啟用，所有顧客與商家資料都保留；管理員帳號不可在此頁被降權，每次有效變更會寫入 `admin_account_role_changed` 稽核紀錄。
+  - 《測試》權限、資料保留與角色互斥自動化驗證 [完成] — 新增 11 個 service／repository 測試；完整 `npm test` 115/115 通過、`check:sql-safety` 通過、`git diff --check` 無錯誤。本機 HTTP 驗證 `/admin/accounts` 登入後回 200、未登入會導回登入頁、偽造 CSRF 的角色切換請求回 403；測試沒有實際切換任何現有帳號。
+  - 《審查》身份授權與資料安全複查 [完成] — 已檢查管理員授權、CSRF、目標角色白名單、SQL injection、XSS、交易鎖、角色撤銷、資料保留、稽核紀錄與秘密外洩；結果見 `docs/AI-security-review-log.md` 2026-09-11 同日追加。
+  - 《部署／實機》Azure 與 Android 端對端驗證 [進行中] (9/11) — 這批 backend 變更（帳號角色切換、登入失敗鎖定）已重新部署到 Azure App Service，`/admin/accounts` 已確認在正式站上可連線（回 302 導向登入頁，不是 404）。**尚未完成**：還沒用一個已核准商家測試帳號在正式站上實際來回切換角色、確認兩種手機介面顯示正確。
+  - 《設計》App／管理後台強隔離 [待處理] — 現況是同一個 App Service 下以 `/admin` 路徑、獨立密碼、HttpOnly／Secure Cookie、server-side admin role、CSRF 與 audit 做邏輯隔離；若從課堂展示走向正式營運，應改用獨立後台 hostname／App Service，並接 Microsoft Entra ID 或等效管理員身份、個人白名單／群組及 MFA。這需要 Azure 身份與網域設定，尚未執行。
+- 管理員每人獨立信箱密碼登入 [進行中] (9/11)
+  > 讓每個管理員用自己的信箱＋密碼登入 `/admin` 網頁後台，取代原本所有管理員共用同一組密碼的方式；共用密碼保留當備援登入管道，不移除。信箱身份本身透過 Firebase 建立，跟顧客／商家用的 Google 登入是同一個 Firebase 專案下的不同登入方式，只是不綁個人 Google 帳號。
+  - 《開發》登入頁信箱表單與後端驗證 [完成] — `/admin/login` 新增信箱＋密碼登入表單（可切換「建立帳號」），要求 Firebase 信箱已驗證才放行；新端點 `POST /admin/login/firebase` 重用既有顧客自動註冊邏輯，新帳號一律只拿到顧客角色，須另外被授予管理員角色才能進 `/admin`。只在 `backend/.env` 有設定 `FIREBASE_WEB_API_KEY`／`FIREBASE_WEB_AUTH_DOMAIN`／`FIREBASE_WEB_APP_ID` 時才顯示，未設定時登入頁維持原本純密碼表單。
+  - 《開發》授予／撤銷管理員角色腳本 [完成] — 新增 `scripts/grant-admin-role.js`（`npm run admin-role:grant`），刻意不做成網頁自助功能；授予前會即時向 Firebase 查證信箱已驗證，避免對未經確認的信箱授權。
+  - 《開發》本機一鍵登入 [完成] — 本機開發模式（`AUTH_DEV_MODE=true`＋只限本機連線）下，登入頁多一顆按鈕可跳過輸入密碼；初版寫成單純 `GET` 就自動登入，複查時發現這樣任何跨來源背景請求都能被動觸發，已改成需要真人點擊按鈕才會送出的同源請求，見 `docs/AI-security-review-log.md` 2026-09-11 第五次追加。
+  - 《審查》身份驗證安全複查 [完成] — 檢查自助建立帳號是否可能直接取得管理員權限、信箱驗證是否可被略過、新登入路徑是否繞過既有登入失敗鎖定、SQL injection、機密外洩；結果見 `docs/AI-security-review-log.md` 2026-09-11 第五次追加，發現一個中風險問題（本機一鍵登入的被動觸發風險）已在同一輪修正。
+  - 《驗證》[進行中] — 已用本機真實 PostgreSQL 與本機已設定的 Firebase 專案跑過：清空 cookie 後單純 GET 不再登入、按鈕點擊會登入、無效 token 正確拒絕、腳本對不存在帳號正確報錯、`npm test` 115/115 全過。**尚未完成**：沒有實際申請一組真的可用信箱走完整「建立帳號 → 收驗證信 → 點擊驗證 → 腳本授予角色 → 登入」流程（需要使用者自己的 Firebase 專案設定），也還沒部署到 Azure 驗證。
+- 商家自助申請＋管理員審核 [進行中] (9/10)
+  > 讓想成為商家的人自己在登入頁填申請表送出，不用工程師手動寫資料庫；管理員在後台審核，核准後這個人才能用同一個 Google 帳號登入看到自己的商家後台。這是這個專案第一個「執行期間才會建立商家資料」的路徑，之前所有商家都是一次性寫死在 SQL 裡。刻意縮小範圍：這次只做到「商家帳號可以建立」，商家自己的 LINE Pay 收款帳號、金流改成直接給商家、月費帳單這三塊都還沒做。
+  - Backend 端 [完成] — 新資料表 `merchant_applications`（`database/migrations/007_merchant_applications_postgres.sql`）；`POST /api/merchant-applications` 公開端點（驗證 Firebase ID token，身份只信任伺服器端解出來的 claims，不信任 request body）；`/admin/merchant-applications` 三支路由（列表、核准、駁回），完全比照既有退款審核頁的授權／CSRF／交易鎖定模式；核准時在同一個交易裡建立（或重用）`users`、新增 `merchants`／`stores`／`merchant_users`／`user_roles`，任何一步衝突（例如申請人其實已經是別間店的商家）整筆回滾不留孤兒資料。已對真實 PostgreSQL 直接呼叫 repository 四個函式驗證：申請成功、重複待審申請被擋、核准後五張表各自正確新增一筆、重複核准正確 no-op、駁回正確、已是商家的帳號再次核准正確觸發錯誤且整筆回滾；另外用瀏覽器實際登入 `/admin` 後台跑過整頁渲染與核准表單真實送出，並個別驗證沒 session 回 302、CSRF token 錯回 403。過程中發現並修正一個真實 bug：核准失敗時，給管理員看的錯誤訊息被原始錯誤代碼蓋掉（物件屬性展開順序寫反）。測試資料驗證後已清除；`npm test` 99/99 全過；安全審查記錄見 `docs/AI-security-review-log.md` 2026-09-10。
+  - Mobile 端 [進行中] — 登入頁新增「申請成為商家」按鈕，新畫面 `MerchantApplyScreen.jsx`（先 Google 登入驗證身份，再填店名／地址／電話送出，送出後顯示靜態確認畫面）。**尚未實機驗證**：這台環境無法模擬真實 Google 帳號登入，「申請人真的用手機走完 Google 登入 → 填表 → 送出」與「核准後這個帳號真的能重新登入看到商家後台」這兩段，都只驗證到後端邏輯層，沒有做到真正的手機端對端測試——跟既有「Firebase Console／OAuth／UID mapping 與 Android 實機 E2E」這個已知缺口是同一類、還沒解決的限制。
+  - 已知缺口／刻意不做的範圍 [待處理]
+    > 這次核准畫面不能編輯商家填的店名／地址／電話，管理員只能照登，另外多填經緯度；申請端點沒有防濫用機制（這個專案目前完全沒有 rate limiting 基礎設施）；申請人送出後沒有地方查審核進度，也沒有通知機制。
 
 ## 團購與活動探索 [進行中]
 > 顧客瀏覽附近有哪些店家、有哪些手搖飲團購活動可以參加的畫面與功能。
@@ -238,6 +262,10 @@ updated: 2026-08-31
       > 商家在畫面上按「可取餐」之後，系統其實已經正常產生取貨碼存進資料庫，但顧客那支專門拿取貨碼的 API 一直被一個內部的「資料庫還沒切換完成」保護機制誤擋，回傳的錯誤又被 App 端悄悄吞掉不顯示，導致顧客看起來像「一直沒生成」，其實是拿不到已經生成好的碼。
     - Production 正式部署（備份、staging、rollback） [進行中] (8/20) — 已與使用者確認關鍵決策並寫入 `docs/AI-postgresql-migration-plan.md`（「2026-08-20 正式環境部署與真實資料起始方案」段落）：正式環境採自架伺服器（非代管服務）；備份策略、staging 定位、rollback 計畫（含「累積真實資料後開關不能再當 rollback 用」的風險說明）均已規劃並記錄；仍待處理：實際租用/設定伺服器、備份 cron job 落地、正式商家帳號連結方案（見下方子項）——這些需要真的申請伺服器與正式憑證才能繼續，非程式碼變更
       > 確保正式環境的資料庫在出問題時（例如硬碟壞掉、程式有 bug）不會整個系統的資料都不見，需要先規劃好的備份、測試環境跟復原方案。
+    - Azure 課堂展示環境 [進行中] (9/11) — 已確認採 Azure App Service（Node.js Backend）＋ Azure Database for PostgreSQL Flexible Server，讓安裝 APK 的組員能從不同網路連線；這是非正式營運的教學展示環境，不取代上方 production 正式部署決策。Azure 資源已建立（資源群組、PostgreSQL、App Service）、資料庫 migration 已套用、環境變數已設定、PostgreSQL 防火牆已開放給 App Service、Backend 已重新部署上線（含帳號角色切換、登入失敗鎖定）——`/health` 與需要資料庫的 API（店家、團購活動、帳號角色）皆已驗證回應正常。Android APK 已重新打包（Debug Key 簽署，僅供內部測試；發現舊版沒有正確接上 EAS Update 已修正並重新產生原生專案），Firebase／Google Cloud 的 Android OAuth 用戶端 SHA-1 已直接用工具驗證跟新版 APK 簽章一致，且真機上已確認「全新帳號自動註冊」乾淨成功一次（真實姓名顯示＋資料庫帳號 ID 格式雙重驗證，不是誤判）。應使用者要求，展示環境已改成跟正式版行為一致：截止結算、付款對帳、取貨逾期三個背景排程都已開啟，LINE Pay sandbox 憑證與回呼網址也已補上（`LINE_PAY_ENV` 仍是 sandbox，沒有開真實金流），詳見 `docs/AI-security-review-log.md` 2026-09-11 第四次追加。**尚未完成**：還沒有實際走過一次「開團→下單→付款→截止結算」完整流程驗證這些排程真的照預期運作；還沒有做兩個帳號、兩種網路的跨網路端對端驗證（目前只驗證過一支手機、一個帳號）；部署過程中 PostgreSQL 密碼／Firebase Service Account Key／Session Secret 曾經在操作畫面上出現過，正式交付前應輪替，目前使用者已知悉、決定暫緩處理。詳見 `docs/azure-classroom-deployment.md`「目前狀態」
+      > 把後端與多人共用資料庫放到 Azure，提供公開的 HTTPS 網址，讓不同地點的組員使用同一套資料；免費層可能休眠，因此不承諾全天候背景排程。
+      - Mobile 線上更新策略 [進行中] (9/11) — 已確認採 EAS Update 更新一般 JavaScript／畫面／圖片變更；首次安裝仍需 APK，原生套件、Android 權限、Expo SDK 等原生變更仍須重新打包。已完成初始設定：專案已連結 EAS（`@royor/drink-group-buy-mobile-prototype`）、`expo-updates` 套件已安裝、`app.config.js` 補上 `updates`／`runtimeVersion`、`eas.json` 已設定三個 build profile（`preview` 明確指定輸出 APK，供組員直接安裝，不透過 Google Play）。**尚未完成**：還沒有實際打包過一版含這些設定的 APK，也還沒有實際發過一次線上更新（`eas update`）驗證組員裝置真的能收到更新，這部分要等到有實機測試環境才能驗證
+        > 讓組員安裝一次 App 後，多數畫面與程式邏輯修改可在線上更新，只有會改到 Android 原生程式的變更才重新下載 APK。
     - 真實資料搬遷方案 [完成] (8/20) — 確認開發資料庫裡的商家／門市／菜單資料其實是既有的開發示範資料（非另外接洽的真實商家），使用者確認直接沿用當正式起始資料；新增 `database/production-reference-seed-postgres.sql`（只含商家／門市／菜單，排除密碼登入的假帳號），已在真實 PostgreSQL 16 用一次性 throwaway schema 驗證套用結果正確（7 商家/7 門市/8 品項/96 客製化選項/32 條規則），不掛進 `database/migrate.js` 的自動 migration 鏈以避免正式環境被誤套用開發假帳號
       > 把現在開發資料庫裡可以沿用的資料（例如商家、門市、菜單），安全地變成正式環境一開始就有的起始資料的規劃與準備工作。
       - 正式商家帳號連結方案 [待處理]
@@ -270,6 +298,8 @@ updated: 2026-08-31
   - Backend 端 [完成] — `AUTH_DEV_MODE` 閘門與 dev-session API
 - 管理員網頁後台 [完成] (8/22) — 伺服器直接輸出 HTML／表單（無另外的前端專案或建置流程），密碼登入寫在 `backend/.env` 的 `ADMIN_WEB_PASSWORDS`（逗號分隔，可設多組密碼給不同人用，登入後都對應到同一個管理員身份；與 `AUTH_DEV_MODE` 無關，正式環境也能用）；session 沿用既有 `createAuthToken`／`verifyAuthToken` 簽章機制存進 HttpOnly cookie，取消團購／核准退款／駁回退款都直接重用既有服務層函式，未新增或修改任何業務邏輯；每個會改資料的表單都帶一次性 CSRF token，已用真實 HTTP 請求驗證登入、未帶 CSRF token 會被拒絕（403）、以及對不存在的活動 ID 觸發取消會正確回傳錯誤訊息。原本手機 App 裡的 `AdminDashboardScreen`／`AdminRefundRequestsScreen` 已移除。事後跑過一次 `/code-review`（xhigh 強度，10 個角度）並全數修復其 15 個發現，包含 2 個真的邏輯缺口（取消團購時若有訂單付款作廢失敗，原本會誤顯示成功；退款審核列表頁原本漏掉資料庫執行模式一致性檢查）與其餘重複程式碼／效率問題；修復過程與驗證方式記錄於 `docs/AI-security-review-log.md` 2026-08-22 追加的那筆
   > 平台營運人員用來取消團購、審核退款的網頁工具，跟顧客/商家用的手機 App 完全分開；原本這兩件事是手機 App 裡工程師專用的開發畫面，現在搬成獨立網頁，比較符合「管理員不是正式 App 的一般角色」這個既有決議（`docs/open-questions.md`）。
+  - 登入失敗鎖定 [完成] (9/11) — 連續猜錯密碼會被暫時鎖住，防止有人對著登入頁一直亂猜密碼。以來源 IP 記錄失敗次數（記憶體內，重啟後歸零，這個規模的課堂展示不需要額外資料庫表），連續 5 次錯誤後鎖定 15 分鐘，鎖定期間即使密碼正確也一律拒絕。已用真實 HTTP 請求驗證：第 1-4 次錯誤正常回應、第 5 次後鎖定生效、鎖定中送出正確密碼仍被拒絕；`npm test` 115/115 全過。**已知取捨**：用 `X-Forwarded-For` 判斷來源 IP，這個值需要有受信任的反向代理才可靠（Azure App Service 前端閘道符合，但如果之後在沒有代理的環境直接曝露伺服器就不可靠）；鎖定以 IP 為單位，同一個對外 IP（例如同一個校園 Wi-Fi）如果有人惡意亂猜，會連帶鎖到共用那個 IP 的其他人，是刻意接受的簡化設計。詳見 `docs/AI-security-review-log.md` 2026-09-11 第三次追加。
+    > 有人對著管理員登入頁一直亂猜密碼時，系統會先暫時鎖住，不讓對方無限次嘗試。
   - 金流資訊總覽頁面 [待處理]
     > 讓管理員在網頁後台能查看每筆訂單完整的付款過程（預授權、確認、請款、退款）與對應金額。這些資料目前都已經存在資料庫裡，只是沒有畫面可以瀏覽，只能直接查資料庫。
     - 畫面需求草稿 《需求》 [待處理]

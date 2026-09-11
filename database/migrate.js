@@ -22,6 +22,7 @@
 const fs = require("node:fs");
 const path = require("node:path");
 const { Client } = require("pg");
+const { createPostgresConnectionOptions } = require("../backend/database/postgresConnection");
 
 const migrationsDir = path.join(__dirname, "migrations");
 
@@ -29,7 +30,7 @@ async function main() {
   if (!process.env.DATABASE_URL) {
     throw new Error("DATABASE_URL is required");
   }
-  const client = new Client({ connectionString: process.env.DATABASE_URL });
+  const client = new Client(createPostgresConnectionOptions());
   await client.connect();
   try {
     const result = await runMigrations(client);

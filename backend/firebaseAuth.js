@@ -35,5 +35,6 @@ function getFirebaseAdminOptions() {
 }
 
 module.exports = {
-  verifyFirebaseIdToken
+  verifyFirebaseIdToken,
+  getFirebaseAuth
 };

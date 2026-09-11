@@ -83,6 +83,15 @@ const {
   rejectRefundRequest
 } = require("./payments/refundRequestService");
 const {
+  approveMerchantApplication,
+  rejectMerchantApplication,
+  submitMerchantApplication
+} = require("./merchants/merchantApplicationService");
+const {
+  listAdminAccounts,
+  setAdminAccountRole
+} = require("./accounts/adminAccountRoleService");
+const {
   settleGroupBuyActivity,
   startDeadlineSettlementScheduler
 } = require("./payments/settlementService");
@@ -165,6 +174,15 @@ const {
 const {
   createPaymentRefundRepository
 } = require("./database/repositories/paymentRefundRepository");
+const {
+  createMerchantApplicationRepository
+} = require("./database/repositories/merchantApplicationRepository");
+const {
+  createCustomerRegistrationRepository
+} = require("./database/repositories/customerRegistrationRepository");
+const {
+  createAdminAccountRoleRepository
+} = require("./database/repositories/adminAccountRoleRepository");
 const {
   createOrderRevisionRepository
 } = require("./database/repositories/orderRevisionRepository");
@@ -293,6 +311,12 @@ const paymentRefundRepository = createPaymentRefundRepository({
     getLatestProviderEventPayload: (value) => getLatestPaymentProviderEventPayload(value),
   },
 });
+// Postgres-only, no sqliteGateway -- see merchantApplicationRepository.js's module comment.
+const merchantApplicationRepository = createMerchantApplicationRepository({});
+// Postgres-only, no sqliteGateway -- see customerRegistrationRepository.js's module comment.
+const customerRegistrationRepository = createCustomerRegistrationRepository({});
+// Postgres-only: roles are authoritative in the deployed runtime and must change atomically.
+const adminAccountRoleRepository = createAdminAccountRoleRepository({});
 const orderRevisionRepository = createOrderRevisionRepository({
   sqliteGateway: {
     createRevision: (value) => createOrderRevision(value),
@@ -573,16 +597,46 @@ const server = http.createServer(async (request, response) => {
       }
 
       const user = await authProfileReadRepository.getByFirebaseUid(firebaseUser.uid);
-      if (!user) {
-        sendJson(response, 403, {
-          error: "Firebase user is not mapped to an active backend user",
-          nextStep: "Add this Firebase UID to users.firebase_uid in the development database."
+      if (user) {
+        const token = createAuthToken(user);
+        sendJson(response, 200, { token, user: toPublicUserResponse(user) });
+        return;
+      }
+
+      // First time this Firebase account has ever signed in -- register it as a customer.
+      // Identity fields come only from the verified token above, never from the request body.
+      const registration = await customerRegistrationRepository.resolveOrRegisterCustomer({
+        firebaseUid: firebaseUser.uid,
+        email: firebaseUser.email || null,
+        displayName: deriveDisplayNameFromFirebaseUser(firebaseUser),
+        now: businessClock.nowIso()
+      });
+      if (registration.error === "account_disabled") {
+        sendJson(response, 403, { error: "This Google account is disabled" });
+        return;
+      }
+      if (registration.error === "email_already_registered") {
+        sendJson(response, 409, {
+          error: "This email is already linked to another account. Please contact the administrator."
         });
         return;
       }
 
-      const token = createAuthToken(user);
-      sendJson(response, 200, { token, user: toPublicUserResponse(user) });
+      const registeredUser = await authProfileReadRepository.getById(registration.userId);
+      const token = createAuthToken(registeredUser);
+      sendJson(response, 200, { token, user: toPublicUserResponse(registeredUser) });
+      return;
+    }
+
+    if (request.method === "POST" && url.pathname === "/api/merchant-applications") {
+      const body = await readJsonBody(request);
+      const result = await submitMerchantApplication({
+        idToken: body.idToken,
+        body,
+        merchantApplicationRepository,
+        now: businessClock.nowIso()
+      });
+      sendJson(response, 201, result);
       return;
     }
 
@@ -1944,38 +1998,149 @@ const server = http.createServer(async (request, response) => {
         response.end();
         return;
       }
-      const loginError = url.searchParams.get("error") === "1" ? "密碼錯誤，請再試一次。" : null;
-      sendHtml(response, 200, renderAdminLoginPage({ error: loginError }));
+
+      const lockoutRemainingMs = getAdminLoginLockoutRemainingMs(request);
+      const loginError = lockoutRemainingMs > 0
+        ? `登入失敗次數過多，請於 ${formatLockoutMinutes(lockoutRemainingMs)} 分鐘後再試。`
+        : url.searchParams.get("error") === "1" ? "密碼錯誤，請再試一次。" : null;
+      sendHtml(response, 200, renderAdminLoginPage({
+        error: loginError,
+        showLocalDevAutoLogin: isDevAuthModeEnabled() && isLoopbackRequest(request)
+      }));
+      return;
+    }
+
+    // Local-dev convenience: same loopback+dev-mode boundary already used to gate /dev-console
+    // (see isDevAuthModeEnabled/isLoopbackRequest below) -- a request that could only have come
+    // from this machine skips typing ADMIN_WEB_PASSWORDS back in, since it's already sitting in
+    // this machine's own .env. Deliberately a POST the person on this machine has to click a
+    // button for, not something GET /admin/login does automatically: a plain GET has no user
+    // gesture behind it, so any passively-loaded cross-origin resource (an <img>, a background
+    // fetch on some other page the developer happens to have open) could silently trigger it and
+    // authenticate the browser without anyone asking for that. Requiring a real click here means
+    // an attacker's page would need to run script inside this exact origin to fire it, which the
+    // Same-Origin Policy already prevents.
+    if (request.method === "POST" && url.pathname === "/admin/login/local-dev") {
+      if (!isDevAuthModeEnabled() || !isLoopbackRequest(request)) {
+        sendJson(response, 404, { error: "Not found" });
+        return;
+      }
+      const session = await resolveAdminWebSessionCookie();
+      if (!session.cookie) {
+        sendJson(response, 500, { error: session.error || "local_dev_login_failed" });
+        return;
+      }
+      response.writeHead(200, {
+        "Content-Type": "application/json; charset=utf-8",
+        "Set-Cookie": session.cookie
+      });
+      response.end(JSON.stringify({ redirectTo: "/admin" }));
       return;
     }
 
     if (request.method === "POST" && url.pathname === "/admin/login") {
-      const body = await readFormBody(request);
-      if (!verifyAdminWebPassword(body.password)) {
-        response.writeHead(302, { Location: "/admin/login?error=1" });
-        response.end();
-        return;
-      }
-
-      // Targeted lookup by the known seed id instead of authProfileReadRepository.listDevUsers()
-      // -- that method's contract is "the dev-mode identity picker" (its only other call site is
-      // gated behind isDevAuthModeEnabled()), and scanning every customer/merchant/admin account
-      // just to find this one row doesn't fit an admin-login path that must work regardless of
-      // AUTH_DEV_MODE.
-      const adminUser = await authProfileReadRepository.getById(ADMIN_WEB_USER_ID);
-      if (!adminUser || !adminUser.roles.includes("admin")) {
-        sendHtml(response, 500, renderAdminLoginPage({
-          error: `系統找不到管理員身份（${ADMIN_WEB_USER_ID}），請確認資料庫已正確 seed。`
+      const lockoutRemainingMs = getAdminLoginLockoutRemainingMs(request);
+      if (lockoutRemainingMs > 0) {
+        sendHtml(response, 429, renderAdminLoginPage({
+          error: `登入失敗次數過多，請於 ${formatLockoutMinutes(lockoutRemainingMs)} 分鐘後再試。`
         }));
         return;
       }
 
-      const token = createAuthToken(adminUser);
+      const body = await readFormBody(request);
+      if (!verifyAdminWebPassword(body.password)) {
+        recordAdminLoginFailure(request);
+        response.writeHead(302, { Location: "/admin/login?error=1" });
+        response.end();
+        return;
+      }
+      clearAdminLoginFailures(request);
+
+      const session = await resolveAdminWebSessionCookie();
+      if (session.error) {
+        sendHtml(response, 500, renderAdminLoginPage({ error: session.error }));
+        return;
+      }
+
       response.writeHead(302, {
-        "Set-Cookie": buildAdminSessionCookie(token),
+        "Set-Cookie": session.cookie,
         Location: "/admin"
       });
       response.end();
+      return;
+    }
+
+    // Per-admin email+password login (Firebase-backed), alongside the shared ADMIN_WEB_PASSWORDS
+    // above as a fallback. Reuses the exact same Firebase verification and customer
+    // auto-registration pipeline as /api/auth/firebase-session -- a first-time sign-in here still
+    // becomes an ordinary customer row, since identity creation by itself grants no privilege.
+    // Only an account whose user_roles already contains an active "admin" row (granted out of
+    // band via scripts/grant-admin-role.js, never self-service) is allowed past this point.
+    if (request.method === "POST" && url.pathname === "/admin/login/firebase") {
+      const lockoutRemainingMs = getAdminLoginLockoutRemainingMs(request);
+      if (lockoutRemainingMs > 0) {
+        sendJson(response, 429, { error: "locked" });
+        return;
+      }
+
+      const body = await readJsonBody(request);
+      if (!body.idToken || typeof body.idToken !== "string") {
+        sendJson(response, 400, { error: "idToken is required" });
+        return;
+      }
+
+      let firebaseUser;
+      try {
+        firebaseUser = await verifyFirebaseIdToken(body.idToken);
+      } catch (error) {
+        recordAdminLoginFailure(request);
+        sendJson(response, 401, { error: "invalid_token" });
+        return;
+      }
+
+      // email_verified comes from Firebase's own verified ID token claim, not anything the
+      // client asserts -- required here (unlike the customer/merchant Firebase login) because an
+      // unverified address could belong to someone other than the person who typed it in.
+      if (!firebaseUser.email_verified) {
+        recordAdminLoginFailure(request);
+        sendJson(response, 403, { error: "email_not_verified" });
+        return;
+      }
+
+      let user = await authProfileReadRepository.getByFirebaseUid(firebaseUser.uid);
+      if (!user) {
+        const registration = await customerRegistrationRepository.resolveOrRegisterCustomer({
+          firebaseUid: firebaseUser.uid,
+          email: firebaseUser.email || null,
+          displayName: deriveDisplayNameFromFirebaseUser(firebaseUser),
+          now: businessClock.nowIso()
+        });
+        if (registration.error) {
+          recordAdminLoginFailure(request);
+          sendJson(response, 403, { error: registration.error });
+          return;
+        }
+        user = await authProfileReadRepository.getById(registration.userId);
+      }
+
+      if (user.status !== "active") {
+        recordAdminLoginFailure(request);
+        sendJson(response, 403, { error: "account_disabled" });
+        return;
+      }
+      if (!user.roles.includes("admin")) {
+        recordAdminLoginFailure(request);
+        sendJson(response, 403, { error: "not_admin" });
+        return;
+      }
+
+      clearAdminLoginFailures(request);
+      const token = createAuthToken(user);
+      response.writeHead(200, {
+        "Content-Type": "application/json; charset=utf-8",
+        "Set-Cookie": buildAdminSessionCookie(token)
+      });
+      response.end(JSON.stringify({ redirectTo: "/admin" }));
       return;
     }
 
@@ -2099,6 +2264,119 @@ const server = http.createServer(async (request, response) => {
         requestId: adminWebRejectRefundMatch[1],
         serviceBody: { reason: body.reason },
         successText: "已駁回這筆退款申請。"
+      });
+      return;
+    }
+
+    if (request.method === "GET" && url.pathname === "/admin/accounts") {
+      const adminUser = await requireAdminWebUser(request, response);
+      if (!adminUser) return;
+
+      const search = url.searchParams.get("q") || "";
+      const accounts = await listAdminAccounts({
+        authUser: adminUser,
+        search,
+        adminAccountRoleRepository,
+      });
+      const csrfToken = buildAdminCsrfToken(parseCookies(request)[ADMIN_SESSION_COOKIE_NAME]);
+      const bodyHtml = renderAdminAccountsBody({
+        accounts,
+        search,
+        notice: readAdminNoticeFromQuery(url),
+        csrfToken,
+      });
+      sendHtml(response, 200, renderAdminPage({
+        title: "帳號角色",
+        bodyHtml,
+        activeNav: "accounts",
+      }));
+      return;
+    }
+
+    const adminWebAccountRoleMatch = url.pathname.match(/^\/admin\/accounts\/([^/]+)\/role$/);
+    if (request.method === "POST" && adminWebAccountRoleMatch) {
+      const adminUser = await requireAdminWebUser(request, response);
+      if (!adminUser) return;
+
+      const body = await readCsrfVerifiedAdminFormBody(request, response);
+      if (!body) return;
+
+      try {
+        const result = await setAdminAccountRole({
+          authUser: adminUser,
+          userId: decodeURIComponent(adminWebAccountRoleMatch[1]),
+          body,
+          adminAccountRoleRepository,
+          now: businessClock.nowIso(),
+        });
+        const roleLabel = result.activeRole === "merchant" ? "商家" : "顧客";
+        const text = result.changed
+          ? `已切換為${roleLabel}介面；原帳號與歷史資料均保留。`
+          : `這個帳號目前已經是${roleLabel}介面。`;
+        response.writeHead(302, {
+          Location: buildAdminRedirectLocation("/admin/accounts", { type: "success", text }),
+        });
+        response.end();
+      } catch (error) {
+        response.writeHead(302, {
+          Location: buildAdminRedirectLocation("/admin/accounts", {
+            type: "error",
+            text: extractAdminWebErrorMessage(error),
+          }),
+        });
+        response.end();
+      }
+      return;
+    }
+
+    if (request.method === "GET" && url.pathname === "/admin/merchant-applications") {
+      const adminUser = await requireAdminWebUser(request, response);
+      if (!adminUser) return;
+
+      const applications = await merchantApplicationRepository.listApplicationsForAdmin({});
+      const csrfToken = buildAdminCsrfToken(parseCookies(request)[ADMIN_SESSION_COOKIE_NAME]);
+      const bodyHtml = renderAdminMerchantApplicationsBody({
+        pendingApplications: applications.filter((item) => item.status === "pending"),
+        reviewedApplications: applications.filter((item) => item.status !== "pending"),
+        notice: readAdminNoticeFromQuery(url),
+        csrfToken
+      });
+      sendHtml(response, 200, renderAdminPage({ title: "商家申請審核", bodyHtml, activeNav: "merchantApplications" }));
+      return;
+    }
+
+    const adminWebApproveMerchantApplicationMatch = url.pathname.match(/^\/admin\/merchant-applications\/([^/]+)\/approve$/);
+    if (request.method === "POST" && adminWebApproveMerchantApplicationMatch) {
+      const adminUser = await requireAdminWebUser(request, response);
+      if (!adminUser) return;
+
+      const body = await readCsrfVerifiedAdminFormBody(request, response);
+      if (!body) return;
+
+      await handleAdminMerchantApplicationDecision(response, {
+        serviceFn: approveMerchantApplication,
+        adminUser,
+        applicationId: adminWebApproveMerchantApplicationMatch[1],
+        serviceBody: { latitude: body.latitude, longitude: body.longitude },
+        successText: "已核准這筆商家申請。"
+      });
+      return;
+    }
+
+    const adminWebRejectMerchantApplicationMatch = url.pathname.match(/^\/admin\/merchant-applications\/([^/]+)\/reject$/);
+    if (request.method === "POST" && adminWebRejectMerchantApplicationMatch) {
+      const adminUser = await requireAdminWebUser(request, response);
+      if (!adminUser) return;
+
+      const body = await readCsrfVerifiedAdminFormBody(request, response);
+      if (!body) return;
+
+      await handleAdminMerchantApplicationDecision(response, {
+        serviceFn: rejectMerchantApplication,
+        adminUser,
+        applicationId: adminWebRejectMerchantApplicationMatch[1],
+        serviceBody: { reason: body.reason },
+        successText: "已駁回這筆商家申請。"
       });
       return;
     }
@@ -2331,6 +2609,18 @@ async function getAdminWebUser(request) {
   return user?.roles.includes("admin") ? user : null;
 }
 
+// Shared by the real password login (POST /admin/login) and the local-dev auto-login below --
+// both end up issuing the exact same signed session cookie for the one seeded admin identity,
+// they just differ in how they decide the caller is allowed to have it.
+async function resolveAdminWebSessionCookie() {
+  const adminUser = await authProfileReadRepository.getById(ADMIN_WEB_USER_ID);
+  if (!adminUser || !adminUser.roles.includes("admin")) {
+    return { error: `系統找不到管理員身份（${ADMIN_WEB_USER_ID}），請確認資料庫已正確 seed。` };
+  }
+  const token = createAuthToken(adminUser);
+  return { cookie: buildAdminSessionCookie(token) };
+}
+
 // Guard clause for every protected /admin/* route: redirects to the login page and returns
 // null on failure so the caller can `if (!adminUser) return;` immediately.
 async function requireAdminWebUser(request, response) {
@@ -2354,6 +2644,61 @@ function verifyAdminWebPassword(password) {
   // Compares against every configured password (not short-circuiting on the first match) so a
   // submitted password's comparison time doesn't reveal which one, if any, it matched.
   return candidates.reduce((matched, candidate) => safeEqual(password, candidate) || matched, false);
+}
+
+// In-memory login lockout for /admin/login -- proportional to this project's actual scale (one
+// App Service instance, a small classroom audience, no existing rate-limiting infrastructure to
+// build on). Resets on process restart; that's an acceptable tradeoff here, not a gap worth a
+// database table and migration for this project's size. Keyed by client IP since
+// ADMIN_WEB_PASSWORDS has no per-admin identity to key on instead.
+const ADMIN_LOGIN_MAX_ATTEMPTS = 5;
+const ADMIN_LOGIN_FAILURE_WINDOW_MS = 15 * 60 * 1000;
+const ADMIN_LOGIN_LOCKOUT_MS = 15 * 60 * 1000;
+const adminLoginAttemptsByIp = new Map();
+
+function getAdminLoginClientIp(request) {
+  // App Service sits behind Azure's front-end proxy, so the real client IP arrives via
+  // X-Forwarded-For (first entry is the original client); local dev has no proxy in front, so
+  // request.socket.remoteAddress is the right fallback there.
+  const forwardedFor = request.headers["x-forwarded-for"];
+  if (typeof forwardedFor === "string" && forwardedFor.trim()) {
+    return forwardedFor.split(",")[0].trim();
+  }
+  return request.socket?.remoteAddress || "unknown";
+}
+
+function getAdminLoginLockoutRemainingMs(request) {
+  const ip = getAdminLoginClientIp(request);
+  const record = adminLoginAttemptsByIp.get(ip);
+  if (!record?.lockedUntil) return 0;
+  const remaining = record.lockedUntil - Date.now();
+  if (remaining <= 0) {
+    adminLoginAttemptsByIp.delete(ip);
+    return 0;
+  }
+  return remaining;
+}
+
+function recordAdminLoginFailure(request) {
+  const ip = getAdminLoginClientIp(request);
+  const now = Date.now();
+  const existing = adminLoginAttemptsByIp.get(ip);
+  const withinWindow = existing && now - existing.firstAttemptAt < ADMIN_LOGIN_FAILURE_WINDOW_MS;
+  const record = withinWindow
+    ? { ...existing, count: existing.count + 1 }
+    : { count: 1, firstAttemptAt: now, lockedUntil: null };
+  if (record.count >= ADMIN_LOGIN_MAX_ATTEMPTS) {
+    record.lockedUntil = now + ADMIN_LOGIN_LOCKOUT_MS;
+  }
+  adminLoginAttemptsByIp.set(ip, record);
+}
+
+function clearAdminLoginFailures(request) {
+  adminLoginAttemptsByIp.delete(getAdminLoginClientIp(request));
+}
+
+function formatLockoutMinutes(remainingMs) {
+  return Math.max(1, Math.ceil(remainingMs / 60000));
 }
 
 // Derived from the session token itself (HMAC'd with the same secret createAuthToken() uses)
@@ -2421,8 +2766,20 @@ function describeAdminCancelActivityError(errorCode) {
 // used to show instead of the raw backend string.
 function extractAdminWebErrorMessage(error) {
   if (!(error instanceof PaymentServiceError)) return error.message;
+  const accountRoleErrorLabels = {
+    account_not_found: "找不到這個帳號。",
+    account_disabled: "停用中的帳號不能切換角色。",
+    admin_account_protected: "管理員帳號不能在這個頁面變更角色。",
+    merchant_profile_required: "這個帳號尚未建立商家與門市資料，請先完成商家申請審核。",
+    merchant_profile_disabled: "這個帳號所屬的商家資料已停用，不能切換到商家介面。",
+  };
+  if (accountRoleErrorLabels[error.payload?.status]) {
+    return accountRoleErrorLabels[error.payload.status];
+  }
   const code = error.payload?.error;
-  if (typeof code === "string" && code.startsWith("Refund request is already")) {
+  if (typeof code === "string" && (
+    code.startsWith("Refund request is already") || code.startsWith("Merchant application is already")
+  )) {
     return "這筆申請已經被其他人審核過了，請重新整理。";
   }
   return code || "審核失敗";
@@ -2449,6 +2806,27 @@ async function handleAdminRefundDecision(response, { serviceFn, adminUser, reque
   } catch (error) {
     response.writeHead(302, {
       Location: buildAdminRedirectLocation("/admin/refund-requests", { type: "error", text: extractAdminWebErrorMessage(error) })
+    });
+    response.end();
+  }
+}
+
+// Same shape as handleAdminRefundDecision, for the merchant-application approve/reject routes.
+async function handleAdminMerchantApplicationDecision(response, { serviceFn, adminUser, applicationId, serviceBody, successText }) {
+  try {
+    await serviceFn({
+      authUser: adminUser,
+      applicationId,
+      body: serviceBody,
+      merchantApplicationRepository
+    });
+    response.writeHead(302, {
+      Location: buildAdminRedirectLocation("/admin/merchant-applications", { type: "success", text: successText })
+    });
+    response.end();
+  } catch (error) {
+    response.writeHead(302, {
+      Location: buildAdminRedirectLocation("/admin/merchant-applications", { type: "error", text: extractAdminWebErrorMessage(error) })
     });
     response.end();
   }
@@ -2509,8 +2887,9 @@ ${ADMIN_THEME_VARIABLES}
   .btn-danger { border-color: var(--error); color: var(--error); }
   .btn-primary { background: var(--text); color: var(--background); }
   .btn-secondary { background: transparent; color: var(--text); }
-  input[type="text"] { border: 1px solid #666666; border-radius: 0; background: var(--background); color: var(--text); padding: 8px 10px; font-size: 13px; font-family: inherit; }
-  input[type="text"]:focus { outline: none; border-color: var(--line-strong); box-shadow: 0 0 0 1px var(--line-strong); }
+  input[type="text"], input[type="search"] { border: 1px solid #666666; border-radius: 0; background: var(--background); color: var(--text); padding: 8px 10px; font-size: 13px; font-family: inherit; }
+  input[type="text"]:focus, input[type="search"]:focus { outline: none; border-color: var(--line-strong); box-shadow: 0 0 0 1px var(--line-strong); }
+  button:disabled { opacity: 0.45; cursor: not-allowed; }
   section.empty { color: var(--muted); font-size: 13px; padding: 10px 0; }
   h3.section-title { font-size: 13px; color: var(--muted); margin: 22px 0 8px; }
   .dashboard-columns { display: grid; grid-template-columns: 1fr 1fr; gap: 24px; align-items: start; }
@@ -2524,6 +2903,8 @@ ${ADMIN_THEME_VARIABLES}
   <nav>
     <a class="${navLinkClass("dashboard")}" href="/admin">全平台團購</a>
     <a class="${navLinkClass("refunds")}" href="/admin/refund-requests">退款審核</a>
+    <a class="${navLinkClass("merchantApplications")}" href="/admin/merchant-applications">商家申請審核</a>
+    <a class="${navLinkClass("accounts")}" href="/admin/accounts">帳號角色</a>
     ${isDevAuthModeEnabled() ? '<a class="nav-link" href="/dev-console">本機測試控制台</a>' : ""}
     <form class="logout" method="POST" action="/admin/logout">
       <button type="submit">登出</button>
@@ -2537,7 +2918,24 @@ ${bodyHtml}
 </html>`;
 }
 
-function renderAdminLoginPage({ error } = {}) {
+function getFirebaseWebConfig() {
+  const apiKey = process.env.FIREBASE_WEB_API_KEY;
+  const authDomain = process.env.FIREBASE_WEB_AUTH_DOMAIN;
+  const projectId = process.env.FIREBASE_PROJECT_ID;
+  const appId = process.env.FIREBASE_WEB_APP_ID;
+  if (!apiKey || !authDomain || !projectId || !appId) return null;
+  return { apiKey, authDomain, projectId, appId };
+}
+
+// Escapes "</" so a trusted server-side config object can't be misread as closing the <script>
+// tag it's embedded in -- these values come from this server's own env, not user input, but
+// costs nothing to do properly.
+function toInlineScriptJson(value) {
+  return JSON.stringify(value).replace(/</g, "\\u003c");
+}
+
+function renderAdminLoginPage({ error, showLocalDevAutoLogin = false } = {}) {
+  const firebaseWebConfig = getFirebaseWebConfig();
   return `<!DOCTYPE html>
 <html lang="zh-Hant">
 <head>
@@ -2548,22 +2946,148 @@ function renderAdminLoginPage({ error } = {}) {
 ${ADMIN_THEME_VARIABLES}
   * { box-sizing: border-box; }
   body { margin: 0; min-height: 100vh; display: flex; align-items: center; justify-content: center; background: var(--background); }
-  form { background: var(--surface); border: 1px solid var(--line); padding: 28px 26px; width: 300px; }
+  .loginCard { background: var(--surface); border: 1px solid var(--line); padding: 28px 26px; width: 300px; }
   h1 { font-size: 16px; margin: 0 0 18px; color: var(--text); }
+  h2 { font-size: 13px; margin: 0 0 10px; color: var(--muted); font-weight: 700; }
   input { width: 100%; border: 1px solid #666666; border-radius: 0; background: var(--background); color: var(--text); padding: 10px 12px; font-size: 14px; margin-bottom: 12px; box-sizing: border-box; }
   input:focus { outline: none; border-color: var(--line-strong); box-shadow: 0 0 0 1px var(--line-strong); }
   button { width: 100%; border: 1px solid var(--text); border-radius: 0; padding: 10px; font-size: 14px; font-weight: 700; background: var(--text); color: var(--background); cursor: pointer; }
   button:hover { filter: invert(1); }
+  button:disabled { opacity: 0.5; cursor: not-allowed; }
   p.error { color: var(--error); font-size: 12px; font-weight: 700; margin: 0 0 12px; }
+  .divider { display: flex; align-items: center; gap: 10px; margin: 22px 0; color: var(--muted); font-size: 12px; }
+  .divider::before, .divider::after { content: ""; flex: 1; height: 1px; background: var(--line); }
+  .textLink { width: 100%; background: none; border: none; color: var(--text); text-decoration: underline; font-size: 12px; font-weight: 700; padding: 8px 0 0; cursor: pointer; }
+  .textLink:hover { filter: none; opacity: 0.75; }
+  p.status { font-size: 12px; font-weight: 700; margin: 0 0 12px; min-height: 15px; color: var(--muted); }
 </style>
 </head>
 <body>
-<form method="POST" action="/admin/login">
+<div class="loginCard">
   <h1>DrinkGroupBuy 管理後台</h1>
-  ${error ? `<p class="error">${escapeHtml(error)}</p>` : ""}
-  <input type="password" name="password" placeholder="密碼" autofocus required />
-  <button type="submit">登入</button>
-</form>
+  <form method="POST" action="/admin/login">
+    ${error ? `<p class="error">${escapeHtml(error)}</p>` : ""}
+    <input type="password" name="password" placeholder="密碼" ${firebaseWebConfig ? "" : "autofocus"} required />
+    <button type="submit">登入</button>
+  </form>
+  ${showLocalDevAutoLogin ? `
+  <p class="status" id="localDevLoginStatus"></p>
+  <button type="button" id="localDevLoginButton">本機開發模式：一鍵登入</button>
+  <script>
+    document.getElementById("localDevLoginButton").addEventListener("click", async (event) => {
+      const button = event.currentTarget;
+      const statusEl = document.getElementById("localDevLoginStatus");
+      button.disabled = true;
+      try {
+        const response = await fetch("/admin/login/local-dev", { method: "POST" });
+        if (!response.ok) {
+          statusEl.textContent = "本機自動登入失敗，請改用密碼登入。";
+          button.disabled = false;
+          return;
+        }
+        window.location.href = "/admin";
+      } catch (error) {
+        statusEl.textContent = "本機自動登入失敗，請改用密碼登入。";
+        button.disabled = false;
+      }
+    });
+  </script>
+  ` : ""}
+  ${firebaseWebConfig ? `
+  <div class="divider">或</div>
+  <h2 id="firebaseLoginHeading">用信箱登入</h2>
+  <form id="firebaseLoginForm">
+    <p class="status" id="firebaseLoginStatus"></p>
+    <input type="email" id="firebaseLoginEmail" placeholder="信箱" autocomplete="username" autofocus required />
+    <input type="password" id="firebaseLoginPassword" placeholder="密碼" autocomplete="current-password" required minlength="6" />
+    <button type="submit" id="firebaseLoginSubmit">登入</button>
+    <button type="button" class="textLink" id="firebaseLoginToggle">第一次使用，建立帳號</button>
+  </form>
+  <script type="module">
+    import { initializeApp } from "https://www.gstatic.com/firebasejs/12.15.0/firebase-app.js";
+    import {
+      getAuth,
+      signInWithEmailAndPassword,
+      createUserWithEmailAndPassword,
+      sendEmailVerification
+    } from "https://www.gstatic.com/firebasejs/12.15.0/firebase-auth.js";
+
+    const firebaseConfig = ${toInlineScriptJson(firebaseWebConfig)};
+    const app = initializeApp(firebaseConfig);
+    const auth = getAuth(app);
+
+    const formEl = document.getElementById("firebaseLoginForm");
+    const statusEl = document.getElementById("firebaseLoginStatus");
+    const emailEl = document.getElementById("firebaseLoginEmail");
+    const passwordEl = document.getElementById("firebaseLoginPassword");
+    const submitEl = document.getElementById("firebaseLoginSubmit");
+    const toggleEl = document.getElementById("firebaseLoginToggle");
+    const headingEl = document.getElementById("firebaseLoginHeading");
+    let mode = "signin";
+
+    toggleEl.addEventListener("click", () => {
+      mode = mode === "signin" ? "signup" : "signin";
+      headingEl.textContent = mode === "signin" ? "用信箱登入" : "建立信箱帳號";
+      submitEl.textContent = mode === "signin" ? "登入" : "建立帳號";
+      toggleEl.textContent = mode === "signin" ? "第一次使用，建立帳號" : "已經有帳號，改用登入";
+      statusEl.textContent = "";
+    });
+
+    formEl.addEventListener("submit", async (event) => {
+      event.preventDefault();
+      statusEl.textContent = "";
+      submitEl.disabled = true;
+      const email = emailEl.value.trim();
+      const password = passwordEl.value;
+      try {
+        if (mode === "signup") {
+          const credential = await createUserWithEmailAndPassword(auth, email, password);
+          await sendEmailVerification(credential.user);
+          statusEl.textContent = "帳號已建立，請到信箱點擊驗證連結；驗證後請聯絡系統管理員開通管理員權限，再回來登入。";
+          return;
+        }
+        const credential = await signInWithEmailAndPassword(auth, email, password);
+        const idToken = await credential.user.getIdToken(true);
+        const response = await fetch("/admin/login/firebase", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ idToken })
+        });
+        if (!response.ok) {
+          const payload = await response.json().catch(() => ({}));
+          statusEl.textContent = describeBackendError(payload.error);
+          return;
+        }
+        window.location.href = "/admin";
+      } catch (error) {
+        statusEl.textContent = describeFirebaseError(error);
+      } finally {
+        submitEl.disabled = false;
+      }
+    });
+
+    function describeBackendError(code) {
+      if (code === "email_not_verified") return "信箱尚未驗證，請先點擊驗證信裡的連結。";
+      if (code === "not_admin") return "這個帳號目前沒有管理員權限，請聯絡系統管理員開通。";
+      if (code === "account_disabled") return "這個帳號已被停用。";
+      if (code === "locked") return "登入失敗次數過多，請稍後再試。";
+      return "登入失敗，請確認帳號密碼是否正確。";
+    }
+
+    function describeFirebaseError(error) {
+      const code = error && error.code;
+      if (code === "auth/email-already-in-use") return "這個信箱已經註冊過，請改用登入。";
+      if (code === "auth/weak-password") return "密碼至少需要 6 碼。";
+      if (code === "auth/invalid-credential" || code === "auth/wrong-password" || code === "auth/user-not-found") {
+        return "帳號或密碼不正確。";
+      }
+      if (code === "auth/too-many-requests") return "嘗試次數過多，請稍後再試。";
+      if (code === "auth/invalid-email") return "信箱格式不正確。";
+      return "發生錯誤，請稍後再試。";
+    }
+  </script>
+  ` : ""}
+</div>
 </body>
 </html>`;
 }
@@ -2656,6 +3180,126 @@ function renderAdminRefundRequestsBody({ pendingRequests, reviewedRequests, noti
   <h3 class="section-title">待審核（${pendingRequests.length} 筆）</h3>
   ${pendingHtml}
   <h3 class="section-title">審核紀錄（${reviewedRequests.length} 筆）</h3>
+  ${reviewedHtml}`;
+}
+
+function renderAdminAccountsBody({ accounts, search, notice, csrfToken }) {
+  const noticeHtml = renderAdminNotice(notice);
+  const searchHtml = `
+    <form class="row" method="GET" action="/admin/accounts" style="margin-bottom:18px;">
+      <input
+        type="search"
+        name="q"
+        value="${escapeHtml(search)}"
+        placeholder="搜尋姓名、Email、帳號 ID 或店名"
+        maxlength="100"
+        style="flex:1; min-width:240px;"
+      />
+      <button type="submit" class="btn-secondary">搜尋</button>
+      ${search ? '<a class="btn" href="/admin/accounts">清除</a>' : ""}
+    </form>`;
+
+  const accountsHtml = accounts.length === 0
+    ? `<section class="empty">${search ? "找不到符合條件的帳號。" : "目前沒有可管理的顧客或商家帳號。"}</section>`
+    : accounts.map((account) => {
+        const roleLabel = account.activeRole === "admin"
+          ? "管理員"
+          : account.activeRole === "merchant"
+            ? "商家"
+            : account.activeRole === "customer"
+              ? "顧客"
+              : "未設定";
+        const statusLabels = { active: "啟用", disabled: "停用", deleted: "已刪除" };
+        const statusLabel = statusLabels[account.status] || account.status;
+        const accountInactive = account.status !== "active";
+        const accountProtected = account.protectedAdmin;
+        const merchantUnavailable = !account.merchantProfileAvailable;
+        const action = `/admin/accounts/${encodeURIComponent(account.id)}/role`;
+        return `
+    <div class="card">
+      <h2>${escapeHtml(account.displayName || account.email || account.id)}
+        <span class="badge">目前：${escapeHtml(roleLabel)}</span>
+      </h2>
+      <p class="meta">Email：${escapeHtml(account.email || "未提供")}</p>
+      <p class="meta">帳號 ID：${escapeHtml(account.id)}</p>
+      <p class="meta">帳號狀態：${escapeHtml(statusLabel)}</p>
+      ${accountProtected
+        ? '<p class="meta" style="color:var(--warning);">管理員是受保護身份：可以在清單查看，但不能在一般角色頁改成顧客或商家。</p>'
+        : account.merchantStore
+        ? `<p class="meta">保留的商家資料：${escapeHtml(account.merchantStore.name || account.merchantStore.id)}（${escapeHtml(account.merchantStore.id)}）</p>`
+        : '<p class="meta">尚無商家／門市資料；必須先完成商家申請審核，才能切換到商家介面。</p>'}
+      ${accountInactive && !accountProtected ? '<p class="meta" style="color:var(--warning);">非啟用帳號只能查看，不能切換角色。</p>' : ""}
+      <div class="row">
+        <form method="POST" action="${action}" onsubmit="return confirm('確定切換為顧客介面嗎？商家與門市資料會保留，但這個帳號將暫時不能使用商家功能。');">
+          <input type="hidden" name="csrfToken" value="${escapeHtml(csrfToken)}" />
+          <input type="hidden" name="targetRole" value="customer" />
+          <button type="submit" class="btn-secondary" ${accountProtected || accountInactive || account.activeRole === "customer" ? "disabled" : ""}>切換為顧客</button>
+        </form>
+        <form method="POST" action="${action}" onsubmit="return confirm('確定切換為商家介面嗎？顧客資料與訂單歷史會保留，但這個帳號將暫時看不到顧客介面。');">
+          <input type="hidden" name="csrfToken" value="${escapeHtml(csrfToken)}" />
+          <input type="hidden" name="targetRole" value="merchant" />
+          <button type="submit" class="btn-primary" ${accountProtected || accountInactive || merchantUnavailable || account.activeRole === "merchant" ? "disabled" : ""}>切換為商家</button>
+        </form>
+      </div>
+    </div>`;
+      }).join("\n");
+
+  return `${noticeHtml}
+  <div class="card">
+    <h2>帳號角色管理</h2>
+    <p class="meta">此頁列出資料庫保留的所有已註冊帳號，包含啟用、停用、已刪除及管理員身份。只有啟用中的一般帳號可切換顧客／商家角色；管理員與非啟用帳號只供查看。</p>
+    <p class="meta">切換只改變目前可使用的介面與權限，不會刪除顧客資料、訂單、商家、門市或歷史紀錄。後端權限立即生效；使用者登出重登，或完全關閉 App 後重新開啟，即會進入新角色介面。</p>
+  </div>
+  ${searchHtml}
+  <h3 class="section-title">帳號（${accounts.length} 筆）</h3>
+  ${accountsHtml}`;
+}
+
+// v1 keeps storeName/address/contactPhone read-only at approval -- the admin only supplies the
+// two fields nothing else in this codebase can derive (latitude/longitude); an editable-override
+// UI can be added later if approval-time typo correction turns out to matter.
+function renderAdminMerchantApplicationsBody({ pendingApplications, reviewedApplications, notice, csrfToken }) {
+  const noticeHtml = renderAdminNotice(notice);
+
+  const pendingHtml = pendingApplications.length === 0
+    ? `<section class="empty">目前沒有待審核的商家申請。</section>`
+    : pendingApplications.map((application) => `
+    <div class="card">
+      <h2>${escapeHtml(application.storeName)} <span class="badge">${escapeHtml(application.status)}</span></h2>
+      <p class="meta">地址：${escapeHtml(application.address)}</p>
+      <p class="meta">聯絡電話：${escapeHtml(application.contactPhone)}</p>
+      <p class="meta">申請人：${escapeHtml(application.applicantDisplayName || application.applicantEmail || application.applicantFirebaseUid)}</p>
+      <div class="row">
+        <form class="row" method="POST" action="/admin/merchant-applications/${encodeURIComponent(application.id)}/approve" style="flex:1;" onsubmit="return confirm('確定要核准這筆商家申請嗎？請先確認緯度／經度已正確填寫。');">
+          <input type="hidden" name="csrfToken" value="${escapeHtml(csrfToken)}" />
+          <input type="text" name="latitude" placeholder="緯度，例如 24.1505" required style="width:140px;" />
+          <input type="text" name="longitude" placeholder="經度，例如 120.6839" required style="width:140px;" />
+          <button type="submit" class="btn-primary">核准並建立商家</button>
+        </form>
+      </div>
+      <div class="row">
+        <form class="row" method="POST" action="/admin/merchant-applications/${encodeURIComponent(application.id)}/reject" style="flex:1;">
+          <input type="hidden" name="csrfToken" value="${escapeHtml(csrfToken)}" />
+          <input type="text" name="reason" placeholder="駁回原因" required style="flex:1; min-width:120px;" />
+          <button type="submit" class="btn-secondary">駁回</button>
+        </form>
+      </div>
+    </div>`).join("\n");
+
+  const reviewedHtml = reviewedApplications.length === 0
+    ? `<section class="empty">目前沒有已審核的商家申請。</section>`
+    : reviewedApplications.map((application) => `
+    <div class="card">
+      <h2>${escapeHtml(application.storeName)} <span class="badge">${escapeHtml(application.status)}</span></h2>
+      <p class="meta">地址：${escapeHtml(application.address)}</p>
+      ${application.status === "rejected" && application.rejectionReason ? `<p class="meta" style="color:#b91c1c;">駁回原因：${escapeHtml(application.rejectionReason)}</p>` : ""}
+      ${application.status === "approved" ? `<p class="meta">已建立商家：${escapeHtml(application.resultingMerchantId)}・門市：${escapeHtml(application.resultingStoreId)}</p>` : ""}
+    </div>`).join("\n");
+
+  return `${noticeHtml}
+  <h3 class="section-title">待審核（${pendingApplications.length} 筆）</h3>
+  ${pendingHtml}
+  <h3 class="section-title">審核紀錄（${reviewedApplications.length} 筆）</h3>
   ${reviewedHtml}`;
 }
 
@@ -2930,6 +3574,15 @@ function isLoopbackRequest(request) {
 function readBooleanEnv(value, fallback = false) {
   if (value == null || value === "") return fallback;
   return ["1", "true", "yes", "on"].includes(String(value).trim().toLowerCase());
+}
+
+function deriveDisplayNameFromFirebaseUser(firebaseUser) {
+  const name = typeof firebaseUser.name === "string" ? firebaseUser.name.trim() : "";
+  if (name) return name;
+
+  const email = typeof firebaseUser.email === "string" ? firebaseUser.email : "";
+  const localPart = email.split("@")[0]?.trim();
+  return localPart || "Google 使用者";
 }
 
 function toPublicUserResponse(user) {

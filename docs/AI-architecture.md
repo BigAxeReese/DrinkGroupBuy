@@ -1,6 +1,6 @@
 # 系統架構
 
-最後更新：2026-08-16
+最後更新：2026-09-11
 
 ## 文件範圍
 
@@ -56,7 +56,9 @@ Mobile 不直接連資料庫或付款 provider。Backend 是身份、價格、�
 - Backend 由 Firebase Admin 驗證 token，再從資料庫解析使用者角色與店家關係，最後簽發本專案 bearer token。角色與 `storeId` 不信任 client 自報值。
 - 舊密碼 login 與 dev-session 是開發相容路徑。Dev identity 只有 `AUTH_DEV_MODE=true`、非 production 且 Mobile `EXPO_PUBLIC_AUTH_MODE=dev` 時才可使用。
 - Admin／營運能力目前主要是開發或補救邊界；不能因畫面或 route 存在就視為 production 身份模型已完成。
-- 管理員入口是 `backend/server.js` 直接輸出的 `/admin` 網頁後台（server-rendered HTML／表單，無獨立前端專案），跟 Mobile／Firebase 完全分開：用 `ADMIN_WEB_PASSWORDS`（`backend/.env`，逗號分隔的多組密碼，皆對應同一個管理員身份）登入，成功後把既有的 `createAuthToken()` 簽出的同一種 bearer token 放進 HttpOnly cookie 當 session，取消團購／退款核准駁回都直接呼叫既有 service 函式，未另外實作一套邏輯。Mobile App 本身不再有任何管理員畫面或路由。
+- 管理員入口是 `backend/server.js` 直接輸出的 `/admin` 網頁後台（server-rendered HTML／表單，無獨立前端專案），跟 Mobile／Firebase 完全分開：用 `ADMIN_WEB_PASSWORDS`（`backend/.env`，逗號分隔的多組密碼，皆對應同一個管理員身份）登入，成功後把既有的 `createAuthToken()` 簽出的同一種 bearer token 放進 HttpOnly cookie 當 session。取消團購、退款審核、商家申請與帳號角色切換都在這個後台完成；角色切換走 PostgreSQL 交易，同時更新 `user_roles` 與 `merchant_users` 的啟用狀態並寫入 `audit_logs`，不刪除角色或業務資料。Mobile App 本身不再有任何管理員畫面或路由。
+- `/admin/accounts` 列出 `users` 中仍保留的所有帳號（包含 active／disabled／deleted 與 admin）；管理員帳號及非 active 帳號只讀，repository 的寫入交易仍會再次拒絕，不能只靠停用 HTML 按鈕保護。
+- 目前 App／後台是「同一個 App Service、不同入口與伺服器權限邊界」的邏輯隔離，適合課堂展示。正式營運的目標應改為獨立後台 hostname／App Service，使用 Microsoft Entra ID 或等效的管理員身份提供者、個人帳號白名單／群組與 MFA；後台管理 API 仍須保留 server-side admin role、CSRF、audit 與最小權限，不能只依賴網址不公開或前端隱藏。
 
 ## 付款、結算與取餐
 
@@ -72,11 +74,18 @@ Mobile 不直接連資料庫或付款 provider。Backend 是身份、價格、�
 - LINE Pay：只由 Backend 保存 provider credential、簽章並呼叫 API。正式 capture、refund 或 production scheduler 需要獨立人工核准與環境 gate。
 - 環境變數範本在 root `.env.example` 與 `mobile/.env.example`。文件只記變數用途，不得複製真實值。
 
+## 課堂展示部署
+
+- 2026-09-10 確認的展示拓撲是：Android APK → Azure App Service 公開 HTTPS 網址 → Azure Database for PostgreSQL Flexible Server。Mobile 不直接連 PostgreSQL，所有身份、價格、權限與資料操作仍經 Backend。
+- 此拓撲只用於非商業課堂展示，和 production 正式上線分開追蹤。App Service 免費層可能休眠且不適合作為可靠的常駐排程主機，因此展示環境預設關閉付款對帳、截止結算與取餐逾期背景排程。
+- Backend 程式更新只需重新部署 App Service，不需要重打 APK。Mobile 目前尚未設定 EAS Update；完成初次設定與重新打包一次後，一般 JavaScript／畫面／圖片變更可線上更新，原生套件、Android 權限或 Expo SDK 變更仍需重新打包。
+- 建立資源、環境變數、資料庫 migration（資料表版本更新）與驗收步驟見 `docs/azure-classroom-deployment.md`。Azure 資源已建立、Backend 已部署並驗證 `/health` 與資料庫讀寫 API 正常；Google 登入尚未在真機上實際驗證過、也尚未完成跨網路端對端驗證，不能把這兩項視為已完成。
+
 ## 開發、建置與驗證
 
 - Root 使用 npm；`package.json` 負責 Backend、Mobile、database、unit test 與各領域 smoke scripts。Mobile 另有自己的 `package.json`，目前是 Expo SDK 51／React Native 0.74。
 - `mobile/app.config.js` 的平台目標是 Android 與 Web。Android development build 使用 `expo run:android`；Web 使用固定本機 port 預覽。
-- Repository 沒有可確認的正式 release／store deployment pipeline，也沒有 root lint 或 typecheck script。不要把 Expo 開發 build、Web preview 或局部 smoke test 寫成 production build 驗證。
+- Repository 已有 Azure App Service 所需的 `npm start` 與課堂展示操作手冊，但尚未建立 Azure 資源，也沒有可確認的正式 release／store deployment pipeline；root 仍沒有 lint 或 typecheck script。不要把 Expo 開發 build、Web preview 或局部 smoke test 寫成 production build 驗證。
 - `.maestro/` 有環境與登入 smoke flow，但檔案存在不代表本次或目前裝置已執行。驗證結果只記實際跑過的命令與觀察。
 
 ## 已知架構邊界

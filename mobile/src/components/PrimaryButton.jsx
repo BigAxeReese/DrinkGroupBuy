@@ -27,7 +27,7 @@ const styles = StyleSheet.create({
     borderRadius: 13,
     alignItems: "center",
     justifyContent: "center",
-    backgroundColor: "#1f6feb",
+    backgroundColor: "#dc2626",
     paddingHorizontal: 14
   },
   secondary: {
