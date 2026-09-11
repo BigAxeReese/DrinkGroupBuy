@@ -62,8 +62,8 @@ const styles = StyleSheet.create({
     fontWeight: "900"
   },
   activeIcon: {
-    color: "#dc2626",
-    backgroundColor: "#fee2e2"
+    color: "#1f6feb",
+    backgroundColor: "#dbeafe"
   },
   label: {
     color: "#8b95a1",
@@ -71,6 +71,6 @@ const styles = StyleSheet.create({
     fontWeight: "800"
   },
   activeLabel: {
-    color: "#dc2626"
+    color: "#1f6feb"
   }
 });
