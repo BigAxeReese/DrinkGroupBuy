@@ -1,6 +1,6 @@
 # 系統架構
 
-最後更新：2026-09-11
+最後更新：2026-09-12
 
 ## 文件範圍
 
@@ -52,11 +52,15 @@ Mobile 不直接連資料庫或付款 provider。Backend 是身份、價格、�
 
 ## Authentication 與 authorization
 
-- 正式 Mobile 流程使用 Firebase Auth + Google Login；Mobile 把 Firebase ID token 送至 `POST /api/auth/firebase-session`。
+- 正式 Mobile 流程使用 Firebase Auth，支援兩種登入方式：Google Login，以及信箱＋密碼（`useFirebaseEmailLogin`，`mobile/src/utils/firebaseAuth.js`）。兩者都是同一個 Firebase 專案下的獨立登入方式，取得的 ID token 格式一致，Mobile 把 token 送至同一支 `POST /api/auth/firebase-session`，後端驗證方式不分登入方式。
 - Backend 由 Firebase Admin 驗證 token，再從資料庫解析使用者角色與店家關係，最後簽發本專案 bearer token。角色與 `storeId` 不信任 client 自報值。
+- **未曾登入過的 Firebase 帳號第一次登入，一律自動建立為顧客角色**（`customerRegistrationRepository.resolveOrRegisterCustomer`），不需要任何人審核；身份欄位（`firebaseUid`／`email`／`displayName`）只取自已驗證的 token，不讀 request body。這條規則對 Google 登入與信箱密碼登入一視同仁。
+  - 信箱密碼登入額外要求 Firebase 的 `email_verified` claim 為真才放行自動註冊；Google 登入的 token 本身這個 claim 恆真，不受影響。信箱未驗證會被擋在 403（`email_not_verified`），不會建立帳號。
+  - **商家角色不會透過登入自動取得**：不論用哪種登入方式，都必須另外走「商家自助申請 → 管理員審核」流程（`POST /api/merchant-applications` ＋ `/admin/merchant-applications`）才能從顧客轉為商家，核准時同一交易內停用顧客角色、啟用商家角色，兩者互斥、不並存。
+  - **管理員角色也不會透過登入自動取得**：只能由已掌握伺服器端機密的操作者用 `scripts/grant-admin-role.js` 手動授予，任何登入路徑（含 `/admin` 網頁後台自己的信箱密碼登入）都不能自我授予或自我升級。
 - 舊密碼 login 與 dev-session 是開發相容路徑。Dev identity 只有 `AUTH_DEV_MODE=true`、非 production 且 Mobile `EXPO_PUBLIC_AUTH_MODE=dev` 時才可使用。
 - Admin／營運能力目前主要是開發或補救邊界；不能因畫面或 route 存在就視為 production 身份模型已完成。
-- 管理員入口是 `backend/server.js` 直接輸出的 `/admin` 網頁後台（server-rendered HTML／表單，無獨立前端專案），跟 Mobile／Firebase 完全分開：用 `ADMIN_WEB_PASSWORDS`（`backend/.env`，逗號分隔的多組密碼，皆對應同一個管理員身份）登入，成功後把既有的 `createAuthToken()` 簽出的同一種 bearer token 放進 HttpOnly cookie 當 session。取消團購、退款審核、商家申請與帳號角色切換都在這個後台完成；角色切換走 PostgreSQL 交易，同時更新 `user_roles` 與 `merchant_users` 的啟用狀態並寫入 `audit_logs`，不刪除角色或業務資料。Mobile App 本身不再有任何管理員畫面或路由。
+- 管理員入口是 `backend/server.js` 直接輸出的 `/admin` 網頁後台（server-rendered HTML／表單，無獨立前端專案）。登入有兩條路：(1) `ADMIN_WEB_PASSWORDS`（`backend/.env`，逗號分隔的多組密碼，皆對應同一個固定管理員身份 `user-admin-001`）——備援用途，任何一組密碼都能登入同一身份，不分辨是誰；(2) 每人獨立的 Firebase 信箱密碼登入（`POST /admin/login/firebase`）——跟 Mobile 端信箱登入同一套 Firebase 機制，但額外要求該帳號已被 `scripts/grant-admin-role.js` 授予 admin 角色才放行，否則回 403（`not_admin`）；只在 `backend/.env` 設定 `FIREBASE_WEB_API_KEY`／`FIREBASE_WEB_AUTH_DOMAIN`／`FIREBASE_WEB_APP_ID` 時才會顯示這個表單。兩條路成功後都把 `createAuthToken()` 簽出的同一種 bearer token 放進 HttpOnly cookie 當 session，其餘 `/admin` 路由與權限檢查不分辨是走哪條路登入的。本機開發模式（`AUTH_DEV_MODE=true`＋僅限本機連線）另有一顆「一鍵登入」按鈕可跳過輸入密碼，正式環境（`NODE_ENV=production`）下這個按鈕與其對應的後端路由完全不存在。取消團購、退款審核、商家申請與帳號角色切換都在這個後台完成；角色切換走 PostgreSQL 交易，同時更新 `user_roles` 與 `merchant_users` 的啟用狀態並寫入 `audit_logs`，不刪除角色或業務資料。Mobile App 本身不再有任何管理員畫面或路由。
 - `/admin/accounts` 列出 `users` 中仍保留的所有帳號（包含 active／disabled／deleted 與 admin）；管理員帳號及非 active 帳號只讀，repository 的寫入交易仍會再次拒絕，不能只靠停用 HTML 按鈕保護。
 - 目前 App／後台是「同一個 App Service、不同入口與伺服器權限邊界」的邏輯隔離，適合課堂展示。正式營運的目標應改為獨立後台 hostname／App Service，使用 Microsoft Entra ID 或等效的管理員身份提供者、個人帳號白名單／群組與 MFA；後台管理 API 仍須保留 server-side admin role、CSRF、audit 與最小權限，不能只依賴網址不公開或前端隱藏。
 
