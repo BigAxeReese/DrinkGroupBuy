@@ -70,7 +70,8 @@
     "auth:map:customer-b": "node scripts/map-firebase-user.js customer-b",
     "auth:map:merchant": "node scripts/map-firebase-user.js merchant",
     "auth:map:admin": "node scripts/map-firebase-user.js admin",
-    "admin-role:grant": "node scripts/grant-admin-role.js"
+    "admin-role:grant": "node scripts/grant-admin-role.js",
+    "seed-account:bind": "node scripts/bind-seed-firebase-account.js"
   },
   "dependencies": {
     "firebase-admin": "^14.1.0",

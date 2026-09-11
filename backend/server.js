@@ -605,6 +605,14 @@ const server = http.createServer(async (request, response) => {
 
       // First time this Firebase account has ever signed in -- register it as a customer.
       // Identity fields come only from the verified token above, never from the request body.
+      // email_verified comes from Firebase itself (Google-provider sign-ins always carry it as
+      // true), not anything the client asserts -- only matters for a brand-new email/password
+      // signup, since an already-registered account already passed this check once, at signup.
+      if (!firebaseUser.email_verified) {
+        sendJson(response, 403, { error: "email_not_verified" });
+        return;
+      }
+
       const registration = await customerRegistrationRepository.resolveOrRegisterCustomer({
         firebaseUid: firebaseUser.uid,
         email: firebaseUser.email || null,
@@ -612,7 +620,7 @@ const server = http.createServer(async (request, response) => {
         now: businessClock.nowIso()
       });
       if (registration.error === "account_disabled") {
-        sendJson(response, 403, { error: "This Google account is disabled" });
+        sendJson(response, 403, { error: "This account is disabled" });
         return;
       }
       if (registration.error === "email_already_registered") {
@@ -2099,8 +2107,10 @@ const server = http.createServer(async (request, response) => {
       }
 
       // email_verified comes from Firebase's own verified ID token claim, not anything the
-      // client asserts -- required here (unlike the customer/merchant Firebase login) because an
-      // unverified address could belong to someone other than the person who typed it in.
+      // client asserts -- an unverified address could belong to someone other than the person who
+      // typed it in. The customer/merchant Firebase login (POST /api/auth/firebase-session) has
+      // the same check, for the same reason; kept as two separate checks since the two routes
+      // don't share a request path, not because only one of them needs it.
       if (!firebaseUser.email_verified) {
         recordAdminLoginFailure(request);
         sendJson(response, 403, { error: "email_not_verified" });
@@ -2123,11 +2133,6 @@ const server = http.createServer(async (request, response) => {
         user = await authProfileReadRepository.getById(registration.userId);
       }
 
-      if (user.status !== "active") {
-        recordAdminLoginFailure(request);
-        sendJson(response, 403, { error: "account_disabled" });
-        return;
-      }
       if (!user.roles.includes("admin")) {
         recordAdminLoginFailure(request);
         sendJson(response, 403, { error: "not_admin" });
@@ -3066,6 +3071,10 @@ ${ADMIN_THEME_VARIABLES}
       }
     });
 
+    // Keep in sync with mobile/src/screens/RoleSelectScreen.jsx's getLoginErrorMessage -- same
+    // Firebase/backend error codes, translated independently here because this runs as a plain
+    // script in a server-rendered HTML page and that one ships in the React Native bundle, with
+    // no shared module system between the two runtimes.
     function describeBackendError(code) {
       if (code === "email_not_verified") return "信箱尚未驗證，請先點擊驗證信裡的連結。";
       if (code === "not_admin") return "這個帳號目前沒有管理員權限，請聯絡系統管理員開通。";

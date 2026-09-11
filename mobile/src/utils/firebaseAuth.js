@@ -2,7 +2,17 @@ import { useEffect } from "react";
 import Constants from "expo-constants";
 import { GoogleSignin, isSuccessResponse } from "@react-native-google-signin/google-signin";
 import { initializeApp, getApps } from "firebase/app";
-import { getAuth, GoogleAuthProvider, signInWithCredential, signInWithPopup, signOut } from "firebase/auth";
+import {
+  getAuth,
+  GoogleAuthProvider,
+  signInWithCredential,
+  signInWithPopup,
+  signOut,
+  createUserWithEmailAndPassword,
+  signInWithEmailAndPassword,
+  sendEmailVerification,
+  sendPasswordResetEmail
+} from "firebase/auth";
 import { Platform } from "react-native";
 
 export function useFirebaseGoogleLogin() {
@@ -69,6 +79,37 @@ export function useFirebaseGoogleLogin() {
   return { signInWithGoogle };
 }
 
+// Email/password is a second, independent Firebase sign-in method alongside Google -- same
+// project, same ID token shape, same backend verification path (POST /api/auth/firebase-session
+// trusts any valid Firebase ID token regardless of which provider produced it). Doesn't require
+// googleWebClientId, since no Google sign-in is involved.
+export function useFirebaseEmailLogin() {
+  const config = getAuthConfig();
+
+  async function signUpWithEmail(email, password) {
+    assertFirebaseConfigured(config, { requireGoogleClientId: false });
+    const auth = getAuth(getFirebaseApp(config.firebase));
+    const credentialResult = await createUserWithEmailAndPassword(auth, email, password);
+    await sendEmailVerification(credentialResult.user);
+    return toFirebaseLoginResult(credentialResult);
+  }
+
+  async function signInWithEmail(email, password) {
+    assertFirebaseConfigured(config, { requireGoogleClientId: false });
+    const auth = getAuth(getFirebaseApp(config.firebase));
+    const credentialResult = await signInWithEmailAndPassword(auth, email, password);
+    return toFirebaseLoginResult(credentialResult);
+  }
+
+  async function resetPassword(email) {
+    assertFirebaseConfigured(config, { requireGoogleClientId: false });
+    const auth = getAuth(getFirebaseApp(config.firebase));
+    await sendPasswordResetEmail(auth, email);
+  }
+
+  return { signUpWithEmail, signInWithEmail, resetPassword };
+}
+
 export async function signOutFirebaseUser() {
   const config = getAuthConfig();
   if (!hasFirebaseConfig(config.firebase) || getApps().length === 0) return;
@@ -108,11 +149,11 @@ function getAuthConfig() {
   };
 }
 
-function assertFirebaseConfigured(config) {
+function assertFirebaseConfigured(config, { requireGoogleClientId = true } = {}) {
   if (!hasFirebaseConfig(config.firebase)) {
     throw new Error("Firebase mobile config is missing");
   }
-  if (!config.googleWebClientId) {
+  if (requireGoogleClientId && !config.googleWebClientId) {
     throw new Error("Google OAuth client ID is missing");
   }
 }

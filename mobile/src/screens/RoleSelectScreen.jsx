@@ -1,12 +1,12 @@
 import { useEffect, useState } from "react";
-import { Pressable, ScrollView, StyleSheet, Text, View } from "react-native";
+import { Pressable, ScrollView, StyleSheet, Text, TextInput, View } from "react-native";
 import {
   getAuthMode,
   listDevAuthUsers,
   loginWithDevUser,
   loginWithFirebaseIdToken
 } from "../utils/apiClient";
-import { signOutFirebaseUser, useFirebaseGoogleLogin } from "../utils/firebaseAuth";
+import { signOutFirebaseUser, useFirebaseEmailLogin, useFirebaseGoogleLogin } from "../utils/firebaseAuth";
 import { getRouteForUser } from "../utils/authRouting";
 
 export function RoleSelectScreen(props) {
@@ -21,14 +21,21 @@ export function RoleSelectScreen(props) {
 
 function FirebaseRoleSelectScreen(props) {
   const googleLogin = useFirebaseGoogleLogin();
-  return <RoleSelectContent {...props} isDevAuthMode={false} googleLogin={googleLogin} />;
+  const emailLogin = useFirebaseEmailLogin();
+  return <RoleSelectContent {...props} isDevAuthMode={false} googleLogin={googleLogin} emailLogin={emailLogin} />;
 }
 
-function RoleSelectContent({ navigation, isDevAuthMode, googleLogin = null }) {
+function RoleSelectContent({ navigation, isDevAuthMode, googleLogin = null, emailLogin = null }) {
   const { signInWithGoogle } = googleLogin || {};
+  const { signInWithEmail, signUpWithEmail, resetPassword } = emailLogin || {};
   const [loginError, setLoginError] = useState("");
   const [isLoggingIn, setIsLoggingIn] = useState(false);
   const [signedInUser, setSignedInUser] = useState(null);
+  const [emailMode, setEmailMode] = useState("signin");
+  const [email, setEmail] = useState("");
+  const [password, setPassword] = useState("");
+  const [emailStatus, setEmailStatus] = useState("");
+  const [isEmailBusy, setIsEmailBusy] = useState(false);
   const [devUsers, setDevUsers] = useState([]);
   const [selectedDevUserId, setSelectedDevUserId] = useState("");
   const [isDevDropdownOpen, setIsDevDropdownOpen] = useState(false);
@@ -68,20 +75,26 @@ function RoleSelectContent({ navigation, isDevAuthMode, googleLogin = null }) {
     };
   }, [isDevAuthMode, devUsersRetryToken]);
 
+  // Shared by every Firebase-backed login path (Google, email/password) -- not devLogin, which
+  // has no Firebase result and builds signedInUser from a different shape entirely.
+  const completeFirebaseLogin = async (firebaseResult) => {
+    const backendResult = await loginWithFirebaseIdToken(firebaseResult.firebaseIdToken);
+    setSignedInUser({
+      ...firebaseResult.firebaseUser,
+      backendUser: backendResult.user
+    });
+
+    const route = getRouteForUser(backendResult.user);
+    navigation.selectRole(route.role, route.routeName, route.params, backendResult.user);
+  };
+
   const login = async () => {
     try {
       setIsLoggingIn(true);
       setLoginError("");
 
       const firebaseResult = await signInWithGoogle();
-      const backendResult = await loginWithFirebaseIdToken(firebaseResult.firebaseIdToken);
-      setSignedInUser({
-        ...firebaseResult.firebaseUser,
-        backendUser: backendResult.user
-      });
-
-      const route = getRouteForUser(backendResult.user);
-      navigation.selectRole(route.role, route.routeName, route.params, backendResult.user);
+      await completeFirebaseLogin(firebaseResult);
     } catch (error) {
       // Backing out of the account picker is a deliberate, ordinary choice -- showing a red
       // error banner for it would make the app look like it's complaining about nothing.
@@ -91,6 +104,52 @@ function RoleSelectContent({ navigation, isDevAuthMode, googleLogin = null }) {
     } finally {
       setIsLoggingIn(false);
     }
+  };
+
+  // Shared busy/status/error scaffold for every email-form action (sign in, sign up, forgot
+  // password) -- each just supplies what happens on success.
+  const runEmailAction = async (action) => {
+    setIsEmailBusy(true);
+    setEmailStatus("");
+    try {
+      await action();
+    } catch (error) {
+      setEmailStatus(getLoginErrorMessage(error));
+    } finally {
+      setIsEmailBusy(false);
+    }
+  };
+
+  const submitEmailForm = async () => {
+    const trimmedEmail = email.trim();
+    if (!trimmedEmail || !password) return;
+    setLoginError("");
+
+    await runEmailAction(async () => {
+      if (emailMode === "signup") {
+        await signUpWithEmail(trimmedEmail, password);
+        setEmailStatus("帳號已建立，請到信箱點擊驗證連結；驗證後再回來登入。");
+        setEmailMode("signin");
+        setPassword("");
+        return;
+      }
+
+      const firebaseResult = await signInWithEmail(trimmedEmail, password);
+      await completeFirebaseLogin(firebaseResult);
+    });
+  };
+
+  const forgotPassword = async () => {
+    const trimmedEmail = email.trim();
+    if (!trimmedEmail) {
+      setEmailStatus("請先輸入信箱，再點擊忘記密碼。");
+      return;
+    }
+
+    await runEmailAction(async () => {
+      await resetPassword(trimmedEmail);
+      setEmailStatus("已寄出重設密碼信，請到信箱查看。");
+    });
   };
 
   const devLogin = async () => {
@@ -148,6 +207,68 @@ function RoleSelectContent({ navigation, isDevAuthMode, googleLogin = null }) {
             disabled={isLoggingIn}
             onPress={() => !isLoggingIn && login()}
           />
+        ) : null}
+
+        {!isDevAuthMode ? (
+          <View style={styles.emailPanel}>
+            <View style={styles.dividerRow}>
+              <View style={styles.dividerLine} />
+              <Text style={styles.dividerText}>或</Text>
+              <View style={styles.dividerLine} />
+            </View>
+            <Text style={styles.emailHeading}>
+              {emailMode === "signin" ? "用信箱登入" : "建立信箱帳號"}
+            </Text>
+            {emailStatus ? <Text style={styles.emailStatus}>{emailStatus}</Text> : null}
+            <TextInput
+              accessibilityLabel="信箱"
+              autoCapitalize="none"
+              autoCorrect={false}
+              keyboardType="email-address"
+              onChangeText={setEmail}
+              placeholder="信箱"
+              placeholderTextColor="#9ca3af"
+              style={styles.emailInput}
+              value={email}
+            />
+            <TextInput
+              accessibilityLabel="密碼"
+              autoCapitalize="none"
+              onChangeText={setPassword}
+              placeholder="密碼"
+              placeholderTextColor="#9ca3af"
+              secureTextEntry
+              style={styles.emailInput}
+              value={password}
+            />
+            <LoginOptionButton
+              compact
+              label={isEmailBusy ? "處理中..." : emailMode === "signin" ? "登入" : "建立帳號"}
+              disabled={isEmailBusy || !email.trim() || !password}
+              onPress={() => !isEmailBusy && submitEmailForm()}
+            />
+            <Pressable
+              accessibilityRole="button"
+              onPress={() => {
+                setEmailMode((mode) => (mode === "signin" ? "signup" : "signin"));
+                setEmailStatus("");
+              }}
+              style={({ pressed }) => [styles.textButton, pressed && styles.pressed]}
+            >
+              <Text style={styles.textButtonLabel}>
+                {emailMode === "signin" ? "第一次使用，建立帳號" : "已經有帳號，改用登入"}
+              </Text>
+            </Pressable>
+            {emailMode === "signin" ? (
+              <Pressable
+                accessibilityRole="button"
+                onPress={() => !isEmailBusy && forgotPassword()}
+                style={({ pressed }) => [styles.textButton, pressed && styles.pressed]}
+              >
+                <Text style={styles.textButtonLabel}>忘記密碼</Text>
+              </Pressable>
+            ) : null}
+          </View>
         ) : null}
 
         {signedInUser ? (
@@ -278,17 +399,37 @@ function LoginOptionButton({ icon, iconStyle, label, onPress, disabled = false, 
   );
 }
 
+// Keep in sync with backend/server.js's describeBackendError/describeFirebaseError (the
+// /admin/login page's inline script) -- same Firebase/backend error codes, translated
+// independently here because this file ships in the React Native bundle and that one in a
+// server-rendered HTML page, with no shared module system between the two runtimes.
 function getLoginErrorMessage(error) {
-  if (error.payload?.error === "Invalid Firebase ID token") {
-    return "Firebase 登入驗證失敗，請重新登入 Google。";
+  if (error.payload?.error === "email_not_verified") {
+    return "信箱尚未完成驗證，請先點擊驗證信裡的連結，再重新登入。";
   }
-  if (error.payload?.error === "This Google account is disabled") {
-    return "這個 Google 帳號已被停用，如有疑問請聯絡管理員。";
+  if (error.payload?.error === "Invalid Firebase ID token") {
+    return "登入驗證失敗，請重新登入一次。";
+  }
+  if (error.payload?.error === "This account is disabled" || error.payload?.error === "This Google account is disabled") {
+    return "這個帳號已被停用，如有疑問請聯絡管理員。";
   }
   if (error.payload?.error?.startsWith("This email is already linked to another account")) {
     return "這個 Email 已經連結到另一個帳號，請聯絡管理員處理。";
   }
-  return error.message || "Google 登入失敗";
+
+  // Firebase client SDK errors (only ever come from the email/password form -- Google sign-in's
+  // own failures are normalized to `.code === "cancelled"` before reaching here).
+  const code = error.code;
+  if (code === "auth/email-already-in-use") return "這個信箱已經註冊過，請改用登入。";
+  if (code === "auth/weak-password") return "密碼至少需要 6 碼。";
+  if (code === "auth/invalid-credential" || code === "auth/wrong-password" || code === "auth/user-not-found") {
+    return "帳號或密碼不正確。";
+  }
+  if (code === "auth/too-many-requests") return "嘗試次數過多，請稍後再試。";
+  if (code === "auth/invalid-email") return "信箱格式不正確。";
+  if (code === "auth/operation-not-allowed") return "信箱登入功能尚未開通，請聯絡系統管理員。";
+
+  return error.message || "登入失敗";
 }
 
 function getDevLoginErrorMessage(error) {
@@ -523,6 +664,46 @@ const styles = StyleSheet.create({
   },
   compactLoginButtonLabel: {
     fontSize: 15
+  },
+  emailPanel: {
+    gap: 8
+  },
+  dividerRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 10,
+    marginTop: 2
+  },
+  dividerLine: {
+    flex: 1,
+    height: 1,
+    backgroundColor: "#e5e7eb"
+  },
+  dividerText: {
+    color: "#9ca3af",
+    fontSize: 12,
+    fontWeight: "800"
+  },
+  emailHeading: {
+    color: "#2f2f33",
+    fontSize: 14,
+    fontWeight: "900"
+  },
+  emailStatus: {
+    color: "#334155",
+    fontSize: 12,
+    fontWeight: "700",
+    lineHeight: 17
+  },
+  emailInput: {
+    minHeight: 46,
+    borderWidth: 1.3,
+    borderColor: "#c7c7c7",
+    borderRadius: 5,
+    backgroundColor: "#ffffff",
+    color: "#2f2f33",
+    fontSize: 14,
+    paddingHorizontal: 12
   },
   userCard: {
     minHeight: 72,

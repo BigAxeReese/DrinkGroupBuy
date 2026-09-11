@@ -796,3 +796,89 @@
 本機啟動真實 backend（連本機 PostgreSQL 與本機已設定的 Firebase 專案）：`node --check` 全部通過；`npm test` 115/115 全過（未受影響）。用瀏覽器與 `curl` 實測：清空 cookie 後單純 `GET /admin/login` 不再核發任何 cookie（修正後的行為）；點擊「本機開發模式：一鍵登入」按鈕（對應 `POST /admin/login/local-dev`）成功核發 session 並可直接讀取 `/admin`；`POST /admin/login/firebase` 送無效 token 正確回 401 `invalid_token`；登入頁在沒有設定 `FIREBASE_WEB_*` 時維持原本純密碼表單、沒有殘留壞掉的 JS 區塊；設定假的 `FIREBASE_WEB_*` 值後，信箱密碼表單、登入／建立帳號切換、錯誤訊息顯示（真實 Firebase 400 錯誤被正確轉成中文提示）皆在瀏覽器人工操作驗證通過，主控台沒有未預期的例外。`scripts/grant-admin-role.js` 對不存在的 email 分別測試 `--revoke`（純資料庫查詢路徑）與一般授予（會先呼叫真實 Firebase Admin SDK 查證）兩種路徑，皆正確回報「找不到帳號」並以結束碼 1 結束。
 
 **驗證限制**：沒有申請真實可用的 Firebase 網頁設定值走完整條「用信箱建立帳號 → 收驗證信 → 點擊驗證 → `grant-admin-role.js` 授予角色 → 用該帳號登入 `/admin`」的端對端流程——這需要使用者自己的 Firebase 專案與真實信箱，屬於使用者需要另外執行的手動設定步驟；也還沒有部署到 Azure（Azure 上 `NODE_ENV=production` 會讓 `本機一鍵登入` 整條路徑直接失效，這點僅由程式碼判斷式確認，沒有部署後實測）。
+
+---
+
+## 2026-09-12 — 手機 App 顧客／商家改用同一套信箱密碼登入
+
+**範圍**：`backend/server.js`（`POST /api/auth/firebase-session` 新增 `email_verified` 檢查、錯誤訊息去 Google 化）、`mobile/src/utils/firebaseAuth.js`（新增 `useFirebaseEmailLogin`：`signUpWithEmail`／`signInWithEmail`／`resetPassword`）、`mobile/src/screens/RoleSelectScreen.jsx`（登入頁新增信箱密碼表單、忘記密碼、`getLoginErrorMessage` 擴充）。
+**觸發原因**：使用者要求把「2026-09-11（第五次追加）」只做給管理員的信箱密碼登入，延伸給手機 App 的顧客／商家用，並要求信箱要先驗證；auth 相關程式碼變更，依規則主動觸發複查。呼應上方「2026-09-11（第五次追加）」那筆：這次重用同一套 Firebase 機制，但顧客／商家自助建立帳號成功後**不**像管理員那樣需要額外被授予角色——第一次登入即自動拿到顧客角色，跟現有 Google 登入行為一致。
+
+### 發現
+
+沒有找到信心度達到門檻（8/10 以上）的漏洞。這次改動本質上是**限制**（幫既有的自動註冊流程多加一道信箱驗證關卡），沒有新增路由、沒有新增資料庫查詢、沒有放寬任何既有權限，風險面比上一筆本來就小很多。
+
+### 沒發現問題的部分
+
+| 面向 | 檢查結果 |
+|------|----------|
+| 是否可能用未驗證信箱建立帳號 | `email_verified` 檢查放在 `customerRegistrationRepository.resolveOrRegisterCustomer(...)` 呼叫之前，未驗證直接 403 並回傳、不建立任何 `users` 資料列；只影響「第一次登入」分支，`getByFirebaseUid` 已找到既有帳號那條路徑完全不受影響 |
+| Google 登入是否受影響 | Google 提供的 ID token 的 `email_verified` claim 一律是 `true`（Google 帳號本身就要求信箱已驗證），這次新增的檢查對 Google 登入是穩定通過、不會誤擋 |
+| 是否可能藉此拿到比顧客更高的權限 | 這條路徑（`resolveOrRegisterCustomer`）一直以來就只授予 `customer` 角色，這次沒有改動授權邏輯本身，只是在它前面多一道信箱驗證的門檻 |
+| 忘記密碼是否會洩漏帳號是否存在 | `resetPassword` 直接呼叫 Firebase 官方 `sendPasswordResetEmail`；Firebase 預設對不存在的信箱一樣回傳成功（避免帳號列舉），這是 Firebase 服務本身的預設行為，不是這次程式碼另外處理的 |
+| 錯誤訊息是否洩漏帳號是否存在 | `auth/wrong-password`／`auth/user-not-found`／`auth/invalid-credential` 三種 Firebase 錯誤在 `getLoginErrorMessage` 裡對應同一句「帳號或密碼不正確」，不會讓人從錯誤訊息分辨出「信箱不存在」還是「密碼錯誤」 |
+| SQL injection／XSS | 這次後端改動只是一個 `if` 判斷讀取已驗證 token 裡的既有欄位，沒有新增查詢；前端是 React Native 元件（`Text`／`TextInput`），沒有任何 `dangerouslySetInnerHTML` 或等效的原始 HTML 注入點 |
+
+### 驗證紀錄
+
+`npm test` 115/115 全過。用瀏覽器打開真實 Expo web preview（連真實本機 backend 與使用者已設定好的真實 Firebase 專案），實際操作驗證：登入頁正確顯示信箱密碼表單、Google 按鈕與其他既有連結排版未受影響（桌面與手機寬度 375px 皆檢查過）；登入／建立帳號切換正確、「忘記密碼」只在登入模式顯示；實際送出「建立帳號」表單，真的呼叫到 Firebase 並收到 `auth/operation-not-allowed`（因為這個真實 Firebase 專案的 Email/Password 登入方式尚未開啟，屬預期行為，不是本次改動的問題）——這證實表單真的打中 Firebase SDK，不是假資料；過程中發現這個錯誤代碼沒有對應的中文訊息、會直接顯示原始英文錯誤，已補上「信箱登入功能尚未開通，請聯絡系統管理員」並熱重載後重新驗證訊息正確顯示。
+
+**驗證限制**：因為這個真實 Firebase 專案的 Email/Password 登入方式尚未開啟（需要使用者自己到 Firebase Console 開啟），沒辦法驗證到「真的建立帳號成功 → 收驗證信 → 點擊驗證 → 用該帳號登入 → 後端正確建立顧客帳號」這條完整路徑；後端 `email_verified` 檢查目前只靠讀程式碼與 2026-09-11 第五次追加那筆對同一段驗證邏輯（`verifyFirebaseIdToken` 的 claim 讀取方式）的既有驗證結果做交叉確認，還沒有對這個新呼叫點發過一次真實通過驗證的 HTTP request。
+
+---
+
+## 2026-09-12（同日追加）— 種子測試帳號綁定信箱密碼腳本
+
+**範圍**：新檔案 `scripts/bind-seed-firebase-account.js`（`npm run seed-account:bind`）。
+**觸發原因**：使用者要求把 `user-customer-yinji`／`user-merchant-001`／`user-admin-001` 這幾個既有種子測試帳號綁上固定的信箱密碼，取代原本壞掉的 `scripts/map-firebase-user.js`（SQLite-only，對現在的 PostgreSQL runtime 沒有作用，見 PROGRESS.md 已知缺口）；使用者確認可以用非真實信箱，因此這支腳本改用 Firebase Admin SDK 直接建立帳號並標記「已驗證」，不走一般自助註冊那套「寄信→點連結」流程。這是新增的、會建立 Firebase 帳號並改變 `users.firebase_uid` 的工具，依規則主動觸發複查。
+
+### 發現
+
+沒有找到信心度達到門檻（8/10 以上）的漏洞。
+
+### 沒發現問題的部分
+
+| 面向 | 檢查結果 |
+|------|----------|
+| 是否可能被外部觸發 | 純 CLI 腳本，沒有對應任何 HTTP 路由；執行需要本機 PostgreSQL 連線與 Firebase Admin SDK 憑證（`FIREBASE_SERVICE_ACCOUNT_JSON`），跟 `grant-admin-role.js`／舊版 `map-firebase-user.js` 是同一種「只有掌握伺服器端機密的操作者能執行」的信任邊界，沒有新增可被外部連線到的攻擊面 |
+| 強制標記「已驗證」是否等於繞過安全機制 | 這個機制存在的目的是防止「未經證實擁有這個信箱的人」自助宣稱一個信箱；這支腳本改成由**操作者自己指定並確認**要綁定的信箱，等於用另一種方式達成同樣的保證（操作者對這個信箱負責），不是繞過保證本身。僅限這支腳本內部使用，不影響一般使用者自助註冊仍然必須真的收信點連結才能通過 `email_verified` 檢查 |
+| 是否可能誤綁到真實使用者的帳號 | 目標預設只認得 `customer`／`customer-a`／`customer-b`／`merchant`／`admin` 這幾個固定種子名稱；若直接填完整 user id 也能用（延續舊工具的彈性），但這次只針對已知的三個種子帳號執行，沒有對任何真實顧客/商家資料操作 |
+| `firebase_uid` 唯一性 | 綁定前會先把同一個 Firebase UID 從其他任何 `users` 資料列清掉，避免違反唯一約束或留下兩筆指到同一個 UID 的資料；`user-customer-yinji` 原本殘留的舊 Firebase UID（見 2026-09-11 那筆已知問題）已在這次執行中被正確清除並換成新的 |
+| SQL injection | 全部查詢使用 PostgreSQL 綁定參數 |
+
+### 驗證紀錄
+
+對本機真實 PostgreSQL 與使用者真實 Firebase 專案實際執行三次（customer／merchant／admin），執行前後各查一次 `users` 資料表確認：三筆資料的 `firebase_uid`／`email` 皆正確更新，且原本 `user-customer-yinji` 殘留的舊 UID 已被清除、沒有任何資料列意外殘留舊值或指向同一個 UID 的衝突資料。嘗試用剛綁定的顧客帳號信箱密碼在真實 Expo web preview 實際登入，收到 `auth/operation-not-allowed`——這是因為 Firebase 專案本身的 Email/Password 登入方式仍未開啟，屬於使用者尚未完成的手動設定步驟，不是這支腳本或綁定本身的問題（腳本用 Admin SDK 建立帳號不受這個開關影響，但一般使用者用 client SDK 登入時仍會被這個專案層級的開關擋下）。
+
+---
+
+## 2026-09-12（第二次追加）— 使用者開啟 Firebase Email/Password 後，端對端驗證並修好一個 admin 登入 bug
+
+**範圍**：`backend/server.js` 的 `POST /admin/login/firebase`（移除一段邏輯錯誤的檢查）；`backend/.env` 補上 `FIREBASE_WEB_API_KEY`／`FIREBASE_WEB_AUTH_DOMAIN`／`FIREBASE_WEB_APP_ID`（複製自 `mobile/.env` 既有的同一組公開值，非新機密）。
+**觸發原因**：使用者在 Firebase Console 開啟 Email/Password 登入方式後，回頭把「2026-09-11 第五次追加」「2026-09-12」「2026-09-12 同日追加」這三筆一直卡在「尚未驗證」狀態的端對端流程實際跑一次；跑的過程中發現一個會擋下所有合法管理員登入的 bug，順手修好，屬於 auth 程式碼變更，依規則觸發複查。
+
+### 發現
+
+| 嚴重度 | 位置 | 問題 | 建議修法 | 狀態 |
+|--------|------|------|----------|------|
+| 中（功能性 bug，非資安漏洞，但會讓合法管理員完全無法用信箱登入） | `backend/server.js`，`POST /admin/login/firebase` | 寫了 `if (user.status !== "active")` 想擋停用帳號，但 `authProfileReadRepository.getByFirebaseUid`／`getById` 的 SQL 本身就已經在 `WHERE` 子句篩選 `status = 'active'`，回傳的物件也從來沒有選取 `status` 這個欄位——`user.status` 永遠是 `undefined`，導致這個判斷式對**每一個**成功找到的使用者都成立，所有信箱密碼登入一律被誤判成「帳號已被停用」而擋下 | 直接移除這段判斷；repository 本身已經保證回傳的帳號一定是 active（否則回傳 `null`／找不到），不需要應用層再檢查一次不存在的欄位 | 已修 |
+
+### 沒發現問題的部分
+
+| 面向 | 檢查結果 |
+|------|----------|
+| 移除這段檢查後，停用帳號是否還會被擋下 | 會。`getByFirebaseUid`／`getById` 的 SQL `WHERE user_account.status = 'active'` 本來就會讓停用帳號完全查不到（回傳 `null`），程式碼裡原本就有的 `if (!user)` 分支（透過 `resolveOrRegisterCustomer` 那條路徑）已經涵蓋這個情況，不需要額外判斷 |
+| 新增的 `FIREBASE_WEB_*` 是否為機密 | 跟 2026-09-11 第五次追加那筆的結論一致：這是公開網頁設定值，直接複製自 `mobile/.env` 既有的 `EXPO_PUBLIC_FIREBASE_*`，不是新的機密 |
+
+### 驗證紀錄（真實端對端，補齊前三筆一直缺的部分）
+
+使用者在 Firebase Console 開啟 Email/Password 登入方式後，依序實際測試：
+1. 顧客（`test-customer-yinji@drinkgroupbuy.test`）：真實 Expo web preview 登入成功，正確進入顧客首頁。
+2. 商家（`store1@example.com`）：真實 Expo web preview 登入成功，正確進入「青山手作茶 中科店」商家後台。
+3. 管理員（`admin@example.com`）：第一次嘗試遇到上述 bug，回應「這個帳號已被停用」；修復後重新測試，成功進入 `/admin` 後台首頁。
+
+三筆帳號的登入都是對真實本機 PostgreSQL 與真實 Firebase 專案發出的真實請求，不是模擬資料。`npm test` 115/115 全過（bug 修復前後都有跑，確認修復沒有牽動其他行為）。至此「2026-09-11 第五次追加」「2026-09-12」「2026-09-12 同日追加」三筆先前記錄的「尚未完成」端對端驗證缺口，已經補齊。
+
+**驗證限制**：這三個帳號的登入都在本機測試，還沒有部署到 Azure 驗證正式站上的行為；也還沒有測試 Google 登入跟信箱密碼登入交叉出現時（例如同一個信箱先後用兩種方式）的邊界情況，目前只驗證了各自獨立運作正常。
+
+**驗證限制**：受限於 Firebase 專案的 Email/Password 登入方式尚未開啟，這三個帳號目前都還沒有實際走完一次「用信箱密碼成功登入」的端對端驗證；等使用者開啟後應直接可用，屬於已知、待補的驗證步驟。
