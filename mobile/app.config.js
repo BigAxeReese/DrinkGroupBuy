@@ -18,7 +18,14 @@ module.exports = {
   owner: "royor",
   version: "0.1.0",
   updates: {
-    url: "https://u.expo.dev/834894ac-fe79-4a32-872f-6cee5edf2214"
+    url: "https://u.expo.dev/834894ac-fe79-4a32-872f-6cee5edf2214",
+    // `eas build` injects this header automatically from the build profile's `channel`; a plain
+    // `expo run:android` local build skips that step entirely, so without this the app has no
+    // way to know which branch's updates it should be checking -- checkForUpdateAsync() finds
+    // nothing to apply even though publishing itself succeeds.
+    requestHeaders: {
+      "expo-channel-name": "preview"
+    }
   },
   runtimeVersion: {
     policy: "appVersion"
