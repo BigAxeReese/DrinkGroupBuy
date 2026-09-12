@@ -5,11 +5,6 @@ const {
   withOperationLeaseSync
 } = require("../reliability/operationLease");
 
-const MAX_FAILED_ATTEMPTS = 5;
-const ATTEMPT_WINDOW_MS = 60_000;
-const BLOCK_DURATION_MS = 60_000;
-const failedAttempts = new Map();
-
 async function markGroupBuyActivityReadyForPickup(activityId, input = {}) {
   const repository = input.pickupCredentialRepository;
   if (repository?.kind === "postgres") {
@@ -287,13 +282,9 @@ async function redeemPickupCode(input = {}) {
 async function accessPickupCode(input, shouldRedeem) {
   const actorUserId = input.actorUserId || null;
   const now = input.now || new Date().toISOString();
-  const rateLimitNow = new Date().toISOString();
-  const limited = getRateLimit(actorUserId, rateLimitNow);
-  if (limited) return limited;
 
   const pickupCode = normalizeCode(input.pickupCode);
   if (!pickupCode) {
-    recordFailure(actorUserId, rateLimitNow);
     return { error: "pickup_code_invalid" };
   }
 
@@ -301,7 +292,7 @@ async function accessPickupCode(input, shouldRedeem) {
   if (repository?.kind === "postgres") {
     return accessPickupCodePostgres(
       repository,
-      { pickupCode, actorUserId, now, rateLimitNow },
+      { pickupCode, actorUserId, now },
       shouldRedeem
     );
   }
@@ -318,11 +309,9 @@ async function accessPickupCode(input, shouldRedeem) {
     if (!row) {
       if (transactionStarted) database.exec("ROLLBACK;");
       transactionStarted = false;
-      recordFailure(actorUserId, rateLimitNow);
       return { error: "credential_not_found" };
     }
 
-    clearFailures(actorUserId);
     const credential = mapMerchantCredential(row, now);
     if (!shouldRedeem) return { credential };
 
@@ -450,22 +439,16 @@ async function accessPickupCode(input, shouldRedeem) {
 
 async function accessPickupCodePostgres(
   repository,
-  { pickupCode, actorUserId, now, rateLimitNow },
+  { pickupCode, actorUserId, now },
   shouldRedeem
 ) {
   const operation = () => (shouldRedeem
     ? repository.redeemCode({ pickupCode, actorUserId, now })
     : repository.lookupCode({ pickupCode, actorUserId, now }));
   try {
-    const result = shouldRedeem
+    return shouldRedeem
       ? await repository.withOperationLock({ pickupCode }, operation)
       : await operation();
-    if (result?.error === "credential_not_found") {
-      recordFailure(actorUserId, rateLimitNow);
-    } else {
-      clearFailures(actorUserId);
-    }
-    return result;
   } catch (error) {
     if (error?.code === "operation_locked") {
       return {
@@ -598,43 +581,6 @@ function isBefore(left, right) {
 function normalizeCode(value) {
   const code = String(value || "").trim();
   return /^\d{6}$/.test(code) ? code : null;
-}
-
-function getRateLimit(actorUserId, now) {
-  if (!actorUserId) return { error: "merchant_user_required" };
-  const nowTime = Date.parse(now);
-  const state = failedAttempts.get(actorUserId);
-  if (!state || Number.isNaN(nowTime)) return null;
-  if (state.blockedUntil > nowTime) {
-    return {
-      error: "pickup_code_rate_limited",
-      retryAfterSeconds: Math.max(Math.ceil((state.blockedUntil - nowTime) / 1000), 1)
-    };
-  }
-  if (nowTime - state.windowStartedAt >= ATTEMPT_WINDOW_MS) {
-    failedAttempts.delete(actorUserId);
-  }
-  return null;
-}
-
-function recordFailure(actorUserId, now) {
-  if (!actorUserId) return;
-  const nowTime = Date.parse(now);
-  if (Number.isNaN(nowTime)) return;
-
-  const current = failedAttempts.get(actorUserId);
-  const state = !current || nowTime - current.windowStartedAt >= ATTEMPT_WINDOW_MS
-    ? { failures: 0, windowStartedAt: nowTime, blockedUntil: 0 }
-    : current;
-  state.failures += 1;
-  if (state.failures >= MAX_FAILED_ATTEMPTS) {
-    state.blockedUntil = nowTime + BLOCK_DURATION_MS;
-  }
-  failedAttempts.set(actorUserId, state);
-}
-
-function clearFailures(actorUserId) {
-  if (actorUserId) failedAttempts.delete(actorUserId);
 }
 
 module.exports = {

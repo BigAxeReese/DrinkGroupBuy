@@ -432,7 +432,6 @@ function getPickupErrorMessage(error) {
     no_captured_orders: "目前沒有已扣款且可製作的訂單。",
     pickup_window_expired: "這筆團購的取餐期限已結束。",
     pickup_code_invalid: "請輸入六位取餐碼。",
-    pickup_code_rate_limited: "輸入錯誤次數過多，請稍後再試。",
     credential_not_found: "找不到有效的取餐碼。",
     credential_already_redeemed: "這組取餐碼已經使用過。",
     credential_expired: "這組取餐碼已經過期。",

@@ -2523,9 +2523,7 @@ function sendPickupServiceResult(response, result) {
     activity_not_found: 404,
     credential_not_found: 404,
     activity_access_denied: 403,
-    merchant_user_required: 403,
-    pickup_code_invalid: 400,
-    pickup_code_rate_limited: 429
+    pickup_code_invalid: 400
   };
   sendJson(response, statusByError[result.error] || 409, result);
 }

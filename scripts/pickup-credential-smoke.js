@@ -284,20 +284,12 @@ try {
   });
   assert(secondRedeem.activityCompleted === true, "all pickups should complete activity", secondRedeem);
 
-  for (let attempt = 0; attempt < 4; attempt += 1) {
-    const failed = await lookupPickupCode({
-      actorUserId: "other-merchant-user",
-      pickupCode: "invalid",
-      now
-    });
-    assert(failed.error === "pickup_code_invalid", "invalid attempt should be rejected", failed);
-  }
-  const limited = await lookupPickupCode({
+  const invalidAttempt = await lookupPickupCode({
     actorUserId: "other-merchant-user",
-    pickupCode: "000000",
+    pickupCode: "invalid",
     now
   });
-  assert(limited.error === "pickup_code_rate_limited", "failed attempts should be rate limited", limited);
+  assert(invalidAttempt.error === "pickup_code_invalid", "invalid attempt should be rejected", invalidAttempt);
 
   const state = readState();
   assert(state.activity.status === "completed", "activity should be completed", state);
@@ -321,7 +313,6 @@ try {
   console.log("permissions: cross_store_denied=1, proxy_code_allowed=1");
   console.log("redemption: duplicate_suppressed=1, activity_completed=1");
   console.log("locking: ready_transition_blocked=1, redeem_transition_blocked=1");
-  console.log("rate_limit: failed_attempts=5, blocked=1");
 } finally {
   if (hadDatabase) {
     fs.copyFileSync(backupPath, databasePath);
