@@ -1414,6 +1414,10 @@ const server = http.createServer(async (request, response) => {
         });
         return;
       }
+      if (result?.error === "customer_not_found") {
+        sendJson(response, 404, { error: "Customer not found" });
+        return;
+      }
       if (result?.error === "activity_not_found") {
         sendJson(response, 404, { error: "Group-buy activity not found" });
         return;
@@ -1552,14 +1556,39 @@ const server = http.createServer(async (request, response) => {
     if (request.method === "GET" && url.pathname === "/api/payments/line-pay/confirm") {
       const transactionId = url.searchParams.get("transactionId");
       const orderId = url.searchParams.get("orderId");
-      const result = await confirmLinePayAuthorization({
-        transactionId,
-        orderId,
-        now: businessClock.nowIso(),
-        authorizationConfirmRepository: paymentAuthorizationConfirmRepository,
-        authorizationCancelRepository: paymentAuthorizationCancelRepository,
-        manualRepaymentRepository
-      });
+      let result;
+      try {
+        result = await confirmLinePayAuthorization({
+          transactionId,
+          orderId,
+          now: businessClock.nowIso(),
+          authorizationConfirmRepository: paymentAuthorizationConfirmRepository,
+          authorizationCancelRepository: paymentAuthorizationCancelRepository,
+          manualRepaymentRepository
+        });
+      } catch (error) {
+        if (error instanceof PaymentServiceError) {
+          // Every other branch in this route builds the HTML result page + app deep link; this
+          // browser redirect is the customer's only way back into the app, so a PaymentServiceError
+          // (e.g. 409 payment_operation_locked from the reconciliation scheduler polling the same
+          // transaction) must not fall through to the generic JSON error handler.
+          sendHtml(response, error.statusCode, buildLinePayResultPage({
+            title: "LINE Pay 預授權無法完成",
+            message: error.statusCode === 409
+              ? "這筆付款正在處理中，請稍後回到 App 查看結果。"
+              : "處理這筆付款時發生錯誤，請回到 App 重新確認訂單狀態。",
+            detail: error.payload?.error,
+            appReturnUrl: buildLinePayAppReturnUrl({
+              orderId,
+              transactionId,
+              status: "failed",
+              error: error.payload?.error
+            })
+          }));
+          return;
+        }
+        throw error;
+      }
 
       if (result?.error === "capacity_exceeded") {
         const voidStatus = result.voidResult?.status
@@ -1633,11 +1662,32 @@ const server = http.createServer(async (request, response) => {
     if (request.method === "GET" && url.pathname === "/api/payments/line-pay/cancel") {
       const transactionId = url.searchParams.get("transactionId");
       const orderId = url.searchParams.get("orderId");
-      const cancelled = await cancelLinePayAuthorization({
-        transactionId,
-        orderId,
-        authorizationCancelRepository: paymentAuthorizationCancelRepository
-      });
+      let cancelled;
+      try {
+        cancelled = await cancelLinePayAuthorization({
+          transactionId,
+          orderId,
+          authorizationCancelRepository: paymentAuthorizationCancelRepository
+        });
+      } catch (error) {
+        if (error instanceof PaymentServiceError) {
+          sendHtml(response, error.statusCode, buildLinePayResultPage({
+            title: "LINE Pay 預授權取消失敗",
+            message: error.statusCode === 409
+              ? "這筆付款正在處理中，請稍後回到 App 查看結果。"
+              : "處理這筆取消時發生錯誤，請回到 App 重新確認訂單狀態。",
+            detail: error.payload?.error,
+            appReturnUrl: buildLinePayAppReturnUrl({
+              orderId,
+              transactionId,
+              status: "failed",
+              error: error.payload?.error
+            })
+          }));
+          return;
+        }
+        throw error;
+      }
       const directRepayment = cancelled.authorization?.paymentFlow === "direct_repayment"
         || cancelled.pendingPayment?.paymentFlow === "direct_repayment";
 

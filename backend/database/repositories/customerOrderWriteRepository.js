@@ -339,8 +339,21 @@ async function updatePostgresPendingOrder(database, input) {
       };
     }
 
+    const customerResult = await transaction.query(`
+      SELECT user_account.id
+      FROM users user_account
+      JOIN user_roles user_role
+        ON user_role.user_id = user_account.id
+       AND user_role.role = 'customer'
+       AND user_role.status = 'active'
+      WHERE user_account.id = $1
+        AND user_account.status = 'active'
+      FOR SHARE OF user_account, user_role
+    `, [input.customerUserId]);
+    if (!customerResult.rows[0]) return { error: "customer_not_found" };
+
     const activityResult = await transaction.query(`
-      SELECT id, store_id, status, maximum_cups
+      SELECT id, store_id, status, deadline_at, maximum_cups
       FROM group_buy_activities
       WHERE id = $1
       FOR UPDATE
@@ -349,6 +362,13 @@ async function updatePostgresPendingOrder(database, input) {
     if (!activity) return { error: "activity_not_found" };
     if (!["recruiting", "confirmed"].includes(activity.status)) {
       return { error: "activity_not_joinable", status: activity.status };
+    }
+    if (Date.parse(now) >= Date.parse(toIsoString(activity.deadline_at))) {
+      return {
+        error: "activity_not_joinable",
+        status: activity.status,
+        reason: "deadline_passed",
+      };
     }
 
     const pricedItems = await pricePostgresOrderItems(transaction, activity.store_id, input.items);
@@ -494,6 +514,22 @@ async function updatePostgresPendingOrder(database, input) {
         id, resource_type, resource_id, from_status, to_status, reason, actor_user_id, created_at
       ) VALUES ($1, 'order', $2, 'submitted', 'submitted', 'customer_update_pending_order', $3, $4)
     `, [`status-history-${randomUUID()}`, input.orderId, input.customerUserId, now]);
+    await transaction.query(`
+      INSERT INTO audit_logs (
+        id, actor_user_id, action_type, resource_type, resource_id, metadata_json, created_at
+      ) VALUES ($1, $2, 'customer_update_pending_order', 'order', $3, $4::jsonb, $5)
+    `, [
+      `audit-log-${randomUUID()}`,
+      input.customerUserId,
+      input.orderId,
+      JSON.stringify({
+        activityId: activity.id,
+        totalCups,
+        originalAmount,
+        failedAuthorizationIds: pendingAuthorizations.map((authorization) => authorization.id),
+      }),
+      now,
+    ]);
 
     return {
       order: {

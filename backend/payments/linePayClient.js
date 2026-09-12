@@ -222,10 +222,21 @@ async function parseLinePayResponse(response) {
   const text = await response.text().catch(() => "");
   if (!text) return {};
 
+  // The digit-quoting rewrite below protects against float-precision loss on LINE Pay's 16+
+  // digit transaction IDs, but it has no JSON string-boundary awareness -- it can also match
+  // digits that happen to appear after a colon inside an already-quoted string value (e.g. a
+  // returnMessage that embeds a long reference number), which corrupts otherwise-valid JSON.
+  // Falling back to a plain parse of the unmodified text keeps the real returnCode/returnMessage
+  // parseable in that case, at the cost of precision on any huge number inside it -- far better
+  // than silently discarding the whole payload as `{}`, which was masking real provider errors.
   try {
     return JSON.parse(text.replace(/:\s*(\d{16,})\b/g, ': "$1"'));
   } catch {
-    return {};
+    try {
+      return JSON.parse(text);
+    } catch {
+      return {};
+    }
   }
 }
 

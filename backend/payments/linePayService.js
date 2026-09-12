@@ -79,6 +79,13 @@ function createMockLinePayRefundPayload(transactionId, refundAmount) {
   };
 }
 
+// Classifies returnCode values from a failed Confirm/Capture call specifically -- kept separate
+// from getLinePayCaptureProviderState's catch block below (which classifies Payment Details
+// Query failures) and reliabilityService.js's switch (which reads Payment Status Check codes,
+// an entirely different LINE Pay API with its own numbering, e.g. 0121/0122/0123). These three
+// are not the same code space despite looking similar, so they're deliberately not merged into
+// one shared table -- doing so would risk treating a code from one endpoint as meaning something
+// it doesn't mean when returned by a different one.
 function classifyLinePayCaptureError(error) {
   const returnCode = String(error?.linePayPayload?.returnCode || "").toUpperCase();
   const retryable = !returnCode
@@ -567,7 +574,13 @@ async function requestManualLinePayRepaymentUnlocked({
           transactionId: originalAuthorization.providerAuthorizationId,
           provider: originalAuthorization.provider,
           reason: "manual_repayment_release_original_authorization",
-          authorizationCancelRepository
+          authorizationCancelRepository,
+          // requestManualLinePayRepaymentUnlocked already runs inside the same
+          // order:{orderId}:payment-lifecycle lock (see requestManualLinePayRepayment above) --
+          // without this, voidLinePayAuthorization tries to reacquire that lock and always fails
+          // with operation_locked, so manual repayment could never actually void the original
+          // authorization. Same pattern already used correctly by merchantActivityCancelService.js.
+          operationLockHeld: authorizationCancelRepository?.kind === "postgres"
         });
       } catch (error) {
         throw new PaymentServiceError(502, {
@@ -864,18 +877,19 @@ async function confirmLinePayAuthorizationUnlocked({
   }
 
   if (authorizationResult?.error) {
-    let voidResult = null;
-    let voidError = null;
-
-    if (isCompensatableConfirmRejection(authorizationResult.error)) {
-      ({ voidResult, voidError } = await compensateRejectedAuthorization({
-        authorizationConfirmRepository,
-        orderId: resolvedOrderId,
-        transactionId,
-        baseReason: authorizationResult.error,
-        providerVoider
-      }));
-    }
+    // By this point providerConfirmer already succeeded (line ~844) -- LINE Pay has confirmed the
+    // payment/authorization on their side regardless of why our own DB-side confirmAuthorization
+    // rejects it. Compensate unconditionally (deny-list default) rather than only for reasons
+    // someone remembered to list: a rejection reason that's new or simply wasn't anticipated here
+    // must not silently leave a real LINE Pay hold unvoided. compensateRejectedAuthorization
+    // already fails safe (records voidError) if there's genuinely nothing to void.
+    const { voidResult, voidError } = await compensateRejectedAuthorization({
+      authorizationConfirmRepository,
+      orderId: resolvedOrderId,
+      transactionId,
+      baseReason: authorizationResult.error,
+      providerVoider
+    });
 
     return {
       ...authorizationResult,
@@ -907,18 +921,6 @@ async function confirmLinePayAuthorizationUnlocked({
     payload,
     pendingPayment: resolvedPendingPayment
   };
-}
-
-const COMPENSATABLE_CONFIRM_REJECTION_REASONS = [
-  "capacity_exceeded",
-  "authorization_confirmed_after_deadline",
-  "authorization_expiry_missing",
-  "authorization_expiry_invalid",
-  "authorization_expiry_too_short"
-];
-
-function isCompensatableConfirmRejection(errorReason) {
-  return COMPENSATABLE_CONFIRM_REJECTION_REASONS.includes(errorReason);
 }
 
 async function compensateRejectedAuthorization({

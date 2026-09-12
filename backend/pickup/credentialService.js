@@ -57,6 +57,8 @@ function markGroupBuyActivityReadyForPickupUnlocked(activityId, input = {}) {
       SELECT
         activity.*,
         EXISTS (
+          -- Merchant-wide, not store-scoped -- see the same note on findMerchantCredential below;
+          -- the SQLite merchant_users table has no store_id column to scope by.
           SELECT 1
           FROM stores store
           JOIN merchant_users merchant_user ON merchant_user.merchant_id = store.merchant_id
@@ -499,6 +501,12 @@ function findMerchantCredential(database, pickupCode, actorUserId) {
     JOIN group_buy_activities activity ON activity.id = orders.activity_id
     JOIN stores store ON store.id = activity.store_id
     JOIN users customer ON customer.id = orders.customer_user_id
+    -- Merchant-wide (any store under the same merchant_id), not store-scoped, because the SQLite
+    -- schema's merchant_users table (database/schema.sql) has no store_id column at all -- unlike
+    -- the PostgreSQL schema's merchant_users.store_id, which findMerchantCredentialPostgres
+    -- (backend/database/repositories/pickupCredentialRepository.js) correctly scopes by. This is a
+    -- known, accepted gap in the SQLite path: SQLite is permanently isolated-compatibility-test-only
+    -- (see AGENTS.md), never the live runtime, so this isn't worth a schema migration to fix here.
     JOIN merchant_users merchant_user ON merchant_user.merchant_id = store.merchant_id
     WHERE credential.pickup_code = ?
       AND merchant_user.user_id = ?
@@ -525,12 +533,14 @@ function generateAvailableCode(database) {
   throw new Error("Unable to allocate a unique pickup code");
 }
 
-function mapCredential(row, context, now) {
+function mapCredential(row, context, now, { revealCode = false } = {}) {
   const status = getCredentialStatus({ ...row, ...context }, now);
   return {
     id: row.id,
     orderId: row.order_id,
-    pickupCode: status === "active" ? row.pickup_code : null,
+    // Masked unless active -- except for the merchant's own lookup view (revealCode: true), which
+    // needs the real code regardless of status to verify against what the customer shows them.
+    pickupCode: revealCode || status === "active" ? row.pickup_code : null,
     status,
     pickupStatus: context.pickup_status,
     expiresAt: row.expires_at,
@@ -543,8 +553,7 @@ function mapCredential(row, context, now) {
 
 function mapMerchantCredential(row, now) {
   return {
-    ...mapCredential(row, row, now),
-    pickupCode: row.pickup_code,
+    ...mapCredential(row, row, now, { revealCode: true }),
     orderStatus: row.order_status,
     paymentStatus: row.payment_status,
     totalCups: row.total_cups,
