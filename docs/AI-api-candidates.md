@@ -20,18 +20,18 @@ API JSON 使用 `camelCase`。已實作 routes 只對目前開發 prototype 具�
 
 | 項目              | 內容                                                                                                    |
 | ----------------- | ------------------------------------------------------------------------------------------------------- |
-| 決策日期          | 2026-07-05                                                                                              |
-| 正式方向          | 只使用 Firebase Auth + Google Login                                                                     |
+| 決策日期          | 2026-07-05（2026-09-12 更新：正式方向加入信箱密碼登入）                                                 |
+| 正式方向          | Firebase Auth，支援 Google Login 與信箱密碼登入（`useFirebaseEmailLogin`，`mobile/src/utils/firebaseAuth.js`）兩種方式，共用同一支後端 route |
 | 目前已實作 route  | `POST /api/auth/firebase-session`                                                                       |
 | 舊版相容 route    | `POST /api/auth/login` 暫時保留為開發相容功能；僅在非 production 且 `AUTH_DEV_MODE=true` 時存在          |
-| Request           | `{ idToken }`，其中 `idToken` 是 Google Login 後取得的 Firebase ID token                                |
+| Request           | `{ idToken }`，其中 `idToken` 是 Google Login 或信箱密碼登入後取得的 Firebase ID token                  |
 | Response          | `{ token, user: { id, loginName, phoneNumber, email, displayName, surname, roles, merchantStores } }`   |
 | Backend 責任      | 驗證 Firebase ID token，將 Firebase UID/email 對應到 `users`，並從資料庫解析 roles 與 store permissions |
 | 目前 session 行為 | Backend 在 Firebase 驗證後回傳既有 bearer token                                                         |
-| 目前對應行為      | 查詢 `users.firebase_uid`；未對應的 Firebase users 回傳 403                                             |
-| 可切換資料來源    | `AUTH_PROFILE_READ_RUNTIME=sqlite|postgres`；預設 `sqlite`，Firebase session、dev auth 與 bearer token 後續角色／門市權限解析共用同一 repository |
+| 目前對應行為      | 查詢 `users.firebase_uid`；未對應的帳號會自動建立為顧客角色（`customerRegistrationRepository.resolveOrRegisterCustomer`），信箱密碼登入額外要求 `email_verified` 為真才放行；商家／管理員角色不會透過登入自動取得，見 `docs/AI-architecture.md` |
+| 可切換資料來源    | `AUTH_PROFILE_READ_RUNTIME=sqlite|postgres`；全部 repository runtime 已永久切換為 `postgres`（見 `AGENTS.md`），`sqlite` 僅保留給隔離的相容性測試 |
 | PostgreSQL 差異   | PostgreSQL v1 以 `merchant_users.store_id` 作授權邊界且不分內部權限等級；`merchantStores[].permissionLevel` 保留但回傳 `null` |
-| 遷移備註          | 不要再新增依賴 phone/password 或 email/password login 的 production features                            |
+| 遷移備註          | 2026-09-12 已新增信箱密碼登入（見上）；商家自助申請＋管理員審核（`POST /api/merchant-applications`）已實作，見下方對應段落 |
 
 ### 登入狀態持久化（app 重開免重新登入）
 
@@ -116,8 +116,8 @@ API JSON 使用 `camelCase`。已實作 routes 只對目前開發 prototype 具�
 | 已實作驗證    | SQLite 與 PostgreSQL 都會逐級驗證可達杯數區間；每杯至少折 1 元，且不得高於店內最低可售單杯權威金額 |
 | 可切換資料來源 | `GROUP_BUY_ACTIVITY_WRITE_RUNTIME=sqlite|postgres`；預設 `sqlite`，不雙寫 |
 | PostgreSQL transaction | 先 `FOR UPDATE` 鎖定 store row，再驗證 merchant 授權並鎖菜單資料；同 transaction 寫入 activity、tiers、notice、初始 status history 與 audit log |
-| PostgreSQL 限制 | Backend 要求 auth、公開菜單、活動讀取／寫入與 `MERCHANT_MENU_RUNTIME` 同步使用 PostgreSQL；訂單與付款仍是 SQLite，不代表完整 runtime 已切換 |
-| 尚缺規則      | PostgreSQL 顧客建單、付款與正式 runtime 切換策略；PostgreSQL v1 已決定不拆 owner／manager／staff                                                                                              |
+| PostgreSQL 現況 | 全部 repository runtime（含訂單與付款）已永久切換為 PostgreSQL，見 `AGENTS.md`；`sqlite` 僅保留給隔離的相容性測試，不是目前實際 runtime |
+| 尚缺規則      | PostgreSQL v1 已決定不拆 owner／manager／staff                                                                                              |
 
 ### 開發 / 補救用：後端取消團購活動
 
@@ -152,7 +152,7 @@ API JSON 使用 `camelCase`。已實作 routes 只對目前開發 prototype 具�
 | Response      | `{ order }`                                                                                                                                                                                                                                                                                             |
 | 已實作規則    | 需要 customer role、從登入使用者推導 `customerUserId`、驗證活動／截止時間／active customer、驗證飲品屬於活動店家且已上架、驗證 option ID 與 min/max、後端重算價格、保存快照、寫入 status history／audit、檢查重複訂單與容量；PostgreSQL 會先 `FOR UPDATE` 鎖 activity |
 | 可切換資料來源 | `CUSTOMER_ORDER_WRITE_RUNTIME=sqlite|postgres`；預設 `sqlite`，不雙寫 |
-| PostgreSQL 狀態 | 首次建單、顧客／商家列表、訂單明細、authorization request／confirm／cancel、一般 authorization void 與顧客取消已完成受控 server 切片且真實 HTTP proof 通過。capture 與 settlement repository／service building blocks 已通過真實 PostgreSQL mock-capture、折扣快照、持久化 job、`SKIP LOCKED` 與跨執行個體 lock proof，但尚未接入 server；改單／revision payment、refund、pickup 與 settlement route 仍回 `503 customer_order_runtime_mismatch` |
+| PostgreSQL 狀態 | 全部 repository runtime（含訂單、付款、改單／revision、refund、pickup、settlement）已永久切換為 PostgreSQL；啟動期一致性檢查 `isSettlementRouteReadyForPostgres` 目前恆為 ready，`503 customer_order_runtime_mismatch` 分支已是 dead code（`backend/server.js`） |
 | 尚缺規則      | 建立訂單通用 idempotency key；目前重複 POST 以同顧客／活動 active-order conflict 與既有 `orderId` 回應 |
 
 ### 更新尚未預授權成功的顧客訂單
@@ -266,8 +266,7 @@ API JSON 使用 `camelCase`。已實作 routes 只對目前開發 prototype 具�
 | High   | pricing snapshot and live discount | SQLite API 即時欄位、結算分配與公式 smoke 已完成；仍需 Mobile 顯示、專用持久化快照設計與 PostgreSQL 寫入 runtime |
 | Medium | provider-neutral payment routes | 目前先以 LINE Pay 專用 route 前進，正式 API shape 後續再收斂       |
 | Medium | order revision history UI | 修改與重新授權主幹已有第一版，仍缺完整歷史查詢與 UI 呈現 |
-| Medium | PostgreSQL runtime adapter | Migration draft 已驗證，但 Backend runtime 仍使用 SQLite |
-| Medium | refund request and account closure | 商家退款申請／營運執行及帳號關閉／去識別化規則已確認，API 與權限尚未實作 |
+| Medium | account closure | 帳號關閉／去識別化規則已確認，API 與權限尚未實作（商家退款申請 API 已實作，見下方段落） |
 
 已完成並移出候選優先清單：顧客訂單列表／取消、商家訂單列表、店家菜單管理，以及取貨碼／可取餐／核銷／逾期未取第一版。
 

@@ -71,16 +71,17 @@ http://localhost:3000
 
 ### 開發測試切換角色
 
-這些指令只修改本機開發資料庫的 `users.firebase_uid` 對應，不會修改 Firebase，也不是正式產品功能。
+⚠️ `npm run auth:map:*` 這組指令（`scripts/map-firebase-user.js`）只會改本機 SQLite 檔案，對現在永久切換到 PostgreSQL 的實際 runtime **完全沒有作用**，執行後不會有任何效果，也不會報錯提醒——不要再用這組指令測試角色切換。
+
+改用 `scripts/bind-seed-firebase-account.js`（`npm run seed-account:bind`），直接對目前真正在跑的 PostgreSQL 資料庫，把種子帳號（顧客／商家／管理員）綁定一組固定的信箱密碼，透過 App 的「用信箱登入」表單登入即可切換身份：
 
 ```powershell
-npm run auth:map:customer
-npm run auth:map:customer-b
-npm run auth:map:merchant
-npm run auth:map:admin
+npm run seed-account:bind -- customer --email=<你選的信箱> --password=<你選的密碼>
+npm run seed-account:bind -- merchant --email=<你選的信箱> --password=<你選的密碼>
+npm run seed-account:bind -- admin --email=<你選的信箱> --password=<你選的密碼>
 ```
 
-切換角色後，請在 App 內登出並重新 Google 登入，backend 才會重新判斷角色。
+用假信箱（例如 `.test` 網域）也可以，這支腳本會透過 Firebase Admin SDK 直接標記「已驗證」，不需要真的收信點連結——僅供本機測試已知帳號使用，不是給一般使用者自助註冊的功能。詳細用法見 `node scripts/bind-seed-firebase-account.js --help`。
 
 ### Android 預覽
 

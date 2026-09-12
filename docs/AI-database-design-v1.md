@@ -1,6 +1,6 @@
 # 資料庫設計 v1
 
-最後更新：2026-08-13
+最後更新：2026-09-12（「方向」段落已依實際完成進度更新）
 
 ## 語言與註解規則
 
@@ -11,18 +11,16 @@
 - 同一概念盡量維持一致命名，例如團購活動使用 `group_buy_activity` / `groupBuyActivity`。
 - PostgreSQL 遷移細節請看 `docs/AI-postgresql-migration-plan.md` 與 `database/migrations/001_initial_postgres.sql`。
 
-本文件是目前 DrinkGroupBuy 的資料庫設計基準，說明本機 SQLite 開發 schema，並讓後續 PostgreSQL 遷移方向保持一致。
+本文件說明 DrinkGroupBuy 的資料庫設計基準；PostgreSQL 已是永久 runtime，本文件的產品／資料設計語意仍適用，但欄位權威定義以 `docs/AI-database-field-spec.md` 與 `database/migrations/` 為準。
 
-目前權威實作草案仍是 `database/schema.sql`。本文件用產品與資料設計語意說明 schema，不是 production migration。
+`database/schema.sql` 現在只用於隔離的 SQLite 相容性測試，不是權威實作草案；正式權威來源是 `database/migrations/` 底下的版本化 migration。
 
 ## 方向
 
-- 目前開發資料庫：`database/drink-group-buy-dev.sqlite`。
-- 目前 schema 來源：`database/schema.sql`。
-- 目前 seed 來源：`database/seed-dev.sql`。
-- 未來正式資料庫目標：PostgreSQL。
-- SQLite 目前是本機開發 backend database，不只是 mock data。
-- Firebase 不作為主要正式資料庫；目前決策是只用 Firebase Auth 處理 Google Login，業務資料保留在 backend database / PostgreSQL。
+- 正式資料庫：PostgreSQL（已永久切換，見 `AGENTS.md`）。
+- 權威 schema 來源：`database/migrations/`（版本化 migration），欄位定義見 `docs/AI-database-field-spec.md`。
+- SQLite（`database/schema.sql`／`database/seed-dev.sql`）僅保留給明確隔離的相容性測試，不是目前的開發資料庫。
+- Firebase 不作為主要正式資料庫；Firebase Auth 支援 Google Login 與信箱密碼登入兩種方式，業務資料保留在 PostgreSQL。
 
 目前開發資料庫的即時筆數不寫入長期文件；需要時應以唯讀方式檢查實際 runtime database，避免快照與程式狀態漂移。
 

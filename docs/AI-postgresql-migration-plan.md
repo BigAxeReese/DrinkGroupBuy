@@ -1,15 +1,14 @@
 # PostgreSQL 遷移規劃
 
-最後更新：2026-08-13
+最後更新：2026-09-12（「目前狀態」段落已依實際完成進度更新；其餘規劃內容維持原樣供歷史參考）
 
-本文件整理從目前 SQLite 開發資料庫遷移到 PostgreSQL 的方向。它是規劃文件，不是可直接執行的 production migration。
+本文件整理從 SQLite 開發資料庫遷移到 PostgreSQL 的方向。**這個遷移已經完成且是永久預設值**（見 `AGENTS.md`）；本文件保留作為當初規劃過程的歷史紀錄，不是待執行的計畫。
 
-## 目前狀態
+## 目前狀態（已完成）
 
-- 目前開發資料庫：SQLite。
-- SQLite schema：`database/schema.sql`。
-- SQLite seed：`database/seed-dev.sql`。
-- Backend 目前仍以本機 SQLite 作為開發資料來源。
+- 全部 repository runtime 已永久切換至 PostgreSQL；`sqlite` 僅保留給明確隔離的相容性測試，不是目前的開發資料庫。
+- SQLite schema（相容性測試用）：`database/schema.sql`。
+- SQLite seed（相容性測試用）：`database/seed-dev.sql`。
 - PostgreSQL schema draft：`database/migrations/001_initial_postgres.sql`。
 - PostgreSQL seed draft：`database/migrations/002_seed_dev_postgres.sql`。
 - PostgreSQL 結算折扣快照 migration draft：`database/migrations/003_activity_settlement_discount_snapshot_postgres.sql`。

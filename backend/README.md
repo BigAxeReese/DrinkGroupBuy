@@ -319,7 +319,7 @@ npm run order-api:smoke
 
 ## 目前限制
 
-- 管理員登入尚未設定。
+- 管理員登入已設定：`/admin` 網頁後台（server-rendered HTML）支援共用密碼（`ADMIN_WEB_PASSWORDS`）與每人獨立的 Firebase 信箱密碼登入（`POST /admin/login/firebase`，需先被 `scripts/grant-admin-role.js` 授予 admin 角色）兩種登入方式；後台涵蓋退款審核、團購取消、商家申請審核、帳號角色切換，見 `docs/AI-architecture.md`「Authentication 與 authorization」段落。
 - 已授權訂單修改 API、mobile 重新預授權、provider request status reconciliation 與持久化 retry job 已完成第一版；仍需更完整的錯誤提示與 sandbox 人工驗證。
 - LINE Pay refund 目前只有管理員後端 API 與 smoke test，尚未做正式操作 UI、退款失敗重試 queue 與正式 sandbox 人工端對端測試。
 - LINE Pay webhook 第一版不列為必要入口；付款同步先以 confirm/cancel redirect、資料庫狀態與後續 provider 狀態查詢為主。

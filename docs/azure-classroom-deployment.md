@@ -1,6 +1,6 @@
 # Azure 課堂展示環境
 
-最後更新：2026-09-11
+最後更新：2026-09-12
 
 ## 目前狀態（2026-09-11）
 
@@ -121,8 +121,8 @@ PICKUP_EXPIRATION_SCHEDULER_ENABLED=false
 
 ## 更新規則
 
-- 只改 Backend：重新部署 App Service，不重打 APK。
-- 改 Mobile JavaScript／畫面／圖片：目前仍需重打 APK；完成 EAS Update 初始設定並重新打包一次後，這類變更才可線上更新。
+- **只改 Backend**：App Service 的部署中心已設定 GitHub Actions 持續部署（CI/CD），`git push` 到 `main` 會自動觸發建置與部署，不需要手動操作 Cloud Shell 或 Portal；設定檔在 `.github/workflows/main_drinkgroupbuy-demo-api.yml`（Azure 自動產生並提交）。第一次接上這個設定時，第一次自動部署可能因為 Azure 剛建立的身份驗證設定還沒在 Entra ID 傳播完成而失敗（`No subscriptions found` 之類的錯誤），重新觸發一次通常就會過。
+- 改 Mobile JavaScript／畫面／圖片：EAS Update 已完成設定並實機驗證成功，`eas update --branch preview` 發布後，已安裝的 APK 重開後會跳出更新提示，不用重打 APK。**前提**：APK 必須是透過 `eas build` 或有明確在 `app.config.js` 設定 `updates.requestHeaders["expo-channel-name"]` 的方式打包出來的——本機純用 `expo run:android`／`gradlew assembleRelease` 打包會跳過 `eas build` 自動注入頻道設定的步驟，即使 `expo.modules.updates.ENABLED=true`、更新網址正確，仍會因為不知道自己屬於哪個頻道而永遠收不到更新（2026-09-12 已實際遇到並修好這個問題，見 `PROGRESS.md`）。
 - 改原生套件、Android 權限、Expo SDK 或其他 native 設定：即使已有 EAS Update，仍要重新打包 APK。
 
 ## 暫停與清理
