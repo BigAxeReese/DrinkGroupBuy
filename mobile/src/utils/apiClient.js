@@ -139,7 +139,17 @@ export async function loginWithDevUser(userId) {
 }
 
 export async function verifyAuthSession() {
-  const response = await fetch(`${backendBaseUrl}/api/auth/session`, { headers: withAuthHeaders() });
+  // Generous timeout (vs. this file's usual 2.5s default): this call runs on every app launch to
+  // restore a persisted session, and Azure App Service's free tier can sleep when idle -- a cold
+  // start can take several seconds to respond. Without a timeout at all, a plain fetch() here left
+  // the launch spinner (AppNavigator.js's sessionRestoreStatus === "checking") stuck indefinitely
+  // whenever the request neither resolved nor rejected in a reasonable time, since nothing else
+  // ever settles the promise that the session-restore effect's finally block depends on.
+  const response = await fetchWithTimeout(`${backendBaseUrl}/api/auth/session`, {
+    headers: withAuthHeaders(),
+    timeoutMs: 10000,
+    timeoutMessage: "登入狀態驗證逾時"
+  });
   const payload = await response.json();
   if (!response.ok) {
     const error = new Error(payload.error ?? "Session verification failed");
