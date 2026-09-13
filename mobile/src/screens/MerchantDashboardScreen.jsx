@@ -188,6 +188,9 @@ export function MerchantDashboardScreen({ navigation, appState, actions, selecte
             <Pressable accessibilityRole="button" onPress={() => navigation.go("merchantCreate")}>
               <Text style={styles.createLink}>＋ 開團</Text>
             </Pressable>
+            <Pressable accessibilityRole="button" onPress={() => navigation.logout()}>
+              <Text style={styles.logoutLink}>登出</Text>
+            </Pressable>
           </View>
         ) : null}
       </View>
@@ -551,6 +554,11 @@ const styles = StyleSheet.create({
   },
   createLink: {
     color: "#1f6feb",
+    fontSize: 12,
+    fontWeight: "900"
+  },
+  logoutLink: {
+    color: "#b91c1c",
     fontSize: 12,
     fontWeight: "900"
   },
