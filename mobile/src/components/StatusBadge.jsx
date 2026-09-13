@@ -53,6 +53,8 @@ const styles = StyleSheet.create({
   submitted: { backgroundColor: "#dbeafe" },
   confirmed: { backgroundColor: "#dcfce7" },
   ordering: { backgroundColor: "#fef3c7" },
+  ready_for_pickup: { backgroundColor: "#dcfce7" },
+  completed: { backgroundColor: "#e2e8f0" },
   not_required: { backgroundColor: "#e2e8f0" },
   ready: { backgroundColor: "#dcfce7" },
   picked_up: { backgroundColor: "#e2e8f0" },

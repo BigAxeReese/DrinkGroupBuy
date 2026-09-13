@@ -5,6 +5,8 @@ export const groupBuyActivityStatusLabels = {
   confirmed: "已成團",
   formed: "已成團",
   ordering: "訂單製作中",
+  ready_for_pickup: "可取餐",
+  completed: "已完成",
   failed: "流團",
   cancelled: "已取消",
   full: "已額滿"

@@ -15,6 +15,7 @@ import { PickupInfoScreen } from "../screens/PickupInfoScreen";
 import { MerchantGroupBuyActivityCreateScreen } from "../screens/MerchantGroupBuyActivityCreateScreen";
 import { MerchantDashboardScreen } from "../screens/MerchantDashboardScreen";
 import { MerchantMenuManagementScreen } from "../screens/MerchantMenuManagementScreen";
+import { MerchantProductionListScreen } from "../screens/MerchantProductionListScreen";
 import { MerchantRefundRequestsScreen } from "../screens/MerchantRefundRequestsScreen";
 import { MerchantApplyScreen } from "../screens/MerchantApplyScreen";
 import { ProfileScreen } from "../screens/ProfileScreen";
@@ -1360,6 +1361,7 @@ export function AppNavigator() {
         {current.name === "merchantCreate" && <MerchantGroupBuyActivityCreateScreen {...screenProps} />}
         {current.name === "merchantDashboard" && <MerchantDashboardScreen {...screenProps} />}
         {current.name === "merchantMenu" && <MerchantMenuManagementScreen {...screenProps} />}
+        {current.name === "merchantProductionList" && <MerchantProductionListScreen {...screenProps} />}
         {current.name === "merchantRefundRequests" && <MerchantRefundRequestsScreen {...screenProps} />}
         {current.name === "customerOrders" && <CustomerOrdersScreen {...screenProps} />}
         {current.name === "profile" && <ProfileScreen {...screenProps} />}

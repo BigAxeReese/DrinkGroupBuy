@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from "react";
-import { Pressable, StyleSheet, Text, TextInput, View } from "react-native";
+import { Modal, Platform, Pressable, ScrollView, StyleSheet, Text, TextInput, View } from "react-native";
 import { MobileScreen, Section } from "../components/MobileScreen";
 import { PrimaryButton } from "../components/PrimaryButton";
 import {
@@ -48,17 +48,19 @@ const OPTION_TYPE_LABELS = {
 export function MerchantMenuManagementScreen({ navigation, memberAction, selectedMerchantStoreId }) {
   const [menu, setMenu] = useState(null);
   const [loading, setLoading] = useState(true);
-  const [notice, setNotice] = useState(null);
+  const [listNotice, setListNotice] = useState(null);
   const [editingItem, setEditingItem] = useState(null);
   const [form, setForm] = useState(() => createEmptyForm());
+  const [formVisible, setFormVisible] = useState(false);
+  const [formNotice, setFormNotice] = useState(null);
 
   async function loadMenu() {
     setLoading(true);
-    setNotice(null);
+    setListNotice(null);
     try {
       setMenu(await getMerchantStoreMenu(selectedMerchantStoreId));
     } catch (error) {
-      setNotice({ type: "error", text: error.message || "菜單載入失敗。" });
+      setListNotice({ type: "error", text: error.message || "菜單載入失敗。" });
     } finally {
       setLoading(false);
     }
@@ -81,13 +83,20 @@ export function MerchantMenuManagementScreen({ navigation, memberAction, selecte
   function beginCreate() {
     setEditingItem(null);
     setForm(createEmptyForm());
-    setNotice(null);
+    setFormNotice(null);
+    setFormVisible(true);
   }
 
   function beginEdit(item) {
     setEditingItem(item);
     setForm(formFromMenuItem(item));
-    setNotice(null);
+    setFormNotice(null);
+    setFormVisible(true);
+  }
+
+  function closeForm() {
+    setFormVisible(false);
+    setFormNotice(null);
   }
 
   function addOptionRow(optionType) {
@@ -129,19 +138,19 @@ export function MerchantMenuManagementScreen({ navigation, memberAction, selecte
     const basePrice = Number(form.basePrice);
     const toppingMaxSelections = Number(form.toppingMaxSelections);
     if (!form.name.trim() || !form.category.trim()) {
-      setNotice({ type: "error", text: "請填寫品名與分類。" });
+      setFormNotice({ type: "error", text: "請填寫品名與分類。" });
       return;
     }
     if (!Number.isInteger(basePrice) || basePrice < 0) {
-      setNotice({ type: "error", text: "基本價格必須是大於或等於 0 的整數。" });
+      setFormNotice({ type: "error", text: "基本價格必須是大於或等於 0 的整數。" });
       return;
     }
     if (!Number.isInteger(toppingMaxSelections) || toppingMaxSelections < 0) {
-      setNotice({ type: "error", text: "加料上限必須是大於或等於 0 的整數。" });
+      setFormNotice({ type: "error", text: "加料上限必須是大於或等於 0 的整數。" });
       return;
     }
     if (toppingMaxSelections > availableToppingCount) {
-      setNotice({ type: "error", text: `目前只有 ${availableToppingCount} 個加料選項，上限不可更高。` });
+      setFormNotice({ type: "error", text: `目前只有 ${availableToppingCount} 個加料選項，上限不可更高。` });
       return;
     }
 
@@ -174,7 +183,7 @@ export function MerchantMenuManagementScreen({ navigation, memberAction, selecte
       customizationGroups
     };
 
-    setNotice({ type: "busy", text: "儲存中…" });
+    setFormNotice({ type: "busy", text: "儲存中…" });
     try {
       if (editingItem) {
         await updateMerchantMenuItem(selectedMerchantStoreId, editingItem.id, payload);
@@ -184,21 +193,35 @@ export function MerchantMenuManagementScreen({ navigation, memberAction, selecte
       await loadMenu();
       setEditingItem(null);
       setForm(createEmptyForm());
-      setNotice({ type: "success", text: "菜單已更新。" });
+      setFormVisible(false);
+      setListNotice({ type: "success", text: "菜單已更新。" });
     } catch (error) {
-      setNotice({ type: "error", text: error.message || "菜單儲存失敗。" });
+      setFormNotice({ type: "error", text: error.message || "菜單儲存失敗。" });
     }
   }
 
   return (
+    <>
     <MobileScreen
       title="菜單管理"
       subtitle={menu?.store?.name || selectedMerchantStoreId}
       onBack={() => navigation.back()}
       onMemberPress={memberAction}
+      headerRight={(
+        <Pressable
+          accessibilityRole="button"
+          onPress={beginCreate}
+          style={({ pressed }) => [styles.addButton, pressed && styles.pressed]}
+        >
+          <Text style={styles.addButtonText}>＋ 新增飲品</Text>
+        </Pressable>
+      )}
     >
       <Section title="飲品清單">
         {loading ? <Text style={styles.meta}>載入中…</Text> : null}
+        {listNotice ? (
+          <Text style={listNotice.type === "error" ? styles.error : styles.success}>{listNotice.text}</Text>
+        ) : null}
         {!loading && menu?.menuItems?.length === 0 ? <Text style={styles.meta}>目前沒有飲品。</Text> : null}
         {(menu?.menuItems || []).map((item) => {
           const toppingRule = item.customizationGroups.find((group) => group.optionType === "topping");
@@ -218,10 +241,14 @@ export function MerchantMenuManagementScreen({ navigation, memberAction, selecte
             </View>
           );
         })}
-        <PrimaryButton label="＋ 新增飲品" onPress={beginCreate} />
       </Section>
+    </MobileScreen>
 
-      <Section title={title}>
+      <MenuItemFormModal
+        visible={formVisible}
+        title={title}
+        onClose={closeForm}
+      >
         <Field label="品名" value={form.name} onChangeText={(value) => setFormField(setForm, "name", value)} />
         <Field
           label="分類名稱（會直接顯示給顧客看，請填中文，例如：奶茶類、茶類、果汁類；同一家店建議固定用同幾種）"
@@ -266,13 +293,52 @@ export function MerchantMenuManagementScreen({ navigation, memberAction, selecte
           </Text>
         </Pressable>
         <PrimaryButton label={editingItem ? "儲存修改" : "建立飲品"} onPress={saveItem} />
-        {notice ? (
-          <Text style={notice.type === "error" ? styles.error : notice.type === "success" ? styles.success : styles.meta}>
-            {notice.text}
+        {formNotice ? (
+          <Text style={formNotice.type === "error" ? styles.error : formNotice.type === "success" ? styles.success : styles.meta}>
+            {formNotice.text}
           </Text>
         ) : null}
-      </Section>
-    </MobileScreen>
+      </MenuItemFormModal>
+    </>
+  );
+}
+
+function MenuItemFormModal({ visible, title, onClose, children }) {
+  if (!visible) return null;
+
+  const content = (
+    <View style={styles.modalOverlay}>
+      <Pressable
+        accessibilityRole="button"
+        accessibilityLabel="關閉"
+        style={StyleSheet.absoluteFillObject}
+        onPress={onClose}
+      />
+      <View style={styles.modalSheet}>
+        <View style={styles.modalHeaderRow}>
+          <Text style={styles.modalTitle}>{title}</Text>
+          <Pressable accessibilityRole="button" accessibilityLabel="關閉" onPress={onClose} style={styles.modalCloseButton}>
+            <Text style={styles.modalCloseIcon}>✕</Text>
+          </Pressable>
+        </View>
+        <ScrollView style={styles.modalScroll} contentContainerStyle={styles.modalScrollContent}>
+          {children}
+        </ScrollView>
+      </View>
+    </View>
+  );
+
+  // Same web-vs-native split as ActivityFilterPanel -- RN Modal on web portals to document.body,
+  // escaping the phone-frame mockup's clipping, so the sheet would render full-viewport-width
+  // instead of staying inside the mocked phone screen.
+  if (Platform.OS === "web") {
+    return <View style={StyleSheet.absoluteFillObject}>{content}</View>;
+  }
+
+  return (
+    <Modal visible={visible} transparent animationType="slide" onRequestClose={onClose}>
+      {content}
+    </Modal>
   );
 }
 
@@ -380,6 +446,64 @@ function digitsOnly(value) {
 }
 
 const styles = StyleSheet.create({
+  pressed: { opacity: 0.75 },
+  addButton: {
+    minHeight: 32,
+    borderRadius: 999,
+    alignItems: "center",
+    justifyContent: "center",
+    paddingHorizontal: 14,
+    backgroundColor: "#dbeafe"
+  },
+  addButtonText: {
+    color: "#1f6feb",
+    fontSize: 13,
+    fontWeight: "900"
+  },
+  modalOverlay: {
+    flex: 1,
+    justifyContent: "flex-end",
+    backgroundColor: "rgba(15,23,42,0.45)"
+  },
+  modalSheet: {
+    maxHeight: "88%",
+    borderTopLeftRadius: 24,
+    borderTopRightRadius: 24,
+    backgroundColor: "#ffffff",
+    paddingHorizontal: 20,
+    paddingTop: 18,
+    paddingBottom: 10
+  },
+  modalHeaderRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "space-between",
+    paddingBottom: 12
+  },
+  modalTitle: {
+    flex: 1,
+    color: "#0f172a",
+    fontSize: 18,
+    fontWeight: "900"
+  },
+  modalCloseButton: {
+    width: 32,
+    height: 32,
+    alignItems: "center",
+    justifyContent: "center"
+  },
+  modalCloseIcon: {
+    color: "#64748b",
+    fontSize: 16,
+    fontWeight: "900"
+  },
+  modalScroll: {
+    flexGrow: 0
+  },
+  modalScrollContent: {
+    gap: 12,
+    paddingBottom: 18
+  },
   itemCard: { gap: 8, borderWidth: 1, borderColor: "#e2e8f0", borderRadius: 12, padding: 11 },
   row: { flexDirection: "row", gap: 10, justifyContent: "space-between" },
   flex: { flex: 1 },

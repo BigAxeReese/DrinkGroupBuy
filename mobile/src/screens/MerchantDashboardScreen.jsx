@@ -343,7 +343,15 @@ export function MerchantDashboardScreen({ navigation, appState, actions, selecte
               ) : null}
               {manufacturableOrderList.length > 0 ? (
                 <View style={styles.productionList}>
-                  <Text style={styles.productionListTitle}>待製作明細</Text>
+                  <View style={styles.productionListHeader}>
+                    <Text style={styles.productionListTitle}>待製作明細</Text>
+                    <Pressable
+                      accessibilityRole="button"
+                      onPress={() => navigation.go("merchantProductionList", { groupBuyActivityId: groupBuyActivity.id })}
+                    >
+                      <Text style={styles.productionListLink}>彙總製作清單 ＞</Text>
+                    </Pressable>
+                  </View>
                   {manufacturableOrderList.map((order) => (
                     <View key={order.id} style={styles.productionOrderRow}>
                       <Text style={styles.productionCustomer}>{order.customerSurname ?? order.customerId}</Text>
@@ -729,8 +737,18 @@ const styles = StyleSheet.create({
     backgroundColor: "#f8fafc",
     padding: 10
   },
+  productionListHeader: {
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "space-between"
+  },
   productionListTitle: {
     color: "#0f172a",
+    fontSize: 12,
+    fontWeight: "900"
+  },
+  productionListLink: {
+    color: "#1f6feb",
     fontSize: 12,
     fontWeight: "900"
   },
