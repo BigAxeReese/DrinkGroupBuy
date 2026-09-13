@@ -13,6 +13,12 @@ export function LiveMapScreen({ navigation, appState, selectedAuthUserId }) {
   const mapRef = useRef(null);
   const lastReportSignatureRef = useRef("");
   const zoom = mapDefaults.zoom;
+  // Store-name labels are rendered as plain absolutely-positioned Views on top of the map, not as
+  // Marker children -- react-native-maps' custom-marker-content path is known to be unreliable on
+  // Android under the New Architecture (this project hit a related blank-map bug upgrading to Expo
+  // SDK 57, see PROGRESS.md 2026-08-19). Positions come from mapRef.pointForCoordinate(), the same
+  // projection API the plain overlay buttons below already rely on implicitly via screen layout.
+  const [markerLabelPositions, setMarkerLabelPositions] = useState({});
   const [selectedStoreId, setSelectedStoreId] = useState(null);
   const [filteredOutStoreName, setFilteredOutStoreName] = useState(null);
   const [locationPermission, setLocationPermission] = useState("not_required");
@@ -131,6 +137,32 @@ export function LiveMapScreen({ navigation, appState, selectedAuthUserId }) {
     recenterOnUser();
   }, [userPosition, zoom]);
 
+  const recomputeMarkerLabelPositions = async () => {
+    if (!mapRef.current) return;
+    const results = await Promise.all(
+      visibleMapStores.map((store) => (
+        mapRef.current
+          .pointForCoordinate({ latitude: store.latitude, longitude: store.longitude })
+          .then((point) => [store.id, point])
+          .catch(() => null)
+      ))
+    );
+    const next = {};
+    for (const result of results) {
+      if (!result) continue;
+      const [storeId, point] = result;
+      next[storeId] = point;
+    }
+    setMarkerLabelPositions(next);
+  };
+
+  // Re-project labels whenever the visible store set changes or the map camera settles after a
+  // pan/zoom/recenter. onRegionChangeComplete already fires for animateCamera (recenterOnUser)
+  // too, so a separate effect keyed on userPosition isn't needed.
+  useEffect(() => {
+    recomputeMarkerLabelPositions();
+  }, [visibleMapStores]);
+
   const openSelectedStore = () => {
     if (!selectedStore) return;
     const destination = getStoreMapDestination(selectedStore);
@@ -155,6 +187,8 @@ export function LiveMapScreen({ navigation, appState, selectedAuthUserId }) {
         toolbarEnabled={false}
         mapType="standard"
         showsPointsOfInterest={false}
+        onMapReady={recomputeMarkerLabelPositions}
+        onRegionChangeComplete={recomputeMarkerLabelPositions}
       >
         <Marker
           coordinate={userPosition}
@@ -179,6 +213,20 @@ export function LiveMapScreen({ navigation, appState, selectedAuthUserId }) {
           );
         })}
       </MapView>
+
+      {visibleMapStores.map((store) => {
+        const point = markerLabelPositions[store.id];
+        if (!point) return null;
+        return (
+          <View
+            key={`label-${store.id}`}
+            pointerEvents="none"
+            style={[styles.markerLabel, { left: point.x, top: point.y + 4 }]}
+          >
+            <Text numberOfLines={1} style={styles.markerLabelText}>{store.name}</Text>
+          </View>
+        );
+      })}
 
       <Pressable
         accessibilityRole="button"
@@ -271,6 +319,28 @@ const styles = StyleSheet.create({
     flex: 1,
     overflow: "hidden",
     backgroundColor: "#e2e8f0"
+  },
+  markerLabel: {
+    position: "absolute",
+    width: 148,
+    marginLeft: -74,
+    alignItems: "center"
+  },
+  markerLabelText: {
+    maxWidth: "100%",
+    color: "#111827",
+    fontSize: 10,
+    fontWeight: "900",
+    borderRadius: 7,
+    backgroundColor: "rgba(255,255,255,0.96)",
+    paddingHorizontal: 6,
+    paddingVertical: 2,
+    shadowColor: "#0f172a",
+    shadowOpacity: 0.18,
+    shadowRadius: 4,
+    shadowOffset: { width: 0, height: 2 },
+    elevation: 3,
+    overflow: "hidden"
   },
   filterButton: {
     position: "absolute",
