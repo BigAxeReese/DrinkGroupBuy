@@ -106,7 +106,16 @@ async function createPostgresOrderRevision(database, input) {
     const lockMinutes = Number(order.withdrawal_lock_minutes || 30);
     const deadlineTime = Date.parse(order.deadline_at);
     const nowTime = Date.parse(now);
-    if (!Number.isNaN(deadlineTime) && deadlineTime - nowTime <= lockMinutes * 60 * 1000) {
+    // The withdrawal-lock formula (deadlineTime - nowTime <= lockMinutes) has no upper bound, so
+    // it also covers every moment after the deadline, not just the last lockMinutes before it. Any
+    // revision -- increase included -- must still be rejected once the deadline has actually passed;
+    // only within the pre-deadline lock window is a non-decreasing revision allowed through.
+    const isPastDeadline = !Number.isNaN(deadlineTime) && nowTime >= deadlineTime;
+    if (isPastDeadline) {
+      return { error: "order_locked_by_deadline", deadlineAt: toIsoString(order.deadline_at), lockMinutes };
+    }
+    const withinWithdrawalLock = !Number.isNaN(deadlineTime) && deadlineTime - nowTime <= lockMinutes * 60 * 1000;
+    if (withinWithdrawalLock && totalCups < Number(order.total_cups)) {
       return { error: "order_locked_by_deadline", deadlineAt: toIsoString(order.deadline_at), lockMinutes };
     }
 

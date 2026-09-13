@@ -164,7 +164,7 @@
 | `storeDirectoryReadRepository` 的 postgres 版本會不會洩漏比原本 SQLite 版本更多的欄位 | 回傳欄位（`id, name, address, phone, business_status, latitude, longitude`）跟既有 SQLite `listPublicStores()` 完全一致 |
 | `isSqliteOrderDependentRoute` 這次的白名單異動，會不會不小心放行了還沒真正接上 postgres 的路由 | 這次只放行了確實已經完整改走 repository 的 `PATCH /api/orders/:orderId`；`POST /api/payments/line-pay/repay`（發起新的人工重新請款）內部還有 3 處未接上 repository 的直接呼叫，維持原本的擋停，沒有放行 |
 
-**這次沒審查到的部分**：`POST /api/payments/line-pay/repay` 內部尚未接上 repository 的三處直接呼叫（已請款和解、建立新預授權、對帳排程）本身不在這次改動範圍內，維持原樣未動，等下一輪處理時再審查。
+**這次沒審查到的部分**：`POST /api/payments/line-pay/repay` 內部尚未接上 repository 的三處直接呼叫（已請款和解、建立新預授權、對帳排程）本身不在這次改動範圍內，維持原樣未動，等下一輪處理時再審查。**〔2026-09-13 補註：已於下一筆記錄（同日「LINE Pay 對帳背景排程 PostgreSQL 支援」）處理完畢，見該筆內容；目前 `linePayService.js` 的 `requestManualLinePayRepaymentUnlocked` 三處都已接上對應 repository（有給就走 repository、沒給才 fallback SQLite），`server.js` 呼叫時也已把五個 repository 全部傳入，此項不再是待處理狀態。〕**
 
 ---
 
@@ -881,8 +881,6 @@
 
 **驗證限制**：這三個帳號的登入都在本機測試，還沒有部署到 Azure 驗證正式站上的行為；也還沒有測試 Google 登入跟信箱密碼登入交叉出現時（例如同一個信箱先後用兩種方式）的邊界情況，目前只驗證了各自獨立運作正常。
 
-**驗證限制**：受限於 Firebase 專案的 Email/Password 登入方式尚未開啟，這三個帳號目前都還沒有實際走完一次「用信箱密碼成功登入」的端對端驗證；等使用者開啟後應直接可用，屬於已知、待補的驗證步驟。
-
 ---
 
 ## 2026-09-13 — 移除舊版本機密碼登入路徑＋信箱自助註冊改為暫時只開放 Google
@@ -936,3 +934,90 @@
 | `resolveOrRegisterCustomer` 既有的呼叫端／測試是否因為新增 `signInProvider` 參數而壞掉 | 沒有。這個參數是新增的可選欄位，沒帶的話 `signInProvider !== "password"` 恆成立，行為跟改動前一致；原本 5 筆測試全過 |
 | 新增的 4 筆測試涵蓋範圍 | 涵蓋：首次信箱密碼註冊被擋、首次 Google 註冊不受影響、已預先綁定的信箱密碼帳號仍可登入、`ALLOW_EMAIL_PASSWORD_REGISTRATION=true` 時信箱密碼註冊恢復正常 |
 | 伺服器啟動與 `/api/auth/firebase-session` 是否還能正常回應 | 重啟本機後端後，`GET /health` 回 200；對 `/api/auth/firebase-session` 送一個假 token 正確回 401 與可讀的錯誤訊息，沒有 crash |
+
+---
+
+## 2026-09-13（第三次追加）— 已預授權訂單改單，最後 30 分鐘只擋「減少」不擋「增加」
+
+**範圍**：`backend/database/repositories/orderRevisionRepository.js`（`createPostgresOrderRevision` 的截止前鎖定判斷）、`backend/db.js`（SQLite 對應的 `createOrderRevision`，以及 `getCustomerOrderAvailableActions` 把 `edit`／`cancel` 兩個動作拆開判斷）、`mobile/src/screens/CartScreen.jsx`（購物車畫面的改單/追加文案與按鈕邏輯，並移除 `pending`〔尚未預授權〕訂單原本多餘的前端 30 分鐘鎖）、`mobile/src/screens/CustomerOrdersScreen.jsx`（訂單頁逐項編輯／刪除的鎖定判斷拆開，並補上顯示 `order.revisionError`）。
+**觸發原因**：使用者要求「已有訂單後能不能追加飲料」這個既有功能，改成截止前 30 分鐘鎖定期間依然可以增加飲料，只有「總杯數變少」才擋——原本的規則是整個鎖定期間完全不能改單（不管加減）。過程中跟使用者來回討論多輪：先確認「總杯數不可減少」是判定基準（不是逐項品項）、確認整筆取消訂單維持不可以（等同減到 0）、討論過給緩衝時間讓最後一刻下單的人有時間預授權（方案 A／B），最後使用者決定不做緩衝，維持「沒完成預授權就是訂單失敗」的現況不動。屬於訂單金額／付款相關邏輯改動，依 `AGENTS.md` 規則自動觸發，主動跑這次審查。
+
+### 這次改了什麼
+
+1. **核心規則**：`createPostgresOrderRevision`／`createOrderRevision` 原本只要進入 `withdrawalLockMinutes`（預設 30 分鐘）鎖定期，任何改單一律拒絕（回傳 `order_locked_by_deadline`）。改成只有當「新的總杯數 `totalCups` 小於訂單目前的總杯數 `order.total_cups`」時才拒絕；新總杯數大於等於原本，即使在鎖定期內也放行。
+2. **`getCustomerOrderAvailableActions`（`db.js`）**：原本 `edit`／`cancel` 兩個動作綁在同一個 `!locked` 條件下，一起開關。拆開後 `edit` 不再受 `locked` 影響（因為編輯方向不確定，可能加也可能減，實際擋不擋由寫入當下的 `createOrderRevision` 判斷），`cancel` 維持只在 `!locked` 才給，跟「整筆取消＝減到 0，鎖定期內不可以」這條規則一致。
+3. **Mobile 端**：`CartScreen.jsx` 新增 `wouldDecreaseCups`（比較購物車總杯數與既有訂單總杯數）跟 `blockedByWithdrawalDecrease`，畫面文案跟著這兩個新狀態分流；同時把 `pending`（尚未預授權）訂單的前端 30 分鐘鎖拿掉，因為查證後端從來沒有這條限制（後端只用真正的截止時間擋，見 `customerOrderWriteRepository.js:366` 的 `updatePostgresPendingOrder`），前端這條鎖是多餘的、擋住了顧客本來合法能做的事。`CustomerOrdersScreen.jsx` 把逐項「編輯」（方向不確定，維持可點）跟「刪除整個品項」（必定是減少，鎖定期內繼續擋）的可操作狀態拆開，並補上顯示 `order.revisionError`（這個欄位之前就存在、但畫面上從沒渲染過，是個既有的靜默失敗缺口——這次因為編輯在鎖定期內更容易觸發「減少被拒絕」，順便補上顯示，不然使用者點了刪除／編輯卻什麼提示都沒有）。
+
+### 發現
+
+沒有找到信心度達到門檻（8/10 以上）的漏洞。用一個 sub-task 針對五個具體疑慮（`totalCups` 型別混淆繞過、容量/折扣驗證與 row lock 是否還在、有沒有繞過訂單歸屬檢查、`revisionError` 在 React Native `<Text>` 有沒有注入風險、`edit` 動作放寬會不會讓前端繞過後端驗證）逐一查證，結論都是否定——細節見下方「沒發現問題的部分」。
+
+### 沒發現問題的部分
+
+| 面向 | 檢查結果 |
+|------|----------|
+| `totalCups`／`order.total_cups` 型別混淆是否能讓比較式失效（例如變成 NaN 恆為 false，等同繞過鎖定） | 不行。`totalCups` 是伺服器端用已驗證過的品項算出來的（`customerOrderWriteRepository.js` 對每個品項的 `quantity` 先檢查 `Number.isInteger(quantity) && quantity > 0`，不合法直接拒絕，不會走到鎖定判斷），`order.total_cups` 在 Postgres 版本有明確 `Number(...)` 轉型、SQLite 版本本身欄位型別就是 INTEGER，兩邊都不存在字串比較或 NaN 繞過的路徑 |
+| 容量檢查、折扣驗證、`FOR UPDATE` row lock 是否還完整套用在兩個分支（放行／擋下）上 | 都還在，而且都在這次改動的那一行判斷之前或之後、沒有被新加的分支跳過——讀完整個函式確認過，這次 diff 只改了單一行的判斷條件，沒有動到前後的驗證步驟 |
+| 訂單歸屬檢查（`order.customer_user_id !== input.customerUserId`）是否還在新邏輯之前執行 | 是，這個檢查在改動的那一行之前就先執行，沒有被繞過 |
+| `order.revisionError` 用 React Native `<Text>` 顯示會不會有注入風險 | 不會。React Native 的 `<Text>` 純文字渲染，不解析 HTML，也沒有用到任何等同 `dangerouslySetInnerHTML` 的 API |
+| `edit` 動作在鎖定期內放寬後，會不會讓前端繞過後端重新驗證 | 不會。`availableActions` 只控制畫面上按鈕能不能按，實際寫入的 `createOrderRevision`／`updatePostgresPendingOrder` 仍然是唯一的權威判斷點，不管前端顯示什麼，後端都會重新算一次總杯數並獨立拒絕真正的減少 |
+
+---
+
+## 2026-09-13（第四次追加）— `/code-review` 抓到「截止後仍可加購」與「Postgres 從沒給過 edit/cancel」兩個真的問題，已修
+
+**範圍**：延續上一筆（第三次追加）的改動，這次是使用者跑完 `/code-review`（medium，8 個角度）後回報的 8 筆發現，全部「處理」（修復）。實際改動：`backend/database/repositories/orderRevisionRepository.js`、`backend/db.js`（新增獨立於「是否減少」判斷之外、不管加減都必擋的「已過真正截止時間」檢查）、`backend/database/repositories/customerOrderReadRepository.js`（把 SQLite 版 `getCustomerOrderAvailableActions`／`getMerchantOrderAvailableActions` 的邏輯移植進 Postgres 版 `getPostgresAvailableActions`，這個函式先前只會回傳 `["pay"]` 或 `[]`，從來沒有過 `edit`／`cancel`）、`mobile/src/screens/CustomerOrdersScreen.jsx`（`canDeleteItem` 改成對 `pending` 訂單不套用鎖定判斷）、`mobile/src/screens/GroupBuyActivityDetailScreen.jsx`（更新過期文案）、`mobile/src/utils/orderWriteErrors.js`＋對應測試（改錯誤訊息文字，不再暗示「完全無法修改」）、`mobile/src/screens/CartScreen.jsx`（清掉重複的通知文字與重複計算的 `quantityDelta`）。
+**觸發原因**：使用者對上一筆改動跑 `/code-review`（medium 強度，附帶「並且跑幾次情境確認」的要求），8 個角度找出 8 筆候選，逐一驗證後全部確認為真（6 筆 CONFIRMED、2 筆 PLAUSIBLE），使用者回覆「處理」要求全部修復。屬於訂單／付款相關邏輯改動，依 `AGENTS.md` 規則自動觸發本次審查。
+
+### `/code-review` 找到、這次修掉的問題
+
+| 嚴重度 | 位置 | 問題 | 修法 | 狀態 |
+|--------|------|------|------|------|
+| 高（真的可被利用的邏輯漏洞） | `orderRevisionRepository.js:109`、`db.js:2155` | 上一筆改動把「截止前 30 分鐘鎖定」的判斷式改成「只擋減少」，但這個判斷式的算法（`deadlineTime - nowTime <= lockMinutes`）本身沒有上限，過了真正的截止時間之後這個算式依然成立——舊版程式碼靠「鎖定期間一律擋」順便把「截止後也一律擋」這件事也一起做掉了；改完之後，只要活動狀態還沒被結算排程（每 30 秒跑一次）從 `recruiting`/`confirmed` 切走，過了截止時間仍然可以送出「增加」的改單請求 | 新增一個獨立、不管加減都必擋的「是否已過真正截止時間」檢查，放在原本的「是否減少」判斷之前 | 已修 |
+| 中（設計不一致，非資安漏洞） | `CustomerOrdersScreen.jsx:214` | 新增的 `canDeleteItem = canEdit && !withdrawalLocked` 沒有排除 `pending`（尚未預授權）訂單，導致鎖定期間內連刪除品項都被擋下——跟同一筆改動裡 `CartScreen.jsx` 明確講的「pending 訂單完全沒有後端鎖定」自相矛盾 | 改成 `pending` 訂單直接跟著 `canEdit` 走，不套用 `withdrawalLocked` | 已修 |
+| 中（既有缺口，這次順便補上，讓改動真的生效） | `customerOrderReadRepository.js:394`（`getPostgresAvailableActions`） | 這個函式是 SQLite 版 `getCustomerOrderAvailableActions` 的 Postgres 對應版本，但先前一直只回傳 `["pay"]` 或 `[]`，從來沒有 `edit`／`cancel` 邏輯——因為 `AGENTS.md` 明訂 PostgreSQL 是唯一永久 runtime，代表上一筆改動對 `CustomerOrdersScreen.jsx` 逐項編輯畫面做的鎖定放寬，實際上完全沒有機會在正式環境生效（`hasBackendActions` 恆為 true 但陣列裡永遠沒有 `"edit"`） | 把 SQLite 版的邏輯（含這次新加的鎖定放寬規則）移植進 Postgres 版，兩邊改用同一套規則 | 已修 |
+| 低（文案跟新規則脫節） | `GroupBuyActivityDetailScreen.jsx:84` | 沒被這次改動碰到的畫面，文案還寫「既有訂單不可修改或退出」，跟新規則（可以增加、只是不能減少）矛盾 | 改成「既有訂單只能增加飲料，不能減少或退出」 | 已修 |
+| 低（註解跟實際行為不符） | `db.js:3211`、`CustomerOrdersScreen.jsx:208` | 註解寫「在 `createOrderRevision`／`updateOrder` 寫入時擋下減少」，但 `updateOrder`（給 `pending` 訂單用）本來就沒有任何鎖定檢查——以後如果有人照著這句註解的字面意思去改 `updateOrder`，可能會誤以為保護已經存在而漏掉真正該加的檢查 | 改寫註解，講清楚 `updateOrder` 目前沒有鎖定檢查是因為 `pending` 訂單本來就不受這條規則限制 | 已修 |
+| 低（重複程式碼） | `CartScreen.jsx`（兩處通知文字、`wouldDecreaseCups`／`capacityCheckQuantity`） | 同一句提示文字被複製貼上兩次；`totalQuantity - existingOrder.quantity` 這個差值也被兩個地方各自重算一次 | 抽成 `withdrawalLockedNoticeText`／`quantityDelta` 兩個共用變數 | 已修 |
+| 低（訊息文案過度概括） | `orderWriteErrors.js:31` | `order_locked_by_deadline` 的訊息文字寫「已無法修改」，聽起來像完全鎖死，但這個錯誤現在只會在「嘗試減少」時才會出現，實際上還是能增加 | 改成「只能增加飲料、無法減少」，同步更新對應的兩個測試斷言 | 已修 |
+
+### 沒發現問題的部分（這次額外確認）
+
+| 面向 | 檢查結果 |
+|------|----------|
+| 新增的「已過真正截止時間」檢查會不會誤擋合法的鎖定期內操作 | 不會。這個檢查只在 `nowTime >= deadlineTime`（真正過了截止時間）才成立，鎖定期間但還沒到截止時間的情境不受影響，原本「只擋減少」的規則照舊 |
+| `getPostgresAvailableActions` 補上邏輯後，會不會意外放寬商家端（`merchant` 角色）原本沒有的權限 | 不會。商家端的 `markReadyForPickup`／`redeemPickup` 邏輯是原封不動照抄 SQLite 版本的既有條件，沒有新增或放寬任何判斷 |
+| `getPostgresOrderDetail` 目前把 `pendingRevision` 固定寫死成 `null`，會不會讓新的 `getPostgresCustomerAvailableActions` 誤判 | 這是既有缺口（`order_revisions` 資料表還沒接進 Postgres 讀取路徑），這次沒有動它，只是在程式碼裡用註解明確標註「這個值目前恆為 null」，避免以後有人誤以為這裡已經處理過 pending revision 的情境 |
+
+**驗證限制**：`npm test` 119/119 全過（含更新後的 `orderWriteErrors.test.mjs` 兩個斷言）；`node --check` 對全部改動檔案語法檢查通過；Mobile 端 Metro 重新打包確認無編譯錯誤、瀏覽器 console 無錯誤。**跟上一筆一樣，這次依然沒有針對「鎖定期內加購／減購」「過了截止時間後嘗試加購」這兩個情境做真正的端對端測試**——需要對開發資料庫寫入測試資料，還沒有取得使用者同意執行，維持原本記錄的已知驗證缺口。
+
+---
+
+## 2026-09-13（第五次追加）— 補齊前兩筆一直留著的「鎖定期情境」端對端驗證缺口
+
+**範圍**：新增 `scripts/order-revision-withdrawal-lock-smoke.js`（唯一新檔案，`npm run order-revision-withdrawal-lock:smoke` 可重跑），對真實本機 PostgreSQL dev 資料庫實際執行四個情境，不是模擬資料。`package.json` 新增對應的 script 別名。
+**觸發原因**：使用者明確同意（「跑」）補做前兩筆記錄裡一直列為「已知驗證缺口」的端對端測試，針對這次改動的核心規則做真實資料庫層級的驗證。
+
+### 測試內容與結果
+
+跟著 `scripts/order-revision-postgres-smoke.js` 既有的手法（用真實存在的顧客帳號、建立一批帶有唯一亂數 ID 的隔離測試活動／訂單，測完在同一個 transaction 裡刪乾淨，最後查一次殘留數量確認歸零），這次額外建立四個情境：
+
+| # | 情境 | 預期結果 | 實測結果 |
+|---|------|----------|----------|
+| 1 | 已授權訂單，活動還有 10 分鐘到截止（在 30 分鐘鎖定窗內），送出「增加」改單（2 杯→3 杯） | 應該成功 | ✅ 成功建立 revision |
+| 2 | 同上設定，送出「減少」改單（2 杯→1 杯） | 應該被擋（`order_locked_by_deadline`） | ✅ 正確被擋 |
+| 3 | 已授權訂單，活動截止時間是 1 分鐘前（真的已經過了截止時間，但刻意讓 `activity.status` 還停在 `recruiting`，模擬結算排程還沒來得及把狀態切走的那個競態窗口），送出「增加」改單 | 應該被擋（這正是這次 `/code-review` 抓到、剛修好的那個漏洞） | ✅ 正確被擋，確認修法有效 |
+| 4 | 尚未預授權（`pending`）訂單，活動還有 10 分鐘到截止，直接呼叫 `updatePostgresPendingOrder` 送出「減少」（2 杯→1 杯） | 應該成功（pending 訂單本來就沒有鎖定） | ✅ 成功更新 |
+
+四個情境全部符合預期，包含這次 `/code-review` 修的那個「過了截止時間仍可增加」的漏洞，也已經用真實資料庫操作反向證實：改之前會失敗（放行不該放行的增加）、改之後正確擋下。
+
+### 沒發現問題的部分
+
+| 面向 | 檢查結果 |
+|------|----------|
+| 測試資料是否有殘留、污染既有種子資料 | 沒有。四個情境用的活動／訂單／顧客 ID 全部帶唯一亂數字串，且顧客帳號本身是重複使用既有的 4 個真實測試帳號（不新建帳號），清理後對 `group_buy_activities`／`orders`／`order_revisions`／`payment_authorizations`／`audit_logs` 五張表各自查詢殘留數量，全部為 0；額外用獨立查詢（`title = 'PostgreSQL Withdrawal-Lock Proof'`）二次確認沒有任何測試活動遺留 |
+| `updatePostgresPendingOrder` 的回傳結構是否跟預期一致 | 第一次執行時斷言寫錯（誤以為 `totalCups` 在回傳物件最外層，實際上巢狀在 `result.order.totalCups` 底下），跑出來就直接抓到並修正，不是靠讀程式碼猜對的 |
+
+**驗證限制**：這次驗證的是 repository 層直接呼叫（`createOrderRevision`／`updatePostgresPendingOrder`），不是走完整 HTTP／LINE Pay 流程，跟 `order-revision-postgres-smoke.js` 既有的驗證深度一致；沒有另外對 Azure 正式環境重跑一次。至此，前兩筆記錄裡留著的「鎖定期情境」端對端驗證缺口已經補齊。
+
+**驗證限制**：`npm test` 119/119 全過（無回歸）；`node --check` 語法檢查通過；Mobile 端透過 Metro 重新打包確認無編譯錯誤、瀏覽器 console 無錯誤。**這次沒有針對新規則寫自動化測試**——`orderRevisionRepository.js` 這個檔案本身目前完全沒有既有的單元測試（只有一支需要連真實 PostgreSQL 的 `scripts/order-revision-postgres-smoke.js`，且該腳本目前也不涵蓋鎖定期情境），要驗證這次改動需要真的跑一次「已授權訂單、卡在鎖定期內分別嘗試加購／減購」的情境，這需要對使用者的開發資料庫做寫入操作，還沒有取得使用者同意執行，屬於已知的驗證缺口，留待使用者確認後補做。

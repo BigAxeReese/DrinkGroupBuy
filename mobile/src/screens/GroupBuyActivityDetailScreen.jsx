@@ -81,7 +81,7 @@ export function GroupBuyActivityDetailScreen({ navigation, route, appState, acti
       </Section>
 
       <Section title="注意事項">
-        {withdrawalLocked ? <Text style={styles.lockNotice}>目前距截止時間 30 分鐘內：仍可加入，但既有訂單不可修改或退出。</Text> : null}
+        {withdrawalLocked ? <Text style={styles.lockNotice}>目前距截止時間 30 分鐘內：仍可加入，既有訂單只能增加飲料，不能減少或退出。</Text> : null}
         {groupBuyActivity.cancellationReason ? <Text style={styles.warning}>取消原因：{groupBuyActivity.cancellationReason}</Text> : null}
         {groupBuyActivity.notices.map((notice) => <Text key={notice} style={styles.meta}>· {notice}</Text>)}
       </Section>

@@ -2152,7 +2152,20 @@ function createOrderRevision(input) {
     const lockMinutes = Number(order.withdrawal_lock_minutes || 30);
     const deadlineTime = Date.parse(order.deadline_at);
     const nowTime = Date.parse(now);
-    if (!Number.isNaN(deadlineTime) && deadlineTime - nowTime <= lockMinutes * 60 * 1000) {
+    // The withdrawal-lock formula (deadlineTime - nowTime <= lockMinutes) has no upper bound, so
+    // it also covers every moment after the deadline, not just the last lockMinutes before it. Any
+    // revision -- increase included -- must still be rejected once the deadline has actually passed;
+    // only within the pre-deadline lock window is a non-decreasing revision allowed through.
+    const isPastDeadline = !Number.isNaN(deadlineTime) && nowTime >= deadlineTime;
+    if (isPastDeadline) {
+      return {
+        error: "order_locked_by_deadline",
+        deadlineAt: order.deadline_at,
+        lockMinutes
+      };
+    }
+    const withinWithdrawalLock = !Number.isNaN(deadlineTime) && deadlineTime - nowTime <= lockMinutes * 60 * 1000;
+    if (withinWithdrawalLock && totalCups < order.total_cups) {
       return {
         error: "order_locked_by_deadline",
         deadlineAt: order.deadline_at,
@@ -3206,9 +3219,14 @@ function getCustomerOrderAvailableActions(order, context, locked) {
   if (order.pendingRevision || (order.status === "submitted" && order.paymentStatus === "pending")) {
     actions.push("pay");
   }
-  if (order.status === "submitted" && !locked && ["pending", "authorized"].includes(order.paymentStatus)) {
+  if (order.status === "submitted" && ["pending", "authorized"].includes(order.paymentStatus)) {
+    // Editing stays available even once the withdrawal lock kicks in -- for an authorized order,
+    // only decreasing total cups is blocked at write time (createOrderRevision), so a customer can
+    // still top up in the last withdrawalLockMinutes before deadline. Pending orders have no
+    // backend-enforced withdrawal lock at all (updateOrder/updatePostgresPendingOrder has no such
+    // check), so they're never blocked here regardless of lock state.
     if (!order.pendingRevision) actions.push("edit");
-    actions.push("cancel");
+    if (!locked) actions.push("cancel");
   }
   if (order.manualRepayment?.eligible) actions.push("repay");
   if (["ready", "picked_up"].includes(order.pickupStatus) && context.pickupCredential.exists) {

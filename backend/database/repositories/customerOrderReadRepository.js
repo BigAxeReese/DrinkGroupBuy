@@ -235,7 +235,7 @@ async function listPostgresOrders(database, input = {}) {
       ...order,
       ...context,
       lifecycleBucket,
-      availableActions: getPostgresAvailableActions(order, context, input.role, lifecycleBucket),
+      availableActions: getPostgresAvailableActions(order, context, input.role, lifecycleBucket, now),
     };
   }));
   const matching = hydrated.filter((order) => order.lifecycleBucket === scope);
@@ -391,12 +391,50 @@ function getOrderLifecycleBucket(order, context, now) {
   return "active";
 }
 
-function getPostgresAvailableActions(order, context, role, lifecycleBucket) {
+function getPostgresAvailableActions(order, context, role, lifecycleBucket, now) {
   if (lifecycleBucket === "history") return [];
-  if (role === "customer" && order.status === "submitted" && order.paymentStatus === "pending") {
-    return ["pay"];
+  const deadline = Date.parse(context.activity.deadlineAt);
+  const lockMinutes = Number(context.activity.withdrawalLockMinutes || 30);
+  const locked = !Number.isNaN(deadline) && deadline - Date.parse(now) <= lockMinutes * 60 * 1000;
+
+  if (role === "customer") {
+    return [...new Set(getPostgresCustomerAvailableActions(order, context, locked))];
+  }
+  if (role === "merchant") {
+    return [...new Set(getPostgresMerchantAvailableActions(order, context))];
   }
   return [];
+}
+
+function getPostgresCustomerAvailableActions(order, context, locked) {
+  const actions = [];
+  if (order.pendingRevision || (order.status === "submitted" && order.paymentStatus === "pending")) {
+    actions.push("pay");
+  }
+  if (order.status === "submitted" && ["pending", "authorized"].includes(order.paymentStatus)) {
+    // Mirrors backend/db.js's getCustomerOrderAvailableActions: editing stays available even once
+    // the withdrawal lock kicks in -- for an authorized order, only decreasing total cups is
+    // rejected at write time (createPostgresOrderRevision), so a customer can still top up. Pending
+    // orders have no backend-enforced lock at all. Cancelling a whole order is unambiguously a
+    // decrease, so that stays gated on !locked.
+    // Note: getPostgresOrderDetail currently always hydrates pendingRevision as null (order_revisions
+    // isn't wired into the Postgres read path yet), so `!order.pendingRevision` is always true here --
+    // a pre-existing gap this fix doesn't address.
+    if (!order.pendingRevision) actions.push("edit");
+    if (!locked) actions.push("cancel");
+  }
+  if (order.manualRepayment?.eligible) actions.push("repay");
+  if (["ready", "picked_up"].includes(order.pickupStatus) && context.pickupCredential.exists) {
+    actions.push("viewPickupCredential");
+  }
+  return actions;
+}
+
+function getPostgresMerchantAvailableActions(order, context) {
+  const actions = [];
+  if (context.activity.status === "ordering" && order.paymentStatus === "captured") actions.push("markReadyForPickup");
+  if (order.pickupStatus === "ready" && context.pickupCredential.status === "active") actions.push("redeemPickup");
+  return actions;
 }
 
 function encodeOrderListCursor(order) {

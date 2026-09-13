@@ -31,6 +31,7 @@
     "pickup-credential-postgres:smoke": "node scripts/pickup-credential-postgres-smoke.js",
     "payment-refund-postgres:smoke": "node scripts/payment-refund-postgres-smoke.js",
     "order-revision-postgres:smoke": "node scripts/order-revision-postgres-smoke.js",
+    "order-revision-withdrawal-lock:smoke": "node scripts/order-revision-withdrawal-lock-smoke.js",
     "group-buy-settlement:smoke": "node scripts/group-buy-settlement-repository-smoke.js",
     "group-buy-settlement-postgres:smoke": "node scripts/group-buy-settlement-postgres-smoke.js",
     "store-menu-read:smoke": "node scripts/store-menu-read-repository-smoke.js",

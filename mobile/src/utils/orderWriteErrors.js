@@ -31,8 +31,8 @@ export function getOrderWriteErrorMessage(payload, fallback) {
   if (payload?.error === "order_locked_by_deadline") {
     const deadlineLabel = payload.deadlineAt ? formatDeadlineLabel(payload.deadlineAt) : null;
     return deadlineLabel
-      ? `團購即將於 ${deadlineLabel} 截止（截止前 ${payload.lockMinutes ?? 30} 分鐘起鎖定訂單），已無法修改。`
-      : "團購即將截止，已無法修改訂單。";
+      ? `團購即將於 ${deadlineLabel} 截止（截止前 ${payload.lockMinutes ?? 30} 分鐘起鎖定訂單），只能增加飲料、無法減少。`
+      : "團購即將截止，只能增加飲料、無法減少訂單。";
   }
   return lookupErrorMessage(payload?.error, ORDER_WRITE_ERROR_MESSAGES, payload?.error ?? fallback);
 }

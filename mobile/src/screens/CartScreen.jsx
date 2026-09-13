@@ -39,14 +39,31 @@ export function CartScreen({ navigation, route, appState, actions, memberAction,
     && !["cancelled", "completed"].includes(order.status)
   ));
   const withdrawalLocked = Boolean(existingOrder && isWithdrawalLocked(groupBuyActivity));
-  const canUpdatePendingOrder = Boolean(existingOrder && existingOrder.paymentStatus === "pending" && !withdrawalLocked);
-  const canCreateRevision = Boolean(existingOrder && existingOrder.paymentStatus === "authorized" && !withdrawalLocked);
+  const quantityDelta = totalQuantity - (existingOrder?.quantity ?? 0);
+  const wouldDecreaseCups = Boolean(existingOrder) && quantityDelta < 0;
+  // Pending orders have no backend-enforced withdrawal lock (only the real deadline blocks them),
+  // so the cart doesn't add one either. Authorized orders keep the lock, but only for decreases --
+  // topping up an already-authorized order is allowed even in the last withdrawalLockMinutes.
+  const canUpdatePendingOrder = Boolean(existingOrder && existingOrder.paymentStatus === "pending");
+  const canCreateRevision = Boolean(
+    existingOrder
+    && existingOrder.paymentStatus === "authorized"
+    && (!withdrawalLocked || !wouldDecreaseCups)
+  );
   const blocksOrderUpdate = Boolean(existingOrder && !canUpdatePendingOrder && !canCreateRevision);
+  const blockedByWithdrawalDecrease = Boolean(
+    existingOrder
+    && existingOrder.paymentStatus === "authorized"
+    && withdrawalLocked
+    && wouldDecreaseCups
+  );
   const capacityInfo = getGroupBuyActivityCapacityInfo(groupBuyActivity);
   const capacityCheckQuantity = existingOrder && existingOrder.paymentStatus !== "pending"
-    ? Math.max(0, totalQuantity - (existingOrder.quantity ?? 0))
+    ? Math.max(0, quantityDelta)
     : totalQuantity;
   const exceedsCapacity = capacityInfo.maximumCups > 0 && capacityCheckQuantity > capacityInfo.remainingCapacity;
+  const withdrawalLockMinutesLabel = groupBuyActivity.withdrawalLockMinutes ?? 30;
+  const withdrawalLockedNoticeText = `已進入截止前 ${withdrawalLockMinutesLabel} 分鐘鎖定，這筆訂單目前只能增加飲料、不能減少。`;
 
   return (
     <MobileScreen
@@ -92,10 +109,19 @@ export function CartScreen({ navigation, route, appState, actions, memberAction,
           此團購已有一筆尚未完成預授權的訂單。送出後會用目前購物車內容更新該訂單，再重新進行 LINE Pay 預授權。
         </Text>
       ) : null}
-      {blocksOrderUpdate && cartItems.length > 0 ? (
+      {blockedByWithdrawalDecrease && cartItems.length > 0 ? (
         <Text style={styles.closedNotice}>
-          此團購已有一筆已授權或已鎖定的訂單。目前尚未支援把新飲料合併到已授權訂單。
+          {withdrawalLockedNoticeText}
+          請調整購物車數量至不低於原本的 {existingOrder?.quantity ?? 0} 杯，或前往訂單頁查看。
         </Text>
+      ) : null}
+      {blocksOrderUpdate && !blockedByWithdrawalDecrease && cartItems.length > 0 ? (
+        <Text style={styles.closedNotice}>
+          此團購已有一筆已請款或已鎖定的訂單，請先回到訂單頁查看。
+        </Text>
+      ) : null}
+      {canCreateRevision && withdrawalLocked && cartItems.length > 0 ? (
+        <Text style={styles.closedNotice}>{withdrawalLockedNoticeText}</Text>
       ) : null}
 
       <PrimaryButton
@@ -113,7 +139,9 @@ export function CartScreen({ navigation, route, appState, actions, memberAction,
           <Text style={styles.notice}>
             {canUpdatePendingOrder
               ? "送出後會以目前購物車內容更新尚未授權的訂單。預授權成功後，購物車才會清空。"
-              : "此團購已有一筆已授權或已鎖定的訂單，請先回到訂單頁查看。"}
+              : blockedByWithdrawalDecrease
+                ? withdrawalLockedNoticeText
+                : "此團購已有一筆已請款或已鎖定的訂單，請先回到訂單頁查看。"}
           </Text>
         ) : null}
       </Section>

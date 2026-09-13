@@ -58,7 +58,7 @@ test("order_locked_by_deadline embeds a formatted deadline and the lock window",
     { error: "order_locked_by_deadline", deadlineAt: "2026-08-27T10:00:00.000Z", lockMinutes: 30 },
     "fallback"
   );
-  assert.equal(message, "團購即將於 <formatted:2026-08-27T10:00:00.000Z> 截止（截止前 30 分鐘起鎖定訂單），已無法修改。");
+  assert.equal(message, "團購即將於 <formatted:2026-08-27T10:00:00.000Z> 截止（截止前 30 分鐘起鎖定訂單），只能增加飲料、無法減少。");
 });
 
 test("order_locked_by_deadline defaults lockMinutes to 30 when the backend omits it", () => {
@@ -71,7 +71,7 @@ test("order_locked_by_deadline defaults lockMinutes to 30 when the backend omits
 
 test("order_locked_by_deadline falls back to a plain message when deadlineAt is missing", () => {
   const message = getOrderWriteErrorMessage({ error: "order_locked_by_deadline" }, "fallback");
-  assert.equal(message, "團購即將截止，已無法修改訂單。");
+  assert.equal(message, "團購即將截止，只能增加飲料、無法減少訂單。");
 });
 
 test("an unrecognized error code falls through to the raw code, not the fallback text", () => {

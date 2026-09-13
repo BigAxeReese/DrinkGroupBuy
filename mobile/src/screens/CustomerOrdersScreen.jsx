@@ -205,9 +205,14 @@ function OrderDetailCard({ order, groupBuyActivities, payments, actions, navigat
   const orderLocked = order.status === "locked";
   const withdrawalLocked = !historical && (orderLocked || isWithdrawalLocked(groupBuyActivity));
   const hasBackendActions = Array.isArray(order.availableActions);
+  // Editing stays allowed even once the withdrawal lock kicks in -- only decreasing an *authorized*
+  // order's total cups is actually rejected (at the createOrderRevision write). Pending orders have
+  // no backend-enforced withdrawal lock at all (see CartScreen.jsx), so deletion isn't blocked for
+  // them either -- only an authorized order's whole-item delete is unambiguously a decrease.
   const canEdit = hasBackendActions
     ? order.availableActions.includes("edit")
-    : !withdrawalLocked && !historical;
+    : !orderLocked && !historical;
+  const canDeleteItem = order.paymentStatus === "pending" ? canEdit : (canEdit && !withdrawalLocked);
   const progress = groupBuyActivity ? getGroupBuyActivityProgress(groupBuyActivity) : null;
   const progressText = progress ? `${progress.currentCups} / ${progress.nextTarget} 杯` : "團購資料已不存在";
   const manualRepayment = order.manualRepayment ?? null;
@@ -266,7 +271,7 @@ function OrderDetailCard({ order, groupBuyActivities, payments, actions, navigat
             <Pressable
               accessibilityRole="button"
               key={item.id}
-              disabled={withdrawalLocked || historical}
+              disabled={!canEdit || historical}
               onPress={() => navigation.go("drinkSelection", {
                 groupBuyActivityId: order.groupBuyActivityId,
                 editMode: true,
@@ -298,7 +303,7 @@ function OrderDetailCard({ order, groupBuyActivities, payments, actions, navigat
                 </View>
                 <Pressable
                   accessibilityRole="button"
-                  disabled={!canEdit || historical}
+                  disabled={!canDeleteItem || historical}
                   onPress={(event) => {
                     event.stopPropagation?.();
                     const nextItems = orderItems.filter((current) => current.id !== item.id);
@@ -306,12 +311,12 @@ function OrderDetailCard({ order, groupBuyActivities, payments, actions, navigat
                   }}
                   style={({ pressed }) => [
                     styles.deleteButton,
-                    (!canEdit || historical) && styles.deleteButtonDisabled,
+                    (!canDeleteItem || historical) && styles.deleteButtonDisabled,
                     pressed && styles.pressed
                   ]}
                 >
-                  <Text style={[styles.deleteText, (!canEdit || historical) && styles.deleteTextDisabled]}>
-                    {historical ? "歷史" : !canEdit ? "鎖定" : "刪除"}
+                  <Text style={[styles.deleteText, (!canDeleteItem || historical) && styles.deleteTextDisabled]}>
+                    {historical ? "歷史" : !canDeleteItem ? "鎖定" : "刪除"}
                   </Text>
                 </Pressable>
               </View>
@@ -325,7 +330,12 @@ function OrderDetailCard({ order, groupBuyActivities, payments, actions, navigat
         ) : orderLocked ? (
           <Text style={styles.withdrawalLockNotice}>活動已到結束時間，系統已自動鎖定訂單。</Text>
         ) : withdrawalLocked ? (
-          <Text style={styles.withdrawalLockNotice}>截止前 30 分鐘訂單已鎖定，只能加入不可退出或修改。</Text>
+          <Text style={styles.withdrawalLockNotice}>
+            截止前 {groupBuyActivity?.withdrawalLockMinutes ?? 30} 分鐘訂單已鎖定，只能增加飲料，不能刪除、減少或退出團購。
+          </Text>
+        ) : null}
+        {order.revisionError ? (
+          <Text style={styles.withdrawalLockNotice}>{order.revisionError}</Text>
         ) : null}
 
         <PrimaryButton
