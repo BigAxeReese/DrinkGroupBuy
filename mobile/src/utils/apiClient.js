@@ -457,9 +457,13 @@ export async function requestLinePayRepayment(input) {
   });
 }
 
-export async function markGroupBuyActivityReadyForPickup(activityId) {
+export async function markGroupBuyActivityReadyForPickup(activityId, orderId) {
+  if (orderId !== undefined && (typeof orderId !== "string" || !orderId.trim())) {
+    throw new Error("invalid_order_id");
+  }
+  const orderPath = orderId === undefined ? "" : `/orders/${encodeURIComponent(orderId)}`;
   return postPickupRequest(
-    `/api/merchant/group-buy-activities/${encodeURIComponent(activityId)}/ready-for-pickup`
+    `/api/merchant/group-buy-activities/${encodeURIComponent(activityId)}${orderPath}/ready-for-pickup`
   );
 }
 

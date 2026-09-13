@@ -3192,6 +3192,7 @@ function listOrdersWithContext(input = {}) {
 function getOrderLifecycleBucket(order, context, now) {
   if (["cancelled", "completed"].includes(order.status)) return "history";
   if (["picked_up", "cancelled", "expired"].includes(order.pickupStatus)) return "history";
+  if (["authorization_voided", "refunded"].includes(order.paymentStatus)) return "history";
   if (order.paymentStatus === "failed") {
     const cutoff = Date.parse(context.activity.pickupStartAt) - 15 * 60 * 1000;
     if (!Number.isNaN(cutoff) && Date.parse(now) >= cutoff) return "history";
@@ -3237,7 +3238,9 @@ function getCustomerOrderAvailableActions(order, context, locked) {
 
 function getMerchantOrderAvailableActions(order, context) {
   const actions = [];
-  if (context.activity.status === "ordering" && order.paymentStatus === "captured") actions.push("markReadyForPickup");
+  if (["ordering", "ready_for_pickup"].includes(context.activity.status)
+    && order.paymentStatus === "captured"
+    && order.pickupStatus === "not_ready") actions.push("markReadyForPickup");
   if (order.pickupStatus === "ready" && context.pickupCredential.status === "active") actions.push("redeemPickup");
   return actions;
 }
@@ -5442,9 +5445,10 @@ function getOrderById(orderId) {
   const database = openDatabase();
   try {
     const order = database.prepare(`
-      SELECT *
+      SELECT orders.*, customer.display_name AS customer_display_name
       FROM orders
-      WHERE id = ?
+      LEFT JOIN users customer ON customer.id = orders.customer_user_id
+      WHERE orders.id = ?
     `).get(orderId);
     if (!order) return null;
 
@@ -6430,6 +6434,7 @@ function mapOrder(row, items = []) {
     id: row.id,
     activityId: row.activity_id,
     customerUserId: row.customer_user_id,
+    customerDisplayName: row.customer_display_name,
     status: row.status,
     fallbackPurchasePreference: row.fallback_purchase_preference,
     totalCups: row.total_cups,

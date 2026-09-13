@@ -82,13 +82,34 @@ export function CartScreen({ navigation, route, appState, actions, memberAction,
               </View>
               <Text style={styles.itemAmount}>{formatCurrency(item.subtotal)}</Text>
             </View>
-            <Pressable
-              accessibilityRole="button"
-              onPress={() => actions.removeCartItem(item.id)}
-              style={({ pressed }) => [styles.removeButton, pressed && styles.pressed]}
-            >
-              <Text style={styles.removeText}>刪除</Text>
-            </Pressable>
+            <View style={styles.itemActions}>
+              <View style={styles.stepper}>
+                <Pressable
+                  accessibilityRole="button"
+                  accessibilityLabel="減少一杯"
+                  onPress={() => actions.updateCartItemQuantity(item.id, item.quantity - 1)}
+                  style={({ pressed }) => [styles.stepperButton, pressed && styles.pressed]}
+                >
+                  <Text style={styles.stepperButtonText}>－</Text>
+                </Pressable>
+                <Text style={styles.stepperValue}>{item.quantity}</Text>
+                <Pressable
+                  accessibilityRole="button"
+                  accessibilityLabel="增加一杯"
+                  onPress={() => actions.updateCartItemQuantity(item.id, item.quantity + 1)}
+                  style={({ pressed }) => [styles.stepperButton, pressed && styles.pressed]}
+                >
+                  <Text style={styles.stepperButtonText}>＋</Text>
+                </Pressable>
+              </View>
+              <Pressable
+                accessibilityRole="button"
+                onPress={() => actions.removeCartItem(item.id)}
+                style={({ pressed }) => [styles.removeButton, pressed && styles.pressed]}
+              >
+                <Text style={styles.removeText}>刪除</Text>
+              </Pressable>
+            </View>
           </View>
         )) : (
           <Text style={styles.emptyText}>購物車目前沒有飲料。</Text>
@@ -243,7 +264,43 @@ const styles = StyleSheet.create({
     fontSize: 12,
     lineHeight: 18
   },
+  itemActions: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 10
+  },
+  stepper: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 2,
+    borderRadius: 10,
+    borderWidth: 1,
+    borderColor: "#cbd5e1",
+    backgroundColor: "#ffffff",
+    padding: 3
+  },
+  stepperButton: {
+    width: 34,
+    height: 32,
+    alignItems: "center",
+    justifyContent: "center",
+    borderRadius: 8,
+    backgroundColor: "#eef2f7"
+  },
+  stepperButtonText: {
+    color: "#0f172a",
+    fontSize: 16,
+    fontWeight: "900"
+  },
+  stepperValue: {
+    minWidth: 30,
+    textAlign: "center",
+    color: "#0f172a",
+    fontSize: 15,
+    fontWeight: "900"
+  },
   removeButton: {
+    flex: 1,
     minHeight: 38,
     borderRadius: 10,
     alignItems: "center",

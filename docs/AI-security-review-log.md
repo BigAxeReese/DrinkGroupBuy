@@ -1021,3 +1021,52 @@
 **驗證限制**：這次驗證的是 repository 層直接呼叫（`createOrderRevision`／`updatePostgresPendingOrder`），不是走完整 HTTP／LINE Pay 流程，跟 `order-revision-postgres-smoke.js` 既有的驗證深度一致；沒有另外對 Azure 正式環境重跑一次。至此，前兩筆記錄裡留著的「鎖定期情境」端對端驗證缺口已經補齊。
 
 **驗證限制**：`npm test` 119/119 全過（無回歸）；`node --check` 語法檢查通過；Mobile 端透過 Metro 重新打包確認無編譯錯誤、瀏覽器 console 無錯誤。**這次沒有針對新規則寫自動化測試**——`orderRevisionRepository.js` 這個檔案本身目前完全沒有既有的單元測試（只有一支需要連真實 PostgreSQL 的 `scripts/order-revision-postgres-smoke.js`，且該腳本目前也不涵蓋鎖定期情境），要驗證這次改動需要真的跑一次「已授權訂單、卡在鎖定期內分別嘗試加購／減購」的情境，這需要對使用者的開發資料庫做寫入操作，還沒有取得使用者同意執行，屬於已知的驗證缺口，留待使用者確認後補做。
+
+
+## 2026-09-13 — 單筆訂單標記可取餐
+
+**範圍**：`backend/server.js` 的標記可取餐路由、`backend/pickup/credentialService.js`、`backend/database/repositories/pickupCredentialRepository.js` 與 Mobile 呼叫路徑。
+**觸發原因**：新增訂單範圍輸入與授權相關流程的 diff 複查。
+
+### 發現
+
+本次 diff 未發現注入、越權、金額竄改或機密外洩問題。
+
+### 沒發現問題的部分
+
+- `POST /api/merchant/group-buy-activities/:id/ready-for-pickup` 可選 JSON `orderId`；省略時沿用整批操作，提供時必須是非空字串，明確傳入 null 不會退回整批。
+- 路由維持登入與 merchant 角色檢查；PostgreSQL 查詢維持 active 門市關聯限制，訂單以活動 ID 與訂單 ID 共同篩選。
+- 訂單 ID 使用參數化查詢；只允許已 capture、未取消且尚未取餐的訂單，沒有接受金額或客戶端付款狀態。
+- 沿用活動 lease、transaction、FOR UPDATE、取餐碼重用與狀態歷程；audit metadata 記錄單筆 orderId。
+- 未更改金流 provider 或機密設定。6 項隔離測試通過；未執行真實資料庫、HTTP 或 Android E2E，因此不作跨程序併發驗收聲明。
+
+
+## 2026-09-13 — 單筆取餐舊後端相容性修正
+
+**範圍**：取餐 HTTP 路由、PostgreSQL runtime gate、Mobile API client。
+**觸發原因**：使用者實測單筆按鈕造成整批標記；執行中的舊後端忽略新增的 body orderId，audit 顯示一次更新 3 筆且沒有 orderId metadata。
+
+### 發現
+
+單筆共用整批 URL 對舊後端不安全，已改為 `/api/merchant/group-buy-activities/:activityId/orders/:orderId/ready-for-pickup`，舊後端不匹配此路由；整批保留原 URL。
+
+### 沒發現問題的部分
+
+- 新路由沿用身份、商家門市授權與 PostgreSQL gate，訂單路徑參數沿用參數化查詢；未更動付款金額或 provider。
+- 12 項相關測試通過，實際 PostgreSQL 指定訂單只回傳該筆憑證（交易回滾）；本機後端已重啟，health 正常，新路由未登入回覆 Authentication required。
+- 尚未重新完成 Android 全流程操作；既有已標記訂單沒有重設。
+
+
+## 2026-09-13 — 單筆取餐 review 問題修正
+
+**範圍**：PostgreSQL／SQLite 商家可用操作判斷、Mobile 模擬請款 pickupStatus 與回歸測試。
+**觸發原因**：處理 code review 的兩項狀態一致性問題。
+
+### 發現
+
+- 已修正活動開始供餐後，其餘待製作訂單缺少 markReadyForPickup 的問題；操作清單限已請款且 not_ready 訂單。
+- 模擬請款維持 not_ready，並將既有 preparing 相容值轉回 not_ready；ready／picked_up 不會被重設。
+
+### 沒發現問題的部分
+
+未變更實際金流 provider、金額計算、登入或門市權限；新增的是操作提示規則，寫入路由仍執行既有授權與交易控制。17 項相關測試通過；PostgreSQL 三筆訂單回歸測試涵蓋單筆、重複、部分取餐、整批與最終完成，使用備份及交易回滾確認原資料不變，沒有呼叫金流。完整 HTTP／Android 流程尚待驗證。

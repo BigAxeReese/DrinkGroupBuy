@@ -900,7 +900,7 @@ const server = http.createServer(async (request, response) => {
     }
 
     const merchantReadyForPickupMatch = url.pathname.match(
-      /^\/api\/merchant\/group-buy-activities\/([^/]+)\/ready-for-pickup$/
+      /^\/api\/merchant\/group-buy-activities\/([^/]+)(?:\/orders\/([^/]+))?\/ready-for-pickup$/
     );
     if (request.method === "POST" && merchantReadyForPickupMatch) {
       const authUser = await getAuthenticatedUser(request);
@@ -913,9 +913,18 @@ const server = http.createServer(async (request, response) => {
         return;
       }
 
+      const body = await readJsonBody(request);
+      if (!body || Array.isArray(body) || typeof body !== "object"
+        || (Object.hasOwn(body, "orderId")
+          && (typeof body.orderId !== "string" || !body.orderId.trim()))) {
+        sendJson(response, 400, { error: "invalid_order_id" });
+        return;
+      }
+
       const result = await markGroupBuyActivityReadyForPickup(
         merchantReadyForPickupMatch[1],
         {
+          orderId: merchantReadyForPickupMatch[2] ?? body.orderId,
           actorUserId: authUser.id,
           now: businessClock.nowIso(),
           pickupCredentialRepository: pickupPostgresReady ? pickupCredentialRepository : undefined
@@ -3537,7 +3546,7 @@ function isSqliteOrderDependentRoute(method, pathname) {
     || pathname.startsWith("/api/payments/")
     || pathname.startsWith("/api/pickup-credentials/")
     || pathname.startsWith("/api/merchant/pickup-credentials/")
-    || /^\/api\/merchant\/group-buy-activities\/[^/]+\/ready-for-pickup$/.test(pathname)
+    || /^\/api\/merchant\/group-buy-activities\/[^/]+(?:\/orders\/[^/]+)?\/ready-for-pickup$/.test(pathname)
     || /^\/api\/admin\/group-buy-activities\/[^/]+\/settle$/.test(pathname)
     || /^\/api\/merchant\/orders\/[^/]+\/refund-requests$/.test(pathname)
     || /^\/api\/merchant\/stores\/[^/]+\/refund-requests$/.test(pathname)
@@ -3564,7 +3573,7 @@ function isSettlementRouteReadyForPostgres(method, pathname) {
       pathname.startsWith("/api/pickup-credentials/")
       || pathname.startsWith("/api/merchant/pickup-credentials/")
       || (method === "GET" && /^\/api\/orders\/[^/]+\/pickup-credential$/.test(pathname))
-      || (method === "POST" && /^\/api\/merchant\/group-buy-activities\/[^/]+\/ready-for-pickup$/.test(pathname))
+      || (method === "POST" && /^\/api\/merchant\/group-buy-activities\/[^/]+(?:\/orders\/[^/]+)?\/ready-for-pickup$/.test(pathname))
     )
   ) {
     return true;

@@ -6,8 +6,10 @@ import { DiscountSummaryCard } from "../components/DiscountSummaryCard";
 import { PrimaryButton } from "../components/PrimaryButton";
 import { ProgressSummary } from "../components/ProgressSummary";
 import { StatusBadge } from "../components/StatusBadge";
+import { formatOrderItemCustomizations } from "../utils/orderItems";
 import { useOrderListSync } from "../hooks/useOrderListSync";
 import { formatCurrency, getStoreById, isWithdrawalLocked } from "../utils/calculations";
+import { formatDeadlineLabel } from "../utils/deadlineTime";
 
 export function MerchantDashboardScreen({ navigation, appState, actions, selectedMerchantStoreId }) {
   const [pickupCode, setPickupCode] = useState("");
@@ -15,6 +17,8 @@ export function MerchantDashboardScreen({ navigation, appState, actions, selecte
   const [pickupNotice, setPickupNotice] = useState(null);
   const [pickupBusy, setPickupBusy] = useState(false);
   const [readyAction, setReadyAction] = useState(null);
+  const [expandedOrderIds, setExpandedOrderIds] = useState({});
+  const [selectedHistoryOrderId, setSelectedHistoryOrderId] = useState(null);
   const [cancelFormActivityId, setCancelFormActivityId] = useState(null);
   const [cancelReason, setCancelReason] = useState("");
   const [cancelAction, setCancelAction] = useState(null);
@@ -92,12 +96,13 @@ export function MerchantDashboardScreen({ navigation, appState, actions, selecte
     }
   }
 
-  async function handleMarkReady(groupBuyActivityId) {
-    setReadyAction({ activityId: groupBuyActivityId, busy: true, text: null, type: null });
+  async function handleMarkReady(groupBuyActivityId, orderId) {
+    setReadyAction({ activityId: groupBuyActivityId, orderId: orderId ?? null, busy: true, text: null, type: null });
     try {
-      const result = await actions.markOrdersReadyForPickupForGroupBuyActivity(groupBuyActivityId);
+      const result = await actions.markOrdersReadyForPickupForGroupBuyActivity(groupBuyActivityId, orderId);
       setReadyAction({
         activityId: groupBuyActivityId,
+        orderId: orderId ?? null,
         busy: false,
         type: "success",
         text: `已產生 ${result.createdCredentialCount} 筆六位取餐碼。`
@@ -105,6 +110,7 @@ export function MerchantDashboardScreen({ navigation, appState, actions, selecte
     } catch (error) {
       setReadyAction({
         activityId: groupBuyActivityId,
+        orderId: orderId ?? null,
         busy: false,
         type: "error",
         text: getPickupErrorMessage(error)
@@ -171,6 +177,19 @@ export function MerchantDashboardScreen({ navigation, appState, actions, selecte
         { text: "取消", style: "cancel" },
         { text: "登出", style: "destructive", onPress: () => navigation.logout() }
       ]
+    );
+  }
+
+  const selectedHistoryOrder = selectedHistoryOrderId
+    ? historyOrders.find((order) => order.id === selectedHistoryOrderId) ?? null
+    : null;
+
+  if (selectedHistoryOrder) {
+    const orderActivity = appState.groupBuyActivities.find((item) => item.id === selectedHistoryOrder.groupBuyActivityId);
+    return (
+      <MobileScreen title="訂單明細" onBack={() => setSelectedHistoryOrderId(null)}>
+        <MerchantHistoryOrderDetail order={selectedHistoryOrder} groupBuyActivity={orderActivity} />
+      </MobileScreen>
     );
   }
 
@@ -313,7 +332,7 @@ export function MerchantDashboardScreen({ navigation, appState, actions, selecte
           const readyPickups = relatedOrders.filter((order) => order.pickupStatus === "ready").length;
           const manufacturableOrderList = relatedOrders.filter((order) => (
             order.paymentStatus === "captured"
-            && !["ready", "picked_up", "cancelled"].includes(order.pickupStatus)
+            && order.pickupStatus === "not_ready"
           ));
           const manufacturableOrders = manufacturableOrderList.length;
 
@@ -349,23 +368,63 @@ export function MerchantDashboardScreen({ navigation, appState, actions, selecte
                       accessibilityRole="button"
                       onPress={() => navigation.go("merchantProductionList", { groupBuyActivityId: groupBuyActivity.id })}
                     >
-                      <Text style={styles.productionListLink}>彙總製作清單 ＞</Text>
+                      <Text style={styles.productionListLink}>總製作清單 ＞</Text>
                     </Pressable>
                   </View>
-                  {manufacturableOrderList.map((order) => (
-                    <View key={order.id} style={styles.productionOrderRow}>
-                      <Text style={styles.productionCustomer}>{order.customerSurname ?? order.customerId}</Text>
-                      <Text style={styles.productionItems}>{formatOrderItemsSummary(order.items)}</Text>
-                    </View>
-                  ))}
+                  {manufacturableOrderList.map((order) => {
+                    const expanded = Boolean(expandedOrderIds[order.id]);
+                    const items = order.items || [];
+                    const totalCups = items.reduce((sum, item) => sum + item.quantity, 0);
+                    return (
+                      <View key={order.id} style={styles.productionOrderRow}>
+                        <Pressable
+                          accessibilityRole="button"
+                          accessibilityLabel={`${order.customerDisplayName || order.customerId || "顧客"}的飲品明細`}
+                          accessibilityState={{ expanded }}
+                          style={styles.productionOrderHeader}
+                          onPress={() => setExpandedOrderIds((current) => ({
+                            ...current, [order.id]: !current[order.id]
+                          }))}
+                        >
+                          <View style={styles.flex}>
+                            <Text style={styles.productionCustomer}>{order.customerDisplayName || order.customerId || "顧客"}</Text>
+                            <Text style={styles.productionItems}>{items.length} 項飲品 · 共 {totalCups} 杯</Text>
+                          </View>
+                          <Text style={styles.productionListLink}>{expanded ? "收合 ∧" : "展開 ∨"}</Text>
+                        </Pressable>
+                        {expanded ? (
+                          <View style={styles.productionOrderDetails}>
+                            {items.map((item, index) => (
+                              <View key={item.id ?? `${order.id}-${index}`} style={styles.productionDrinkRow}>
+                                <View style={styles.flex}>
+                                  <Text style={styles.productionCustomer}>{item.itemName}</Text>
+                                  <Text style={styles.productionItems}>
+                                    {formatOrderItemCustomizations(item, { separator: "、" }) || "無客製化"}
+                                  </Text>
+                                </View>
+                                <Text style={styles.productionCustomer}>×{item.quantity}</Text>
+                              </View>
+                            ))}
+                            <PrimaryButton
+                              disabled={Boolean(readyAction?.busy && readyAction.activityId === groupBuyActivity.id)}
+                              label={readyAction?.busy && readyAction.activityId === groupBuyActivity.id && readyAction.orderId === order.id
+                                ? "處理中"
+                                : "標記可取餐"}
+                              onPress={() => handleMarkReady(groupBuyActivity.id, order.id)}
+                            />
+                          </View>
+                        ) : null}
+                      </View>
+                    );
+                  })}
                 </View>
               ) : null}
               {manufacturableOrders > 0 ? (
                 <PrimaryButton
-                  disabled={readyAction?.activityId === groupBuyActivity.id && readyAction.busy}
-                  label={readyAction?.activityId === groupBuyActivity.id && readyAction.busy
+                  disabled={Boolean(readyAction?.busy && readyAction.activityId === groupBuyActivity.id)}
+                  label={readyAction?.busy && readyAction.activityId === groupBuyActivity.id && readyAction.orderId == null
                     ? "處理中"
-                    : `標記可取餐（${manufacturableOrders} 筆）`}
+                    : `全部標記可取餐（${manufacturableOrders} 筆）`}
                   onPress={(event) => {
                     event.stopPropagation?.();
                     handleMarkReady(groupBuyActivity.id);
@@ -439,11 +498,16 @@ export function MerchantDashboardScreen({ navigation, appState, actions, selecte
             const total = order.captureAmount ?? order.finalAmount ?? order.subtotal ?? order.originalAmount ?? 0;
 
             return (
-              <View key={order.id} style={styles.historyCard}>
+              <Pressable
+                key={order.id}
+                accessibilityRole="button"
+                onPress={() => setSelectedHistoryOrderId(order.id)}
+                style={({ pressed }) => [styles.historyCard, pressed && styles.pressed]}
+              >
                 <View style={styles.header}>
                   <View style={styles.flex}>
                     <Text style={styles.title}>{groupBuyActivity?.title ?? "團購活動"}</Text>
-                    <Text style={styles.meta}>顧客：{order.customerSurname ?? order.customerId} · {order.quantity ?? 0} 杯</Text>
+                    <Text style={styles.meta}>顧客：{order.customerDisplayName || order.customerId || "顧客"} · {order.quantity ?? 0} 杯</Text>
                   </View>
                   <Text style={styles.historyAmount}>{formatCurrency(total)}</Text>
                 </View>
@@ -452,7 +516,8 @@ export function MerchantDashboardScreen({ navigation, appState, actions, selecte
                   <StatusBadge owner="pickup" value={order.pickupStatus} />
                 </View>
                 <Text style={styles.summary}>訂單狀態：{getOrderStatusLabel(order.status)}</Text>
-              </View>
+                <Text style={styles.openHint}>點擊查看明細 ＞</Text>
+              </Pressable>
             );
           })}
         </Section>
@@ -494,6 +559,60 @@ function formatOrderItemsSummary(items = []) {
     const details = [item.sweetness, item.ice, ...(item.toppings || [])].filter(Boolean).join("、");
     return `${item.itemName || "飲料"} x${item.quantity}${details ? `（${details}）` : ""}`;
   }).join("、");
+}
+
+function MerchantHistoryOrderDetail({ order, groupBuyActivity }) {
+  const items = order.items || [];
+  const finalAmount = order.captureAmount ?? order.finalAmount ?? order.originalAmount ?? 0;
+  const discount = Math.max(0, (order.originalAmount ?? 0) - finalAmount);
+
+  return (
+    <>
+      <Section title="訂單資訊">
+        <DetailRow label="團購活動" value={groupBuyActivity?.title ?? "團購活動"} />
+        <DetailRow label="顧客" value={order.customerDisplayName || order.customerId || "顧客"} />
+        <DetailRow label="訂單編號" value={order.id} valueStyle={styles.monoValue} />
+        <DetailRow label="送出時間" value={order.submittedAt ? formatDeadlineLabel(order.submittedAt) : "-"} />
+        <View style={styles.summaryRow}>
+          <StatusBadge owner="merchantPayment" value={order.paymentStatus} />
+          <StatusBadge owner="pickup" value={order.pickupStatus} />
+        </View>
+      </Section>
+
+      <Section title="飲品明細">
+        {items.length === 0 ? (
+          <Text style={styles.emptyText}>沒有品項資料。</Text>
+        ) : (
+          items.map((item, index) => (
+            <View key={item.id ?? index} style={styles.detailItemRow}>
+              <View style={styles.flex}>
+                <Text style={styles.productionCustomer}>{item.itemName} ×{item.quantity}</Text>
+                <Text style={styles.productionItems}>
+                  {formatOrderItemCustomizations(item, { separator: "、" }) || "無客製化"}
+                </Text>
+              </View>
+              <Text style={styles.summary}>{formatCurrency(item.subtotal)}</Text>
+            </View>
+          ))
+        )}
+      </Section>
+
+      <Section title="對帳金額">
+        <DetailRow label="原價" value={formatCurrency(order.originalAmount ?? 0)} />
+        {discount > 0 ? <DetailRow label="優惠折抵" value={`-${formatCurrency(discount)}`} /> : null}
+        <DetailRow label="實收金額" value={formatCurrency(finalAmount)} valueStyle={styles.historyAmount} />
+      </Section>
+    </>
+  );
+}
+
+function DetailRow({ label, value, valueStyle }) {
+  return (
+    <View style={styles.detailRow}>
+      <Text style={styles.detailLabel}>{label}</Text>
+      <Text style={[styles.detailValue, valueStyle]} numberOfLines={1}>{value}</Text>
+    </View>
+  );
 }
 
 function getOrderStatusLabel(status) {
@@ -753,7 +872,31 @@ const styles = StyleSheet.create({
     fontWeight: "900"
   },
   productionOrderRow: {
-    gap: 2
+    borderWidth: 1,
+    borderColor: "#e2e8f0",
+    borderRadius: 12,
+    backgroundColor: "#ffffff",
+    overflow: "hidden"
+  },
+  productionOrderHeader: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 12,
+    padding: 12,
+    minHeight: 56
+  },
+  productionOrderDetails: {
+    paddingHorizontal: 12,
+    paddingBottom: 12,
+    gap: 10
+  },
+  productionDrinkRow: {
+    flexDirection: "row",
+    alignItems: "flex-start",
+    gap: 10,
+    paddingVertical: 10,
+    borderTopWidth: 1,
+    borderTopColor: "#eef2f7"
   },
   productionCustomer: {
     color: "#334155",
@@ -796,6 +939,41 @@ const styles = StyleSheet.create({
     color: "#2563eb",
     fontSize: 18,
     fontWeight: "900"
+  },
+  openHint: {
+    color: "#94a3b8",
+    fontSize: 11,
+    fontWeight: "700",
+    textAlign: "right"
+  },
+  detailRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "space-between",
+    gap: 10
+  },
+  detailLabel: {
+    color: "#64748b",
+    fontSize: 13,
+    fontWeight: "700"
+  },
+  detailValue: {
+    flexShrink: 1,
+    color: "#0f172a",
+    fontSize: 13,
+    fontWeight: "900",
+    textAlign: "right"
+  },
+  monoValue: {
+    fontSize: 11
+  },
+  detailItemRow: {
+    flexDirection: "row",
+    alignItems: "flex-start",
+    gap: 10,
+    paddingVertical: 8,
+    borderBottomWidth: 1,
+    borderBottomColor: "#eef2f7"
   },
   cancelForm: {
     gap: 8

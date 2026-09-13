@@ -124,12 +124,13 @@ async function markReadyPostgres(database, input = {}) {
       SELECT id, pickup_status
       FROM orders
       WHERE activity_id = $1
+        AND ($2::text IS NULL OR id = $2)
         AND payment_status = 'captured'
         AND status != 'cancelled'
         AND pickup_status IN ('not_ready', 'ready')
       ORDER BY submitted_at ASC, id ASC
       FOR UPDATE
-    `, [activityId]);
+    `, [activityId, input.orderId ?? null]);
     const orders = ordersResult.rows;
     if (orders.length === 0) {
       return { error: "no_captured_orders" };
@@ -205,7 +206,7 @@ async function markReadyPostgres(database, input = {}) {
 
     if (activity.status !== "ready_for_pickup" || createdCredentialCount > 0 || readyOrderCount > 0) {
       await insertAudit(transaction, "merchant_mark_activity_ready_for_pickup", "activity", activityId,
-        { createdCredentialCount, readyOrderCount, expiresAt }, actorUserId, now);
+        { createdCredentialCount, readyOrderCount, expiresAt, orderId: input.orderId ?? null }, actorUserId, now);
     }
 
     return {

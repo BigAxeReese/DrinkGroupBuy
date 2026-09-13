@@ -10,7 +10,8 @@ export function MerchantProductionListScreen({ navigation, route, appState, sele
   const manufacturableOrders = appState.orders.filter((order) => (
     order.groupBuyActivityId === groupBuyActivityId
     && order.paymentStatus === "captured"
-    && !["ready", "picked_up", "cancelled"].includes(order.pickupStatus)
+    && order.status !== "cancelled"
+    && order.pickupStatus === "not_ready"
   ));
 
   const summaryRows = buildProductionSummary(manufacturableOrders);
@@ -18,7 +19,7 @@ export function MerchantProductionListScreen({ navigation, route, appState, sele
 
   return (
     <MobileScreen
-      title="製作清單"
+      title="總製作清單"
       subtitle={groupBuyActivity ? `${groupBuyActivity.title} · ${store?.name ?? ""}` : "找不到這筆團購活動"}
       onBack={() => navigation.back()}
     >
@@ -26,7 +27,7 @@ export function MerchantProductionListScreen({ navigation, route, appState, sele
         <Text style={styles.emptyText}>找不到這筆團購活動。</Text>
       ) : (
         <>
-          <Section title={`彙總數量（共 ${totalCups} 杯）`}>
+          <Section title={`待製作合計（${manufacturableOrders.length} 筆訂單 · ${totalCups} 杯）`}>
             {summaryRows.length === 0 ? (
               <Text style={styles.emptyText}>目前沒有待製作的訂單。</Text>
             ) : (
@@ -48,7 +49,7 @@ export function MerchantProductionListScreen({ navigation, route, appState, sele
             ) : (
               manufacturableOrders.map((order) => (
                 <View key={order.id} style={styles.orderRow}>
-                  <Text style={styles.orderCustomer}>{order.customerSurname ?? order.customerId}</Text>
+                  <Text style={styles.orderCustomer}>{order.customerDisplayName || order.customerId || "顧客"}</Text>
                   {(order.items || []).map((item, index) => (
                     <Text key={`${order.id}-${index}`} style={styles.orderItem}>
                       {item.itemName} x{item.quantity}（{formatVariantDetail(item)}）

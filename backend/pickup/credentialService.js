@@ -11,7 +11,7 @@ async function markGroupBuyActivityReadyForPickup(activityId, input = {}) {
     try {
       return await repository.withOperationLock(
         { activityId },
-        () => repository.markReady({ activityId, actorUserId: input.actorUserId || null, now: input.now })
+        () => repository.markReady({ activityId, orderId: input.orderId, actorUserId: input.actorUserId || null, now: input.now })
       );
     } catch (error) {
       if (error?.code === "operation_locked") {
@@ -83,11 +83,12 @@ function markGroupBuyActivityReadyForPickupUnlocked(activityId, input = {}) {
       SELECT id, pickup_status
       FROM orders
       WHERE activity_id = ?
+        AND (? IS NULL OR id = ?)
         AND payment_status = 'captured'
         AND status != 'cancelled'
         AND pickup_status IN ('not_ready', 'ready')
       ORDER BY submitted_at ASC, id ASC
-    `).all(activityId);
+    `).all(activityId, input.orderId ?? null, input.orderId ?? null);
     if (orders.length === 0) {
       database.exec("ROLLBACK;");
       transactionStarted = false;
@@ -201,7 +202,7 @@ function markGroupBuyActivityReadyForPickupUnlocked(activityId, input = {}) {
         "audit-log-" + randomUUID(),
         actorUserId,
         activityId,
-        JSON.stringify({ createdCredentialCount, readyOrderCount, expiresAt }),
+        JSON.stringify({ createdCredentialCount, readyOrderCount, expiresAt, orderId: input.orderId ?? null }),
         now
       );
     }

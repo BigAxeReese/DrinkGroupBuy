@@ -101,6 +101,29 @@ function toLocalOrderItem(item) {
   };
 }
 
+function isSameCartItemVariant(a, b) {
+  return a.drinkId === b.drinkId
+    && a.groupBuyActivityId === b.groupBuyActivityId
+    && a.customerId === b.customerId
+    && a.targetOrderId === b.targetOrderId
+    && a.size === b.size
+    && a.sweetness === b.sweetness
+    && a.ice === b.ice
+    // A unitPrice mismatch (e.g. the menu price changed between two adds in the same
+    // session) means these aren't really "identical" any more -- stacking them onto one
+    // line would silently apply whichever price happened to be on the existing line to
+    // the whole combined quantity, over- or under-charging for the newer half.
+    && a.unitPrice === b.unitPrice
+    && sameToppingSet(a.toppings, b.toppings);
+}
+
+function sameToppingSet(a = [], b = []) {
+  if (a.length !== b.length) return false;
+  const sortedA = [...a].sort();
+  const sortedB = [...b].sort();
+  return sortedA.every((label, index) => label === sortedB[index]);
+}
+
 function getStoredArray(storedState, key, legacyKey, fallback) {
   if (Array.isArray(storedState[key])) return storedState[key];
   if (legacyKey && Array.isArray(storedState[legacyKey])) return storedState[legacyKey];
@@ -219,6 +242,8 @@ function buildLocalOrderFromBackend({
     ...existingOrder,
     id: backendOrder.id,
     customerId: existingOrder?.customerId ?? selectedCustomerId,
+    customerDisplayName: backendOrder.customerDisplayName ?? existingOrder?.customerDisplayName,
+    submittedAt: backendOrder.submittedAt ?? existingOrder?.submittedAt,
     groupBuyActivityId: backendOrder.activityId,
     status: backendOrder.status,
     itemName: localItems.length > 1 ? `${firstItem.itemName || "飲料"} 等 ${localItems.length} 項` : firstItem.itemName || existingOrder?.itemName || "飲料訂單",
@@ -633,14 +658,31 @@ export function AppNavigator() {
       }
     },
     addToCart(cartItem) {
-      setCartItems((items) => [
-        ...items,
-        {
-          ...cartItem,
-          customerId: selectedCustomerId,
-          id: `cart-item-${Date.now()}-${items.length + 1}`
+      setCartItems((items) => {
+        const candidate = { ...cartItem, customerId: selectedCustomerId };
+        // Only stack quantity onto an existing line when every customization matches exactly --
+        // a "半糖" and a "微糖" order of the same drink must stay on separate lines.
+        const existingIndex = items.findIndex((item) => isSameCartItemVariant(item, candidate));
+        if (existingIndex !== -1) {
+          const existing = items[existingIndex];
+          const quantity = existing.quantity + candidate.quantity;
+          const next = [...items];
+          next[existingIndex] = { ...existing, quantity, subtotal: existing.unitPrice * quantity };
+          return next;
         }
-      ]);
+        return [
+          ...items,
+          { ...candidate, id: `cart-item-${Date.now()}-${items.length + 1}` }
+        ];
+      });
+    },
+    updateCartItemQuantity(cartItemId, quantity) {
+      setCartItems((items) => {
+        if (quantity <= 0) return items.filter((item) => item.id !== cartItemId);
+        return items.map((item) => (
+          item.id === cartItemId ? { ...item, quantity, subtotal: item.unitPrice * quantity } : item
+        ));
+      });
     },
     removeCartItem(cartItemId) {
       setCartItems((items) => items.filter((item) => item.id !== cartItemId));
@@ -1054,7 +1096,7 @@ export function AppNavigator() {
               captureAmount,
               releasedAmount: Math.max(0, order.authorizedAmount - captureAmount),
               merchantAcceptanceStatus: "accepted",
-              pickupStatus: order.pickupStatus === "not_ready" ? "preparing" : order.pickupStatus
+              pickupStatus: order.pickupStatus === "preparing" ? "not_ready" : order.pickupStatus
             }
           : order
       )));
@@ -1171,8 +1213,8 @@ export function AppNavigator() {
         : item));
       return order;
     },
-    async markOrdersReadyForPickupForGroupBuyActivity(groupBuyActivityId) {
-      const result = await markGroupBuyActivityReadyForPickup(groupBuyActivityId);
+    async markOrdersReadyForPickupForGroupBuyActivity(groupBuyActivityId, orderId) {
+      const result = await markGroupBuyActivityReadyForPickup(groupBuyActivityId, orderId);
       const credentialByOrderId = new Map(
         (result.credentials || []).map((credential) => [credential.orderId, credential])
       );
