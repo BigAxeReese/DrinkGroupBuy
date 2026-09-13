@@ -20,15 +20,15 @@ API JSON 使用 `camelCase`。已實作 routes 只對目前開發 prototype 具�
 
 | 項目              | 內容                                                                                                    |
 | ----------------- | ------------------------------------------------------------------------------------------------------- |
-| 決策日期          | 2026-07-05（2026-09-12 更新：正式方向加入信箱密碼登入）                                                 |
+| 決策日期          | 2026-07-05（2026-09-12 更新：正式方向加入信箱密碼登入；2026-09-13 更新：自助註冊暫時只開放 Google）      |
 | 正式方向          | Firebase Auth，支援 Google Login 與信箱密碼登入（`useFirebaseEmailLogin`，`mobile/src/utils/firebaseAuth.js`）兩種方式，共用同一支後端 route |
 | 目前已實作 route  | `POST /api/auth/firebase-session`                                                                       |
-| 舊版相容 route    | `POST /api/auth/login` 暫時保留為開發相容功能；僅在非 production 且 `AUTH_DEV_MODE=true` 時存在          |
 | Request           | `{ idToken }`，其中 `idToken` 是 Google Login 或信箱密碼登入後取得的 Firebase ID token                  |
 | Response          | `{ token, user: { id, loginName, phoneNumber, email, displayName, surname, roles, merchantStores } }`   |
 | Backend 責任      | 驗證 Firebase ID token，將 Firebase UID/email 對應到 `users`，並從資料庫解析 roles 與 store permissions |
 | 目前 session 行為 | Backend 在 Firebase 驗證後回傳既有 bearer token                                                         |
-| 目前對應行為      | 查詢 `users.firebase_uid`；未對應的帳號會自動建立為顧客角色（`customerRegistrationRepository.resolveOrRegisterCustomer`），信箱密碼登入額外要求 `email_verified` 為真才放行；商家／管理員角色不會透過登入自動取得，見 `docs/AI-architecture.md` |
+| 目前對應行為      | 查詢 `users.firebase_uid`；未對應的帳號且是 Google 登入會自動建立為顧客角色（`customerRegistrationRepository.resolveOrRegisterCustomer`）；商家／管理員角色不會透過登入自動取得，見 `docs/AI-architecture.md` |
+| 自助註冊政策（2026-09-13，2026-09-13 追加收斂進 repository） | 政策本身收斂在 `customerRegistrationRepository.resolveOrRegisterCustomer` 裡（不是個別 route 各自判斷）：首次註冊若呼叫時帶的 `signInProvider === "password"` 且 `ALLOW_EMAIL_PASSWORD_REGISTRATION`（env，預設關閉）未開啟，一律回傳 `email_registration_disabled`，暫不建立帳號；未來任何呼叫這個 repository 函式的地方都會自動套用同一條規則，不用各自重複判斷。已由 `scripts/bind-seed-firebase-account.js` 或 `scripts/grant-admin-role.js` 預先綁定 `firebase_uid` 的既有帳號不受影響，仍可用信箱密碼登入。要重新開放：後端把 `ALLOW_EMAIL_PASSWORD_REGISTRATION=true` 設進 `.env` 即可，不用改程式碼；Mobile 端「第一次使用，建立帳號」入口目前仍刻意隱藏（`RoleSelectScreen.jsx`，底層 `signUpWithEmail` 保留未刪），要重新顯示是另一個獨立的前端決定，需要另外改 App 並重新發版，不會因為後端開關就自動出現 |
 | 可切換資料來源    | `AUTH_PROFILE_READ_RUNTIME=sqlite|postgres`；全部 repository runtime 已永久切換為 `postgres`（見 `AGENTS.md`），`sqlite` 僅保留給隔離的相容性測試 |
 | PostgreSQL 差異   | PostgreSQL v1 以 `merchant_users.store_id` 作授權邊界且不分內部權限等級；`merchantStores[].permissionLevel` 保留但回傳 `null` |
 | 遷移備註          | 2026-09-12 已新增信箱密碼登入（見上）；商家自助申請＋管理員審核（`POST /api/merchant-applications`）已實作，見下方對應段落 |

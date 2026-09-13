@@ -882,3 +882,57 @@
 **驗證限制**：這三個帳號的登入都在本機測試，還沒有部署到 Azure 驗證正式站上的行為；也還沒有測試 Google 登入跟信箱密碼登入交叉出現時（例如同一個信箱先後用兩種方式）的邊界情況，目前只驗證了各自獨立運作正常。
 
 **驗證限制**：受限於 Firebase 專案的 Email/Password 登入方式尚未開啟，這三個帳號目前都還沒有實際走完一次「用信箱密碼成功登入」的端對端驗證；等使用者開啟後應直接可用，屬於已知、待補的驗證步驟。
+
+---
+
+## 2026-09-13 — 移除舊版本機密碼登入路徑＋信箱自助註冊改為暫時只開放 Google
+
+**範圍**：`backend/server.js`（移除 `POST /api/auth/login`；新增「自助註冊暫時只允許 Google」的判斷邏輯，分別在 `POST /api/auth/firebase-session` 與 `POST /admin/login/firebase` 兩處）、`backend/auth.js`（移除 `verifyPassword`）、`backend/db.js`、`backend/database/repositories/authProfileReadRepository.js`（移除 `getByLoginIdentifier` 與 `password_hash`／`passwordHash` 欄位讀取）、`mobile/src/utils/apiClient.js`（移除死代碼 `login()`）、`mobile/src/screens/RoleSelectScreen.jsx`（隱藏「第一次使用，建立帳號」入口）。
+**觸發原因**：使用者要求「先處理掉」上一輪對話中發現的舊版本機密碼登入殘留機制，並要求信箱自助註冊暫時只開放 Google；屬於 auth 程式碼改動，依 `AGENTS.md` 規則觸發。先自己跑一次 `/security-review`（結論：沒有發現問題——新加的 `sign_in_provider === "password"` 判斷依據是 Firebase Admin SDK 驗證過的 token claim，使用者端無法偽造；移除的舊路徑確認全專案沒有任何呼叫端），跑完後**忘記依規則寫這筆記錄**，直到使用者接著跑 `/code-review`（medium）時，conventions 這個角度直接抓到「改了 auth 程式碼但沒有新增 `docs/AI-security-review-log.md` 記錄」，才回頭補上這筆。
+
+### 發現
+
+| 嚴重度 | 位置 | 問題 | 建議修法 | 狀態 |
+|--------|------|------|----------|------|
+| 低（流程遺漏，非漏洞） | 本檔案 | 完成 auth 改動、跑完 `/security-review` 後沒有依規則寫這筆記錄，是 `/code-review` 的 conventions 角度抓到才補寫 | 已補寫本筆 | 已修 |
+| 中（一致性 bug，非資安漏洞） | `backend/server.js`，`POST /api/auth/firebase-session` 與 `POST /admin/login/firebase` 兩處新增的判斷順序 | 原本兩處新判斷的順序不一致：`/api/auth/firebase-session` 是「先判斷是否信箱密碼登入」再判斷 `email_verified`，`/admin/login/firebase` 是反過來（`email_verified` 對每次登入都無條件先檢查）。結果同一種情境（第一次用未驗證信箱的信箱密碼登入）在兩個入口會拿到不同的錯誤代碼（`email_registration_disabled` vs `email_not_verified`），跟兩處註解都寫「同一套政策」不符 | 把 `/api/auth/firebase-session` 的判斷順序對調，改成先檢查 `email_verified` 再檢查 `sign_in_provider`，跟 `/admin/login/firebase` 的優先順序一致 | 已修 |
+| 低（文案錯誤，非資安漏洞） | `backend/server.js`，`/admin` 登入頁 `describeBackendError` 裡 `email_registration_disabled` 的訊息文字 | 訊息寫「請聯絡系統管理員以信箱密碼建立管理員帳號」，等於叫使用者去做剛剛被擋下的那件事，實際正確的補救方式是請既有管理員用 `scripts/grant-admin-role.js` 手動授權，訊息內容跟真正的補救步驟矛盾 | 改成「請聯絡已有權限的管理員用 `scripts/grant-admin-role.js` 綁定」 | 已修 |
+
+### 沒發現問題的部分
+
+| 面向 | 檢查結果 |
+|------|----------|
+| `sign_in_provider` 判斷依據是否可被使用者偽造 | 不行。`firebaseUser` 是 `verifyFirebaseIdToken`（Firebase Admin SDK `verifyIdToken`）驗證過簽章的 token 內容，`firebase.sign_in_provider` 是 Firebase 自己核發 token 時寫入的 claim，使用者端沒有簽發金鑰，無法偽造 |
+| 既有已綁定的信箱密碼帳號（12 個測試帳號）是否受影響 | 不受影響。這些帳號的 `firebase_uid` 已經由 `scripts/bind-seed-firebase-account.js` 預先寫入 `users` 表，登入時 `getByFirebaseUid` 會直接找到既有帳號，不會進到「第一次註冊」那個分支，新判斷邏輯完全不會碰到 |
+| 移除的舊路徑（`/api/auth/login`、`verifyPassword`、`getByLoginIdentifier`、`password_hash` 欄位讀取）是否還有呼叫端 | 全專案（含 `scripts/`、`mobile/`）grep 確認沒有任何殘留呼叫端；唯一使用這些欄位的地方就是被移除的那個路由本身 |
+| 資料庫 `users.password_hash` 欄位本身是否一併移除 | 沒有移除 schema 欄位本身——那是額外的資料庫遷移動作，這次沒有一併做，避免在沒有明確要求下多做一個有風險的資料庫變更 |
+
+### 待人工評估（信心度不夠高，沒有列為正式發現，來自 `/code-review` 的 altitude 角度）——已於同日處理，見下方追加
+
+**「Google-only 自助註冊」這個政策只寫在兩個 route 各自的判斷式裡，沒有收斂進 `customerRegistrationRepository.resolveOrRegisterCustomer` 這個共用的註冊機制本身**
+- 現況：`resolveOrRegisterCustomer` 的輸入目前完全不知道 `sign_in_provider`，這條政策要收斂進去需要改函式簽章，不是免費的重構
+- 風險：以後如果有第三個呼叫端呼叫 `resolveOrRegisterCustomer`（例如新的邀請流程），忘記複製這段判斷就會悄悄繞過這條政策，不會有任何錯誤或紀錄可以抓到
+- 目前沒有處理：屬於「如果之後真的加第三個呼叫端」才會浮現的風險，這次沒有動 `resolveOrRegisterCustomer` 的簽章
+
+---
+
+## 2026-09-13（同日追加）— 收斂註冊政策進 repository＋改成 env 開關（呼應上面「待人工評估」與同日稍早那筆）
+
+**範圍**：`backend/database/repositories/customerRegistrationRepository.js`（新增 `signInProvider` 參數與集中判斷、新增 `ALLOW_EMAIL_PASSWORD_REGISTRATION` env 開關）、`backend/server.js`（兩個呼叫點移除各自的判斷式，改成把 `signInProvider` 傳進 repository，並各自把 repository 回傳的 `email_registration_disabled` 轉成對應的 HTTP 回應；同時修正兩處判斷順序不一致與 admin 頁面文案矛盾）、`backend/database/repositories/customerRegistrationRepository.test.js`（新增 4 筆測試）。
+**觸發原因**：使用者跑完 `/code-review` 後看到上面「待人工評估」與另外兩筆設計建議，回覆「處理」——把 4 筆待處理事項處理掉，其中「信箱登入畫面的建立帳號入口／底層邏輯」使用者明確說要保留不動（只是先把入口拿掉），所以這筆不算採納，其餘 3 筆（政策收斂進 repository、改成 env 開關、順帶清掉同一份 code 裡的重複判斷）都實際處理。
+
+### 這次改了什麼
+
+1. **政策收斂進 `resolveOrRegisterCustomer`**：新增 `signInProvider` 輸入欄位，在「確認是全新帳號」之後、真的寫入資料庫之前，判斷 `signInProvider === "password"` 且 `ALLOW_EMAIL_PASSWORD_REGISTRATION`（env，預設關閉）未開啟時回傳 `{ error: "email_registration_disabled" }`，不寫入任何資料列。兩個呼叫端（`POST /api/auth/firebase-session`、`POST /admin/login/firebase`）不再各自判斷，只負責把 `firebaseUser.firebase?.sign_in_provider` 傳進去、把回傳的錯誤代碼轉成 HTTP 回應——之後任何新呼叫端都會自動套用同一條規則。
+2. **改成 env 開關**：新增 `ALLOW_EMAIL_PASSWORD_REGISTRATION`（布林 env，預設關閉，跟其他 env 開關一樣的 `readBooleanEnv` 判斷方式）。要重新開放信箱密碼自助註冊，後端只需要設這個 env，不用改程式碼、不用重新部署程式；但 Mobile 端「第一次使用，建立帳號」入口目前仍刻意隱藏（使用者明確要求保留底層邏輯、只拿掉入口），要重新顯示是另一個獨立的前端決定，需要另外改 App 並重新發版。
+3. **順帶修掉檢查順序**：兩個呼叫端原本各自判斷順序不一致的問題，隨著改成呼叫共用函式自然消失——不會再有「同一種情境兩個入口回傳不同錯誤碼」的狀況。
+4. **錯誤代碼字串收斂成單一常數**：`email_registration_disabled` 這個字串改成只在 `customerRegistrationRepository.js` 定義一次（`EMAIL_REGISTRATION_DISABLED_ERROR`），`backend/server.js` 的兩處都改成 `require` 這個常數，包含 `/admin/login` 頁面內嵌 `<script>` 那段——因為那整段本來就是 Node 的 template literal，用 `${EMAIL_REGISTRATION_DISABLED_ERROR}` 直接內插即可，不用另外傳參數。Mobile 端 `RoleSelectScreen.jsx` 因為是完全獨立的 React Native bundle、跟後端沒有共用模組系統，這個字串仍然維持獨立寫死一份——這是這個專案所有錯誤代碼原本就有的既定模式（`email_not_verified`／`not_admin` 等都是這樣），不是這次改動特有的問題，所以沒有連這個也一起處理。
+
+### 沒發現問題的部分
+
+| 面向 | 檢查結果 |
+|------|----------|
+| 既有已綁定的信箱密碼帳號是否受影響 | 不受影響。新的判斷式放在「確認資料庫裡沒有這個 `firebase_uid`」之後，既有帳號一律在更早的 `existing.rows[0]` 分支就回傳了，不會碰到新判斷 |
+| `resolveOrRegisterCustomer` 既有的呼叫端／測試是否因為新增 `signInProvider` 參數而壞掉 | 沒有。這個參數是新增的可選欄位，沒帶的話 `signInProvider !== "password"` 恆成立，行為跟改動前一致；原本 5 筆測試全過 |
+| 新增的 4 筆測試涵蓋範圍 | 涵蓋：首次信箱密碼註冊被擋、首次 Google 註冊不受影響、已預先綁定的信箱密碼帳號仍可登入、`ALLOW_EMAIL_PASSWORD_REGISTRATION=true` 時信箱密碼註冊恢復正常 |
+| 伺服器啟動與 `/api/auth/firebase-session` 是否還能正常回應 | 重啟本機後端後，`GET /health` 回 200；對 `/api/auth/firebase-session` 送一個假 token 正確回 401 與可讀的錯誤訊息，沒有 crash |

@@ -23,7 +23,6 @@ const {
   getLinePayAuthorizationContext,
   authorizeLinePayPaymentInDatabase,
   getUserAuthProfileByFirebaseUid: getSqliteUserAuthProfileByFirebaseUid,
-  getUserAuthProfileByLoginIdentifier: getSqliteUserAuthProfileByLoginIdentifier,
   getUserAuthProfileById: getSqliteUserAuthProfileById,
   listDevAuthUsers: listSqliteDevAuthUsers,
   listCustomerOrders,
@@ -64,7 +63,7 @@ const {
   completeManualLinePayRepaymentInDatabase,
   listPendingLinePayAuthorizations
 } = require("./db");
-const { createAuthToken, getBearerToken, safeEqual, verifyAuthToken, verifyPassword } = require("./auth");
+const { createAuthToken, getBearerToken, safeEqual, verifyAuthToken } = require("./auth");
 const { verifyFirebaseIdToken } = require("./firebaseAuth");
 const {
   PaymentServiceError,
@@ -178,7 +177,8 @@ const {
   createMerchantApplicationRepository
 } = require("./database/repositories/merchantApplicationRepository");
 const {
-  createCustomerRegistrationRepository
+  createCustomerRegistrationRepository,
+  EMAIL_REGISTRATION_DISABLED_ERROR
 } = require("./database/repositories/customerRegistrationRepository");
 const {
   createAdminAccountRoleRepository
@@ -205,7 +205,6 @@ const groupBuyActivityReadRepository = createGroupBuyActivityReadRepository({
 const authProfileReadRepository = createAuthProfileReadRepository({
   sqliteReaders: {
     getByFirebaseUid: getSqliteUserAuthProfileByFirebaseUid,
-    getByLoginIdentifier: getSqliteUserAuthProfileByLoginIdentifier,
     getById: getSqliteUserAuthProfileById,
     listDevUsers: listSqliteDevAuthUsers,
   },
@@ -606,17 +605,22 @@ const server = http.createServer(async (request, response) => {
       // First time this Firebase account has ever signed in -- register it as a customer.
       // Identity fields come only from the verified token above, never from the request body.
       // email_verified comes from Firebase itself (Google-provider sign-ins always carry it as
-      // true), not anything the client asserts -- only matters for a brand-new email/password
-      // signup, since an already-registered account already passed this check once, at signup.
+      // true), not anything the client asserts -- checked before calling resolveOrRegisterCustomer
+      // so an unverified address always fails for that reason first, matching the admin login
+      // route (POST /admin/login/firebase), which validates email_verified unconditionally.
       if (!firebaseUser.email_verified) {
         sendJson(response, 403, { error: "email_not_verified" });
         return;
       }
 
+      // The Google-only self-registration policy itself lives inside resolveOrRegisterCustomer
+      // (see customerRegistrationRepository.js), not here, so every caller of it inherits the same
+      // rule automatically -- this route just passes along which provider was actually used.
       const registration = await customerRegistrationRepository.resolveOrRegisterCustomer({
         firebaseUid: firebaseUser.uid,
         email: firebaseUser.email || null,
         displayName: deriveDisplayNameFromFirebaseUser(firebaseUser),
+        signInProvider: firebaseUser.firebase?.sign_in_provider,
         now: businessClock.nowIso()
       });
       if (registration.error === "account_disabled") {
@@ -627,6 +631,10 @@ const server = http.createServer(async (request, response) => {
         sendJson(response, 409, {
           error: "This email is already linked to another account. Please contact the administrator."
         });
+        return;
+      }
+      if (registration.error === EMAIL_REGISTRATION_DISABLED_ERROR) {
+        sendJson(response, 403, { error: EMAIL_REGISTRATION_DISABLED_ERROR });
         return;
       }
 
@@ -730,30 +738,6 @@ const server = http.createServer(async (request, response) => {
         return;
       }
       sendJson(response, 200, { user: toPublicUserResponse(authUser) });
-      return;
-    }
-
-    if (request.method === "POST" && url.pathname === "/api/auth/login") {
-      if (!isDevAuthModeEnabled()) {
-        sendJson(response, 404, { error: "Not found" });
-        return;
-      }
-
-      const body = await readJsonBody(request);
-      const loginIdentifier = body.phoneNumber || body.loginName || body.email;
-      if (!loginIdentifier || !body.password) {
-        sendJson(response, 400, { error: "phoneNumber or loginName and password are required" });
-        return;
-      }
-
-      const user = await authProfileReadRepository.getByLoginIdentifier(loginIdentifier);
-      if (!user || !verifyPassword(body.password, user.passwordHash)) {
-        sendJson(response, 401, { error: "Invalid phoneNumber/loginName or password" });
-        return;
-      }
-
-      const token = createAuthToken(user);
-      sendJson(response, 200, { token, user: toPublicUserResponse(user) });
       return;
     }
 
@@ -2169,10 +2153,17 @@ const server = http.createServer(async (request, response) => {
 
       let user = await authProfileReadRepository.getByFirebaseUid(firebaseUser.uid);
       if (!user) {
+        // The Google-only self-registration policy lives inside resolveOrRegisterCustomer (see
+        // customerRegistrationRepository.js), so it applies here the same way it applies to
+        // POST /api/auth/firebase-session -- an admin account is always pre-bound by
+        // scripts/bind-seed-firebase-account.js or scripts/grant-admin-role.js before its first
+        // login, so it never reaches this branch; this only stops a brand-new email/password
+        // sign-in from creating a stray customer row.
         const registration = await customerRegistrationRepository.resolveOrRegisterCustomer({
           firebaseUid: firebaseUser.uid,
           email: firebaseUser.email || null,
           displayName: deriveDisplayNameFromFirebaseUser(firebaseUser),
+          signInProvider: firebaseUser.firebase?.sign_in_provider,
           now: businessClock.nowIso()
         });
         if (registration.error) {
@@ -3125,6 +3116,7 @@ ${ADMIN_THEME_VARIABLES}
     // no shared module system between the two runtimes.
     function describeBackendError(code) {
       if (code === "email_not_verified") return "信箱尚未驗證，請先點擊驗證信裡的連結。";
+      if (code === "${EMAIL_REGISTRATION_DISABLED_ERROR}") return "這個信箱密碼帳號尚未被授予管理員權限，請聯絡已有權限的管理員用 scripts/grant-admin-role.js 綁定。";
       if (code === "not_admin") return "這個帳號目前沒有管理員權限，請聯絡系統管理員開通。";
       if (code === "account_disabled") return "這個帳號已被停用。";
       if (code === "locked") return "登入失敗次數過多，請稍後再試。";

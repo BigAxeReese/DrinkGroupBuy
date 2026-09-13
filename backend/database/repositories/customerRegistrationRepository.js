@@ -3,6 +3,14 @@
 const { randomUUID } = require("node:crypto");
 const { createRuntimeDatabaseAdapter } = require("..");
 
+// The one place this error code is defined -- backend/server.js imports it instead of retyping
+// the literal at each of its two call sites (the customer/merchant route and the admin login
+// page's inline script). Mobile's RoleSelectScreen.jsx still matches it as its own literal: it
+// ships as a separate React Native bundle with no shared module system with the backend, same as
+// every other error code this app already returns (see server.js's existing "Keep in sync with…"
+// comments on describeBackendError/getLoginErrorMessage).
+const EMAIL_REGISTRATION_DISABLED_ERROR = "email_registration_disabled";
+
 // Postgres-only, same reasoning as merchantApplicationRepository.js: this is the first runtime
 // path that creates a *customer* user record from a first Google login, there is no legacy
 // SQLite behavior to preserve, and AUTH_PROFILE_READ_RUNTIME has already permanently moved to
@@ -19,10 +27,25 @@ function createCustomerRegistrationRepository(input = {}) {
   };
 }
 
+// Self-service registration is temporarily Google-only: anyone can still create a raw Firebase
+// email/password account directly through Firebase's own API, but this function won't turn a
+// first-time one into a real user row unless ALLOW_EMAIL_PASSWORD_REGISTRATION is explicitly
+// enabled. Centralized here (not at each caller) so every current and future caller of
+// resolveOrRegisterCustomer inherits the same policy automatically, instead of each one having to
+// remember to check signInProvider itself.
+function isEmailPasswordRegistrationEnabled() {
+  return readBooleanEnv(process.env.ALLOW_EMAIL_PASSWORD_REGISTRATION, false);
+}
+
+function readBooleanEnv(value, fallback = false) {
+  if (value == null || value === "") return fallback;
+  return ["1", "true", "yes", "on"].includes(String(value).trim().toLowerCase());
+}
+
 // Only ever called with claims taken directly from a verified Firebase ID token (see
 // backend/server.js) -- never from request-body fields a client could set itself.
 async function resolveOrRegisterCustomerPostgres(database, input = {}) {
-  const { firebaseUid, email, displayName } = input;
+  const { firebaseUid, email, displayName, signInProvider } = input;
   const now = input.now || new Date().toISOString();
 
   // Look up by firebase_uid regardless of status -- a disabled/deleted account must be rejected,
@@ -32,6 +55,13 @@ async function resolveOrRegisterCustomerPostgres(database, input = {}) {
   );
   if (existing.rows[0]) {
     return finalizeExistingUser(existing.rows[0]);
+  }
+
+  // An already-registered email/password account is unaffected by this -- it was matched by the
+  // firebase_uid lookup above and returned already, so it never reaches this point. This only
+  // stops a brand-new email/password sign-in from creating its first row.
+  if (signInProvider === "password" && !isEmailPasswordRegistrationEnabled()) {
+    return { error: EMAIL_REGISTRATION_DISABLED_ERROR };
   }
 
   const userId = `user-${randomUUID()}`;
@@ -86,4 +116,5 @@ async function insertAudit(database, actionType, resourceId, metadata, actorUser
 
 module.exports = {
   createCustomerRegistrationRepository,
+  EMAIL_REGISTRATION_DISABLED_ERROR,
 };

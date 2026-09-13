@@ -200,22 +200,7 @@ function RoleSelectContent({ navigation, isDevAuthMode, googleLogin = null, emai
         ) : null}
 
         {!isDevAuthMode ? (
-          <LoginOptionButton
-            icon="G"
-            iconStyle={styles.googleIcon}
-            label={isLoggingIn ? "登入中..." : "使用 Google 登入／註冊"}
-            disabled={isLoggingIn}
-            onPress={() => !isLoggingIn && login()}
-          />
-        ) : null}
-
-        {!isDevAuthMode ? (
           <View style={styles.emailPanel}>
-            <View style={styles.dividerRow}>
-              <View style={styles.dividerLine} />
-              <Text style={styles.dividerText}>或</Text>
-              <View style={styles.dividerLine} />
-            </View>
             <Text style={styles.emailHeading}>
               {emailMode === "signin" ? "用信箱登入" : "建立信箱帳號"}
             </Text>
@@ -247,18 +232,9 @@ function RoleSelectContent({ navigation, isDevAuthMode, googleLogin = null, emai
               disabled={isEmailBusy || !email.trim() || !password}
               onPress={() => !isEmailBusy && submitEmailForm()}
             />
-            <Pressable
-              accessibilityRole="button"
-              onPress={() => {
-                setEmailMode((mode) => (mode === "signin" ? "signup" : "signin"));
-                setEmailStatus("");
-              }}
-              style={({ pressed }) => [styles.textButton, pressed && styles.pressed]}
-            >
-              <Text style={styles.textButtonLabel}>
-                {emailMode === "signin" ? "第一次使用，建立帳號" : "已經有帳號，改用登入"}
-              </Text>
-            </Pressable>
+            {/* Self-service email signup is temporarily Google-only (backend rejects it at
+                POST /api/auth/firebase-session regardless) -- this entry point into emailMode
+                "signup" stays out of the UI until that policy changes, not removed outright. */}
             {emailMode === "signin" ? (
               <Pressable
                 accessibilityRole="button"
@@ -269,6 +245,24 @@ function RoleSelectContent({ navigation, isDevAuthMode, googleLogin = null, emai
               </Pressable>
             ) : null}
           </View>
+        ) : null}
+
+        {!isDevAuthMode ? (
+          <View style={styles.dividerRow}>
+            <View style={styles.dividerLine} />
+            <Text style={styles.dividerText}>或</Text>
+            <View style={styles.dividerLine} />
+          </View>
+        ) : null}
+
+        {!isDevAuthMode ? (
+          <LoginOptionButton
+            icon="G"
+            iconStyle={styles.googleIcon}
+            label={isLoggingIn ? "登入中..." : "使用 Google 登入／註冊"}
+            disabled={isLoggingIn}
+            onPress={() => !isLoggingIn && login()}
+          />
         ) : null}
 
         {signedInUser ? (
@@ -406,6 +400,9 @@ function LoginOptionButton({ icon, iconStyle, label, onPress, disabled = false, 
 function getLoginErrorMessage(error) {
   if (error.payload?.error === "email_not_verified") {
     return "信箱尚未完成驗證，請先點擊驗證信裡的連結，再重新登入。";
+  }
+  if (error.payload?.error === "email_registration_disabled") {
+    return "目前尚未開放信箱註冊，請改用 Google 登入／註冊。";
   }
   if (error.payload?.error === "Invalid Firebase ID token") {
     return "登入驗證失敗，請重新登入一次。";

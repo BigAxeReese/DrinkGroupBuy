@@ -17,7 +17,6 @@ function createAuthProfileReadRepository(input = {}) {
   if (runtime === "sqlite") {
     const requiredReaders = [
       "getByFirebaseUid",
-      "getByLoginIdentifier",
       "getById",
       "listDevUsers",
     ];
@@ -31,9 +30,6 @@ function createAuthProfileReadRepository(input = {}) {
     return {
       kind: "sqlite",
       getByFirebaseUid: async (firebaseUid) => input.sqliteReaders.getByFirebaseUid(firebaseUid),
-      getByLoginIdentifier: async (identifier) => (
-        input.sqliteReaders.getByLoginIdentifier(identifier)
-      ),
       getById: async (userId) => input.sqliteReaders.getById(userId),
       listDevUsers: async () => input.sqliteReaders.listDevUsers(),
       close: async () => {},
@@ -48,9 +44,6 @@ function createAuthProfileReadRepository(input = {}) {
   return {
     kind: "postgres",
     getByFirebaseUid: (firebaseUid) => getPostgresAuthProfileByFirebaseUid(database, firebaseUid),
-    getByLoginIdentifier: (identifier) => (
-      getPostgresAuthProfileByLoginIdentifier(database, identifier)
-    ),
     getById: (userId) => getPostgresAuthProfileById(database, userId),
     listDevUsers: () => listPostgresDevAuthUsers(database),
     close: async () => {
@@ -66,7 +59,6 @@ async function getPostgresAuthProfileByFirebaseUid(database, firebaseUid) {
       user_account.login_name,
       COALESCE(private_profile.contact_phone, user_account.phone_number) AS phone_number,
       COALESCE(private_profile.contact_email, user_account.email) AS email,
-      user_account.password_hash,
       user_account.display_name
     FROM users user_account
     LEFT JOIN user_private_profiles private_profile
@@ -78,31 +70,6 @@ async function getPostgresAuthProfileByFirebaseUid(database, firebaseUid) {
   return hydrateSinglePostgresAuthProfile(database, result.rows[0]);
 }
 
-async function getPostgresAuthProfileByLoginIdentifier(database, identifier) {
-  const result = await database.query(`
-    SELECT
-      user_account.id,
-      user_account.login_name,
-      COALESCE(private_profile.contact_phone, user_account.phone_number) AS phone_number,
-      COALESCE(private_profile.contact_email, user_account.email) AS email,
-      user_account.password_hash,
-      user_account.display_name
-    FROM users user_account
-    LEFT JOIN user_private_profiles private_profile
-      ON private_profile.user_id = user_account.id
-    WHERE (
-        user_account.phone_number = $1
-        OR private_profile.contact_phone = $1
-        OR lower(user_account.login_name) = lower($1)
-        OR lower(user_account.email) = lower($1)
-        OR lower(private_profile.contact_email) = lower($1)
-      )
-      AND user_account.status = 'active'
-    LIMIT 1
-  `, [identifier]);
-  return hydrateSinglePostgresAuthProfile(database, result.rows[0]);
-}
-
 async function getPostgresAuthProfileById(database, userId) {
   const result = await database.query(`
     SELECT
@@ -110,7 +77,6 @@ async function getPostgresAuthProfileById(database, userId) {
       user_account.login_name,
       COALESCE(private_profile.contact_phone, user_account.phone_number) AS phone_number,
       COALESCE(private_profile.contact_email, user_account.email) AS email,
-      user_account.password_hash,
       user_account.display_name
     FROM users user_account
     LEFT JOIN user_private_profiles private_profile
@@ -129,7 +95,6 @@ async function listPostgresDevAuthUsers(database) {
       user_account.login_name,
       COALESCE(private_profile.contact_phone, user_account.phone_number) AS phone_number,
       COALESCE(private_profile.contact_email, user_account.email) AS email,
-      user_account.password_hash,
       user_account.display_name
     FROM users user_account
     LEFT JOIN user_private_profiles private_profile
@@ -181,7 +146,6 @@ async function hydratePostgresAuthProfiles(database, rows) {
     loginName: row.login_name,
     phoneNumber: row.phone_number,
     email: row.email,
-    passwordHash: row.password_hash,
     displayName: row.display_name,
     surname: null,
     roles: rolesResult.rows
@@ -244,7 +208,6 @@ module.exports = {
   createAuthProfileReadRepository,
   getPostgresAuthProfileByFirebaseUid,
   getPostgresAuthProfileById,
-  getPostgresAuthProfileByLoginIdentifier,
   hydratePostgresAuthProfiles,
   listPostgresDevAuthUsers,
   resolveAuthProfileReadRuntime,

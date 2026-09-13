@@ -31,7 +31,6 @@ Invoke-RestMethod http://localhost:3000/health
 | `POST` | `/api/auth/firebase-session` | Firebase ID token login and backend role resolution |
 | `GET` | `/api/auth/dev-users` | 本機 dev-only 身份清單，需 `AUTH_DEV_MODE=true` |
 | `POST` | `/api/auth/dev-session` | 本機 dev-only 模擬登入，需 `AUTH_DEV_MODE=true` |
-| `POST` | `/api/auth/login` | 開發版登入 |
 | `GET` | `/health` | 後端健康檢查 |
 | `GET` | `/api/group-buy-activities` | 讀取團購活動 |
 | `POST` | `/api/merchant/group-buy-activities` | 商家建立團購 |

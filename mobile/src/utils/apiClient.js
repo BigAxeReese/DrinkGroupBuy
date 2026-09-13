@@ -38,29 +38,6 @@ export function setAuthToken(token) {
   authToken = token || null;
 }
 
-export async function login(input) {
-  const response = await fetch(`${backendBaseUrl}/api/auth/login`, {
-    method: "POST",
-    headers: {
-      "Content-Type": "application/json"
-    },
-    body: JSON.stringify({
-      phoneNumber: input.phoneNumber,
-      loginName: input.loginName ?? input.email,
-      password: input.password
-    })
-  });
-
-  const payload = await response.json();
-  if (!response.ok) {
-    throw new Error(payload.error ?? "Login failed");
-  }
-
-  setAuthToken(payload.token);
-  saveAuthSession({ token: payload.token, user: payload.user }).catch(() => {});
-  return payload;
-}
-
 export async function loginWithFirebaseIdToken(idToken) {
   const response = await fetch(`${backendBaseUrl}/api/auth/firebase-session`, {
     method: "POST",

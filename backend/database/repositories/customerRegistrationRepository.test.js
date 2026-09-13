@@ -115,6 +115,69 @@ test("concurrent first login reuses the account that won the firebase UID constr
   assert.equal(fake.queries.length, 2);
 });
 
+test("a first-time email/password sign-in is rejected while self-service registration is Google-only", async () => {
+  const fake = createFakeDatabase();
+  const repository = createCustomerRegistrationRepository({ database: fake.database });
+
+  const result = await repository.resolveOrRegisterCustomer({
+    firebaseUid: "firebase-password-signup",
+    email: "newpassword@example.com",
+    displayName: "新註冊",
+    signInProvider: "password",
+  });
+
+  assert.deepEqual(result, { error: "email_registration_disabled" });
+  assert.equal(fake.transactionQueries.length, 0);
+});
+
+test("a first-time Google sign-in is unaffected by the email/password registration policy", async () => {
+  const fake = createFakeDatabase();
+  const repository = createCustomerRegistrationRepository({ database: fake.database });
+
+  const result = await repository.resolveOrRegisterCustomer({
+    firebaseUid: "firebase-google-signup",
+    email: "newgoogle@example.com",
+    displayName: "新註冊",
+    signInProvider: "google.com",
+  });
+
+  assert.equal(result.created, true);
+});
+
+test("an already-bound email/password account can still sign in once registration is closed", async () => {
+  const fake = createFakeDatabase({ initialUsers: [{ id: "user-preseeded", status: "active" }] });
+  const repository = createCustomerRegistrationRepository({ database: fake.database });
+
+  const result = await repository.resolveOrRegisterCustomer({
+    firebaseUid: "firebase-preseeded",
+    signInProvider: "password",
+  });
+
+  assert.deepEqual(result, { userId: "user-preseeded", created: false });
+  assert.equal(fake.transactionQueries.length, 0);
+});
+
+test("ALLOW_EMAIL_PASSWORD_REGISTRATION=true reopens self-service email/password registration", async () => {
+  const previous = process.env.ALLOW_EMAIL_PASSWORD_REGISTRATION;
+  process.env.ALLOW_EMAIL_PASSWORD_REGISTRATION = "true";
+  try {
+    const fake = createFakeDatabase();
+    const repository = createCustomerRegistrationRepository({ database: fake.database });
+
+    const result = await repository.resolveOrRegisterCustomer({
+      firebaseUid: "firebase-password-reopened",
+      email: "reopened@example.com",
+      displayName: "重新開放",
+      signInProvider: "password",
+    });
+
+    assert.equal(result.created, true);
+  } finally {
+    if (previous === undefined) delete process.env.ALLOW_EMAIL_PASSWORD_REGISTRATION;
+    else process.env.ALLOW_EMAIL_PASSWORD_REGISTRATION = previous;
+  }
+});
+
 test("an email owned by a different account fails closed", async () => {
   const duplicateEmailError = Object.assign(new Error("duplicate email"), {
     code: "23505",

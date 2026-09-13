@@ -23,10 +23,6 @@ async function verifySqliteDelegation() {
         calls.push(["firebase", value]);
         return { id: "sqlite-firebase" };
       },
-      getByLoginIdentifier(value) {
-        calls.push(["identifier", value]);
-        return { id: "sqlite-identifier" };
-      },
       getById(value) {
         calls.push(["id", value]);
         return { id: "sqlite-id" };
@@ -40,12 +36,10 @@ async function verifySqliteDelegation() {
 
   assert.equal(repository.kind, "sqlite");
   assert.deepEqual(await repository.getByFirebaseUid("firebase-1"), { id: "sqlite-firebase" });
-  assert.deepEqual(await repository.getByLoginIdentifier("merchant1"), { id: "sqlite-identifier" });
   assert.deepEqual(await repository.getById("user-1"), { id: "sqlite-id" });
   assert.deepEqual(await repository.listDevUsers(), [{ id: "sqlite-list" }]);
   assert.deepEqual(calls, [
     ["firebase", "firebase-1"],
-    ["identifier", "merchant1"],
     ["id", "user-1"],
     ["list"],
   ]);
@@ -62,10 +56,6 @@ async function verifyPostgresContract() {
   assert.deepEqual(merchant, expectedMerchantProfile());
 
   assert.deepEqual(await repository.getById("user-merchant-pg"), expectedMerchantProfile());
-  assert.deepEqual(
-    await repository.getByLoginIdentifier("private-merchant@example.com"),
-    expectedMerchantProfile()
-  );
 
   const devUsers = await repository.listDevUsers();
   assert.equal(devUsers.length, 2);
@@ -77,10 +67,6 @@ async function verifyPostgresContract() {
 
   const firebaseCall = calls.find((call) => call.sql.includes("firebase_uid = $1"));
   assert.deepEqual(firebaseCall.parameters, ["firebase-merchant"]);
-  const identifierCall = calls.find((call) => (
-    call.sql.includes("lower(private_profile.contact_email) = lower($1)")
-  ));
-  assert.deepEqual(identifierCall.parameters, ["private-merchant@example.com"]);
   assert.ok(calls.some((call) => call.sql.includes("merchant_user.store_id")));
   await repository.close();
 }
@@ -158,7 +144,6 @@ function postgresUserRow(overrides = {}) {
     login_name: "merchantpg",
     phone_number: "0922333444",
     email: "private-merchant@example.com",
-    password_hash: "hash",
     display_name: "PostgreSQL 商家",
     ...overrides,
   };
@@ -170,7 +155,6 @@ function expectedMerchantProfile() {
     loginName: "merchantpg",
     phoneNumber: "0922333444",
     email: "private-merchant@example.com",
-    passwordHash: "hash",
     displayName: "PostgreSQL 商家",
     surname: null,
     roles: ["merchant"],

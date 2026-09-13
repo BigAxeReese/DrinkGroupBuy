@@ -7,17 +7,6 @@ loadLocalEnv(path.resolve(__dirname, ".env"));
 
 const TOKEN_TTL_SECONDS = 60 * 60 * 12;
 
-function verifyPassword(password, passwordHash) {
-  if (!passwordHash || typeof password !== "string") return false;
-
-  const [algorithm, salt, expectedHash] = passwordHash.split(":");
-  if (algorithm !== "scrypt" || !salt || !expectedHash) return false;
-
-  const actual = crypto.scryptSync(password, salt, 32);
-  const expected = Buffer.from(expectedHash, "hex");
-  return expected.length === actual.length && crypto.timingSafeEqual(actual, expected);
-}
-
 function createAuthToken(user) {
   const secret = getAuthSecret();
   const now = Math.floor(Date.now() / 1000);
@@ -120,6 +109,5 @@ module.exports = {
   createAuthToken,
   getBearerToken,
   safeEqual,
-  verifyAuthToken,
-  verifyPassword
+  verifyAuthToken
 };

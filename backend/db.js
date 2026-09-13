@@ -1314,31 +1314,11 @@ function completeGroupBuySettlement(activityId, input = {}) {
   }
 }
 
-function getUserAuthProfileByLoginIdentifier(identifier) {
-  const database = openDatabase();
-  try {
-    const user = database.prepare(`
-      SELECT id, login_name, phone_number, email, password_hash, display_name, surname, status
-      FROM users
-      WHERE (
-          phone_number = ?
-          OR lower(login_name) = lower(?)
-          OR lower(email) = lower(?)
-        )
-        AND status = 'active'
-    `).get(identifier, identifier, identifier);
-
-    return user ? hydrateUserAuthProfile(database, user) : null;
-  } finally {
-    database.close();
-  }
-}
-
 function getUserAuthProfileByFirebaseUid(firebaseUid) {
   const database = openDatabase();
   try {
     const user = database.prepare(`
-      SELECT id, login_name, phone_number, email, password_hash, display_name, surname, status
+      SELECT id, login_name, phone_number, email, display_name, surname, status
       FROM users
       WHERE firebase_uid = ?
         AND status = 'active'
@@ -1354,7 +1334,7 @@ function getUserAuthProfileById(userId) {
   const database = openDatabase();
   try {
     const user = database.prepare(`
-      SELECT id, login_name, phone_number, email, password_hash, display_name, surname, status
+      SELECT id, login_name, phone_number, email, display_name, surname, status
       FROM users
       WHERE id = ?
         AND status = 'active'
@@ -1375,7 +1355,6 @@ function listDevAuthUsers() {
         u.login_name,
         u.phone_number,
         u.email,
-        u.password_hash,
         u.display_name,
         u.surname,
         u.status
@@ -6372,7 +6351,6 @@ function hydrateUserAuthProfile(database, user) {
     loginName: user.login_name,
     phoneNumber: user.phone_number,
     email: user.email,
-    passwordHash: user.password_hash,
     displayName: user.display_name,
     surname: user.surname,
     roles,
@@ -6898,7 +6876,6 @@ module.exports = {
   getOrderRevisionById,
   getOrderRevisionPaymentContext,
   getUserAuthProfileByFirebaseUid,
-  getUserAuthProfileByLoginIdentifier,
   getUserAuthProfileById,
   listDevAuthUsers,
   listDueGroupBuyActivitiesForSettlement,
