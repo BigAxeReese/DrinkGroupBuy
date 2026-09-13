@@ -1,5 +1,5 @@
 import { useRef, useState } from "react";
-import { Pressable, StyleSheet, Text, TextInput, View } from "react-native";
+import { Alert, Platform, Pressable, StyleSheet, Text, TextInput, View } from "react-native";
 import { ActivitySyncNotice } from "../components/ActivitySyncNotice";
 import { MobileScreen, Section } from "../components/MobileScreen";
 import { DiscountSummaryCard } from "../components/DiscountSummaryCard";
@@ -156,8 +156,38 @@ export function MerchantDashboardScreen({ navigation, appState, actions, selecte
     }
   }
 
+  function confirmLogout() {
+    // Alert.alert is a no-op on react-native-web (react-native-web/src/exports/Alert is an
+    // empty stub) -- window.confirm is the only way to get a blocking confirm on that platform.
+    if (Platform.OS === "web") {
+      if (window.confirm("確定要登出嗎？")) navigation.logout();
+      return;
+    }
+
+    Alert.alert(
+      "登出",
+      "確定要登出嗎？",
+      [
+        { text: "取消", style: "cancel" },
+        { text: "登出", style: "destructive", onPress: () => navigation.logout() }
+      ]
+    );
+  }
+
   return (
-    <MobileScreen title="" compactHeader>
+    <MobileScreen
+      title=""
+      compactHeader
+      headerRight={(
+        <Pressable
+          accessibilityRole="button"
+          onPress={confirmLogout}
+          style={({ pressed }) => [styles.logoutButton, pressed && styles.pressed]}
+        >
+          <Text style={styles.logoutButtonText}>登出</Text>
+        </Pressable>
+      )}
+    >
       <View style={styles.hero}>
         <View style={styles.heroTop}>
           <View style={styles.storeAvatar}>
@@ -187,9 +217,6 @@ export function MerchantDashboardScreen({ navigation, appState, actions, selecte
             </Pressable>
             <Pressable accessibilityRole="button" onPress={() => navigation.go("merchantCreate")}>
               <Text style={styles.createLink}>＋ 開團</Text>
-            </Pressable>
-            <Pressable accessibilityRole="button" onPress={() => navigation.logout()}>
-              <Text style={styles.logoutLink}>登出</Text>
             </Pressable>
           </View>
         ) : null}
@@ -481,8 +508,6 @@ const styles = StyleSheet.create({
     paddingTop: 82,
     paddingHorizontal: 18,
     paddingBottom: 18,
-    borderBottomLeftRadius: 24,
-    borderBottomRightRadius: 24,
     backgroundColor: "#2f6df6"
   },
   heroTop: {
@@ -557,9 +582,17 @@ const styles = StyleSheet.create({
     fontSize: 12,
     fontWeight: "900"
   },
-  logoutLink: {
+  logoutButton: {
+    minHeight: 32,
+    borderRadius: 999,
+    alignItems: "center",
+    justifyContent: "center",
+    paddingHorizontal: 14,
+    backgroundColor: "#fee2e2"
+  },
+  logoutButtonText: {
     color: "#b91c1c",
-    fontSize: 12,
+    fontSize: 13,
     fontWeight: "900"
   },
   tabRow: {

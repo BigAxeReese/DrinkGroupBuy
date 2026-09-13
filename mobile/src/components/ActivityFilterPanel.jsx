@@ -1,11 +1,19 @@
 import { useEffect, useState } from "react";
 import { Modal, Platform, Pressable, StyleSheet, Switch, Text, View } from "react-native";
+import Slider from "@react-native-community/slider";
 import {
   DEFAULT_MAP_FILTERS,
   MIN_CUPS_OPTIONS,
   PICKUP_WITHIN_MINUTES_OPTIONS,
   RADIUS_OPTIONS
 } from "../utils/groupBuyActivityMapFilters";
+
+const RADIUS_MAX_INDEX = RADIUS_OPTIONS.length - 1;
+
+function radiusValueToIndex(radiusKm) {
+  const index = RADIUS_OPTIONS.findIndex((option) => option.value === radiusKm);
+  return index === -1 ? 0 : index;
+}
 
 export function ActivityFilterPanel({
   visible,
@@ -73,16 +81,37 @@ export function ActivityFilterPanel({
                 ) : null}
               </View>
             ) : null}
-            <View style={styles.optionRow}>
-              {RADIUS_OPTIONS.map((option) => (
-                <SegmentButton
-                  key={option.label}
-                  label={option.label}
-                  active={hasLocation && draft.radiusKm === option.value}
-                  disabled={!hasLocation}
-                  onPress={() => setDraft((current) => ({ ...current, radiusKm: option.value }))}
-                />
-              ))}
+            <View style={styles.sliderBlock}>
+              <Text style={[styles.radiusValue, !hasLocation && styles.radiusValueDisabled]}>
+                {RADIUS_OPTIONS[radiusValueToIndex(draft.radiusKm)].label}
+              </Text>
+              <Slider
+                accessibilityLabel="搜尋半徑"
+                style={styles.slider}
+                minimumValue={0}
+                maximumValue={RADIUS_MAX_INDEX}
+                step={1}
+                disabled={!hasLocation}
+                value={radiusValueToIndex(draft.radiusKm)}
+                onValueChange={(index) => setDraft((current) => ({ ...current, radiusKm: RADIUS_OPTIONS[index].value }))}
+                minimumTrackTintColor="#111827"
+                maximumTrackTintColor="#e2e8f0"
+                thumbTintColor={hasLocation ? "#111827" : "#cbd5e1"}
+              />
+              <View style={styles.sliderTicks}>
+                {RADIUS_OPTIONS.map((option, index) => (
+                  <Text
+                    key={option.label}
+                    style={[
+                      styles.sliderTickLabel,
+                      hasLocation && index === radiusValueToIndex(draft.radiusKm) && styles.sliderTickLabelActive,
+                      !hasLocation && styles.sliderTickLabelDisabled
+                    ]}
+                  >
+                    {option.label}
+                  </Text>
+                ))}
+              </View>
             </View>
           </View>
 
@@ -249,6 +278,39 @@ const styles = StyleSheet.create({
     flexDirection: "row",
     flexWrap: "wrap",
     gap: 8
+  },
+  sliderBlock: {
+    gap: 2
+  },
+  radiusValue: {
+    color: "#111827",
+    fontSize: 20,
+    fontWeight: "900",
+    textAlign: "center"
+  },
+  radiusValueDisabled: {
+    color: "#94a3b8"
+  },
+  slider: {
+    width: "100%",
+    height: 36
+  },
+  sliderTicks: {
+    flexDirection: "row",
+    justifyContent: "space-between",
+    paddingHorizontal: 2
+  },
+  sliderTickLabel: {
+    color: "#94a3b8",
+    fontSize: 11,
+    fontWeight: "700"
+  },
+  sliderTickLabelActive: {
+    color: "#111827",
+    fontWeight: "900"
+  },
+  sliderTickLabelDisabled: {
+    color: "#cbd5e1"
   },
   segment: {
     minHeight: 40,
