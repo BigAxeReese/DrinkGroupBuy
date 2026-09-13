@@ -201,9 +201,6 @@ function RoleSelectContent({ navigation, isDevAuthMode, googleLogin = null, emai
 
         {!isDevAuthMode ? (
           <View style={styles.emailPanel}>
-            <Text style={styles.emailHeading}>
-              {emailMode === "signin" ? "用信箱登入" : "建立信箱帳號"}
-            </Text>
             {emailStatus ? <Text style={styles.emailStatus}>{emailStatus}</Text> : null}
             <TextInput
               accessibilityLabel="信箱"
@@ -244,14 +241,6 @@ function RoleSelectContent({ navigation, isDevAuthMode, googleLogin = null, emai
                 <Text style={styles.textButtonLabel}>忘記密碼</Text>
               </Pressable>
             ) : null}
-          </View>
-        ) : null}
-
-        {!isDevAuthMode ? (
-          <View style={styles.dividerRow}>
-            <View style={styles.dividerLine} />
-            <Text style={styles.dividerText}>或</Text>
-            <View style={styles.dividerLine} />
           </View>
         ) : null}
 
@@ -664,27 +653,6 @@ const styles = StyleSheet.create({
   },
   emailPanel: {
     gap: 8
-  },
-  dividerRow: {
-    flexDirection: "row",
-    alignItems: "center",
-    gap: 10,
-    marginTop: 2
-  },
-  dividerLine: {
-    flex: 1,
-    height: 1,
-    backgroundColor: "#e5e7eb"
-  },
-  dividerText: {
-    color: "#9ca3af",
-    fontSize: 12,
-    fontWeight: "800"
-  },
-  emailHeading: {
-    color: "#2f2f33",
-    fontSize: 14,
-    fontWeight: "900"
   },
   emailStatus: {
     color: "#334155",

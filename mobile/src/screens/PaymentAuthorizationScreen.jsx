@@ -297,14 +297,6 @@ export function PaymentAuthorizationScreen({ navigation, route, appState, action
                 });
               }}
             />
-            <PrimaryButton
-              label={syncStatus === "loading" ? "正在刷新付款狀態..." : "刷新付款狀態"}
-              variant="secondary"
-              onPress={() => {
-                if (syncStatus === "loading") return;
-                syncBackendOrder({ orderId: payment.orderId, actions, setSyncStatus, setSyncMessage });
-              }}
-            />
             {syncMessage ? (
               <Text style={syncStatus === "error" ? styles.errorText : styles.successText}>{syncMessage}</Text>
             ) : null}
@@ -539,7 +531,7 @@ function startLinePaySyncPolling({
       if (Date.now() >= deadline) {
         stopLinePaySyncPolling({ pollIntervalRef, pollTimeoutRef });
         setSyncStatus("idle");
-        setSyncMessage("尚未收到 LINE Pay 授權結果，可稍後按「刷新付款狀態」。");
+        setSyncMessage("尚未收到 LINE Pay 授權結果，稍後回到 App 時會自動再次確認。");
       }
     } catch (error) {
       stopLinePaySyncPolling({ pollIntervalRef, pollTimeoutRef });
