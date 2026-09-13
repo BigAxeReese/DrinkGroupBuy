@@ -617,7 +617,7 @@ const styles = StyleSheet.create({
     fontWeight: "900"
   },
   actionStack: {
-    gap: 14
+    gap: 10
   },
   loginButton: {
     minHeight: 58,
@@ -625,7 +625,7 @@ const styles = StyleSheet.create({
     flexDirection: "row",
     alignItems: "center",
     justifyContent: "center",
-    borderRadius: 4,
+    borderRadius: 14,
     borderWidth: 1,
     borderColor: "#c9c9c9",
     backgroundColor: "#ffffff",
