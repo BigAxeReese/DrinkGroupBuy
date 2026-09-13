@@ -17,7 +17,6 @@ import { MerchantDashboardScreen } from "../screens/MerchantDashboardScreen";
 import { MerchantMenuManagementScreen } from "../screens/MerchantMenuManagementScreen";
 import { MerchantRefundRequestsScreen } from "../screens/MerchantRefundRequestsScreen";
 import { MerchantApplyScreen } from "../screens/MerchantApplyScreen";
-import { CustomerPlaceholderScreen } from "../screens/CustomerPlaceholderScreen";
 import { ProfileScreen } from "../screens/ProfileScreen";
 import { CustomerOrdersScreen } from "../screens/CustomerOrdersScreen";
 import { CartScreen } from "../screens/CartScreen";
@@ -1362,7 +1361,6 @@ export function AppNavigator() {
         {current.name === "merchantDashboard" && <MerchantDashboardScreen {...screenProps} />}
         {current.name === "merchantMenu" && <MerchantMenuManagementScreen {...screenProps} />}
         {current.name === "merchantRefundRequests" && <MerchantRefundRequestsScreen {...screenProps} />}
-        {current.name === "customerPlaceholder" && <CustomerPlaceholderScreen {...screenProps} />}
         {current.name === "customerOrders" && <CustomerOrdersScreen {...screenProps} />}
         {current.name === "profile" && <ProfileScreen {...screenProps} />}
       </View>

@@ -4,7 +4,6 @@ const navItems = [
   { id: "home", route: "nearby", icon: "⌂", label: "首頁", roles: ["customer"] },
   { id: "liveMap", route: "liveMap", icon: "⌖", label: "即時地圖", roles: ["customer"] },
   { id: "orders", route: "customerOrders", icon: "＄", label: "我的訂單", roles: ["customer"] },
-  { id: "discussion", route: "customerPlaceholder", icon: "○", label: "討論區", params: { type: "discussion" }, roles: ["customer"] },
   { id: "profile", route: "profile", icon: "⌔", label: "個人中心", roles: ["customer"] },
   { id: "merchantDashboard", route: "merchantDashboard", icon: "⌂", label: "首頁", roles: ["merchant"] },
   { id: "merchantCreate", route: "merchantCreate", icon: "＋", label: "開團", roles: ["merchant"] }

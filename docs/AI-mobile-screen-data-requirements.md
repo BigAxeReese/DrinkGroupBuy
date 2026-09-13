@@ -47,7 +47,6 @@
 | `MerchantGroupBuyActivityCreateScreen` | 商家建立團購與優惠門檻 | 固定店家、標題、24 小時內截止時間、取餐開始與結束時間、公告、優惠門檻、欄位級中文錯誤 | 新增／刪除門檻、建立團購；格式、截止時間、取餐時間、每杯折扣上下限不合法時阻擋送出 | POST API + local fallback；Backend 驗證 tier 可達區間與最低單杯金額；Mobile 轉譯 `discount_tier_invalid`／`discount_menu_invalid` | 完整 Android E2E |
 | `MerchantMenuManagementScreen` | 店家查看、修改與上下架店內菜單                  | 完整菜單、分類、名稱、說明、價格、客製化選項、`isAvailable`、每杯加料上限                                       | 新增品項、修改資料、上架或停售、輸入明確加料上限                                                           | Merchant menu GET/POST/PATCH API + merchant-store permission；mobile 第一版已串接         | 更完整的表單元件、刪除前確認與 mobile E2E                                                            |
 | `AdminDashboardScreen`      | 開發 / 補救工具，不屬於第一階段正式 App 流程     | 團購進度、訂單 / 付款摘要、取消狀態                                                                              | 開發或營運補救時查看詳情、取消團購                                                                          | DELETE API + local fallback                                                             | 若未來要做正式後台，需另開管理員需求與權限設計                                                          |
-| `CustomerPlaceholderScreen` | 討論區／個人中心 placeholder | 會員摘要、選填電話的遮罩值、帳號狀態 | 查看會員資料、提出帳號關閉申請 | Static | 個人中心、電話保護、帳號關閉 API 與去識別化流程尚未設計 |
 
 ## 共用畫面規則
 
