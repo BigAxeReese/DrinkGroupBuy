@@ -1020,6 +1020,38 @@
 
 **驗證限制**：這次驗證的是 repository 層直接呼叫（`createOrderRevision`／`updatePostgresPendingOrder`），不是走完整 HTTP／LINE Pay 流程，跟 `order-revision-postgres-smoke.js` 既有的驗證深度一致；沒有另外對 Azure 正式環境重跑一次。至此，前兩筆記錄裡留著的「鎖定期情境」端對端驗證缺口已經補齊。
 
+---
+
+## 2026-09-14 — 取貨憑證 lease 時鐘不一致修正（SQLite 相容性路徑）
+
+**範圍**：`backend/pickup/credentialService.js`（`markGroupBuyActivityReadyForPickup`、`redeemPickupCode` 各一行新增 `now: input.now`），未動 Postgres 路徑（`backend/database/repositories/pickupCredentialRepository.js`）
+**觸發原因**：`npm run pickup-credential:smoke` 斷言「activity lease should block ready transition」失敗（已用 git checkout 回測到今天稍早的 80428db 確認是既有問題、不是這次金流 `/code-review` 修正批次造成的迴歸），使用者要求診斷、修復並依高風險區域規則留安全複查記錄。
+
+### 診斷
+
+`backend/reliability/operationLease.js` 的 `createLease()` 會把 `input.now` 轉傳給 `backend/db.js` 的 `acquireOperationLock`，後者用 `current.locked_until > now`（`now` 未提供時退回 `Date.now()`）判斷既有鎖是否已過期。修正前，`credentialService.js` 裡呼叫 `withOperationLeaseSync(...)` 時沒有把呼叫端傳入的 `input.now`（測試用的模擬時間 `2026-07-29T10:00:00.000Z`）一併轉傳，導致鎖的過期判斷退回真實系統時間（今天 2026-09-14），而測試用模擬時間算出的 `locked_until` 遠早於真實今天，鎖被誤判成早已過期，直接被覆蓋、沒有真的擋下轉換。
+
+### 這次改了什麼
+
+`markGroupBuyActivityReadyForPickup`、`redeemPickupCode` 兩處呼叫 `withOperationLeaseSync` 的 options 都加上 `now: input.now`，讓 lease 的過期判斷跟同一次呼叫裡其餘業務邏輯（`markGroupBuyActivityReadyForPickupUnlocked`、`accessPickupCode` 內部的 `const now = input.now || new Date().toISOString();`）使用同一個時間基準。
+
+### 發現
+
+沒有找到信心度達到門檻（8/10 以上）的漏洞。用一個獨立 sub-task 交叉檢查：`input.now` 在 HTTP 路由層一律來自伺服器端 `businessClock.nowIso()`，不會讀取 request body／query／header；能移動 `businessClock` 偏離真實時間的唯一入口 `PUT /api/dev/business-time` 有三層防護（`isDevAuthModeEnabled()`、`isLoopbackRequest` 拒絕非本機呼叫、`NODE_ENV=production` 時直接拋錯，且偏移量鎖在 7 天內），沒有客戶端可操控的路徑能影響這個欄位。正式 Postgres runtime 也不會走到這段被改動的程式碼（走的是另一條未變動的 `repository.withOperationLock`）。
+
+### 沒發現問題的部分
+
+| 面向 | 檢查結果 |
+|------|----------|
+| `now` 是否可被客戶端操控來繞過 lease | 否；僅來自伺服器端 `businessClock.nowIso()`，且 dev-only 時間覆寫入口有 loopback＋非 production＋7 天封頂三層限制 |
+| 這次改動是否影響授權／SQL／回應內容 | 否；純粹在既有 options 物件多加一個欄位，沒有動 `actorUserId`、門市歸屬檢查、SQL 組裝或回應欄位 |
+| 是否引入新的信任關係 | 否；`input.now` 在同一次呼叫裡本來就已經被業務邏輯信任（`markGroupBuyActivityReadyForPickupUnlocked`／`accessPickupCode` 既有的 `now` 讀取），這次只是讓 lease 檢查跟既有用法時間基準一致 |
+| Postgres 路徑是否受影響 | 未修改 `pickupCredentialRepository.js`；`npm test` 全跑後沒有出現新的失敗 |
+
+**已記錄但這次刻意不修的相關發現**：`markGroupBuyActivityReadyForPickup`／`redeemPickupCode` 的 Postgres 分支（`repository.withOperationLock({ activityId }, ...)`，`backend/pickup/credentialService.js` 約 12 行、無 `now` 轉傳）有相同形狀的潛在問題——正式環境呼叫端目前一律不傳明確 `now`（兩端都退回真實 `Date.now()`，時間差在毫秒等級、實務上不構成問題），所以判斷為非緊急，但屬於同一類「業務時鐘與 lease 時鐘可能不一致」的設計疑慮，這次範圍明確排除 Postgres 路徑，已另外用 `spawn_task` 開一張獨立任務追蹤，不在此筆記錄內視為已解決。
+
+**驗證限制**：`npm run pickup-credential:smoke` 完整腳本（含 `ready_transition_blocked`、`redeem_transition_blocked` 兩個斷言）通過；`npm test` 138 個測試裡 135 通過、3 個既有失敗（`backend/payments/orderRuleConsent.test.js`，錯誤為 `no such table: main.orders`）——已確認在完全不牽涉這次改動程式碼的情況下單獨執行該測試檔案一樣會失敗，錯誤堆疊只經過 `linePayService.js`／`db.js`，且本機 `database/drink-group-buy-dev.sqlite`（gitignored、未追蹤）目前只有 2 張表、缺少 `orders` 等主要資料表，判斷是這個 worktree 本機開發 DB 初始化不完整的既有環境問題，與這次修改無關，未嘗試用 `db:init`／migration 動這個共用開發資料庫去「修好」它。
+
 **驗證限制**：`npm test` 119/119 全過（無回歸）；`node --check` 語法檢查通過；Mobile 端透過 Metro 重新打包確認無編譯錯誤、瀏覽器 console 無錯誤。**這次沒有針對新規則寫自動化測試**——`orderRevisionRepository.js` 這個檔案本身目前完全沒有既有的單元測試（只有一支需要連真實 PostgreSQL 的 `scripts/order-revision-postgres-smoke.js`，且該腳本目前也不涵蓋鎖定期情境），要驗證這次改動需要真的跑一次「已授權訂單、卡在鎖定期內分別嘗試加購／減購」的情境，這需要對使用者的開發資料庫做寫入操作，還沒有取得使用者同意執行，屬於已知的驗證缺口，留待使用者確認後補做。
 
 

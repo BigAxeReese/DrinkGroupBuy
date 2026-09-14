@@ -27,7 +27,8 @@ async function markGroupBuyActivityReadyForPickup(activityId, input = {}) {
   try {
     return withOperationLeaseSync({
       lockKey: `pickup:activity:${activityId}:transition`,
-      leaseMs: 120_000
+      leaseMs: 120_000,
+      now: input.now
     }, () => markGroupBuyActivityReadyForPickupUnlocked(activityId, input));
   } catch (error) {
     if (error instanceof OperationLeaseError) {
@@ -266,7 +267,8 @@ async function redeemPickupCode(input = {}) {
   try {
     return withOperationLeaseSync({
       lockKey: `pickup:code:${pickupCode}:redeem`,
-      leaseMs: 120_000
+      leaseMs: 120_000,
+      now: input.now
     }, () => accessPickupCode(input, true));
   } catch (error) {
     if (error instanceof OperationLeaseError) {
