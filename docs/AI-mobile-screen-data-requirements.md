@@ -31,22 +31,23 @@
 
 | Screen                      | 角色與用途                                       | 顯示資料 / 輸入                                                                                                  | 使用者操作                                                                                                  | 目前資料來源                                                                            | 尚未完成 / 後端缺口                                                                                    |
 | --------------------------- | ------------------------------------------------ | ---------------------------------------------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------- | --------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------ |
-| `RoleSelectScreen`          | Google 登入入口畫面                              | Google Login 按鈕、載入狀態、錯誤訊息、登入後使用者摘要；本機 dev mode 額外顯示測試身份下拉選單                  | 開始 Google 登入、把 Firebase ID token 送到 backend、依 backend 回傳角色進入對應首頁、登出 Firebase session；本機 dev mode 可選擇測試身份進入 | Firebase Auth + backend `POST /api/auth/firebase-session`；dev-only `GET /api/auth/dev-users`、`POST /api/auth/dev-session` | 需要 Firebase 專案設定，以及開發資料庫的 `users.firebase_uid` 對應；dev-only 身份切換不得出現在 production |
+| `RoleSelectScreen`          | 登入入口畫面（Google／信箱密碼）                  | Google Login 按鈕；信箱密碼登入表單（信箱／密碼欄位、忘記密碼，「建立帳號」入口目前刻意隱藏但底層邏輯保留）；載入狀態、錯誤訊息、登入後使用者摘要；本機 dev mode 額外顯示測試身份下拉選單 | 開始 Google 登入或信箱密碼登入、把 Firebase ID token 送到 backend、依 backend 回傳角色進入對應首頁、登出 Firebase session；本機 dev mode 可選擇測試身份進入 | Firebase Auth + backend `POST /api/auth/firebase-session`；dev-only `GET /api/auth/dev-users`、`POST /api/auth/dev-session` | 需要 Firebase 專案設定，以及開發資料庫的 `users.firebase_uid` 對應；dev-only 身份切換不得出現在 production；信箱自助註冊目前僅開放 Google（`ALLOW_EMAIL_PASSWORD_REGISTRATION` 關閉時） |
 | `NearbyGroupBuyActivitiesScreen` | 顧客首頁，顯示已參加與推薦團購             | 會員資訊、目前顧客已參加的團購進度、Backend 店家名稱／地址、推薦團購、預估每杯折扣與下一級距差杯數、活動同步狀態 | 開啟團購詳情、地圖、訂單、會員頁、活動同步失敗後重試 | `GET /api/group-buy-activities` + `GET /api/customers/me/orders`；local state 作 cache；同步失敗保留上次成功資料 | 使用者定位與距離、完整 Android E2E |
 | `LiveMapScreen`             | 用地圖瀏覽全部營業店家                           | Google Map、店名、地址、藍色無可加入活動／黃色有可加入活動 marker、可加入活動數與進度；dev auth mode 依登入 Backend `userId` 套用控制台固定位置或 GPS | 地圖拖曳／縮放、查看 marker；單一活動進詳情、多個活動進清單、無活動進店家菜單 | Google Maps SDK + `GET /api/stores` + `GET /api/group-buy-activities`；dev-only 定位控制；不讀取 mock 店家 runtime，店家 API 失敗明確顯示錯誤 | 正式版定位／隱私流程、附近公里數篩選與 Android E2E |
 | `StoreGroupBuyActivitiesScreen` | 顧客選擇同一店家的可加入活動 | 店名、可加入活動清單、剩餘時間與目前／下一門檻杯數 | 選擇一個活動進入詳情 | `GET /api/stores` + `GET /api/group-buy-activities` 的 Mobile cache | Android E2E |
 | `GroupBuyActivityDetailScreen` | 下單前查看團購詳情 | Backend 店家名稱／地址／電話、團購狀態、優惠門檻、目前有效杯數、預估每杯折扣、預估分配、尾差、下一級距差杯數、截止時間、取餐時間、公告、活動同步狀態 | 開啟菜單、查看進度、活動同步失敗後重試 | Backend 活動列表 + Mobile cache；同步失敗保留上次成功資料 | 獨立詳情 API 非第一階段必要；定位距離與 Android E2E |
 | `StoreMenuScreen`           | 瀏覽店家的全部上架飲料菜單                   | 店家摘要、分類、`isAvailable = true` 的品項、說明、價格、客製化選項與選擇上限                                   | 瀏覽店家權威菜單                                                                                            | `GET /api/stores/:storeId/menu`；mobile 已串接後端菜單                                    | Android E2E                                                              |
 | `DrinkSelectionScreen`      | 客製化單杯飲料                                   | 尺寸、甜度、冰塊、可多選加料、店家設定的明確加料上限、數量、小計                                                 | 加入購物車、編輯後儲存                                                                                      | Backend menu API + Mobile cart state；傳送 `customizationOptionIds`                       | 完整裝置 E2E、選項異動後返回購物車的更細 UX                                                           |
-| `CartScreen`                | 檢查購物車並送出訂單                             | 飲料明細、數量、尺寸／甜度／冰塊／加料客製化摘要、金額、是否接受原價購買                                              | 刪除項目、繼續選購、建立訂單、更新 pending 訂單、為已授權訂單建立 revision                                  | Mobile cart state / localStorage；三種 order write API 均使用後端權威菜單驗證與價格重算  | `order_price_changed`／`order_items_invalid` 的逐項修正提示、revision 失敗提示仍需細化                  |
-| `PaymentAuthorizationScreen` | LINE Pay sandbox 預授權 / 重新預授權 / 重新付款 | 原價金額、授權金額、最終金額、請款金額、釋放金額、付款狀態、provider `transactionId`、`paymentUrl`、backend 結果、deep link 返回結果、Backend 現行取餐與逾期未取規則全文／版本 | 目前畫面只提供 LINE Pay；付款前勾選同意規則、開啟 sandbox 授權 URL、由 deep link 返回付款畫面、自動／手動刷新 backend 狀態、revision 重新預授權、失敗後重新付款 | `GET /api/payment-rules/pickup-overdue` + `POST /api/payments/line-pay/request` 同意 gate；`POST /api/payments/line-pay/repay`；`GET /api/orders/:orderId`；provider reconciliation 已完成第一版 | 付款同意畫面與 LINE Pay sandbox Android 人工 E2E；refund 是開發 / 補救後端 API，尚未有正式 mobile 操作 UI |
+| `CartScreen`                | 檢查購物車並送出訂單                             | 飲料明細、數量、尺寸／甜度／冰塊／加料客製化摘要、金額、是否接受原價購買                                              | +/- 調整單項數量、刪除項目、繼續選購、建立訂單、更新 pending 訂單、為已授權訂單建立 revision；相同品項＋完全相同客製化組合（含單價）自動疊加成一行，不重複新增；已授權訂單在截止前 30 分鐘鎖定期內只能建立「不減少總杯數」的 revision（可以加購，不能退掉），pending 訂單不受此鎖定 | Mobile cart state / localStorage；三種 order write API 均使用後端權威菜單驗證與價格重算  | `order_price_changed`／`order_items_invalid` 的逐項修正提示、revision 失敗提示仍需細化                  |
+| `PaymentAuthorizationScreen` | LINE Pay sandbox 預授權 / 重新預授權 / 重新付款 | 原價金額、授權金額、最終金額、請款金額、釋放金額、付款狀態、provider `transactionId`、`paymentUrl`、backend 結果、deep link 返回結果、Backend 現行取餐與逾期未取規則全文／版本 | 目前畫面只提供 LINE Pay；付款前勾選同意規則、開啟 sandbox 授權 URL、由 deep link 返回付款畫面、App 回到前景或視窗取得焦點時自動刷新 backend 狀態（無手動刷新按鈕）、revision 重新預授權、失敗後重新付款 | `GET /api/payment-rules/pickup-overdue` + `POST /api/payments/line-pay/request` 同意 gate；`POST /api/payments/line-pay/repay`；`GET /api/orders/:orderId`；provider reconciliation 已完成第一版 | 付款同意畫面與 LINE Pay sandbox Android 人工 E2E；refund 是開發 / 補救後端 API，尚未有正式 mobile 操作 UI |
 | `GroupProgressScreen` | 顯示團購與顧客訂單進度 | 團購徽章、目前／下一門檻杯數、截止前預估每杯折扣／分配／尾差；截止後顯示 Backend 最終有效杯數、最終每杯折扣、訂單實際應付、訂單折扣與不可變尾差；另含參與者、剩餘時間、訂單摘要、活動同步狀態 | 前往付款或取餐資訊、活動同步失敗後重試 | Backend 活動列表 `settlement` + 訂單 `finalAmount` + Mobile cache；共用折扣摘要與同步提示已接線 | Android 小螢幕排版 E2E |
 | `CustomerOrdersScreen`      | 顧客查看進行中 / 歷史訂單與編輯訂單              | Backend 訂單／活動店家、品項、客製化、品項金額、訂單總額、訂單／付款／取貨狀態、取餐憑證有效期限 | 鎖單前編輯或取消、建立 revision、前往重新授權／重新付款、查看取貨碼與歷史訂單 | Backend `GET /api/customers/me/orders` + 單筆訂單／活動／取貨憑證 API；local state 僅作 cache | revision／付款錯誤提示細化、完整 Android E2E |
 | `PickupInfoScreen`          | 顯示取餐資訊                                     | Backend 訂單／活動店家、地址、取餐時間、取餐憑證有效期限、訂單摘要、取餐狀態 | 查看位置與有效六位取餐碼 | Backend 取貨憑證 API + 訂單／活動 cache；逾期排程已完成；已移除店家 mock fallback | 真實導航入口、完整 Android E2E |
-| `MerchantDashboardScreen` | 商家管理團購與履約 | 進行中團購、即時預估每杯折扣、訂單數、付款數、取餐數、取餐憑證有效期限、退款申請狀態、歷史紀錄 | 建立團購、查看門市有效訂單、標記可取餐、查碼與核銷取餐、針對已請款訂單提出退款申請 | Backend 活動列表 + `GET /api/merchant/stores/:storeId/orders` + pickup APIs；local state 作 cache | 退款申請 API／UI、獨立總覽聚合 API、完整 Android E2E；商家不得直接執行 provider refund |
+| `MerchantApplyScreen`       | 想成為商家的人自助申請                           | 申請表單（店名、地址、聯絡電話）、Google 身份驗證狀態、送出後的靜態確認畫面                                     | 先用 Google 登入驗證身份、填表送出申請；核准與否由管理員在 `/admin` 網頁後台審核，不在 Mobile | `POST /api/merchant-applications`（一律用 Firebase ID token 解出的身份，不信任表單裡的身份欄位） | 送出後無查詢進度或通知機制；核准畫面不能編輯申請人填的資料 |
+| `MerchantDashboardScreen` | 商家管理團購與履約 | 進行中團購、即時預估每杯折扣、訂單數、付款數、待製作明細、取餐數、取餐憑證有效期限、退款申請狀態、歷史紀錄（可點開查看單筆訂單明細） | 建立團購、查看門市有效訂單、個別或整批標記可取餐、查碼與核銷取餐、前往「總製作清單」（跨訂單彙總同品項＋客製化的待製作杯數）、針對已請款訂單提出退款申請、登出 | Backend 活動列表 + `GET /api/merchant/stores/:storeId/orders` + pickup APIs；local state 作 cache | 退款申請 API／UI、獨立總覽聚合 API、完整 Android E2E；商家不得直接執行 provider refund |
+| `MerchantProductionListScreen` | 單一團購活動的彙總待製作清單                 | 依「品項＋客製化組合」彙總的待製作杯數合計、逐筆訂單對照明細（顧客、品項、客製化） | 唯讀瀏覽，從 `MerchantDashboardScreen` 的待製作明細旁點「總製作清單」進入 | Mobile local state（沿用 `MerchantDashboardScreen` 已同步的訂單資料，未另外呼叫 API） | 完整 Android E2E |
 | `MerchantGroupBuyActivityCreateScreen` | 商家建立團購與優惠門檻 | 固定店家、標題、24 小時內截止時間、取餐開始與結束時間、公告、優惠門檻、欄位級中文錯誤 | 新增／刪除門檻、建立團購；格式、截止時間、取餐時間、每杯折扣上下限不合法時阻擋送出 | POST API + local fallback；Backend 驗證 tier 可達區間與最低單杯金額；Mobile 轉譯 `discount_tier_invalid`／`discount_menu_invalid` | 完整 Android E2E |
-| `MerchantMenuManagementScreen` | 店家查看、修改與上下架店內菜單                  | 完整菜單、分類、名稱、說明、價格、客製化選項、`isAvailable`、每杯加料上限                                       | 新增品項、修改資料、上架或停售、輸入明確加料上限                                                           | Merchant menu GET/POST/PATCH API + merchant-store permission；mobile 第一版已串接         | 更完整的表單元件、刪除前確認與 mobile E2E                                                            |
-| `AdminDashboardScreen`      | 開發 / 補救工具，不屬於第一階段正式 App 流程     | 團購進度、訂單 / 付款摘要、取消狀態                                                                              | 開發或營運補救時查看詳情、取消團購                                                                          | DELETE API + local fallback                                                             | 若未來要做正式後台，需另開管理員需求與權限設計                                                          |
+| `MerchantMenuManagementScreen` | 店家查看、修改與上下架店內菜單                  | 完整菜單、分類、名稱、說明、價格、客製化選項、`isAvailable`、每杯加料上限                                       | 新增品項（右上角小按鈕開啟底部彈窗表單）、修改資料、上架或停售、輸入明確加料上限                                                           | Merchant menu GET/POST/PATCH API + merchant-store permission；mobile 第一版已串接         | 更完整的表單元件、刪除前確認與 mobile E2E                                                            |
 
 ## 共用畫面規則
 
@@ -77,7 +78,7 @@
 顧客：
 
 ```text
-Google Login
+Google Login 或信箱密碼登入
 -> Backend 判斷角色
 -> 首頁 / 地圖
 -> 團購詳情
@@ -95,25 +96,18 @@ Google Login
 商家：
 
 ```text
-Google Login
+Google Login 或信箱密碼登入
 -> Backend 判斷角色
 -> 商家後台
 -> 菜單管理（可新增、修改、上架或停售）
 -> 建立團購
 -> 回到商家後台查看進度
--> 查看有效訂單
--> 標記可取餐
+-> 查看有效訂單 / 待製作明細 / 總製作清單
+-> 個別或整批標記可取餐
 -> 核銷取貨
 ```
 
-開發 / 補救工具：
-
-```text
-Google Login
--> Backend 判斷角色
--> 開發或營運補救入口
--> 必要時查看團購詳情 / 觸發取消或手動結算
-```
+管理／營運補救：不在 Mobile App 裡，已全部搬到獨立的 `/admin` 網頁後台（各自的密碼登入、CSRF、session），詳見 `docs/AI-architecture.md`；Mobile 端沒有任何管理員畫面或入口。
 
 ## 2026-07-05 登入 UI 方向
 
@@ -124,6 +118,6 @@ Google Login
 - Firebase 登入後，由 backend response 決定進入哪個入口；第一階段正式 App 只規劃顧客與商家入口：
   - `customer` -> 顧客首頁 / 地圖 / 訂單
   - `merchant` -> 該商家有權管理店家的商家後台
-- `admin` -> 僅作開發或後端補救工具，不列入第一階段正式 App 使用者流程
-- 既有 password 欄位與帳號下拉選單已從 mobile 登入畫面移除。
+- `admin` -> 在 Mobile App 裡完全沒有入口，只能透過獨立的 `/admin` 網頁後台登入使用。
+- 登入頁目前同時提供 Google 登入與 Firebase 信箱密碼登入（信箱自助「建立帳號」入口目前刻意隱藏，暫時只開放 Google 完成自助註冊；已綁定好的信箱密碼帳號登入不受影響）；舊版本機假密碼（手機號碼/Email + 明碼比對、非 Firebase）登入機制已於 2026-09-13 整個移除，不再是相容選項。
 - 開發期間如果要測不同角色，應使用不同 Firebase Google 測試帳號，或用本機 mapping helper 改 `users.firebase_uid` 對應；正式 app 不提供角色切換 UI。

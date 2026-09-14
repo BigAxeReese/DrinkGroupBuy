@@ -324,7 +324,8 @@ API JSON 使用 `camelCase`。已實作 routes 只對目前開發 prototype 具�
 | Method / path candidate                                             | 用途                         | 主要不確定點                     |
 | ------------------------------------------------------------------- | ---------------------------- | -------------------------------- |
 | `GET /api/merchant/stores/:storeId/orders?activityId=`              | 商家訂單佇列與歷史           | 已實作門市權限、活動篩選、匿名顧客及履約摘要 |
-| `POST /api/merchant/group-buy-activities/:activityId/ready-for-pickup` | 標記活動可取餐並建立取貨憑證 | 已實作第一版，需 merchant-store permission |
+| `POST /api/merchant/group-buy-activities/:activityId/ready-for-pickup` | 整批標記活動下所有可製作訂單為可取餐並建立取貨憑證 | 已實作，需 merchant-store permission |
+| `POST /api/merchant/group-buy-activities/:activityId/orders/:orderId/ready-for-pickup` | 單筆標記某一訂單為可取餐並建立取貨憑證（同一支路由多帶 `orders/:orderId` 區段，2026-09-14 新增） | 已實作，需 merchant-store permission；與整批版本共用同一組 SQLite／Postgres 邏輯 |
 | `GET /api/orders/:orderId/pickup-credential`                       | 顧客查詢自己的取貨憑證       | 已實作 ownership 檢查及顯示條件 |
 | `POST /api/merchant/pickup-credentials/lookup`                     | 商家用取貨碼查詢訂單         | 已實作門市權限、錯誤次數限制與過期拒絕 |
 | `POST /api/merchant/pickup-credentials/redeem`                     | 商家核銷取貨並完成訂單       | 已實作冪等、狀態歷程與 audit；QR Code 尚未實作 |
