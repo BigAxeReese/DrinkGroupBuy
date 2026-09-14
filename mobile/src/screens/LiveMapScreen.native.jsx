@@ -161,7 +161,6 @@ export function LiveMapScreen({ navigation, appState, selectedAuthUserId }) {
           title={locationName}
           description={effectiveLocationMode === "live" ? "顧客即時 GPS；失敗時使用固定備援位置" : "控制台指定的顧客固定位置"}
           anchor={{ x: 0.5, y: 0.5 }}
-          tracksViewChanges={false}
         >
           <View style={styles.customMarker}>
             <View style={[styles.customMarkerBadge, styles.userMarkerBadge]}>
@@ -185,14 +184,12 @@ export function LiveMapScreen({ navigation, appState, selectedAuthUserId }) {
                 setSelectedStoreId(store.id);
               }}
               anchor={{ x: 0.5, y: 0.5 }}
-              // Custom marker content is captured to a bitmap once and never re-rendered on
-              // Android when tracksViewChanges is false -- the standard mitigation for the
-              // per-frame redraw performance hit (and flicker) this API causes by default. The
-              // trade-off: if a store's recruiting status or name changes while this screen stays
-              // mounted, the marker visual won't update until the screen remounts. Acceptable here
-              // since visibleMapStores already forces a remount of this Marker (new `key`) whenever
-              // its underlying data actually changes across a screen re-entry.
-              tracksViewChanges={false}
+              // Deliberately NOT setting tracksViewChanges={false} here: on Android, a custom
+              // Marker's content is only captured to a bitmap while tracksViewChanges is true, so
+              // starting it false (as this file originally did) meant the marker's view was never
+              // snapshotted at all -- the pin rendered as nothing. Leaving it at the library's
+              // default (true, re-snapshot every frame) trades some redraw efficiency for markers
+              // that actually show up; fine at this app's marker count.
             >
               <View style={styles.customMarker}>
                 <View style={[
