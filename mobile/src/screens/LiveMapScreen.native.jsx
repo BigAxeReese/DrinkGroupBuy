@@ -13,12 +13,6 @@ export function LiveMapScreen({ navigation, appState, selectedAuthUserId }) {
   const mapRef = useRef(null);
   const lastReportSignatureRef = useRef("");
   const zoom = mapDefaults.zoom;
-  // Store-name labels are rendered as plain absolutely-positioned Views on top of the map, not as
-  // Marker children -- react-native-maps' custom-marker-content path is known to be unreliable on
-  // Android under the New Architecture (this project hit a related blank-map bug upgrading to Expo
-  // SDK 57, see PROGRESS.md 2026-08-19). Positions come from mapRef.pointForCoordinate(), the same
-  // projection API the plain overlay buttons below already rely on implicitly via screen layout.
-  const [markerLabelPositions, setMarkerLabelPositions] = useState({});
   const [selectedStoreId, setSelectedStoreId] = useState(null);
   const [filteredOutStoreName, setFilteredOutStoreName] = useState(null);
   const [locationPermission, setLocationPermission] = useState("not_required");
@@ -137,32 +131,6 @@ export function LiveMapScreen({ navigation, appState, selectedAuthUserId }) {
     recenterOnUser();
   }, [userPosition, zoom]);
 
-  const recomputeMarkerLabelPositions = async () => {
-    if (!mapRef.current) return;
-    const results = await Promise.all(
-      visibleMapStores.map((store) => (
-        mapRef.current
-          .pointForCoordinate({ latitude: store.latitude, longitude: store.longitude })
-          .then((point) => [store.id, point])
-          .catch(() => null)
-      ))
-    );
-    const next = {};
-    for (const result of results) {
-      if (!result) continue;
-      const [storeId, point] = result;
-      next[storeId] = point;
-    }
-    setMarkerLabelPositions(next);
-  };
-
-  // Re-project labels whenever the visible store set changes or the map camera settles after a
-  // pan/zoom/recenter. onRegionChangeComplete already fires for animateCamera (recenterOnUser)
-  // too, so a separate effect keyed on userPosition isn't needed.
-  useEffect(() => {
-    recomputeMarkerLabelPositions();
-  }, [visibleMapStores]);
-
   const openSelectedStore = () => {
     if (!selectedStore) return;
     const destination = getStoreMapDestination(selectedStore);
@@ -187,15 +155,23 @@ export function LiveMapScreen({ navigation, appState, selectedAuthUserId }) {
         toolbarEnabled={false}
         mapType="standard"
         showsPointsOfInterest={false}
-        onMapReady={recomputeMarkerLabelPositions}
-        onRegionChangeComplete={recomputeMarkerLabelPositions}
       >
         <Marker
           coordinate={userPosition}
           title={locationName}
           description={effectiveLocationMode === "live" ? "顧客即時 GPS；失敗時使用固定備援位置" : "控制台指定的顧客固定位置"}
-          pinColor="#7c3aed"
-        />
+          anchor={{ x: 0.5, y: 0.5 }}
+          tracksViewChanges={false}
+        >
+          <View style={styles.customMarker}>
+            <View style={[styles.customMarkerBadge, styles.userMarkerBadge]}>
+              <Text style={styles.customMarkerBadgeText}>我</Text>
+            </View>
+            <View style={styles.customMarkerLabel}>
+              <Text numberOfLines={1} style={styles.customMarkerLabelText}>{locationName}</Text>
+            </View>
+          </View>
+        </Marker>
         {visibleMapStores.map((store) => {
           const hasRecruitingGroupBuyActivity = store.hasRecruitingGroupBuyActivity;
           return (
@@ -208,25 +184,34 @@ export function LiveMapScreen({ navigation, appState, selectedAuthUserId }) {
                 setFilteredOutStoreName(null);
                 setSelectedStoreId(store.id);
               }}
-              pinColor={hasRecruitingGroupBuyActivity ? "#facc15" : "#2563eb"}
-            />
+              anchor={{ x: 0.5, y: 0.5 }}
+              // Custom marker content is captured to a bitmap once and never re-rendered on
+              // Android when tracksViewChanges is false -- the standard mitigation for the
+              // per-frame redraw performance hit (and flicker) this API causes by default. The
+              // trade-off: if a store's recruiting status or name changes while this screen stays
+              // mounted, the marker visual won't update until the screen remounts. Acceptable here
+              // since visibleMapStores already forces a remount of this Marker (new `key`) whenever
+              // its underlying data actually changes across a screen re-entry.
+              tracksViewChanges={false}
+            >
+              <View style={styles.customMarker}>
+                <View style={[
+                  styles.customMarkerBadge,
+                  hasRecruitingGroupBuyActivity ? styles.recruitingMarkerBadge : styles.idleMarkerBadge
+                ]}>
+                  <Text style={[
+                    styles.customMarkerBadgeText,
+                    hasRecruitingGroupBuyActivity && styles.recruitingMarkerBadgeText
+                  ]}>店</Text>
+                </View>
+                <View style={styles.customMarkerLabel}>
+                  <Text numberOfLines={1} style={styles.customMarkerLabelText}>{store.name}</Text>
+                </View>
+              </View>
+            </Marker>
           );
         })}
       </MapView>
-
-      {visibleMapStores.map((store) => {
-        const point = markerLabelPositions[store.id];
-        if (!point) return null;
-        return (
-          <View
-            key={`label-${store.id}`}
-            pointerEvents="none"
-            style={[styles.markerLabel, { left: point.x, top: point.y + 4 }]}
-          >
-            <Text numberOfLines={1} style={styles.markerLabelText}>{store.name}</Text>
-          </View>
-        );
-      })}
 
       <Pressable
         accessibilityRole="button"
@@ -320,17 +305,44 @@ const styles = StyleSheet.create({
     overflow: "hidden",
     backgroundColor: "#e2e8f0"
   },
-  markerLabel: {
-    position: "absolute",
+  customMarker: {
     width: 148,
-    marginLeft: -74,
-    alignItems: "center"
+    alignItems: "center",
+    gap: 3
   },
-  markerLabelText: {
-    maxWidth: "100%",
-    color: "#111827",
-    fontSize: 10,
-    fontWeight: "900",
+  customMarkerBadge: {
+    width: 30,
+    height: 30,
+    borderRadius: 15,
+    borderWidth: 3,
+    borderColor: "#ffffff",
+    alignItems: "center",
+    justifyContent: "center",
+    shadowColor: "#0f172a",
+    shadowOpacity: 0.28,
+    shadowRadius: 5,
+    shadowOffset: { width: 0, height: 3 },
+    elevation: 4
+  },
+  userMarkerBadge: {
+    backgroundColor: "#7c3aed"
+  },
+  idleMarkerBadge: {
+    backgroundColor: "#2563eb"
+  },
+  recruitingMarkerBadge: {
+    backgroundColor: "#facc15"
+  },
+  customMarkerBadgeText: {
+    color: "#ffffff",
+    fontSize: 11,
+    fontWeight: "900"
+  },
+  recruitingMarkerBadgeText: {
+    color: "#713f12"
+  },
+  customMarkerLabel: {
+    maxWidth: 148,
     borderRadius: 7,
     backgroundColor: "rgba(255,255,255,0.96)",
     paddingHorizontal: 6,
@@ -339,8 +351,12 @@ const styles = StyleSheet.create({
     shadowOpacity: 0.18,
     shadowRadius: 4,
     shadowOffset: { width: 0, height: 2 },
-    elevation: 3,
-    overflow: "hidden"
+    elevation: 3
+  },
+  customMarkerLabelText: {
+    color: "#111827",
+    fontSize: 10,
+    fontWeight: "900"
   },
   filterButton: {
     position: "absolute",
