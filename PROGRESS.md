@@ -172,6 +172,7 @@ updated: 2026-09-14
     > 提供「這個團購活動最後結算結果是多少」這筆資料的後端介面，讓手機 App 可以查詢顯示，而且這筆結果一旦算出來就不會再變動。
   - Mobile 團購進度 [完成] — 顯示最終有效杯數、最終每杯折扣、訂單實際應付、訂單折扣與未分配尾差
     > 手機畫面上顯示這次團購目前/最終的進度：湊了幾杯、折扣打幾折、自己這筆訂單實際要付多少錢。
+  - 「目前進度」分母顯示錯誤級距，杯數超過第一級距後變成「30 / 20」[完成] (9/15) — 使用者截圖回報團購詳情頁「目前進度」顯示「30 / 20 杯」，看起來像超過上限。查證後發現 `groupBuyActivity.targetCups` 這個欄位（見 [groupBuyActivityReadRepository.js](backend/database/repositories/groupBuyActivityReadRepository.js)）後端定義固定是「第一個優惠級距的門檻」，不是活動上限；[GroupBuyActivityDetailScreen.jsx](mobile/src/screens/GroupBuyActivityDetailScreen.jsx) 與 [GroupProgressScreen.jsx](mobile/src/screens/GroupProgressScreen.jsx) 兩個畫面都直接拿這個欄位當進度條分母，一旦已授權杯數衝過第一級距（此例：第一級距 20 杯，實際已達 30 杯級距），分母沒有跟著換成「下一個還沒達到的級距」或「最高級距」，就會出現分子大於分母、看起來像超賣的畫面。首頁附近推薦列表（`NearbyGroupBuyActivitiesScreen.jsx`）其實早就有一個算對的共用函式 `getGroupBuyActivityProgress`（`mobile/src/utils/groupBuyActivityProgress.js`），只是這兩個畫面沒有共用到，`GroupProgressScreen.jsx` 甚至自己另外重寫了一份邏輯、fallback 順序還寫錯（沒過任何一級距時會先退回第一級距門檻，而不是最高級距）。修法是讓這兩個畫面都改用同一個已驗證過的共用函式，不再各自維護。純顯示邏輯調整，不影響杯數、金額、授權或後端資料。`npm test` 138/138 全過，Expo Web 重新 bundle 無報錯，已推送並發布 EAS Update。**尚未實機驗證**：需要使用者在真的超過第一級距的團購上確認分母正確顯示為下一級距或最高級距。
   - 自動測試 [完成] — 最終快照資料契約與 PostgreSQL read repository smoke 已通過
     > 針對「團購結算完之後金額資料對不對、讀得到讀得對」寫的自動化檢查。
   - Android UI 人工覆核 [待處理] — 尚未由使用者在模擬器檢查小螢幕排版
