@@ -6,7 +6,7 @@ import { PrimaryButton } from "../components/PrimaryButton";
 import { ProgressSummary } from "../components/ProgressSummary";
 import { StatusBadge } from "../components/StatusBadge";
 import { getGroupBuyActivityById, formatCurrency } from "../utils/calculations";
-import { getFinalSettlementSnapshot } from "../utils/groupBuyActivityProgress";
+import { getFinalSettlementSnapshot, getGroupBuyActivityProgress } from "../utils/groupBuyActivityProgress";
 import { formatOrderItemCustomizations } from "../utils/orderItems";
 
 export function GroupProgressScreen({ navigation, route, appState, actions, memberAction, selectedCustomerId }) {
@@ -33,19 +33,16 @@ export function GroupProgressScreen({ navigation, route, appState, actions, memb
     ?? appState.orders.find((item) => item.groupBuyActivityId === groupBuyActivity.id && item.customerId === selectedCustomerId);
   const payment = appState.paymentAuthorizations.find((item) => item.orderId === order?.id);
   const finalSettlement = getFinalSettlementSnapshot(groupBuyActivity, order);
-  const authorizedCups = groupBuyActivity.currentCups;
-  const tierTargets = (groupBuyActivity.tiers ?? [])
-    .map((tier) => Number(tier.cups))
-    .filter((cups) => Number.isFinite(cups) && cups > 0)
-    .sort((left, right) => left - right);
-  const targetCups = tierTargets.find((cups) => authorizedCups < cups)
-    ?? groupBuyActivity.targetCups
-    ?? tierTargets[tierTargets.length - 1]
-    ?? 0;
-  const reachedTiers = tierTargets.filter((cups) => authorizedCups >= cups);
-  const reachedTier = reachedTiers[reachedTiers.length - 1];
+  // groupBuyActivity.targetCups is always the first tier's threshold, not a ceiling -- once
+  // authorizedCups passes it, treating it as the progress denominator reads as an impossible
+  // overshoot (see GroupBuyActivityDetailScreen for the same fix). Reuse the same shared
+  // derivation the nearby-activities list already uses instead of re-deriving it here.
+  const progress = getGroupBuyActivityProgress(groupBuyActivity);
+  const authorizedCups = progress.currentCups;
+  const targetCups = progress.nextTarget;
+  const reachedTier = progress.reachedTier;
   const nextTierText = targetCups > 0 && authorizedCups < targetCups
-    ? `下一級距：還差 ${targetCups - authorizedCups} 杯達到 ${targetCups} 杯`
+    ? `下一級距：還差 ${progress.remainingCups} 杯達到 ${targetCups} 杯`
     : reachedTier
       ? `已達目前最高級距：${reachedTier} 杯`
       : "目前沒有下一級距資料";

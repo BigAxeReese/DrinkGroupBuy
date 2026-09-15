@@ -8,6 +8,7 @@ import { StatusBadge } from "../components/StatusBadge";
 import { getGroupBuyActivityById, formatCurrency, isWithdrawalLocked } from "../utils/calculations";
 import { getGroupBuyActivityStore } from "../utils/groupBuyActivityStores";
 import { getGroupBuyActivityJoinAction } from "../utils/groupBuyActivityJoinState";
+import { getGroupBuyActivityProgress } from "../utils/groupBuyActivityProgress";
 
 export function GroupBuyActivityDetailScreen({ navigation, route, appState, actions, memberAction, selectedCustomerId }) {
   const groupBuyActivity = getGroupBuyActivityById(appState.groupBuyActivities, route.params?.groupBuyActivityId);
@@ -39,6 +40,12 @@ export function GroupBuyActivityDetailScreen({ navigation, route, appState, acti
   const store = getGroupBuyActivityStore(groupBuyActivity);
   const withdrawalLocked = isWithdrawalLocked(groupBuyActivity);
   const joinAction = getGroupBuyActivityJoinAction(groupBuyActivity, Boolean(existingOrder));
+  // groupBuyActivity.targetCups is always the FIRST tier's threshold (see
+  // groupBuyActivityReadRepository.js), not a ceiling -- once currentCups passes it, showing
+  // "current / targetCups" reads as an impossible overshoot. getGroupBuyActivityProgress (already
+  // used the same way on the nearby-activities list) swaps in the next unreached tier, or the
+  // highest tier once all are reached.
+  const progress = getGroupBuyActivityProgress(groupBuyActivity);
 
   return (
     <MobileScreen
@@ -61,8 +68,8 @@ export function GroupBuyActivityDetailScreen({ navigation, route, appState, acti
       <Section title="目前進度">
         <Text style={styles.title}>{groupBuyActivity.title}</Text>
         <ProgressSummary
-          currentCups={groupBuyActivity.currentCups}
-          targetCups={groupBuyActivity.targetCups}
+          currentCups={progress.currentCups}
+          targetCups={progress.nextTarget}
           participantCount={groupBuyActivity.participantCount}
           remainingTimeText={groupBuyActivity.remainingTimeText}
         />
