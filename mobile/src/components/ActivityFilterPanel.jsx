@@ -1,5 +1,6 @@
 import { useEffect, useState } from "react";
 import { Modal, Platform, Pressable, StyleSheet, Switch, Text, View } from "react-native";
+import { useSafeAreaInsets } from "react-native-safe-area-context";
 import {
   DEFAULT_MAP_FILTERS,
   MIN_CUPS_OPTIONS,
@@ -16,6 +17,10 @@ export function ActivityFilterPanel({
   onOpenLocationSettings = null
 }) {
   const [draft, setDraft] = useState({ ...DEFAULT_MAP_FILTERS, ...filters });
+  // RN's Modal portals to a native overlay outside App.jsx's root SafeAreaView, so its content
+  // doesn't inherit that safe-area padding -- without this, the sheet's bottom (and the apply
+  // button in it) renders flush against the screen edge, under Android's gesture bar/back button.
+  const insets = useSafeAreaInsets();
 
   useEffect(() => {
     if (visible) setDraft({ ...DEFAULT_MAP_FILTERS, ...filters });
@@ -38,7 +43,7 @@ export function ActivityFilterPanel({
           style={StyleSheet.absoluteFillObject}
           onPress={onClose}
         />
-        <View style={styles.sheet}>
+        <View style={[styles.sheet, { paddingBottom: 28 + insets.bottom }]}>
           <View style={styles.headerRow}>
             <Text style={styles.title}>搜尋偏好</Text>
             <Pressable accessibilityRole="button" accessibilityLabel="關閉" onPress={onClose} style={styles.closeButton}>

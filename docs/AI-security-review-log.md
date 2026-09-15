@@ -1102,3 +1102,21 @@
 ### 沒發現問題的部分
 
 未變更實際金流 provider、金額計算、登入或門市權限；新增的是操作提示規則，寫入路由仍執行既有授權與交易控制。17 項相關測試通過；PostgreSQL 三筆訂單回歸測試涵蓋單筆、重複、部分取餐、整批與最終完成，使用備份及交易回滾確認原資料不變，沒有呼叫金流。完整 HTTP／Android 流程尚待驗證。
+
+## 2026-09-15 — 修改訂單（加購）漏掉既有品項並回填搜尋半徑安全審查
+
+**範圍**：`mobile/src/navigation/AppNavigator.js`（`submitCart` 的訂單修改／加購邏輯與容量預檢）、`mobile/src/components/ActivityFilterPanel.jsx`（搜尋半徑安全區域 padding，非金流，一併審查因同批改動）。
+**觸發原因**：使用者回報「已有訂單後加購，沒有跳出 LINE Pay」；追查後發現「修改訂單」流程只把購物車裡新選的品項送給後端，`order_revisions`／pending 訂單更新兩條路徑後端都是整批替換品項清單，導致既有品項被靜默蓋掉——屬於改到送進 LINE Pay 預授權金額的邏輯，依規則主動跑一次 `/security-review`。
+
+### 發現
+
+沒有找到信心度達到門檻（8/10 以上）的漏洞。有一項相關的**正確性**問題（非安全漏洞，已一併修正）：合併品項後，既有的容量預檢公式（`quantity - existingOrder.quantity`）沒有同步更新，會讓前端的「已達上限」提示失效；已改為已授權訂單用純新增杯數（`quantity`）、待授權/全新訂單用合併後總杯數（`finalQuantity`）。
+
+### 沒發現問題的部分
+
+- **金額竄改**：`orderRevisionRepository.js` 的 `createPostgresOrderRevision` 與 `customerOrderWriteRepository.js` 的待授權訂單更新，都會呼叫 `pricePostgresOrderItems` 依店家菜單重新計價，客戶端送來的 `unitPrice`／`subtotal` 一律不被信任，價格不符直接回傳 `order_price_changed`。
+- **權限**：兩條路徑都重新比對 `order.customer_user_id` 與登入者 token 對應的使用者 id，不是信任客戶端帶來的任何欄位；合併進去的 `existingOrder.items` 本來就是同一顧客自己訂單的資料，不會跨顧客外洩。
+- **容量上限**：後端各自用完整合併後的品項清單重新加總杯數並比對活動上限，跟本次修正的前端預檢公式無關；前端公式錯誤最多只是少顯示一則提醒訊息，不影響後端最終是否放行。
+- 惡意使用者原本就能直接打 API 帶任意 `items` 陣列（這是既有、已經過驗證的攻擊面），本次修正只是讓「正常使用者」送出的內容變得正確，沒有擴大攻擊面。
+- `ActivityFilterPanel.jsx` 的改動純屬版面 padding（避免搜尋面板底部被 Android 系統手勢列擋住），不涉及任何資料流或權限，無安全影響。
+- `npm test` 138/138 全過；另外用本機真實 PostgreSQL 手動走過兩次端對端情境（單一新品項、以及新增 3 杯的不同品項），確認合併後的 `order_revisions`／`order_revision_items` 金額與杯數正確（$105／2 杯、$235／4 杯），且未誤觸容量預檢。

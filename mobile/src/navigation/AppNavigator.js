@@ -697,20 +697,35 @@ export function AppNavigator() {
         && !["cancelled", "completed"].includes(order.status)
       ));
       const quantity = submittedItems.reduce((sum, item) => sum + item.quantity, 0);
+      const subtotal = submittedItems.reduce((sum, item) => sum + item.subtotal, 0);
+      const firstItem = submittedItems[0];
+      const orderItems = submittedItems.map((item) => normalizeOrderItem(item));
+      // order_revisions and the pending-order PATCH both replace the order's entire item list
+      // wholesale (the same contract a fresh order create uses) -- the cart here only ever holds
+      // items freshly picked in this edit session (see DrinkSelectionScreen's editOrderId flow), so
+      // the existing order's own items must be merged back in or "修改訂單" would silently drop them.
+      const existingOrderItems = existingOrder ? (existingOrder.items ?? []).map((item) => normalizeOrderItem(item)) : [];
+      const finalOrderItems = existingOrder ? [...existingOrderItems, ...orderItems] : orderItems;
+      const finalSubtotal = existingOrder ? finalOrderItems.reduce((sum, item) => sum + item.subtotal, 0) : subtotal;
+      const finalQuantity = existingOrder ? finalOrderItems.reduce((sum, item) => sum + item.quantity, 0) : quantity;
+      const finalFirstItem = finalOrderItems[0] ?? firstItem;
+      const backendItems = toBackendOrderItems(finalOrderItems);
+
       const groupBuyActivity = groupBuyActivities.find((item) => item.id === groupBuyActivityId);
+      // An authorized existing order's cups are already counted in the activity's authorized-cups
+      // tally, so only the newly-added cart cups (quantity) are net-new capacity; a pending order
+      // (or a brand new one) hasn't been counted at all yet, so its full merged total (finalQuantity)
+      // is what newly lands on the tally once it's authorized -- matches how the backend recomputes
+      // capacity from the complete merged item list in both cases.
       const capacityCheckQuantity = existingOrder && existingOrder.paymentStatus !== "pending"
-        ? Math.max(0, quantity - (existingOrder.quantity ?? 0))
-        : quantity;
+        ? quantity
+        : finalQuantity;
       if (groupBuyActivity && wouldExceedGroupBuyActivityCapacity(groupBuyActivity, capacityCheckQuantity)) {
         return {
           error: "capacity_exceeded",
           message: `此團購最多 ${getGroupBuyActivityCapacityInfo(groupBuyActivity).maximumCups} 杯，已無法再加入 ${capacityCheckQuantity} 杯。`
         };
       }
-      const subtotal = submittedItems.reduce((sum, item) => sum + item.subtotal, 0);
-      const firstItem = submittedItems[0];
-      const orderItems = submittedItems.map((item) => normalizeOrderItem(item));
-      const backendItems = toBackendOrderItems(orderItems);
 
       if (existingOrder) {
         if (existingOrder.paymentStatus !== "pending") {
@@ -733,9 +748,9 @@ export function AppNavigator() {
               ? {
                   ...order,
                   pendingRevisionId: revision.id,
-                  pendingRevisionAmount: revision.originalAmount ?? subtotal,
-                  pendingRevisionItems: orderItems,
-                  pendingRevisionTotalCups: revision.totalCups ?? quantity,
+                  pendingRevisionAmount: revision.originalAmount ?? finalSubtotal,
+                  pendingRevisionItems: finalOrderItems,
+                  pendingRevisionTotalCups: revision.totalCups ?? finalQuantity,
                   reauthorizationReason: "order_amount_changed"
                 }
               : order
@@ -745,12 +760,12 @@ export function AppNavigator() {
               ? {
                   ...report,
                   pendingRevisionId: revision.id,
-                  revisionAmount: revision.originalAmount ?? subtotal,
-                  revisionItems: orderItems,
+                  revisionAmount: revision.originalAmount ?? finalSubtotal,
+                  revisionItems: finalOrderItems,
                   status: "pending",
                   paymentStatus: "pending",
                   authorizationStatus: "pending",
-                  originalAmount: revision.originalAmount ?? subtotal,
+                  originalAmount: revision.originalAmount ?? finalSubtotal,
                   authorizedAmount: 0,
                   finalAmount: null,
                   captureAmount: null,
@@ -763,8 +778,8 @@ export function AppNavigator() {
           return {
             orderId: existingOrder.id,
             orderRevisionId: revision.id,
-            revisionAmount: revision.originalAmount ?? subtotal,
-            revisionItems: orderItems
+            revisionAmount: revision.originalAmount ?? finalSubtotal,
+            revisionItems: finalOrderItems
           };
         }
 
@@ -786,14 +801,14 @@ export function AppNavigator() {
             ? {
                 ...order,
                 status: backendOrder.status,
-                itemName: submittedItems.length > 1 ? `${firstItem.itemName} 等 ${submittedItems.length} 項` : firstItem.itemName,
-                items: orderItems,
-                quantity,
-                sweetness: firstItem.sweetness,
-                ice: firstItem.ice,
-                toppings: firstItem.toppings,
-                subtotal,
-                originalAmount: subtotal,
+                itemName: finalOrderItems.length > 1 ? `${finalFirstItem.itemName} 等 ${finalOrderItems.length} 項` : finalFirstItem.itemName,
+                items: finalOrderItems,
+                quantity: finalQuantity,
+                sweetness: finalFirstItem.sweetness,
+                ice: finalFirstItem.ice,
+                toppings: finalFirstItem.toppings,
+                subtotal: finalSubtotal,
+                originalAmount: finalSubtotal,
                 authorizedAmount: 0,
                 finalAmount: null,
                 captureAmount: null,
@@ -815,7 +830,7 @@ export function AppNavigator() {
           report.orderId === existingOrder.id
             ? {
                 ...report,
-                originalAmount: subtotal,
+                originalAmount: finalSubtotal,
                 authorizedAmount: 0,
                 finalAmount: null,
                 captureAmount: null,
