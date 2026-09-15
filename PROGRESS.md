@@ -203,6 +203,8 @@ updated: 2026-09-14
 - 取貨與逾期 [進行中]
   - 單筆訂單標記可取餐 [進行中] (9/13) — 已串接商家按鈕、請求與取餐資料存取；6 項隔離單元測試通過，涵蓋訂單範圍、商家權限、重複標記與共用活動鎖。Mobile 語法解析通過；已驗證真實 PostgreSQL 單筆憑證回傳（交易回滾）。單筆改用獨立網址，避免舊後端忽略參數而整批更新，本機後端已重啟；17 項相關測試通過；真實 PostgreSQL 三筆訂單逐筆標記、重複標記、部分取餐、後續整批與完成流程通過，交易回滾後資料與原快照一致。尚待完整 HTTP／Android 操作驗證。
     > 店家可依各筆訂單的製作進度個別開放取餐，其他訂單繼續等待，也保留全部標記功能。
+  - SQLite 相容路徑的 lease 鎖定判斷漏傳模擬時間 [完成] (9/14) — 驗證 `npm run pickup-credential:smoke` 時發現「activity lease should block ready transition」這個斷言持續失敗；根因是 `credentialService.js` 的 SQLite 相容路徑呼叫 `withOperationLeaseSync` 標記可取餐／核銷取貨碼時，沒有把呼叫端傳入的模擬時間（`input.now`，測試與開發控制台用來模擬「現在幾點」）轉傳給 lease 機制，導致過期判斷退回真實系統時間，跟其餘轉換邏輯用的時間基準對不上，鎖被誤判成早已過期、擋不住並發轉換。修法是補傳 `now: input.now`，只動 SQLite 相容路徑，未碰 Postgres repository。已獨立重新驗證：`npm run pickup-credential:smoke` 全數通過（含 `ready_transition_blocked`／`redeem_transition_blocked`）、`npm test` 138/138 全過，並完成一次 `/security-review`（見 `docs/AI-security-review-log.md`）。原本在另一個 session 的獨立分支上修復，9/14 已合併進 `main`。
+    > 商家標記訂單可取餐或核銷取貨碼時，系統會先鎖住這筆活動避免兩個操作同時衝突；這個鎖原本在測試模式下判斷「有沒有過期」用錯了時間基準，可能讓鎖形同虛設。
   > 顧客到店取餐、以及超過時間沒來取餐的處理流程。
   - 取貨憑證建立／驗證／逾期排程 [完成] — `npm run pickup-expiration:smoke` 驗證
     > 顧客取餐時要出示的憑證（類似取貨碼），系統會產生、驗證這張憑證是否有效，並自動排程檢查有沒有訂單超過取貨時間還沒被領走。
