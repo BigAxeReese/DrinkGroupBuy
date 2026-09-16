@@ -363,6 +363,32 @@ async function syncBackendOrder({
   }
 }
 
+async function openLinePayCheckoutUrl(paymentUrl) {
+  const webUrl = paymentUrl?.web;
+  const appUrl = paymentUrl?.app;
+  if (!webUrl && !appUrl) {
+    throw new Error("LINE Pay 沒有回傳付款網址");
+  }
+
+  // Try the LINE app deep link first on native: when LINE is installed and the customer is
+  // already logged into their own real account there, this skips the browser -- and LINE Pay's
+  // separate web login -- entirely, matching how most real LINE Pay integrations behave.
+  // Linking.openURL rejects when nothing can handle the URL scheme (LINE not installed), so that
+  // failure just falls through to the web checkout page below. Skipped on web: line:// isn't a
+  // browser-openable scheme there, and the desktop preview has no app to hand off to anyway.
+  if (Platform.OS !== "web" && appUrl) {
+    try {
+      await Linking.openURL(appUrl);
+      return;
+    } catch {
+      // Fall through to the web checkout URL.
+    }
+  }
+
+  if (!webUrl) throw new Error("LINE Pay 沒有回傳付款網址");
+  await Linking.openURL(webUrl);
+}
+
 async function startLinePayRepayment({
   payment,
   order,
@@ -387,10 +413,7 @@ async function startLinePayRepayment({
       productName: order.itemName || "DrinkGroupBuy 飲料訂單",
       packageName: payment.recipientName || "DrinkGroupBuy"
     });
-    const paymentUrl = payload.paymentUrl?.web || payload.paymentUrl?.app;
-    if (!paymentUrl) throw new Error("LINE Pay 沒有回傳付款網址");
-
-    await Linking.openURL(paymentUrl);
+    await openLinePayCheckoutUrl(payload.paymentUrl);
     setLinePayStatus("ready");
     setLinePayMessage("已開啟 LINE Pay。付款完成後回到 App，訂單狀態會自動刷新。");
     startLinePaySyncPolling({
@@ -455,12 +478,7 @@ async function startPaymentAuthorization({
       packageName: payment.recipientName || "DrinkGroupBuy",
       products: buildLinePayProducts(order, payment, revisionPayment)
     });
-    const paymentUrl = payload.paymentUrl?.web || payload.paymentUrl?.app;
-    if (!paymentUrl) {
-      throw new Error(`${providerLabel} 沒有回傳付款網址`);
-    }
-
-    await Linking.openURL(paymentUrl);
+    await openLinePayCheckoutUrl(payload.paymentUrl);
     setLinePayStatus("ready");
     setLinePayMessage(`已開啟${providerLabel}。完成授權後回到 App，付款狀態會自動刷新。`);
     startLinePaySyncPolling({
