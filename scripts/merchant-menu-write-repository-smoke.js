@@ -11,6 +11,9 @@ async function main() {
   await verifyPostgresTransactionContract();
   await verifyPostgresAccessBoundary();
   await verifyPostgresDiscountRollback();
+  await verifyPostgresClosingTimeSuccess();
+  await verifyPostgresClosingTimeAccessBoundary();
+  await verifyPostgresClosingTimeStoreNotFound();
   verifyRuntimeValidation();
   console.log("Merchant menu write repository smoke test passed.");
 }
@@ -27,11 +30,20 @@ async function verifySqliteDelegation() {
       calls.push({ type: "write", input });
       return { menuItem: { id: "menu-sqlite" } };
     },
+    sqliteClosingTimeWriter(input) {
+      calls.push({ type: "closingTime", input });
+      return { store: { id: input.storeId, pickupClosingTime: input.pickupClosingTime } };
+    },
   });
   assert.equal(repository.kind, "sqlite");
   assert.equal((await repository.getStoreMenu("store-001")).store.id, "store-001");
   assert.deepEqual(calls[0].options, { includeUnavailable: true });
   assert.equal((await repository.saveMenuItem({ storeId: "store-001" })).menuItem.id, "menu-sqlite");
+  const closingTimeResult = await repository.updateStorePickupClosingTime({
+    storeId: "store-001", pickupClosingTime: "22:00",
+  });
+  assert.equal(closingTimeResult.store.pickupClosingTime, "22:00");
+  assert.equal(calls[2].type, "closingTime");
   await repository.close();
 }
 
@@ -83,6 +95,47 @@ async function verifyPostgresDiscountRollback() {
   assert.equal(calls.some((call) => call.sql.includes("INSERT INTO audit_logs")), false);
 }
 
+async function verifyPostgresClosingTimeSuccess() {
+  const calls = [];
+  const database = createFakePostgresDatabase(calls);
+  const repository = createMerchantMenuRepository({ runtime: "postgres", database });
+  const result = await repository.updateStorePickupClosingTime({
+    storeId: "store-001", actorUserId: "user-merchant-001", pickupClosingTime: "22:00",
+  });
+  assert.equal(database.transactionCount, 1);
+  assert.equal(database.rollbackCount, 0);
+  assert.deepEqual(result, { store: { id: "store-001", pickupClosingTime: "22:00" } });
+  assert.ok(calls.some((call) => (
+    call.sql.includes("UPDATE stores") && call.sql.includes("pickup_closing_time")
+  )));
+  assert.ok(calls.some((call) => call.sql.includes("FOR SHARE OF merchant_user")));
+  const auditCall = calls.find((call) => call.sql.includes("INSERT INTO audit_logs"));
+  assert.ok(auditCall, "closing time update must be audited");
+  assert.ok(auditCall.sql.includes("merchant_update_store_pickup_closing_time"));
+  await repository.close();
+}
+
+async function verifyPostgresClosingTimeAccessBoundary() {
+  const calls = [];
+  const database = createFakePostgresDatabase(calls, { denyAccess: true });
+  const repository = createMerchantMenuRepository({ runtime: "postgres", database });
+  const result = await repository.updateStorePickupClosingTime({
+    storeId: "store-001", actorUserId: "user-other-merchant", pickupClosingTime: "22:00",
+  });
+  assert.deepEqual(result, { error: "store_access_denied", storeId: "store-001" });
+  assert.equal(calls.some((call) => call.sql.includes("UPDATE stores")), false);
+}
+
+async function verifyPostgresClosingTimeStoreNotFound() {
+  const calls = [];
+  const database = createFakePostgresDatabase(calls, { storeMissing: true });
+  const repository = createMerchantMenuRepository({ runtime: "postgres", database });
+  const result = await repository.updateStorePickupClosingTime({
+    storeId: "store-missing", actorUserId: "user-merchant-001", pickupClosingTime: "22:00",
+  });
+  assert.deepEqual(result, { error: "store_not_found" });
+}
+
 function verifyRuntimeValidation() {
   assert.equal(resolveMerchantMenuRuntime({ env: {} }), "sqlite");
   assert.equal(resolveMerchantMenuRuntime({
@@ -95,6 +148,10 @@ function verifyRuntimeValidation() {
   assert.throws(
     () => createMerchantMenuRepository({ env: {}, sqliteReader() {} }),
     /sqliteWriter is required/
+  );
+  assert.throws(
+    () => createMerchantMenuRepository({ env: {}, sqliteReader() {}, sqliteWriter() {} }),
+    /sqliteClosingTimeWriter is required/
   );
   assert.throws(
     () => createMerchantMenuRepository({ runtime: "postgres" }),
@@ -125,6 +182,9 @@ function createFakePostgresDatabase(calls, options = {}) {
     if (sql.includes("INSERT INTO menu_items")) {
       createdMenuItemId = parameters[0];
       return { rows: [], rowCount: 1 };
+    }
+    if (compactSql.includes("SELECT id, pickup_closing_time FROM stores")) {
+      return { rows: options.storeMissing ? [] : [{ id: "store-001", pickup_closing_time: null }] };
     }
     if (compactSql.includes("SELECT id FROM stores")) {
       return { rows: [{ id: "store-001" }] };
@@ -228,6 +288,7 @@ function createFakePostgresDatabase(calls, options = {}) {
       sql.includes("INSERT INTO")
       || sql.includes("UPDATE menu_items")
       || sql.includes("UPDATE customization_options")
+      || sql.includes("UPDATE stores")
     ) {
       return { rows: [], rowCount: 1 };
     }

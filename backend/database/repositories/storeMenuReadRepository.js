@@ -51,7 +51,7 @@ async function getPostgresPublicStoreMenu(database, storeId) {
 async function getPostgresStoreMenu(database, storeId, input = {}) {
   const includeUnavailable = Boolean(input.includeUnavailable);
   const storeResult = await database.query(`
-    SELECT id, merchant_id, name, address, phone, business_status
+    SELECT id, merchant_id, name, address, phone, business_status, pickup_closing_time
     FROM stores
     WHERE id = $1
   `, [storeId]);
@@ -91,6 +91,7 @@ async function getPostgresStoreMenu(database, storeId, input = {}) {
       address: store.address,
       phone: store.phone,
       businessStatus: store.business_status,
+      pickupClosingTime: store.pickup_closing_time,
     },
     menuItems: menuItemsResult.rows.map((menuItem) => mapMenuItem(
       menuItem,

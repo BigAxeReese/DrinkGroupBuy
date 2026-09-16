@@ -5,7 +5,8 @@ import { PrimaryButton } from "../components/PrimaryButton";
 import {
   createMerchantMenuItem,
   getMerchantStoreMenu,
-  updateMerchantMenuItem
+  updateMerchantMenuItem,
+  updateMerchantStorePickupClosingTime
 } from "../utils/apiClient";
 import { formatCurrency } from "../utils/calculations";
 
@@ -51,6 +52,9 @@ export function MerchantMenuManagementScreen({ navigation, memberAction, selecte
   const [notice, setNotice] = useState(null);
   const [editingItem, setEditingItem] = useState(null);
   const [form, setForm] = useState(() => createEmptyForm());
+  const [closingTimeText, setClosingTimeText] = useState("");
+  const [closingTimeNotice, setClosingTimeNotice] = useState(null);
+  const [savingClosingTime, setSavingClosingTime] = useState(false);
 
   async function loadMenu() {
     setLoading(true);
@@ -67,6 +71,36 @@ export function MerchantMenuManagementScreen({ navigation, memberAction, selecte
   useEffect(() => {
     loadMenu();
   }, [selectedMerchantStoreId]);
+
+  useEffect(() => {
+    setClosingTimeText(menu?.store?.pickupClosingTime || "");
+  }, [menu?.store?.pickupClosingTime]);
+
+  async function saveClosingTime() {
+    const trimmed = closingTimeText.trim();
+    const pickupClosingTime = trimmed === "" ? null : trimmed;
+    if (pickupClosingTime !== null && !/^([01][0-9]|2[0-3]):[0-5][0-9]$/.test(pickupClosingTime)) {
+      setClosingTimeNotice({
+        type: "error",
+        text: "格式需為 24 小時制「時:分」，例如 22:00；留空代表 24 小時營業、不限打烊時間。"
+      });
+      return;
+    }
+    setSavingClosingTime(true);
+    setClosingTimeNotice(null);
+    try {
+      const store = await updateMerchantStorePickupClosingTime(selectedMerchantStoreId, pickupClosingTime);
+      setMenu((current) => (current ? {
+        ...current,
+        store: { ...current.store, pickupClosingTime: store.pickupClosingTime }
+      } : current));
+      setClosingTimeNotice({ type: "success", text: "打烊時間已更新。" });
+    } catch (error) {
+      setClosingTimeNotice({ type: "error", text: error.message || "打烊時間更新失敗。" });
+    } finally {
+      setSavingClosingTime(false);
+    }
+  }
 
   const title = editingItem ? `編輯：${editingItem.name}` : "新增飲品";
   const availableToppingCount = useMemo(
@@ -197,6 +231,29 @@ export function MerchantMenuManagementScreen({ navigation, memberAction, selecte
       onBack={() => navigation.back()}
       onMemberPress={memberAction}
     >
+      <Section title="打烊時間設定">
+        <Text style={styles.meta}>
+          用來限制團購取餐時段不能超過打烊時間（取餐窗口固定 3 小時）。留空代表 24 小時營業、不限打烊時間。
+        </Text>
+        <Field
+          label="打烊時間（24 小時制，例如 22:00）"
+          value={closingTimeText}
+          onChangeText={(value) => setClosingTimeText(timeCharsOnly(value))}
+          placeholder="例如 22:00，留空為不限"
+          keyboardType="numbers-and-punctuation"
+        />
+        <PrimaryButton
+          label={savingClosingTime ? "儲存中…" : "儲存打烊時間"}
+          onPress={saveClosingTime}
+          disabled={savingClosingTime}
+        />
+        {closingTimeNotice ? (
+          <Text style={closingTimeNotice.type === "error" ? styles.error : styles.success}>
+            {closingTimeNotice.text}
+          </Text>
+        ) : null}
+      </Section>
+
       <Section title="飲品清單">
         {loading ? <Text style={styles.meta}>載入中…</Text> : null}
         {!loading && menu?.menuItems?.length === 0 ? <Text style={styles.meta}>目前沒有飲品。</Text> : null}
@@ -377,6 +434,10 @@ function setFormField(setForm, field, value) {
 
 function digitsOnly(value) {
   return String(value).replace(/[^0-9]/g, "");
+}
+
+function timeCharsOnly(value) {
+  return String(value).replace(/[^0-9:]/g, "").slice(0, 5);
 }
 
 const styles = StyleSheet.create({

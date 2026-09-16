@@ -29,12 +29,16 @@ function createMerchantMenuRepository(input = {}) {
     if (typeof input.sqliteWriter !== "function") {
       throw new Error("sqliteWriter is required when MERCHANT_MENU_RUNTIME=sqlite");
     }
+    if (typeof input.sqliteClosingTimeWriter !== "function") {
+      throw new Error("sqliteClosingTimeWriter is required when MERCHANT_MENU_RUNTIME=sqlite");
+    }
     return {
       kind: "sqlite",
       getStoreMenu: async (storeId) => (
         input.sqliteReader(storeId, { includeUnavailable: true })
       ),
       saveMenuItem: async (menuItemInput) => input.sqliteWriter(menuItemInput),
+      updateStorePickupClosingTime: async (value) => input.sqliteClosingTimeWriter(value),
       close: async () => {},
     };
   }
@@ -50,6 +54,7 @@ function createMerchantMenuRepository(input = {}) {
       getPostgresStoreMenu(database, storeId, { includeUnavailable: true })
     ),
     saveMenuItem: (menuItemInput) => savePostgresMerchantMenuItem(database, menuItemInput),
+    updateStorePickupClosingTime: (value) => updatePostgresStorePickupClosingTime(database, value),
     close: async () => {
       if (ownsDatabase) await database.close();
     },
@@ -276,6 +281,67 @@ async function savePostgresMerchantMenuItem(database, input) {
   }
 }
 
+async function updatePostgresStorePickupClosingTime(database, input) {
+  const now = input.now || new Date().toISOString();
+
+  return database.transaction(async (transaction) => {
+    const storeResult = await transaction.query(`
+      SELECT id, pickup_closing_time
+      FROM stores
+      WHERE id = $1
+      FOR UPDATE
+    `, [input.storeId]);
+    const store = storeResult.rows[0];
+    if (!store) return { error: "store_not_found" };
+
+    const accessResult = await transaction.query(`
+      SELECT merchant_user.id
+      FROM merchant_users merchant_user
+      JOIN users user_account ON user_account.id = merchant_user.user_id
+      JOIN user_roles user_role
+        ON user_role.user_id = user_account.id
+       AND user_role.role = 'merchant'
+       AND user_role.status = 'active'
+      WHERE merchant_user.user_id = $1
+        AND merchant_user.store_id = $2
+        AND merchant_user.status = 'active'
+        AND user_account.status = 'active'
+      FOR SHARE OF merchant_user, user_account, user_role
+    `, [input.actorUserId, input.storeId]);
+    if (!accessResult.rows[0]) {
+      return { error: "store_access_denied", storeId: input.storeId };
+    }
+
+    await transaction.query(`
+      UPDATE stores
+      SET pickup_closing_time = $1, updated_at = $2
+      WHERE id = $3
+    `, [input.pickupClosingTime, now, input.storeId]);
+
+    await transaction.query(`
+      INSERT INTO audit_logs (
+        id, actor_user_id, action_type, resource_type, resource_id, metadata_json, created_at
+      ) VALUES ($1, $2, 'merchant_update_store_pickup_closing_time', 'store', $3, $4::jsonb, $5)
+    `, [
+      `audit-log-${randomUUID()}`,
+      input.actorUserId,
+      input.storeId,
+      JSON.stringify({
+        previousPickupClosingTime: store.pickup_closing_time,
+        pickupClosingTime: input.pickupClosingTime,
+      }),
+      now,
+    ]);
+
+    return {
+      store: {
+        id: input.storeId,
+        pickupClosingTime: input.pickupClosingTime,
+      },
+    };
+  });
+}
+
 class MerchantMenuWriteRejected extends Error {
   constructor(result) {
     super(result.error || "merchant_menu_write_rejected");
@@ -345,5 +411,6 @@ module.exports = {
   createMerchantMenuRepository,
   resolveMerchantMenuRuntime,
   savePostgresMerchantMenuItem,
+  updatePostgresStorePickupClosingTime,
   validatePostgresActiveStoreDiscountPricing,
 };

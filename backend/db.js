@@ -1411,7 +1411,7 @@ function listStoreMenu(storeId, input = {}) {
   const includeUnavailable = Boolean(input.includeUnavailable);
   try {
     const store = database.prepare(`
-      SELECT id, merchant_id, name, address, phone, business_status
+      SELECT id, merchant_id, name, address, phone, business_status, pickup_closing_time
       FROM stores
       WHERE id = ?
     `).get(storeId);
@@ -1447,7 +1447,8 @@ function listStoreMenu(storeId, input = {}) {
         name: store.name,
         address: store.address,
         phone: store.phone,
-        businessStatus: store.business_status
+        businessStatus: store.business_status,
+        pickupClosingTime: store.pickup_closing_time
       },
       menuItems: menuItems.map((menuItem) => mapMenuItem(
         menuItem,
@@ -1633,6 +1634,54 @@ function saveMerchantMenuItem(input) {
     transactionStarted = false;
     return { menuItem: listStoreMenu(input.storeId, { includeUnavailable: true })
       .menuItems.find((item) => item.id === menuItemId) };
+  } catch (error) {
+    if (transactionStarted) database.exec("ROLLBACK;");
+    throw error;
+  } finally {
+    database.close();
+  }
+}
+
+// Store ownership is checked at the route level (canManageStore) before this is called --
+// same trust boundary saveMerchantMenuItem above already relies on for the SQLite path.
+function updateStorePickupClosingTimeInDatabase(input) {
+  const database = openDatabase();
+  const now = input.now || new Date().toISOString();
+  let transactionStarted = false;
+
+  try {
+    const store = database.prepare("SELECT id, pickup_closing_time FROM stores WHERE id = ?").get(input.storeId);
+    if (!store) return { error: "store_not_found" };
+
+    database.exec("BEGIN IMMEDIATE;");
+    transactionStarted = true;
+
+    database.prepare(`
+      UPDATE stores
+      SET pickup_closing_time = ?, updated_at = ?
+      WHERE id = ?
+    `).run(input.pickupClosingTime, now, input.storeId);
+
+    database.prepare(`
+      INSERT INTO audit_logs (
+        id, actor_user_id, action_type, resource_type, resource_id, metadata_json, created_at
+      ) VALUES (?, ?, 'merchant_update_store_pickup_closing_time', 'store', ?, ?, ?)
+    `).run(
+      `audit-log-${randomUUID()}`,
+      input.actorUserId,
+      input.storeId,
+      JSON.stringify({ previousPickupClosingTime: store.pickup_closing_time, pickupClosingTime: input.pickupClosingTime }),
+      now
+    );
+
+    database.exec("COMMIT;");
+    transactionStarted = false;
+    return {
+      store: {
+        id: input.storeId,
+        pickupClosingTime: input.pickupClosingTime
+      }
+    };
   } catch (error) {
     if (transactionStarted) database.exec("ROLLBACK;");
     throw error;
@@ -6915,5 +6964,6 @@ module.exports = {
   saveMerchantMenuItem,
   toPublicUser,
   updatePendingOrder,
+  updateStorePickupClosingTimeInDatabase,
   voidLinePayAuthorizationInDatabase
 };

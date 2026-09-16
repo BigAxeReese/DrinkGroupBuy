@@ -273,6 +273,25 @@ async function writeMenuItemRequest(path, method, body) {
   return payload.menuItem;
 }
 
+export async function updateMerchantStorePickupClosingTime(storeId, pickupClosingTime) {
+  const response = await fetch(
+    `${backendBaseUrl}/api/merchant/stores/${encodeURIComponent(storeId)}/pickup-closing-time`,
+    {
+      method: "PATCH",
+      headers: withAuthHeaders({ "Content-Type": "application/json" }),
+      body: JSON.stringify({ pickupClosingTime })
+    }
+  );
+  const payload = await response.json();
+  if (!response.ok) {
+    const error = new Error(payload.error ?? "Update pickup closing time failed");
+    error.status = response.status;
+    error.payload = payload;
+    throw error;
+  }
+  return payload.store;
+}
+
 export async function createOrder(input) {
   const requestKey = `createOrder:${stableStringify(input)}`;
   return dedupeRequest(requestKey, async () => {

@@ -37,6 +37,7 @@ const {
   recordLinePayVoidFailureInDatabase,
   saveMerchantMenuItem,
   updatePendingOrder,
+  updateStorePickupClosingTimeInDatabase,
   voidLinePayAuthorizationInDatabase,
   captureLinePayAuthorizationInDatabase,
   claimPaymentReliabilityJobs,
@@ -206,6 +207,7 @@ const groupBuyActivityWriteRepository = createGroupBuyActivityWriteRepository({
 const merchantMenuRepository = createMerchantMenuRepository({
   sqliteReader: listStoreMenu,
   sqliteWriter: saveMerchantMenuItem,
+  sqliteClosingTimeWriter: updateStorePickupClosingTimeInDatabase,
 });
 const customerOrderWriteRepository = createCustomerOrderWriteRepository({
   sqliteWriter: createOrder,
@@ -759,6 +761,42 @@ const server = http.createServer(async (request, response) => {
       }
       const menu = await merchantMenuRepository.getStoreMenu(merchantStoreMenuMatch[1]);
       sendJson(response, 200, menu);
+      return;
+    }
+
+    const merchantPickupClosingTimeMatch = url.pathname.match(
+      /^\/api\/merchant\/stores\/([^/]+)\/pickup-closing-time$/
+    );
+    if (request.method === "PATCH" && merchantPickupClosingTimeMatch) {
+      const authUser = await getAuthenticatedUser(request);
+      if (!authUser) {
+        sendJson(response, 401, { error: "Authentication required" });
+        return;
+      }
+      if (!authUser.roles.includes("merchant") || !canManageStore(authUser, merchantPickupClosingTimeMatch[1])) {
+        sendJson(response, 403, { error: "Store access denied" });
+        return;
+      }
+      const body = await readJsonBody(request);
+      const validationError = validatePickupClosingTimeInput(body);
+      if (validationError) {
+        sendJson(response, 400, { error: validationError });
+        return;
+      }
+      const result = await merchantMenuRepository.updateStorePickupClosingTime({
+        storeId: merchantPickupClosingTimeMatch[1],
+        pickupClosingTime: body.pickupClosingTime,
+        actorUserId: authUser.id
+      });
+      if (result.error === "store_not_found") {
+        sendJson(response, 404, result);
+        return;
+      }
+      if (result.error === "store_access_denied") {
+        sendJson(response, 403, result);
+        return;
+      }
+      sendJson(response, 200, result);
       return;
     }
 
@@ -2884,6 +2922,19 @@ function validateMenuItemInput(body) {
       }
       if (typeof option.isAvailable !== "boolean") return "customization option isAvailable must be a boolean";
     }
+  }
+  return null;
+}
+
+// Enforces the stricter 00-23 hour range regardless of which database is configured --
+// SQLite's own CHECK constraint on this column is a GLOB pattern that only catches malformed
+// shape, not an out-of-range hour (e.g. "29:59" satisfies it), while PostgreSQL's CHECK does
+// enforce the range. Validating here means both runtimes reject the same inputs.
+function validatePickupClosingTimeInput(body) {
+  if (!("pickupClosingTime" in body)) return "pickupClosingTime is required";
+  if (body.pickupClosingTime === null) return null;
+  if (typeof body.pickupClosingTime !== "string" || !/^([01][0-9]|2[0-3]):[0-5][0-9]$/.test(body.pickupClosingTime)) {
+    return "pickupClosingTime must be null or a 24-hour \"HH:MM\" string (00:00-23:59)";
   }
   return null;
 }
