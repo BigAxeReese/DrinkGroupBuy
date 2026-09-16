@@ -31,10 +31,27 @@ function createStoreDirectoryReadRepository(input = {}) {
   return {
     kind: "postgres",
     listPublicStores: () => listPostgresPublicStores(database),
+    listAllStoresForAdmin: () => listPostgresAllStoresForAdmin(database),
     close: async () => {
       if (ownsDatabase) await database.close();
     },
   };
+}
+
+// Unlike listPublicStores, includes every store regardless of business_status -- an admin
+// picking where to import a menu needs to reach a temporarily-closed store too, not just the
+// ones customers can currently see.
+async function listPostgresAllStoresForAdmin(database) {
+  const result = await database.query(`
+    SELECT id, name, business_status
+    FROM stores
+    ORDER BY name ASC
+  `);
+  return result.rows.map((row) => ({
+    id: row.id,
+    name: row.name,
+    businessStatus: row.business_status,
+  }));
 }
 
 async function listPostgresPublicStores(database) {

@@ -2456,12 +2456,22 @@ const server = http.createServer(async (request, response) => {
 
       const storeId = adminMenuImportMatch[1];
       const existingMenu = await merchantMenuRepository.getStoreMenu(storeId);
+      if (!existingMenu) {
+        sendHtml(response, 404, renderAdminPage({
+          title: "匯入菜單",
+          activeNav: "merchantApplications",
+          bodyHtml: `<section class="empty">找不到這間店，請確認網址裡的店家 ID（${escapeHtml(storeId)}）正確。</section>`
+        }));
+        return;
+      }
       const csrfToken = buildAdminCsrfToken(parseCookies(request)[ADMIN_SESSION_COOKIE_NAME]);
+      const allStores = await storeDirectoryReadRepository.listAllStoresForAdmin();
       sendHtml(response, 200, renderAdminPage({
         title: "匯入菜單",
         activeNav: "merchantApplications",
         bodyHtml: renderAdminMenuImportBody({
           storeId,
+          allStores,
           existingItemCount: existingMenu.menuItems.length,
           csrfToken,
           notice: readAdminNoticeFromQuery(url),
@@ -2481,15 +2491,24 @@ const server = http.createServer(async (request, response) => {
       if (!body) return;
 
       const existingMenu = await merchantMenuRepository.getStoreMenu(storeId);
+      if (!existingMenu) {
+        sendHtml(response, 404, renderAdminPage({
+          title: "匯入菜單",
+          activeNav: "merchantApplications",
+          bodyHtml: `<section class="empty">找不到這間店，請確認網址裡的店家 ID（${escapeHtml(storeId)}）正確。</section>`
+        }));
+        return;
+      }
       const existingItemCount = existingMenu.menuItems.length;
       const prefill = { menuItemsCsv: body.menuItemsCsv || "", optionsCsv: body.optionsCsv || "" };
+      const allStores = await storeDirectoryReadRepository.listAllStoresForAdmin();
 
       function rerenderWithErrors(errors) {
         const csrfToken = buildAdminCsrfToken(parseCookies(request)[ADMIN_SESSION_COOKIE_NAME]);
         sendHtml(response, 200, renderAdminPage({
           title: "匯入菜單",
           activeNav: "merchantApplications",
-          bodyHtml: renderAdminMenuImportBody({ storeId, existingItemCount, csrfToken, notice: null, errors, prefill })
+          bodyHtml: renderAdminMenuImportBody({ storeId, allStores, existingItemCount, csrfToken, notice: null, errors, prefill })
         }));
       }
 
@@ -3547,8 +3566,15 @@ const MENU_IMPORT_OPTION_TYPE_LABELS = { "甜度": "sweetness", "冰量": "ice",
 // self-service screen currently exposes a way to set a smaller custom cap).
 const MENU_IMPORT_SINGLE_CHOICE_TYPES = new Set(["sweetness", "ice", "size"]);
 
-function renderAdminMenuImportBody({ storeId, existingItemCount, csrfToken, notice, errors, prefill }) {
+const ADMIN_STORE_STATUS_LABELS = { open: "營業中", closed: "已關閉", temporarily_closed: "暫停營業" };
+
+function renderAdminMenuImportBody({ storeId, allStores, existingItemCount, csrfToken, notice, errors, prefill }) {
   const noticeHtml = renderAdminNotice(notice);
+  const storeSwitcherHtml = `
+    <label>切換店家</label>
+    <select onchange="if (this.value) location.href = '/admin/stores/' + this.value + '/import-menu';" style="width:100%; margin-bottom:10px;">
+      ${allStores.map((store) => `<option value="${escapeHtml(store.id)}" ${store.id === storeId ? "selected" : ""}>${escapeHtml(store.name)}（${escapeHtml(store.id)}・${escapeHtml(ADMIN_STORE_STATUS_LABELS[store.businessStatus] || store.businessStatus)}）</option>`).join("")}
+    </select>`;
   const errorsHtml = errors.length > 0 ? `
     <div class="notice error">
       <p>匯入前發現 ${errors.length} 個問題，請修正後重新送出（下面已保留你剛才貼的內容）：</p>
@@ -3568,6 +3594,7 @@ function renderAdminMenuImportBody({ storeId, existingItemCount, csrfToken, noti
   ${replaceWarningHtml}
   <section class="card">
     <h2>店家 ID：${escapeHtml(storeId)}</h2>
+    ${storeSwitcherHtml}
     <p class="meta">用在幫店家一次貼上整份菜單：全新店家可以直接匯入；已經有菜單的店家再次匯入，會把舊菜單整批換成這次貼上的新清單（舊品項下架，不刪除）。</p>
     <p class="meta">
       表一「菜單品項」欄位：品名、分類、價格、說明（選填）、是否上架（選填，預設是）。<br />
@@ -3577,10 +3604,16 @@ function renderAdminMenuImportBody({ storeId, existingItemCount, csrfToken, noti
     </p>
     <form method="POST" action="/admin/stores/${encodeURIComponent(storeId)}/import-menu">
       <input type="hidden" name="csrfToken" value="${escapeHtml(csrfToken)}" />
-      <label>表一：菜單品項（第一列是標題：品名,分類,價格,說明,是否上架）</label>
-      <textarea name="menuItemsCsv" rows="10" style="width:100%; font-family:monospace;" placeholder="品名,分類,價格,說明,是否上架&#10;珍珠奶茶,奶茶類,55,,">${escapeHtml(prefill.menuItemsCsv)}</textarea>
-      <label>表二：客製化選項（第一列是標題：品名,選項類型,選項名稱,加價）</label>
-      <textarea name="optionsCsv" rows="10" style="width:100%; font-family:monospace;" placeholder="品名,選項類型,選項名稱,加價&#10;珍珠奶茶,甜度,正常糖,0">${escapeHtml(prefill.optionsCsv)}</textarea>
+      <label>表一：菜單品項</label>
+      <textarea name="menuItemsCsv" rows="10" style="width:100%; font-family:monospace;">${escapeHtml(prefill.menuItemsCsv)}</textarea>
+      <p class="meta" style="font-family:monospace; white-space:pre;">範例（第一列是標題，貼上時連標題一起貼）：
+品名,分類,價格,說明,是否上架
+珍珠奶茶,奶茶類,55,,</p>
+      <label>表二：客製化選項</label>
+      <textarea name="optionsCsv" rows="10" style="width:100%; font-family:monospace;">${escapeHtml(prefill.optionsCsv)}</textarea>
+      <p class="meta" style="font-family:monospace; white-space:pre;">範例（第一列是標題，貼上時連標題一起貼）：
+品名,選項類型,選項名稱,加價
+珍珠奶茶,甜度,正常糖,0</p>
       <button type="submit" class="btn-primary">開始匯入</button>
     </form>
   </section>`;
