@@ -118,6 +118,7 @@ updated: 2026-09-14
   - 付款畫面與文案 [進行中]
     > 顧客／商家在畫面上看到的付款相關內容：付款流程本身的畫面、雙方看到的狀態文字說法。
     - Mobile 端 [完成] — 付款畫面、輪詢、deep link 回跳
+    - 優先嘗試直接開啟 LINE App，退回瀏覽器才需要另外登入 [完成] (9/16) — 使用者提問「為何我按 LINE Pay 都跳瀏覽器要登入，別人的有些能直接跳進 LINE App」。查證後端 `linePayService.js` 其實把 LINE Pay 官方回傳的 `paymentUrl.web`／`paymentUrl.app` 原封不動轉給前端，但 [PaymentAuthorizationScreen.jsx](mobile/src/screens/PaymentAuthorizationScreen.jsx) 原本寫死「只要有 `.web` 就一定用 `.web`」，從沒試過 `.app`（可以直接開啟已登入 LINE App 的深層連結），這是這個 App 一定跳瀏覽器的直接原因。抽出共用函式 `openLinePayCheckoutUrl`，原生平台（Android／iOS）先嘗試 `.app`，開不了（`Linking.openURL` 找不到能處理該網址的 App 時會 reject）才退回 `.web`；Web 平台維持原行為直接用 `.web`（`line://` 深層連結在瀏覽器裡本來就打不開）。**已跟使用者說明兩個目前看不出效果的前提**：(1) 這個專案 LINE Pay 目前仍是 `LINE_PAY_ENV=sandbox`，sandbox 交易本來就不綁真實 LINE 帳號，就算改了程式碼也連不到手機上真正登入的 LINE App，要等切到正式環境才看得出差異；(2) Android 11 以後的套件可見性限制，可能還需要在原生層級的 `<queries>` manifest 額外聲明才能穩定偵測到 LINE App 已安裝——這是需要重新 EAS Build（原生打包）才能生效的改動，這次沒有動，等真的要切正式環境時再一併處理。`npm test` 138/138 全過，Expo Web 重新 bundle 無報錯（Web 路徑邏輯與改動前完全等價，純新增原生分支）。已推送並發布 EAS Update。**尚未實機驗證**：現有 sandbox 環境無法測出實際差異，需等切到正式 LINE Pay 後才能確認。
     - 顧客／商家付款狀態文案分離 [完成] — `authorized` 顧客端顯示「訂單成立」、商家端顯示「已付款」；`failed` 商家端顯示灰色「待付款」。已加入 3 個 Mobile 文案契約測試，`npm test` 於 2026-08-15 實測共 42 項全數通過
       > 同一筆訂單的付款狀態，顧客看到的說法跟商家看到的說法不一樣（例如顧客看到「訂單成立」，商家看到「已付款」），避免同一句話讓兩邊誤會。
     - 付款狀態文案 Android UI 人工覆核 [待處理] — 尚未實際開啟顧客訂單／付款頁與商家訂單畫面確認最終排版；不可把自動測試視為 UI E2E
