@@ -364,29 +364,18 @@ async function syncBackendOrder({
 }
 
 async function openLinePayCheckoutUrl(paymentUrl) {
-  const webUrl = paymentUrl?.web;
-  const appUrl = paymentUrl?.app;
-  if (!webUrl && !appUrl) {
-    throw new Error("LINE Pay 沒有回傳付款網址");
-  }
-
-  // Try the LINE app deep link first on native: when LINE is installed and the customer is
-  // already logged into their own real account there, this skips the browser -- and LINE Pay's
-  // separate web login -- entirely, matching how most real LINE Pay integrations behave.
-  // Linking.openURL rejects when nothing can handle the URL scheme (LINE not installed), so that
-  // failure just falls through to the web checkout page below. Skipped on web: line:// isn't a
-  // browser-openable scheme there, and the desktop preview has no app to hand off to anyway.
-  if (Platform.OS !== "web" && appUrl) {
-    try {
-      await Linking.openURL(appUrl);
-      return;
-    } catch {
-      // Fall through to the web checkout URL.
-    }
-  }
-
-  if (!webUrl) throw new Error("LINE Pay 沒有回傳付款網址");
-  await Linking.openURL(webUrl);
+  // Tried preferring paymentUrl.app (the LINE app deep link) on 2026-09-16 so an
+  // already-logged-in LINE app could skip the browser entirely. Reverted the same day: when LINE
+  // is installed, Linking.openURL(appUrl) *succeeds* (Android found a handler for the scheme), so
+  // the catch-and-fall-back-to-web path never triggers -- but this project's LINE Pay is still
+  // LINE_PAY_ENV=sandbox, and LINE's real app can't process a sandbox reservation once opened, so
+  // it just shows its own "載入失敗" error instead of completing checkout. The failure mode this
+  // was written to catch (nothing can open the URL at all) isn't the one sandbox actually hits.
+  // Revisit trying the app link again only once this project has real production LINE Pay to test
+  // against, not sandbox.
+  const paymentPageUrl = paymentUrl?.web || paymentUrl?.app;
+  if (!paymentPageUrl) throw new Error("LINE Pay 沒有回傳付款網址");
+  await Linking.openURL(paymentPageUrl);
 }
 
 async function startLinePayRepayment({
