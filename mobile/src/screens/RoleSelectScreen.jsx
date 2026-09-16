@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import { Pressable, ScrollView, StyleSheet, Text, TextInput, View } from "react-native";
+import { Image, Pressable, ScrollView, StyleSheet, Text, TextInput, View } from "react-native";
 import {
   getAuthMode,
   listDevAuthUsers,
@@ -335,30 +335,12 @@ function RoleSelectContent({ navigation, isDevAuthMode, googleLogin = null, emai
 
 function LoginHeroIllustration() {
   return (
-    <View style={styles.illustration} accessibilityLabel="飲料團購插圖">
-      <View style={styles.blob} />
-      <View style={styles.smallBlobTop} />
-      <View style={styles.smallBlobBottom} />
-      <View style={styles.cup}>
-        <View style={[styles.ticket, styles.ticketOne]}>
-          <Text style={styles.ticketText}>折</Text>
-        </View>
-        <View style={[styles.ticket, styles.ticketTwo]}>
-          <Text style={styles.ticketText}>省</Text>
-        </View>
-        <View style={[styles.ticket, styles.ticketThree]}>
-          <Text style={styles.ticketText}>團</Text>
-        </View>
-        <View style={[styles.ticket, styles.ticketFour]}>
-          <Text style={styles.ticketText}>買</Text>
-        </View>
-      </View>
-      <View style={styles.lid} />
-      <View style={styles.straw} />
-      <View style={styles.flower}>
-        <Text style={styles.flowerText}>米</Text>
-      </View>
-    </View>
+    <Image
+      source={require("../../assets/login-hero.png")}
+      style={styles.illustration}
+      resizeMode="contain"
+      accessibilityLabel="飲料團購插圖"
+    />
   );
 }
 
@@ -495,115 +477,7 @@ const styles = StyleSheet.create({
   },
   illustration: {
     width: 282,
-    height: 246,
-    alignItems: "center",
-    justifyContent: "center"
-  },
-  blob: {
-    position: "absolute",
-    width: 226,
-    height: 166,
-    borderRadius: 999,
-    backgroundColor: "#37d39b",
-    transform: [{ rotate: "8deg" }]
-  },
-  smallBlobTop: {
-    position: "absolute",
-    right: 34,
-    top: 36,
-    width: 58,
-    height: 40,
-    borderRadius: 999,
-    backgroundColor: "#2ecf93",
-    transform: [{ rotate: "18deg" }]
-  },
-  smallBlobBottom: {
-    position: "absolute",
-    left: 36,
-    bottom: 42,
-    width: 74,
-    height: 52,
-    borderRadius: 999,
-    backgroundColor: "#37d39b",
-    transform: [{ rotate: "28deg" }]
-  },
-  cup: {
-    position: "absolute",
-    bottom: 54,
-    width: 92,
-    height: 116,
-    overflow: "hidden",
-    borderRadius: 22,
-    borderWidth: 7,
-    borderColor: "#27c7da",
-    backgroundColor: "rgba(34, 211, 238, 0.72)"
-  },
-  lid: {
-    position: "absolute",
-    top: 76,
-    width: 106,
-    height: 18,
-    borderRadius: 6,
-    backgroundColor: "#6b7280"
-  },
-  straw: {
-    position: "absolute",
-    top: 42,
-    width: 4,
-    height: 38,
-    borderRadius: 3,
-    backgroundColor: "#087f5b"
-  },
-  flower: {
-    position: "absolute",
-    top: 30,
-    width: 36,
-    height: 36,
-    borderRadius: 18,
-    alignItems: "center",
-    justifyContent: "center",
-    backgroundColor: "#f43f5e"
-  },
-  flowerText: {
-    color: "#ffffff",
-    fontSize: 18,
-    fontWeight: "900"
-  },
-  ticket: {
-    position: "absolute",
-    width: 52,
-    height: 28,
-    alignItems: "center",
-    justifyContent: "center",
-    borderRadius: 4,
-    backgroundColor: "#16a34a",
-    borderWidth: 2,
-    borderColor: "#087f5b"
-  },
-  ticketOne: {
-    left: 8,
-    top: 22,
-    transform: [{ rotate: "-18deg" }]
-  },
-  ticketTwo: {
-    right: 7,
-    top: 34,
-    transform: [{ rotate: "14deg" }]
-  },
-  ticketThree: {
-    left: 18,
-    bottom: 28,
-    transform: [{ rotate: "12deg" }]
-  },
-  ticketFour: {
-    right: 15,
-    bottom: 14,
-    transform: [{ rotate: "-12deg" }]
-  },
-  ticketText: {
-    color: "#bbf7d0",
-    fontSize: 13,
-    fontWeight: "900"
+    height: 246
   },
   actionStack: {
     gap: 10
