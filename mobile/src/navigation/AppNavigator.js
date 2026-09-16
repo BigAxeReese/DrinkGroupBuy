@@ -29,7 +29,7 @@ import { useDevBusinessTime } from "../hooks/useDevBusinessTime";
 import { getBusinessNow } from "../utils/businessTime";
 import { formatDeadlineLabel, formatPickupTimeRangeLabel, getMinutesUntilDeadline, isDeadlineReached } from "../utils/deadlineTime";
 import { getGroupBuyActivityCapacityInfo, wouldExceedGroupBuyActivityCapacity } from "../utils/groupBuyActivityProgress";
-import { normalizeOrderItem } from "../utils/orderItems";
+import { normalizeOrderItem, toLocalOrderItem } from "../utils/orderItems";
 import { buildOrderItemsChange, rollbackAuthorizedCups } from "../utils/orderState";
 import { clearPrototypeStateOnce, loadPrototypeState, savePrototypeState } from "../utils/prototypeStorage";
 import {
@@ -78,27 +78,6 @@ function toBackendOrderItems(orderItems) {
     ice: item.ice,
     toppings: item.toppings
   }));
-}
-
-function toLocalOrderItem(item) {
-  return {
-    id: item.id,
-    drinkId: item.menuItemId,
-    itemName: item.itemName,
-    name: item.itemName,
-    quantity: item.quantity,
-    unitPrice: item.unitPrice,
-    subtotal: item.subtotal,
-    size: item.customizations?.find((customization) => customization.optionType === "size")?.label ?? "L",
-    sweetness: item.customizations?.find((customization) => customization.optionType === "sweetness")?.label ?? "",
-    ice: item.customizations?.find((customization) => customization.optionType === "ice")?.label ?? "",
-    toppings: (item.customizations || [])
-      .filter((customization) => customization.optionType === "topping")
-      .map((customization) => customization.label),
-    customizationOptionIds: (item.customizations || [])
-      .map((customization) => customization.customizationOptionId)
-      .filter(Boolean)
-  };
 }
 
 function isSameCartItemVariant(a, b) {

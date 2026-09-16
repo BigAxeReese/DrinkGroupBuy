@@ -551,7 +551,13 @@ function mapMerchantCredential(row, now) {
       pickupStartAt: row.pickup_start_at,
       pickupEndAt: row.pickup_end_at
     },
-    customerDisplayName: row.customer_display_name || row.customer_login_name || null
+    customerDisplayName: row.customer_display_name || row.customer_login_name || null,
+    // The PostgreSQL path (pickupCredentialRepository.js) also fetches and includes the order's
+    // drink items here so the merchant can see what to hand over before confirming pickup; not
+    // added to this SQLite path since it's permanently isolated-compatibility-test-only, never the
+    // live runtime (see AGENTS.md), and getOrderDetail's own openDatabase()/close() would open a
+    // second connection inside this function's already-open transaction.
+    items: []
   };
 }
 

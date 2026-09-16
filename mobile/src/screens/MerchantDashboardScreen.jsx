@@ -6,7 +6,7 @@ import { DiscountSummaryCard } from "../components/DiscountSummaryCard";
 import { PrimaryButton } from "../components/PrimaryButton";
 import { ProgressSummary } from "../components/ProgressSummary";
 import { StatusBadge } from "../components/StatusBadge";
-import { formatOrderItemCustomizations } from "../utils/orderItems";
+import { formatOrderItemCustomizations, toLocalOrderItem } from "../utils/orderItems";
 import { useOrderListSync } from "../hooks/useOrderListSync";
 import { formatCurrency, getStoreById, isWithdrawalLocked } from "../utils/calculations";
 import { formatDeadlineLabel } from "../utils/deadlineTime";
@@ -304,6 +304,18 @@ export function MerchantDashboardScreen({ navigation, appState, actions, selecte
                 <Text style={styles.lookupMeta}>
                   {pickupLookup.totalCups} 杯 · {formatCurrency(pickupLookup.finalAmount)}
                 </Text>
+                {(pickupLookup.items ?? []).length > 0 ? (
+                  <View style={styles.pickupLookupItems}>
+                    {pickupLookup.items.map(toLocalOrderItem).map((item, index) => (
+                      <View key={item.id ?? index} style={styles.pickupLookupItemRow}>
+                        <Text style={styles.pickupLookupItemName}>{item.itemName} x{item.quantity}</Text>
+                        <Text style={styles.pickupLookupItemMeta}>
+                          {formatOrderItemCustomizations(item, { separator: "、" }) || "無客製化"}
+                        </Text>
+                      </View>
+                    ))}
+                  </View>
+                ) : null}
                 <PrimaryButton
                   disabled={pickupBusy || pickupLookup.status !== "active"}
                   label={pickupBusy
@@ -783,6 +795,26 @@ const styles = StyleSheet.create({
     color: "#475569",
     fontSize: 12,
     lineHeight: 18
+  },
+  pickupLookupItems: {
+    gap: 6,
+    marginTop: 2,
+    borderTopWidth: 1,
+    borderTopColor: "#e2e8f0",
+    paddingTop: 8
+  },
+  pickupLookupItemRow: {
+    gap: 2
+  },
+  pickupLookupItemName: {
+    color: "#0f172a",
+    fontSize: 13,
+    fontWeight: "800"
+  },
+  pickupLookupItemMeta: {
+    color: "#64748b",
+    fontSize: 11,
+    fontWeight: "700"
   },
   errorText: {
     color: "#b91c1c",

@@ -3,6 +3,7 @@
 const { randomInt, randomUUID } = require("node:crypto");
 const { createRuntimeDatabaseAdapter } = require("..");
 const { calculatePickupExpirationAt } = require("../../db");
+const { getPostgresOrderDetail } = require("./customerOrderReadRepository");
 
 function resolvePickupCredentialRuntime(input = {}) {
   const env = input.env || process.env;
@@ -244,14 +245,15 @@ async function lookupCodePostgres(database, input = {}) {
   const now = input.now || new Date().toISOString();
   const row = await findMerchantCredentialPostgres(database, input.pickupCode, input.actorUserId);
   if (!row) return { error: "credential_not_found" };
-  return { credential: mapMerchantCredential(row, now) };
+  const order = await getPostgresOrderDetail(database, row.order_id);
+  return { credential: mapMerchantCredential(row, now, order?.items) };
 }
 
 async function redeemCodePostgres(database, input = {}) {
   const now = input.now || new Date().toISOString();
   const actorUserId = input.actorUserId || null;
 
-  return database.transaction(async (transaction) => {
+  const result = await database.transaction(async (transaction) => {
     const row = await findMerchantCredentialPostgres(transaction, input.pickupCode, actorUserId, true);
     if (!row) return { error: "credential_not_found" };
 
@@ -314,6 +316,7 @@ async function redeemCodePostgres(database, input = {}) {
     return {
       status: "redeemed",
       activityCompleted,
+      orderId: row.order_id,
       credential: {
         ...credential,
         status: "redeemed",
@@ -323,6 +326,18 @@ async function redeemCodePostgres(database, input = {}) {
       }
     };
   });
+
+  if (result.error) return result;
+
+  // Fetched after the transaction commits, on the pooled (non-transactional) connection --
+  // getPostgresOrderDetail runs several sub-queries concurrently via Promise.all, which a single
+  // transactional connection can't safely support (pg logs a deprecation warning and the queries
+  // silently serialize instead of actually running concurrently). Items are immutable snapshots
+  // taken at order creation, so reading them after commit carries no staleness risk.
+  const order = await getPostgresOrderDetail(database, result.orderId);
+  result.credential.items = order?.items ?? [];
+  delete result.orderId;
+  return result;
 }
 
 async function findMerchantCredentialPostgres(database, pickupCode, actorUserId, lockRow = false) {
@@ -562,7 +577,7 @@ function mapCredential(row, context, now) {
   };
 }
 
-function mapMerchantCredential(row, now) {
+function mapMerchantCredential(row, now, items = []) {
   return {
     ...mapCredential(row, row, now),
     pickupCode: row.pickup_code,
@@ -577,7 +592,8 @@ function mapMerchantCredential(row, now) {
       pickupStartAt: toIsoString(row.pickup_start_at),
       pickupEndAt: toIsoString(row.pickup_end_at)
     },
-    customerDisplayName: row.customer_display_name || row.customer_login_name || null
+    customerDisplayName: row.customer_display_name || row.customer_login_name || null,
+    items
   };
 }
 

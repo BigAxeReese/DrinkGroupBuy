@@ -44,6 +44,27 @@ export function CustomerOrdersScreen({ navigation, appState, actions, memberActi
     actions.syncOrderFromBackend(selectedOrderId).catch(() => {});
   }, [selectedOrderId]);
 
+  const hasActivePickupCode = selectedOrder?.pickupCredential?.status === "active";
+  useEffect(() => {
+    if (!selectedOrderId || !hasActivePickupCode) return undefined;
+    // A customer looking at an active pickup code is typically standing at the counter waiting
+    // for the merchant to redeem it on their own device -- nothing else refreshes this screen
+    // once it's open (no AppState foreground listener here, unlike PaymentAuthorizationScreen),
+    // so without a poll the code and payment badge stay frozen at whatever they were when the
+    // screen was first opened, even after the merchant confirms pickup. Capped at 5 minutes so an
+    // order left open indefinitely doesn't poll forever; re-entering the order (or the pull-to-
+    // refresh already on the list) still works as a fallback after that.
+    const deadline = Date.now() + 5 * 60 * 1000;
+    const intervalId = setInterval(() => {
+      if (Date.now() >= deadline) {
+        clearInterval(intervalId);
+        return;
+      }
+      actions.syncOrderFromBackend(selectedOrderId).catch(() => {});
+    }, 5000);
+    return () => clearInterval(intervalId);
+  }, [selectedOrderId, hasActivePickupCode]);
+
   function handleTabChange(nextTab) {
     setSelectedOrderId(null);
     setTab(nextTab);

@@ -1,3 +1,28 @@
+// Converts one raw backend order item (customizations as a flat array of
+// {optionType, label, ...} rows) into the flattened {size, sweetness, ice, toppings} shape the
+// rest of the mobile UI expects. Distinct from normalizeOrderItem below, which normalizes the
+// mobile app's own cart-item shape (already flat) and does not read a customizations array.
+export function toLocalOrderItem(item) {
+  return {
+    id: item.id,
+    drinkId: item.menuItemId,
+    itemName: item.itemName,
+    name: item.itemName,
+    quantity: item.quantity,
+    unitPrice: item.unitPrice,
+    subtotal: item.subtotal,
+    size: item.customizations?.find((customization) => customization.optionType === "size")?.label ?? "L",
+    sweetness: item.customizations?.find((customization) => customization.optionType === "sweetness")?.label ?? "",
+    ice: item.customizations?.find((customization) => customization.optionType === "ice")?.label ?? "",
+    toppings: (item.customizations || [])
+      .filter((customization) => customization.optionType === "topping")
+      .map((customization) => customization.label),
+    customizationOptionIds: (item.customizations || [])
+      .map((customization) => customization.customizationOptionId)
+      .filter(Boolean)
+  };
+}
+
 export function normalizeOrderItem(item) {
   const itemName = item.itemName ?? item.name ?? "";
   return {
