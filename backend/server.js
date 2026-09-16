@@ -177,6 +177,9 @@ const {
   createMerchantApplicationRepository
 } = require("./database/repositories/merchantApplicationRepository");
 const {
+  createMerchantMenuImportRepository
+} = require("./database/repositories/merchantMenuImportRepository");
+const {
   createCustomerRegistrationRepository,
   EMAIL_REGISTRATION_DISABLED_ERROR
 } = require("./database/repositories/customerRegistrationRepository");
@@ -312,6 +315,8 @@ const paymentRefundRepository = createPaymentRefundRepository({
 });
 // Postgres-only, no sqliteGateway -- see merchantApplicationRepository.js's module comment.
 const merchantApplicationRepository = createMerchantApplicationRepository({});
+// Postgres-only, no sqliteGateway -- see merchantMenuImportRepository.js's module comment.
+const merchantMenuImportRepository = createMerchantMenuImportRepository({});
 // Postgres-only, no sqliteGateway -- see customerRegistrationRepository.js's module comment.
 const customerRegistrationRepository = createCustomerRegistrationRepository({});
 // Postgres-only: roles are authoritative in the deployed runtime and must change atomically.
@@ -2328,6 +2333,9 @@ const server = http.createServer(async (request, response) => {
       if (!adminUser) return;
 
       const search = url.searchParams.get("q") || "";
+      const category = ADMIN_ACCOUNT_CATEGORIES.has(url.searchParams.get("category"))
+        ? url.searchParams.get("category")
+        : "all";
       const accounts = await listAdminAccounts({
         authUser: adminUser,
         search,
@@ -2337,6 +2345,7 @@ const server = http.createServer(async (request, response) => {
       const bodyHtml = renderAdminAccountsBody({
         accounts,
         search,
+        category,
         notice: readAdminNoticeFromQuery(url),
         csrfToken,
       });
@@ -2433,6 +2442,95 @@ const server = http.createServer(async (request, response) => {
         serviceBody: { reason: body.reason },
         successText: "已駁回這筆商家申請。"
       });
+      return;
+    }
+
+    // First-time bulk menu import for a brand-new store (see merchantMenuImportRepository.js --
+    // deliberately refuses once the store already has any menu item). Meant for the one moment a
+    // newly-approved store has 50-60 items to enter at once; ordinary day-to-day menu edits stay
+    // on the merchant's own /api/merchant/stores/:storeId/menu-items self-service screen.
+    const adminMenuImportMatch = url.pathname.match(/^\/admin\/stores\/([^/]+)\/import-menu$/);
+    if (request.method === "GET" && adminMenuImportMatch) {
+      const adminUser = await requireAdminWebUser(request, response);
+      if (!adminUser) return;
+
+      const storeId = adminMenuImportMatch[1];
+      const existingMenu = await merchantMenuRepository.getStoreMenu(storeId);
+      const csrfToken = buildAdminCsrfToken(parseCookies(request)[ADMIN_SESSION_COOKIE_NAME]);
+      sendHtml(response, 200, renderAdminPage({
+        title: "匯入菜單",
+        activeNav: "merchantApplications",
+        bodyHtml: renderAdminMenuImportBody({
+          storeId,
+          existingItemCount: existingMenu.menuItems.length,
+          csrfToken,
+          notice: readAdminNoticeFromQuery(url),
+          errors: [],
+          prefill: { menuItemsCsv: "", optionsCsv: "" }
+        })
+      }));
+      return;
+    }
+
+    if (request.method === "POST" && adminMenuImportMatch) {
+      const adminUser = await requireAdminWebUser(request, response);
+      if (!adminUser) return;
+
+      const storeId = adminMenuImportMatch[1];
+      const body = await readCsrfVerifiedAdminFormBody(request, response);
+      if (!body) return;
+
+      const existingMenu = await merchantMenuRepository.getStoreMenu(storeId);
+      const existingItemCount = existingMenu.menuItems.length;
+      const prefill = { menuItemsCsv: body.menuItemsCsv || "", optionsCsv: body.optionsCsv || "" };
+
+      function rerenderWithErrors(errors) {
+        const csrfToken = buildAdminCsrfToken(parseCookies(request)[ADMIN_SESSION_COOKIE_NAME]);
+        sendHtml(response, 200, renderAdminPage({
+          title: "匯入菜單",
+          activeNav: "merchantApplications",
+          bodyHtml: renderAdminMenuImportBody({ storeId, existingItemCount, csrfToken, notice: null, errors, prefill })
+        }));
+      }
+
+      if (existingItemCount > 0 && body.confirmReplace !== "on") {
+        rerenderWithErrors([`這間店目前已經有 ${existingItemCount} 項菜單品項，請勾選下面的確認框後再送出，避免不小心取代到還在使用中的菜單。`]);
+        return;
+      }
+
+      const parsed = buildMenuImportItemsFromCsv(prefill.menuItemsCsv, prefill.optionsCsv);
+      if (parsed.errors) {
+        rerenderWithErrors(parsed.errors);
+        return;
+      }
+
+      const result = await merchantMenuImportRepository.importMenuItems({
+        storeId,
+        actorUserId: adminUser.id,
+        items: parsed.items,
+        now: businessClock.nowIso()
+      });
+
+      if (result.error) {
+        const errorText = result.error === "store_not_found"
+          ? "找不到這間店，請確認網址裡的店家 ID 正確。"
+          : result.error === "menu_discount_conflict"
+            ? "這次的價格會讓這間店目前正在進行的團購優惠級距失效（例如新價格低於某個折扣後的最低售價），請調整價格或先處理該團購後再匯入。"
+            : "匯入失敗，請稍後再試。";
+        rerenderWithErrors([errorText]);
+        return;
+      }
+
+      const successText = result.retiredCount > 0
+        ? `已成功匯入 ${result.menuItemIds.length} 筆菜單品項，並下架原本的 ${result.retiredCount} 筆舊品項。`
+        : `已成功匯入 ${result.menuItemIds.length} 筆菜單品項。`;
+      response.writeHead(302, {
+        Location: buildAdminRedirectLocation(`/admin/stores/${encodeURIComponent(storeId)}/import-menu`, {
+          type: "success",
+          text: successText
+        })
+      });
+      response.end();
       return;
     }
 
@@ -2948,6 +3046,10 @@ ${ADMIN_THEME_VARIABLES}
   .dashboard-columns { display: grid; grid-template-columns: 1fr 1fr; gap: 24px; align-items: start; }
   .dashboard-columns h3.section-title { margin-top: 0; }
   @media (max-width: 720px) { .dashboard-columns { grid-template-columns: 1fr; } }
+  .tabs { display: flex; gap: 6px; flex-wrap: wrap; margin-bottom: 14px; }
+  .tab { border: 1px solid var(--line); border-radius: 999px; padding: 6px 14px; font-size: 12px; font-weight: 700; color: var(--muted); text-decoration: none; }
+  .tab:hover { color: var(--text); border-color: var(--line-strong); }
+  .tab.active { background: var(--text); color: var(--background); border-color: var(--text); }
 </style>
 </head>
 <body>
@@ -3241,8 +3343,36 @@ function renderAdminRefundRequestsBody({ pendingRequests, reviewedRequests, noti
   ${reviewedHtml}`;
 }
 
-function renderAdminAccountsBody({ accounts, search, notice, csrfToken }) {
+// Keys accepted in ?category= -- "all" plus one entry per group renderAdminAccountsBody can show.
+const ADMIN_ACCOUNT_CATEGORIES = new Set(["all", "merchant", "customer", "admin", "test", "other"]);
+const ADMIN_ACCOUNT_CATEGORY_LABELS = {
+  all: "全部分類",
+  merchant: "商家帳號",
+  customer: "顧客帳號",
+  admin: "管理員帳號",
+  test: "測試帳號（seed／開發測試用，非真實使用者）",
+  other: "其他帳號（目前沒有啟用中的角色）",
+};
+// Short labels for the tab bar -- the full descriptive labels above stay on each section's own
+// heading, where there's room to explain what "測試帳號"/"其他帳號" actually means.
+const ADMIN_ACCOUNT_CATEGORY_TAB_LABELS = {
+  all: "全部",
+  merchant: "商家",
+  customer: "顧客",
+  admin: "管理員",
+  test: "測試帳號",
+  other: "其他",
+};
+
+function renderAdminAccountsBody({ accounts, search, category, notice, csrfToken }) {
   const noticeHtml = renderAdminNotice(notice);
+  const tabsHtml = `
+    <div class="tabs">
+      ${[...ADMIN_ACCOUNT_CATEGORIES].map((value) => {
+        const href = `/admin/accounts?${new URLSearchParams({ ...(search ? { q: search } : {}), category: value }).toString()}`;
+        return `<a class="tab ${value === category ? "active" : ""}" href="${escapeHtml(href)}">${escapeHtml(ADMIN_ACCOUNT_CATEGORY_TAB_LABELS[value])}</a>`;
+      }).join("")}
+    </div>`;
   const searchHtml = `
     <form class="row" method="GET" action="/admin/accounts" style="margin-bottom:18px;">
       <input
@@ -3253,27 +3383,81 @@ function renderAdminAccountsBody({ accounts, search, notice, csrfToken }) {
         maxlength="100"
         style="flex:1; min-width:240px;"
       />
+      <input type="hidden" name="category" value="${escapeHtml(category)}" />
       <button type="submit" class="btn-secondary">搜尋</button>
-      ${search ? '<a class="btn" href="/admin/accounts">清除</a>' : ""}
+      ${search || category !== "all" ? '<a class="btn" href="/admin/accounts">清除</a>' : ""}
     </form>`;
 
-  const accountsHtml = accounts.length === 0
+  const testAccounts = accounts.filter(isTestSeedAccount);
+  const realAccounts = accounts.filter((account) => !isTestSeedAccount(account));
+  const groupsByCategory = {
+    merchant: () => renderAdminAccountGroup(ADMIN_ACCOUNT_CATEGORY_LABELS.merchant, realAccounts.filter((account) => account.activeRole === "merchant"), csrfToken),
+    customer: () => renderAdminAccountGroup(ADMIN_ACCOUNT_CATEGORY_LABELS.customer, realAccounts.filter((account) => account.activeRole === "customer"), csrfToken),
+    admin: () => renderAdminAccountGroup(ADMIN_ACCOUNT_CATEGORY_LABELS.admin, realAccounts.filter((account) => account.activeRole === "admin"), csrfToken),
+    other: () => renderAdminAccountGroup(
+      ADMIN_ACCOUNT_CATEGORY_LABELS.other,
+      realAccounts.filter((account) => !["merchant", "customer", "admin"].includes(account.activeRole)),
+      csrfToken
+    ),
+    test: () => renderAdminAccountGroup(ADMIN_ACCOUNT_CATEGORY_LABELS.test, testAccounts, csrfToken),
+  };
+  const categoriesToRender = category === "all" ? Object.keys(groupsByCategory) : [category];
+  const renderedGroupsHtml = categoriesToRender.map((key) => groupsByCategory[key]()).join("\n");
+  const groupsHtml = accounts.length === 0
     ? `<section class="empty">${search ? "找不到符合條件的帳號。" : "目前沒有可管理的顧客或商家帳號。"}</section>`
-    : accounts.map((account) => {
-        const roleLabel = account.activeRole === "admin"
-          ? "管理員"
-          : account.activeRole === "merchant"
-            ? "商家"
-            : account.activeRole === "customer"
-              ? "顧客"
-              : "未設定";
-        const statusLabels = { active: "啟用", disabled: "停用", deleted: "已刪除" };
-        const statusLabel = statusLabels[account.status] || account.status;
-        const accountInactive = account.status !== "active";
-        const accountProtected = account.protectedAdmin;
-        const merchantUnavailable = !account.merchantProfileAvailable;
-        const action = `/admin/accounts/${encodeURIComponent(account.id)}/role`;
-        return `
+    : renderedGroupsHtml.trim() === ""
+      ? `<section class="empty">這個分類目前沒有符合的帳號。</section>`
+      : renderedGroupsHtml;
+
+  return `${noticeHtml}
+  <div class="card">
+    <h2>帳號角色管理</h2>
+    <p class="meta">此頁列出資料庫保留的所有已註冊帳號，包含啟用、停用、已刪除及管理員身份。只有啟用中的一般帳號可切換顧客／商家角色；管理員與非啟用帳號只供查看。</p>
+    <p class="meta">切換只改變目前可使用的介面與權限，不會刪除顧客資料、訂單、商家、門市或歷史紀錄。後端權限立即生效；使用者登出重登，或完全關閉 App 後重新開啟，即會進入新角色介面。</p>
+  </div>
+  ${tabsHtml}
+  ${searchHtml}
+  ${groupsHtml}`;
+}
+
+// Distinguishes real, organically-created accounts from one-time SQL seed data and ad-hoc test
+// signups accumulated over development (e.g. the 7 demo merchants, the seed admin, and various
+// "@a.test" customer fixtures) -- both signals were confirmed against this project's real data:
+// every account created through an actual runtime path (customerRegistrationRepository.js,
+// merchantApplicationRepository.js) gets `user-${randomUUID()}`, while every seed account was
+// hand-assigned a readable id like "user-merchant-001"; RFC 2606 reserves .test/example.com as
+// non-routable placeholder domains, which is exactly what this project's seed data uses.
+const REAL_ACCOUNT_ID_PATTERN = /^user-[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+const TEST_EMAIL_DOMAIN_PATTERN = /@([a-z0-9-]+\.)*(test|example\.(com|org|net))$/i;
+
+function isTestSeedAccount(account) {
+  if (!REAL_ACCOUNT_ID_PATTERN.test(account.id)) return true;
+  if (account.email && TEST_EMAIL_DOMAIN_PATTERN.test(account.email)) return true;
+  return false;
+}
+
+function renderAdminAccountGroup(title, groupAccounts, csrfToken) {
+  if (groupAccounts.length === 0) return "";
+  return `
+  <h3 class="section-title">${escapeHtml(title)}（${groupAccounts.length} 筆）</h3>
+  ${groupAccounts.map((account) => renderAdminAccountCard(account, csrfToken)).join("\n")}`;
+}
+
+function renderAdminAccountCard(account, csrfToken) {
+  const roleLabel = account.activeRole === "admin"
+    ? "管理員"
+    : account.activeRole === "merchant"
+      ? "商家"
+      : account.activeRole === "customer"
+        ? "顧客"
+        : "未設定";
+  const statusLabels = { active: "啟用", disabled: "停用", deleted: "已刪除" };
+  const statusLabel = statusLabels[account.status] || account.status;
+  const accountInactive = account.status !== "active";
+  const accountProtected = account.protectedAdmin;
+  const merchantUnavailable = !account.merchantProfileAvailable;
+  const action = `/admin/accounts/${encodeURIComponent(account.id)}/role`;
+  return `
     <div class="card">
       <h2>${escapeHtml(account.displayName || account.email || account.id)}
         <span class="badge">目前：${escapeHtml(roleLabel)}</span>
@@ -3284,7 +3468,8 @@ function renderAdminAccountsBody({ accounts, search, notice, csrfToken }) {
       ${accountProtected
         ? '<p class="meta" style="color:var(--warning);">管理員是受保護身份：可以在清單查看，但不能在一般角色頁改成顧客或商家。</p>'
         : account.merchantStore
-        ? `<p class="meta">保留的商家資料：${escapeHtml(account.merchantStore.name || account.merchantStore.id)}（${escapeHtml(account.merchantStore.id)}）</p>`
+        ? `<p class="meta">保留的商家資料：${escapeHtml(account.merchantStore.name || account.merchantStore.id)}（${escapeHtml(account.merchantStore.id)}）
+          ・<a href="/admin/stores/${encodeURIComponent(account.merchantStore.id)}/import-menu">匯入菜單</a></p>`
         : '<p class="meta">尚無商家／門市資料；必須先完成商家申請審核，才能切換到商家介面。</p>'}
       ${accountInactive && !accountProtected ? '<p class="meta" style="color:var(--warning);">非啟用帳號只能查看，不能切換角色。</p>' : ""}
       <div class="row">
@@ -3300,17 +3485,6 @@ function renderAdminAccountsBody({ accounts, search, notice, csrfToken }) {
         </form>
       </div>
     </div>`;
-      }).join("\n");
-
-  return `${noticeHtml}
-  <div class="card">
-    <h2>帳號角色管理</h2>
-    <p class="meta">此頁列出資料庫保留的所有已註冊帳號，包含啟用、停用、已刪除及管理員身份。只有啟用中的一般帳號可切換顧客／商家角色；管理員與非啟用帳號只供查看。</p>
-    <p class="meta">切換只改變目前可使用的介面與權限，不會刪除顧客資料、訂單、商家、門市或歷史紀錄。後端權限立即生效；使用者登出重登，或完全關閉 App 後重新開啟，即會進入新角色介面。</p>
-  </div>
-  ${searchHtml}
-  <h3 class="section-title">帳號（${accounts.length} 筆）</h3>
-  ${accountsHtml}`;
 }
 
 // v1 keeps storeName/address/contactPhone read-only at approval -- the admin only supplies the
@@ -3351,7 +3525,8 @@ function renderAdminMerchantApplicationsBody({ pendingApplications, reviewedAppl
       <h2>${escapeHtml(application.storeName)} <span class="badge">${escapeHtml(application.status)}</span></h2>
       <p class="meta">地址：${escapeHtml(application.address)}</p>
       ${application.status === "rejected" && application.rejectionReason ? `<p class="meta" style="color:#b91c1c;">駁回原因：${escapeHtml(application.rejectionReason)}</p>` : ""}
-      ${application.status === "approved" ? `<p class="meta">已建立商家：${escapeHtml(application.resultingMerchantId)}・門市：${escapeHtml(application.resultingStoreId)}</p>` : ""}
+      ${application.status === "approved" ? `<p class="meta">已建立商家：${escapeHtml(application.resultingMerchantId)}・門市：${escapeHtml(application.resultingStoreId)}
+        ・<a href="/admin/stores/${encodeURIComponent(application.resultingStoreId)}/import-menu">匯入菜單</a></p>` : ""}
     </div>`).join("\n");
 
   return `${noticeHtml}
@@ -3359,6 +3534,206 @@ function renderAdminMerchantApplicationsBody({ pendingApplications, reviewedAppl
   ${pendingHtml}
   <h3 class="section-title">審核紀錄（${reviewedApplications.length} 筆）</h3>
   ${reviewedHtml}`;
+}
+
+// Chinese column headers a non-technical admin can type straight from a spreadsheet, mapped to
+// this app's internal option-type identifiers (customization_options.option_type's CHECK
+// constraint in database/schema.sql only allows these four English values).
+const MENU_IMPORT_OPTION_TYPE_LABELS = { "甜度": "sweetness", "冰量": "ice", "尺寸": "size", "加料": "topping" };
+// Matches MerchantMenuManagementScreen.jsx's own rule for a merchant manually building this same
+// shape one item at a time: sweetness/ice/size are "pick exactly one" once any option exists for
+// that type; topping is "pick any number up to however many are listed" (no separate cap column
+// in the CSV -- the imported list's length becomes the cap, since only the merchant's own
+// self-service screen currently exposes a way to set a smaller custom cap).
+const MENU_IMPORT_SINGLE_CHOICE_TYPES = new Set(["sweetness", "ice", "size"]);
+
+function renderAdminMenuImportBody({ storeId, existingItemCount, csrfToken, notice, errors, prefill }) {
+  const noticeHtml = renderAdminNotice(notice);
+  const errorsHtml = errors.length > 0 ? `
+    <div class="notice error">
+      <p>匯入前發現 ${errors.length} 個問題，請修正後重新送出（下面已保留你剛才貼的內容）：</p>
+      <ul>${errors.map((message) => `<li>${escapeHtml(message)}</li>`).join("\n")}</ul>
+    </div>` : "";
+  const replaceWarningHtml = existingItemCount > 0 ? `
+    <div class="notice warning">
+      <p>這間店目前已經有 ${existingItemCount} 項菜單品項。匯入後，這些現有品項會被下架（不會刪除，避免影響已經下單過的歷史訂單），顧客之後只看得到你這次貼上的新清單。</p>
+      <label style="display:flex; align-items:center; gap:8px; font-weight:400;">
+        <input type="checkbox" name="confirmReplace" />
+        我了解，繼續匯入並取代目前的菜單
+      </label>
+    </div>` : "";
+
+  return `${noticeHtml}
+  ${errorsHtml}
+  ${replaceWarningHtml}
+  <section class="card">
+    <h2>店家 ID：${escapeHtml(storeId)}</h2>
+    <p class="meta">用在幫店家一次貼上整份菜單：全新店家可以直接匯入；已經有菜單的店家再次匯入，會把舊菜單整批換成這次貼上的新清單（舊品項下架，不刪除）。</p>
+    <p class="meta">
+      表一「菜單品項」欄位：品名、分類、價格、說明（選填）、是否上架（選填，預設是）。<br />
+      表二「客製化選項」欄位：品名（需對應表一）、選項類型（甜度／冰量／尺寸／加料其中之一）、選項名稱、加價。<br />
+      甜度／冰量／尺寸只要有列出來，顧客就必須從裡面選一個；加料則是可選 0 個到全部都選。<br />
+      從 Excel／Google 試算表整段選取複製，直接貼進下面對應的欄位即可（欄位用逗號或 Tab 都可以）。
+    </p>
+    <form method="POST" action="/admin/stores/${encodeURIComponent(storeId)}/import-menu">
+      <input type="hidden" name="csrfToken" value="${escapeHtml(csrfToken)}" />
+      <label>表一：菜單品項（第一列是標題：品名,分類,價格,說明,是否上架）</label>
+      <textarea name="menuItemsCsv" rows="10" style="width:100%; font-family:monospace;" placeholder="品名,分類,價格,說明,是否上架&#10;珍珠奶茶,奶茶類,55,,">${escapeHtml(prefill.menuItemsCsv)}</textarea>
+      <label>表二：客製化選項（第一列是標題：品名,選項類型,選項名稱,加價）</label>
+      <textarea name="optionsCsv" rows="10" style="width:100%; font-family:monospace;" placeholder="品名,選項類型,選項名稱,加價&#10;珍珠奶茶,甜度,正常糖,0">${escapeHtml(prefill.optionsCsv)}</textarea>
+      <button type="submit" class="btn-primary">開始匯入</button>
+    </form>
+  </section>`;
+}
+
+// Small hand-rolled CSV reader (handles quoted fields with embedded commas/newlines/doubled
+// quotes) instead of a dependency -- this project has no CSV/file-upload library anywhere else,
+// and a real parser is one screen of code, not worth a new dependency for one admin form.
+function parseCsvRows(text) {
+  const normalized = String(text || "").replace(/^﻿/, "").replace(/\r\n/g, "\n").replace(/\r/g, "\n");
+  const rows = [];
+  let row = [];
+  let field = "";
+  let inQuotes = false;
+  for (let i = 0; i < normalized.length; i += 1) {
+    const char = normalized[i];
+    if (inQuotes) {
+      if (char === "\"") {
+        if (normalized[i + 1] === "\"") {
+          field += "\"";
+          i += 1;
+        } else {
+          inQuotes = false;
+        }
+      } else {
+        field += char;
+      }
+      continue;
+    }
+    if (char === "\"") {
+      inQuotes = true;
+    } else if (char === "," || char === "\t") {
+      row.push(field);
+      field = "";
+    } else if (char === "\n") {
+      row.push(field);
+      rows.push(row);
+      row = [];
+      field = "";
+    } else {
+      field += char;
+    }
+  }
+  if (field !== "" || row.length > 0) {
+    row.push(field);
+    rows.push(row);
+  }
+  return rows;
+}
+
+function parseCsvTable(text) {
+  const rows = parseCsvRows(text).filter((row) => row.some((cell) => cell.trim() !== ""));
+  if (rows.length === 0) return [];
+  const headers = rows[0].map((header) => header.trim());
+  return rows.slice(1).map((row) => Object.fromEntries(headers.map((header, index) => [header, (row[index] || "").trim()])));
+}
+
+function isMenuImportFalseValue(text) {
+  return ["否", "no", "false", "0", "n"].includes(text.trim().toLowerCase());
+}
+
+// Parses the two pasted CSV tables into the exact shape validateMenuItemInput (this file's
+// existing single-item validator, shared with the merchant self-service API) already checks --
+// reused as-is here rather than duplicated, so a bulk-imported item is held to the same rules a
+// merchant's own manually-entered item is.
+function buildMenuImportItemsFromCsv(menuItemsCsvText, optionsCsvText) {
+  const errors = [];
+  const itemRecords = parseCsvTable(menuItemsCsvText);
+  if (itemRecords.length === 0) {
+    return { errors: ["菜單品項表沒有任何資料列，請確認第一列是標題（品名、分類、價格...），下面至少要有一列真的資料。"] };
+  }
+
+  const itemsByName = new Map();
+  const orderedItems = [];
+  itemRecords.forEach((record, index) => {
+    const rowNumber = index + 2;
+    const name = record["品名"] || "";
+    if (!name) { errors.push(`菜單品項表第 ${rowNumber} 列：品名不能空白`); return; }
+    if (itemsByName.has(name)) { errors.push(`菜單品項表第 ${rowNumber} 列：品名「${name}」重複出現`); return; }
+    const category = record["分類"] || "";
+    if (!category) { errors.push(`菜單品項表第 ${rowNumber} 列（${name}）：分類不能空白`); return; }
+    const basePrice = Number(record["價格"]);
+    if (!Number.isInteger(basePrice) || basePrice < 0) {
+      errors.push(`菜單品項表第 ${rowNumber} 列（${name}）：價格必須是不小於 0 的整數，目前是「${record["價格"] || ""}」`);
+      return;
+    }
+    const item = {
+      name,
+      category,
+      basePrice,
+      description: record["說明"] || null,
+      isAvailable: !isMenuImportFalseValue(record["是否上架"] || ""),
+      optionsByType: { sweetness: [], ice: [], size: [], topping: [] }
+    };
+    itemsByName.set(name, item);
+    orderedItems.push(item);
+  });
+
+  const optionRecords = parseCsvTable(optionsCsvText);
+  optionRecords.forEach((record, index) => {
+    const rowNumber = index + 2;
+    const name = record["品名"] || "";
+    const item = itemsByName.get(name);
+    if (!item) {
+      errors.push(`客製化選項表第 ${rowNumber} 列：品名「${name}」在菜單品項表裡找不到，請確認兩份表的品名完全一致`);
+      return;
+    }
+    const optionTypeZh = record["選項類型"] || "";
+    const optionType = MENU_IMPORT_OPTION_TYPE_LABELS[optionTypeZh];
+    if (!optionType) {
+      errors.push(`客製化選項表第 ${rowNumber} 列（${name}）：選項類型「${optionTypeZh}」必須是甜度、冰量、尺寸或加料其中之一`);
+      return;
+    }
+    const label = record["選項名稱"] || "";
+    if (!label) { errors.push(`客製化選項表第 ${rowNumber} 列（${name}）：選項名稱不能空白`); return; }
+    if (item.optionsByType[optionType].some((option) => option.label === label)) {
+      errors.push(`客製化選項表第 ${rowNumber} 列（${name}）：${optionTypeZh}裡「${label}」重複出現`);
+      return;
+    }
+    const priceDeltaText = record["加價"] || "0";
+    const priceDelta = Number(priceDeltaText || "0");
+    if (!Number.isInteger(priceDelta) || priceDelta < 0) {
+      errors.push(`客製化選項表第 ${rowNumber} 列（${name}）：加價必須是不小於 0 的整數，目前是「${priceDeltaText}」`);
+      return;
+    }
+    item.optionsByType[optionType].push({ label, priceDelta, isAvailable: true });
+  });
+
+  if (errors.length > 0) return { errors };
+
+  const items = orderedItems.map((item) => ({
+    name: item.name,
+    category: item.category,
+    basePrice: item.basePrice,
+    description: item.description,
+    isAvailable: item.isAvailable,
+    customizationGroups: Object.entries(item.optionsByType)
+      .filter(([, options]) => options.length > 0)
+      .map(([optionType, options]) => ({
+        optionType,
+        minSelections: MENU_IMPORT_SINGLE_CHOICE_TYPES.has(optionType) ? 1 : 0,
+        maxSelections: MENU_IMPORT_SINGLE_CHOICE_TYPES.has(optionType) ? 1 : options.length,
+        options
+      }))
+  }));
+
+  const shapeErrors = items
+    .map((item) => ({ name: item.name, message: validateMenuItemInput(item) }))
+    .filter((entry) => entry.message)
+    .map((entry) => `「${entry.name}」：${entry.message}`);
+  if (shapeErrors.length > 0) return { errors: shapeErrors };
+
+  return { items };
 }
 
 const MINIMUM_ACTIVITY_DURATION_MS = 30 * 60 * 1000;

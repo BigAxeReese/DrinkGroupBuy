@@ -220,6 +220,13 @@ http://localhost:3000
 http://localhost:3000/health
 ```
 
+### 後台管理網頁
+
+Backend 內建一個網頁版後台（`/admin`），可以審核退款、取消團購、審核商家申請、切換帳號角色；登入方式（共用密碼或管理員個人信箱密碼）見 [`backend/README.md`](./backend/README.md) 「Authentication 與 authorization」段落。
+
+- 本機開發：`http://localhost:3000/admin`（`backend/.env` 有設定其他 `PORT` 時，以該 port 為準）
+- 課堂展示（Azure）：`https://drinkgroupbuy-demo-api-ddfkcbgugsaqfwc2.eastasia-01.azurewebsites.net/admin`
+
 ## 在電腦瀏覽器預覽 mobile app
 
 再開另一個終端機，在專案根目錄執行：
