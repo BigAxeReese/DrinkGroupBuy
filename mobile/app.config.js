@@ -13,10 +13,11 @@ const appScheme = process.env.EXPO_PUBLIC_APP_SCHEME || "drinkgroupbuy";
 const authMode = process.env.EXPO_PUBLIC_AUTH_MODE || "firebase";
 
 module.exports = {
-  name: "DrinkGroupBuy Prototype",
+  name: "飲料團購",
   slug: "drink-group-buy-mobile-prototype",
   owner: "royor",
   version: "0.1.0",
+  icon: "./assets/icon.png",
   updates: {
     url: "https://u.expo.dev/834894ac-fe79-4a32-872f-6cee5edf2214",
     // `eas build` injects this header automatically from the build profile's `channel`; a plain
