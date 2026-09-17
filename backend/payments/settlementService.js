@@ -336,86 +336,6 @@ function createTerminalCaptureFailureResult(order, retryState, reason) {
   };
 }
 
-async function runDueGroupBuySettlements(input = {}) {
-  const now = input.now || new Date().toISOString();
-  const dueInput = {
-    now,
-    limit: input.limit
-  };
-  const dueActivities = input.settlementRepository
-    ? await input.settlementRepository.listDueActivities(dueInput)
-    : listDueGroupBuyActivitiesForSettlement(dueInput);
-  const results = [];
-  const failures = [];
-
-  for (const activity of dueActivities) {
-    try {
-      const result = await settleGroupBuyActivity({
-        activityId: activity.id,
-        actorUserId: input.actorUserId || null,
-        now,
-        settlementRepository: input.settlementRepository,
-        paymentCaptureRepository: input.paymentCaptureRepository,
-        authorizationCancelRepository: input.authorizationCancelRepository
-      });
-
-      if (!result) {
-        failures.push({
-          activityId: activity.id,
-          error: "activity_not_found"
-        });
-        continue;
-      }
-
-      if (
-        result.error === "activity_already_settled"
-        || result.error === "settlement_not_due"
-        || result.error === "settlement_retry_pending"
-      ) {
-        results.push({
-          activityId: activity.id,
-          status: result.error === "settlement_retry_pending" ? "retry_pending" : "skipped",
-          error: result.error,
-          result
-        });
-        continue;
-      }
-
-      if (result.error) {
-        failures.push({
-          activityId: activity.id,
-          error: result.error,
-          result
-        });
-        continue;
-      }
-
-      results.push({
-        activityId: activity.id,
-        status: "settled",
-        result
-      });
-    } catch (error) {
-      failures.push({
-        activityId: activity.id,
-        error: error.payload || { message: error.message }
-      });
-    }
-  }
-
-  return {
-    checkedAt: now,
-    dueActivityCount: dueActivities.length,
-    settledCount: results.filter((result) => result.status === "settled").length,
-    retryPendingCount: results.filter((result) => result.status === "retry_pending").length,
-    skippedCount: results.filter((result) => result.status === "skipped").length,
-    failedCount: failures.length,
-    results,
-    failures
-  };
-}
-
-
 async function enqueueDueGroupBuySettlementJobs(input = {}) {
   const now = input.now || new Date().toISOString();
   const dueInput = {
@@ -645,7 +565,6 @@ function readBooleanEnv(value, fallback) {
 module.exports = {
   enqueueDueGroupBuySettlementJobs,
   runDueGroupBuySettlementJobs,
-  runDueGroupBuySettlements,
   startDeadlineSettlementScheduler,
   settleGroupBuyActivity
 };

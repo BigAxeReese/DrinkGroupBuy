@@ -15,7 +15,6 @@ $projectRoot = Split-Path -Parent $PSScriptRoot
 $mobileRoot = Join-Path $projectRoot "mobile"
 $backendEnvPath = Join-Path $projectRoot "backend\.env"
 $mobileEnvPath = Join-Path $mobileRoot ".env"
-$databasePath = Join-Path $projectRoot "database\drink-group-buy-dev.sqlite"
 $postgresComposeFile = Join-Path $projectRoot "database\docker-compose.postgres.yml"
 $appPackage = "com.drinkgroupbuy.prototype"
 $metroPort = 8081
@@ -259,16 +258,6 @@ function Ensure-PostgresDatabase {
   }
 }
 
-function Ensure-DevelopmentDatabase {
-  if (Test-Path -LiteralPath $databasePath) {
-    return
-  }
-
-  Write-Step "Creating missing development database"
-  Invoke-NpmCommand -WorkingDirectory $projectRoot -Arguments @("run", "db:init")
-  Invoke-NpmCommand -WorkingDirectory $projectRoot -Arguments @("run", "db:seed")
-}
-
 function Open-ProjectInCode {
   if ($SkipCode) {
     return
@@ -456,7 +445,6 @@ if (-not [int]::TryParse($backendPortText, [ref]$backendPort) -or $backendPort -
 
 if ($LaunchTarget -eq "Server") {
   Ensure-PostgresDatabase
-  Ensure-DevelopmentDatabase
   Start-Backend -Port $backendPort
 
   Write-Host ""

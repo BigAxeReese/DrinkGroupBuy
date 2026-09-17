@@ -203,11 +203,9 @@ Group-buy activity not found
 目前 mobile 仍保留部分開發身份、訂單與商家／補救畫面 fixture：
 
 ```text
-src/mock/drinks.js
 src/mock/groupBuyActivities.js
 src/mock/orders.js
 src/mock/paymentAuthorizations.js
-src/mock/customerUsers.js
 ```
 
-顧客首頁、活動詳情、地圖、顧客訂單、取餐資訊、商家儀表板、商家開團與開發補救畫面已全面改用 `GET /api/stores`（`appState.stores`）作為店家資料來源；`src/mock/stores.js` 已移除。`src/mock/databaseMapStores.js` 為舊測試工具匯出用途保留，目前 runtime 已不再讀取此檔案。`groupBuyActivities.js` 保留為空的相容檔，不再提供初始活動。
+顧客首頁、活動詳情、地圖、顧客訂單、取餐資訊、商家儀表板、商家開團與開發補救畫面已全面改用 `GET /api/stores`（`appState.stores`）作為店家資料來源；`src/mock/stores.js` 已移除。`src/mock/databaseMapStores.js`（舊測試工具匯出用途、runtime 早已不讀取）已於 2026-09-17 移除。`groupBuyActivities.js` 保留為空的相容檔，不再提供初始活動。`src/mock/drinks.js`、`src/mock/customerUsers.js`（舊的靜態飲品/客戶原型資料，畫面早已改用真實菜單與登入資料）已於 2026-09-17 移除。

@@ -44,10 +44,6 @@ function createStoreMenuReadRepository(input = {}) {
   };
 }
 
-async function getPostgresPublicStoreMenu(database, storeId) {
-  return getPostgresStoreMenu(database, storeId);
-}
-
 async function getPostgresStoreMenu(database, storeId, input = {}) {
   const includeUnavailable = Boolean(input.includeUnavailable);
   const storeResult = await database.query(`
@@ -149,7 +145,6 @@ function toBoolean(value) {
 
 module.exports = {
   createStoreMenuReadRepository,
-  getPostgresPublicStoreMenu,
   getPostgresStoreMenu,
   mapMenuItem,
   resolveStoreMenuReadRuntime,

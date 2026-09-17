@@ -156,7 +156,7 @@ npm run postgres-reliability:multiprocess
 
 - `drink-group-buy-dev.sqlite` 是本機產物，不要上傳 GitHub。
 - `drink-group-buy-dev.sqlite` 於 2026-08-21 用 `db:init` + `db:seed` 重建過一次（見下方對應日期記錄），修正了 2026-08-20 發現的資料過期問題。
-- `database/test/` 是展示/測試資料，不是正式資料庫規格。
+- `database/test/` 這個舊的展示/匯出工具（用來產生 `mobile/src/mock/databaseMapStores.js`）已於 2026-09-17 移除：mobile 地圖畫面早已改連真的後端 API，這個工具跟它產生的 mock 檔案都已經沒有任何程式碼在用。
 - LINE Pay 真正上線前，付款狀態、webhook、capture、void、refund 都需要更完整的記錄與測試。
 
 ## 2026-08-20 本機 backend 完整切換到 PostgreSQL 運作的驗證記錄

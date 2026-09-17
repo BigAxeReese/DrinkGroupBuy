@@ -45,7 +45,7 @@ Mobile 不直接連資料庫或付款 provider。Backend 是身份、價格、�
 ## Database 與 runtime 切換
 
 - PostgreSQL schema 的權威來源是 `database/migrations/`，由 `database/migrate.js` 依版本套用；精確欄位說明只維護在 `docs/AI-database-field-spec.md`。
-- `database/schema.sql` 與被 Git 忽略的 `database/drink-group-buy-dev.sqlite` 保留給 SQLite 相容性測試；`database/test/` 只是測試／匯出工具，不是正式 schema source。
+- `database/schema.sql` 與被 Git 忽略的 `database/drink-group-buy-dev.sqlite` 保留給 SQLite 相容性測試，不是正式 schema source。
 - Repository 仍保留各自的 `*_RUNTIME` 選擇能力，但本機開發 Backend 已將全部 runtime 永久設定為 PostgreSQL。Server 會要求相依的 read/write/payment repositories 一致，不雙寫，也不讓單一交易跨兩個 runtime 拼接。
 - `DATABASE_RUNTIME` 是通用 adapter 的選擇值，但實際 server 行為仍要檢查各 repository 的 runtime consumer，不能只看一個環境變數或文件敘述。
 - `db:init`、`db:seed` 與部分 smoke scripts 會替換本機開發 SQLite。Inspection 一律唯讀；任何 mutation 先備份，完成後跑 integrity 與 foreign-key checks。
