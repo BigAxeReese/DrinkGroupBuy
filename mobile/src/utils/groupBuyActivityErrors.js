@@ -79,6 +79,16 @@ export function mapGroupBuyActivityCreateError(error, tiers = []) {
     return { message, tierErrors };
   }
 
+  if (payload.error === "deadline_too_close_to_store_closing") {
+    const latestTime = payload.latestDeadlineAt
+      ? new Date(payload.latestDeadlineAt).toLocaleTimeString("zh-TW", { hour: "2-digit", minute: "2-digit" })
+      : null;
+    const message = latestTime
+      ? `開團截止時間太晚：店家 ${payload.closingTime} 打烊，截止時間最晚要設在 ${latestTime}（打烊前 1 小時）。`
+      : `開團截止時間太晚，太接近店家 ${payload.closingTime} 打烊時間，請提早截止。`;
+    return { message, tierErrors };
+  }
+
   if (payload.error === "discount_menu_invalid") {
     if (payload.reason === "store_menu_empty") {
       return {

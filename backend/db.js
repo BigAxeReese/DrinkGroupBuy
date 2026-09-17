@@ -11,7 +11,10 @@ const {
   validateActiveStoreDiscountPricing,
   validateOrderItemsForActivityDiscount
 } = require("./pricing/groupBuyDiscountDatabase");
-const { validatePickupWindowAgainstClosingTime } = require("./pickup/pickupWindow");
+const {
+  validatePickupWindowAgainstClosingTime,
+  validateDeadlineAgainstClosingTime,
+} = require("./pickup/pickupWindow");
 
 const databasePath = process.env.DRINK_GROUP_BUY_DB_PATH
   ? path.resolve(process.env.DRINK_GROUP_BUY_DB_PATH)
@@ -471,6 +474,12 @@ function createGroupBuyActivity(input) {
       storeRow?.pickup_closing_time
     );
     if (pickupWindowError) return { ...pickupWindowError, storeId: input.storeId };
+
+    const deadlineClosingError = validateDeadlineAgainstClosingTime(
+      input.deadlineAt,
+      storeRow?.pickup_closing_time
+    );
+    if (deadlineClosingError) return { ...deadlineClosingError, storeId: input.storeId };
 
     const menuPricing = getStoreDiscountPricingContext(database, input.storeId);
     if (menuPricing.error || menuPricing.menuItemCount === 0) {

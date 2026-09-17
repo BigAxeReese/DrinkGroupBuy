@@ -8,7 +8,10 @@ const {
   normalizeDiscountTiers,
   validateDiscountTierConfiguration,
 } = require("../../pricing/groupBuyDiscount");
-const { validatePickupWindowAgainstClosingTime } = require("../../pickup/pickupWindow");
+const {
+  validatePickupWindowAgainstClosingTime,
+  validateDeadlineAgainstClosingTime,
+} = require("../../pickup/pickupWindow");
 
 function resolveGroupBuyActivityWriteRuntime(input = {}) {
   const env = input.env || process.env;
@@ -72,6 +75,12 @@ async function createPostgresGroupBuyActivity(database, input) {
       store.pickup_closing_time
     );
     if (pickupWindowError) return { ...pickupWindowError, storeId: input.storeId };
+
+    const deadlineClosingError = validateDeadlineAgainstClosingTime(
+      input.deadlineAt,
+      store.pickup_closing_time
+    );
+    if (deadlineClosingError) return { ...deadlineClosingError, storeId: input.storeId };
 
     const accessResult = await transaction.query(`
       SELECT merchant_user.id
