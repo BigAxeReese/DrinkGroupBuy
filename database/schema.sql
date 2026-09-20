@@ -121,7 +121,7 @@ CREATE TABLE promotion_tiers (
   id TEXT PRIMARY KEY,
   activity_id TEXT NOT NULL REFERENCES group_buy_activities(id) ON DELETE CASCADE,
   target_cups INTEGER NOT NULL CHECK (target_cups > 0),
-  discount_amount INTEGER NOT NULL CHECK (discount_amount >= 0),
+  discount_percent INTEGER NOT NULL CHECK (discount_percent BETWEEN 1 AND 99),
   sort_order INTEGER NOT NULL DEFAULT 0,
   UNIQUE (activity_id, target_cups)
 );
@@ -425,7 +425,8 @@ CREATE TABLE activity_settlements (
   outcome TEXT NOT NULL CHECK (outcome IN ('qualified', 'failed', 'cancelled')),
   authorized_cups INTEGER NOT NULL DEFAULT 0 CHECK (authorized_cups >= 0),
   applied_tier_id TEXT REFERENCES promotion_tiers(id),
-  discount_amount INTEGER NOT NULL DEFAULT 0 CHECK (discount_amount >= 0),
+  total_discount_amount INTEGER NOT NULL DEFAULT 0 CHECK (total_discount_amount >= 0),
+  discount_percent INTEGER CHECK (discount_percent IS NULL OR discount_percent BETWEEN 1 AND 99),
   settled_at TEXT NOT NULL,
   reason TEXT
 );

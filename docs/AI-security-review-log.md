@@ -1120,3 +1120,21 @@
 - 惡意使用者原本就能直接打 API 帶任意 `items` 陣列（這是既有、已經過驗證的攻擊面），本次修正只是讓「正常使用者」送出的內容變得正確，沒有擴大攻擊面。
 - `ActivityFilterPanel.jsx` 的改動純屬版面 padding（避免搜尋面板底部被 Android 系統手勢列擋住），不涉及任何資料流或權限，無安全影響。
 - `npm test` 138/138 全過；另外用本機真實 PostgreSQL 手動走過兩次端對端情境（單一新品項、以及新增 3 杯的不同品項），確認合併後的 `order_revisions`／`order_revision_items` 金額與杯數正確（$105／2 杯、$235／4 杯），且未誤觸容量預檢。
+
+## 2026-09-18 — 團購優惠改成百分比折扣（金額折扣 → 打折）
+
+**範圍**：`backend/pricing/groupBuyDiscount.js`（核心折扣計算重寫）、`backend/database/repositories/groupBuySettlementRepository.js`（LINE Pay 實際請款金額計算）、`groupBuyActivityWriteRepository.js`／`groupBuyActivityReadRepository.js`（活動建立／讀取）、`customerOrderWriteRepository.js`／`orderRevisionRepository.js`／`merchantMenuRepository.js`／`merchantMenuImportRepository.js`（移除了幾個舊制專屬的價格下限驗證函式）、`backend/db.js`（SQLite 相容路徑鏡像同步改寫）、`backend/payments/settlementService.js`、新增 migration `database/migrations/008_percentage_discount_postgres.sql`，以及對應的 Mobile 顯示/輸入邏輯。
+**觸發原因**：使用者要求把「滿N杯折固定金額」改成「滿N杯打折」；這是會改到 LINE Pay 實際請款金額計算方式的金流改動，依規則主動跑一次 `/security-review`。
+
+### 發現
+
+沒有找到信心度達到門檻（6/10 以上，本次以較寬鬆門檻篩選候選後仍全數排除）的漏洞。
+
+### 沒發現問題的部分
+
+- **移除的驗證函式沒有夾帶授權/注入邏輯**：追查 `findOrderDiscountConflicts`／`validatePostgresOrderDiscount`／`validatePostgresActiveStoreDiscountPricing`／`validateOrderItemsForActivityDiscount` 的完整內容，全部只做「固定金額折扣會不會讓價格變負」這個舊制專屬的價格下限檢查，沒有任何權限、歸屬或注入相關邏輯；實際授權檢查（`store_access_denied`、`order_access_denied`、角色檢查）都在完全沒被這次改動觸碰到的另一段程式碼裡，維持原樣。
+- **新制數學上不可能讓價格變負**：新的 `calculatePercentageDiscount(originalAmount, discountPercent)` 在 `discountPercent` 限制在 1-99、`originalAmount >= 0` 的前提下，`ceil(originalAmount * (100-percent)/100)` 保證落在 `[0, originalAmount]` 之間；輸入超出範圍會直接 `throw`（fail closed），不是靜默轉型，所以拿掉舊檢查是拿掉多餘的重複邏輯，不是拿掉真正的防護。
+- **`discount_percent` 範圍在每一條寫入路徑都有後端驗證，不只是前端**：`validateDiscountTierConfiguration`（PostgreSQL 與 SQLite 活動建立路徑共用）拒絕非整數或超出 1-99 的值；`database/schema.sql` 與 migration 008 在 `promotion_tiers`／`activity_settlements` 都加了對應的 CHECK constraint；`completePostgresSettlement` 在寫入結算快照前另外做了一次 `discountPercentValid` 檢查。Mobile 端「打幾折」輸入（`discountPercentFormat.js`）純粹是顯示/輸入層轉換，換算出來的值一樣要通過上述所有後端檢查。
+- **SQL 一律使用參數化查詢**：這次改動到的所有 repository 查詢（含新 migration）都用 `$1`／`$2`／`ANY($n::text[])` 參數化，沒有字串拼接組出來的 SQL。
+- 附帶檢查了同一批 `git diff` 裡出現、但**不是這次任務範圍**的 `backend/database/repositories/adminStatisticsRepository.js`（新檔案）與 `server.js` 的 `/admin/statistics` 路由——這是另一位協作者（Codex）同時在處理的東西，本次任務沒有修改也沒有依賴它；順帶確認它沿用既有的 `requireAdminWebUser` 授權檢查、輸出經過 `escapeHtml()`，沒有明顯問題，但正式驗收應由該項改動自己的作者或另一次 review 負責，不算在本次記錄的審查範圍內。
+- `npm test` 146/146 全過；另外用本機真實 PostgreSQL 走過一次乾淨的單一結算情境（活動打 7.9 折、訂單原價 $65），確認 `orders.final_amount`／`payment_captures.capture_amount` 正確寫入 $52（`ceil(65*0.79)`），LINE Pay（mock provider）沒有多扣或少扣。尚未針對 Azure 展示環境做遷移驗證（需要使用者自行清空 `group_buy_activities` 後才能套用 migration 008，已在對話中提醒）。

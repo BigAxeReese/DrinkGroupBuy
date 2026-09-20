@@ -6,6 +6,7 @@ import { PrimaryButton } from "../components/PrimaryButton";
 import { ProgressSummary } from "../components/ProgressSummary";
 import { StatusBadge } from "../components/StatusBadge";
 import { getGroupBuyActivityById, formatCurrency } from "../utils/calculations";
+import { formatDealFactorLabel } from "../utils/discountPercentFormat";
 import { getFinalSettlementSnapshot, getGroupBuyActivityProgress } from "../utils/groupBuyActivityProgress";
 import { formatOrderItemCustomizations } from "../utils/orderItems";
 
@@ -73,7 +74,10 @@ export function GroupProgressScreen({ navigation, route, appState, actions, memb
           <View style={styles.finalSettlementCard}>
             <DetailLine label="結算結果" value={finalSettlement.outcomeLabel} />
             <DetailLine label="最終有效杯數" value={`${finalSettlement.authorizedCups} 杯`} />
-            <AmountLine label="最終每杯折扣" value={finalSettlement.discountPerCup} />
+            <DetailLine
+              label="最終折數"
+              value={finalSettlement.discountPercent ? formatDealFactorLabel(finalSettlement.discountPercent) : "未達優惠門檻"}
+            />
             {finalSettlement.hasOrder ? (
               <AmountLine label="我的訂單原價" value={finalSettlement.originalAmount} />
             ) : null}
@@ -91,10 +95,6 @@ export function GroupProgressScreen({ navigation, route, appState, actions, memb
                 emptyLabel="待同步訂單"
               />
             ) : null}
-            <AmountLine
-              label="未分配尾差（退回商家）"
-              value={finalSettlement.undistributedDiscountAmount}
-            />
             <Text style={styles.finalSettlementNotice}>
               此區使用 Backend 保存的截止結算快照，與截止前的預估折扣不同，結算後不再變動。
             </Text>

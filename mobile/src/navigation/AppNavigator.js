@@ -117,10 +117,8 @@ function normalizeBackendSettlement(settlement) {
     outcome: settlement.outcome,
     authorizedCups: Number(settlement.authorizedCups ?? 0),
     appliedTierId: settlement.appliedTierId ?? null,
-    discountAmount: Number(settlement.discountAmount ?? 0),
-    discountPerCup: Number(settlement.discountPerCup ?? 0),
-    allocatedDiscountAmount: Number(settlement.allocatedDiscountAmount ?? 0),
-    undistributedDiscountAmount: Number(settlement.undistributedDiscountAmount ?? 0),
+    totalDiscountAmount: Number(settlement.totalDiscountAmount ?? 0),
+    discountPercent: settlement.discountPercent == null ? null : Number(settlement.discountPercent),
     discountFunder: settlement.discountFunder ?? "merchant",
     calculationVersion: settlement.calculationVersion ?? null,
     settledAt: settlement.settledAt ?? null,
@@ -133,7 +131,7 @@ function normalizeBackendGroupBuyActivity(activity, existingActivity = {}) {
     id: tier.id ?? null,
     cups: Number(tier.targetCups ?? tier.cups),
     targetCups: Number(tier.targetCups ?? tier.cups),
-    discountAmount: Number(tier.discountAmount),
+    discountPercent: Number(tier.discountPercent),
     sortOrder: tier.sortOrder
   }));
   const currentCups = Number(
@@ -169,10 +167,7 @@ function normalizeBackendGroupBuyActivity(activity, existingActivity = {}) {
     participantCount: Number(activity?.participantCount ?? existingActivity.participantCount ?? 0),
     currentTierId: activity?.currentTierId ?? null,
     currentTierTargetCups: activity?.currentTierTargetCups ?? null,
-    currentTierDiscountAmount: Number(activity?.currentTierDiscountAmount ?? 0),
-    estimatedDiscountPerCup: Number(activity?.estimatedDiscountPerCup ?? 0),
-    estimatedAllocatedDiscountAmount: Number(activity?.estimatedAllocatedDiscountAmount ?? 0),
-    estimatedUndistributedDiscountAmount: Number(activity?.estimatedUndistributedDiscountAmount ?? 0),
+    currentTierDiscountPercent: Number(activity?.currentTierDiscountPercent ?? 0),
     nextTierTargetCups: activity?.nextTierTargetCups ?? null,
     cupsToNextTier: Number(activity?.cupsToNextTier ?? 0),
     discountSummaryAuthorizedCups: currentCups,

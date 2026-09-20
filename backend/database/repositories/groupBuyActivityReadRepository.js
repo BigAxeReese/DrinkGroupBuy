@@ -1,5 +1,5 @@
 const { createRuntimeDatabaseAdapter } = require("..");
-const { calculateGroupBuyDiscountSummary } = require("../../pricing/groupBuyDiscount");
+const { resolveAppliedDiscountTier } = require("../../pricing/groupBuyDiscount");
 
 function resolveGroupBuyActivityReadRuntime(input = {}) {
   const env = input.env || process.env;
@@ -64,7 +64,7 @@ async function listPostgresGroupBuyActivities(database) {
       ORDER BY activity.created_at DESC
     `),
     database.query(`
-      SELECT id, activity_id, target_cups, discount_amount, sort_order
+      SELECT id, activity_id, target_cups, discount_percent, sort_order
       FROM promotion_tiers
       ORDER BY target_cups ASC
     `),
@@ -85,10 +85,8 @@ async function listPostgresGroupBuyActivities(database) {
         outcome,
         authorized_cups,
         applied_tier_id,
-        discount_amount,
-        discount_per_cup,
-        allocated_discount_amount,
-        undistributed_discount_amount,
+        total_discount_amount,
+        discount_percent,
         discount_funder,
         calculation_version,
         settled_at,
@@ -111,13 +109,13 @@ async function listPostgresGroupBuyActivities(database) {
         id: tier.id,
         targetCups: tier.target_cups,
         cups: tier.target_cups,
-        discountAmount: tier.discount_amount,
+        discountPercent: tier.discount_percent,
         sortOrder: tier.sort_order,
       }));
     const progress = progressByActivityId.get(row.id);
     const authorizedCups = Number(progress?.authorized_cups ?? 0);
     const participantCount = Number(progress?.participant_count ?? 0);
-    const discountSummary = calculateGroupBuyDiscountSummary(activityTiers, authorizedCups);
+    const discountSummary = resolveAppliedDiscountTier(activityTiers, authorizedCups);
     const firstTargetCups = activityTiers[0]?.targetCups ?? row.maximum_cups ?? 0;
     const displayStatus = row.status === "recruiting" && authorizedCups >= firstTargetCups
       ? "confirmed"
@@ -162,10 +160,8 @@ function mapActivitySettlement(row) {
     outcome: row.outcome,
     authorizedCups: Number(row.authorized_cups),
     appliedTierId: row.applied_tier_id,
-    discountAmount: Number(row.discount_amount),
-    discountPerCup: Number(row.discount_per_cup),
-    allocatedDiscountAmount: Number(row.allocated_discount_amount),
-    undistributedDiscountAmount: Number(row.undistributed_discount_amount),
+    totalDiscountAmount: Number(row.total_discount_amount),
+    discountPercent: row.discount_percent == null ? null : Number(row.discount_percent),
     discountFunder: row.discount_funder,
     calculationVersion: row.calculation_version,
     settledAt: toIsoString(row.settled_at),

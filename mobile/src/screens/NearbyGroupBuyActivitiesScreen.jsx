@@ -5,6 +5,7 @@ import { DistanceRadiusFilter } from "../components/DistanceRadiusFilter";
 import { MobileScreen, Section } from "../components/MobileScreen";
 import { DiscountSummaryCard } from "../components/DiscountSummaryCard";
 import { useDevLocationConfig } from "../hooks/useDevLocationConfig";
+import { formatDealFactorLabel } from "../utils/discountPercentFormat";
 import { calculateDistanceKm, formatDistanceKm } from "../utils/distance";
 import { getGroupBuyActivityStore } from "../utils/groupBuyActivityStores";
 import { getGroupBuyActivityProgress } from "../utils/groupBuyActivityProgress";
@@ -186,8 +187,8 @@ export function NearbyGroupBuyActivitiesScreen({ navigation, appState, actions, 
 
 function getTargetSummary(groupBuyActivity, targetCups) {
   const tier = (groupBuyActivity.tiers ?? []).find((item) => Number(item.cups ?? item.targetCups) === Number(targetCups));
-  const discountAmount = tier?.discountAmount ?? groupBuyActivity.tiers?.[0]?.discountAmount ?? 0;
-  return `目標：滿 ${targetCups} 杯折 ${discountAmount}`;
+  const discountPercent = tier?.discountPercent ?? groupBuyActivity.tiers?.[0]?.discountPercent ?? 0;
+  return `目標：滿 ${targetCups} 杯打 ${formatDealFactorLabel(discountPercent) || "—"}`;
 }
 
 function isVisibleRecruitingGroupBuyActivity(groupBuyActivity) {

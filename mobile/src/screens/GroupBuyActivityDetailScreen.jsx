@@ -5,7 +5,8 @@ import { DiscountSummaryCard } from "../components/DiscountSummaryCard";
 import { PrimaryButton } from "../components/PrimaryButton";
 import { ProgressSummary } from "../components/ProgressSummary";
 import { StatusBadge } from "../components/StatusBadge";
-import { getGroupBuyActivityById, formatCurrency, isWithdrawalLocked } from "../utils/calculations";
+import { getGroupBuyActivityById, isWithdrawalLocked } from "../utils/calculations";
+import { formatDealFactorLabel } from "../utils/discountPercentFormat";
 import { getGroupBuyActivityStore } from "../utils/groupBuyActivityStores";
 import { getGroupBuyActivityJoinAction } from "../utils/groupBuyActivityJoinState";
 import { getGroupBuyActivityProgress } from "../utils/groupBuyActivityProgress";
@@ -82,7 +83,7 @@ export function GroupBuyActivityDetailScreen({ navigation, route, appState, acti
         {groupBuyActivity.tiers.map((tier) => (
           <View key={tier.cups} style={styles.tierRow}>
             <Text style={styles.tierText}>滿 {tier.cups} 杯</Text>
-            <Text style={styles.tierValue}>折 {formatCurrency(tier.discountAmount)}</Text>
+            <Text style={styles.tierValue}>打 {formatDealFactorLabel(tier.discountPercent) || "—"}</Text>
           </View>
         ))}
       </Section>

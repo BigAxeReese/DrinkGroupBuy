@@ -45,12 +45,14 @@ LINE Pay 實作與驗證進度詳見 `docs/AI-current-progress.md`「2026-08-08 
 7. 如果團購未達優惠門檻，且顧客沒有勾選接受原價購買，系統取消授權 `void`，顧客端顯示「未成團」與「授權已取消」，訂單直接進入歷史訂單。
 8. 顧客端保留「未達優惠時接受原價購買」選項。
 9. 顧客端對未請款金額的說明使用：「未請款金額會由 LINE Pay 或發卡銀行依規定釋放，實際時間以付款服務為準」。
-10. `promotion_tiers.discount_amount` 代表該優惠級距的總折扣金額，不是單杯折扣。
-11. 達標結算時，系統會把適用級距的總折扣金額平均分攤給每一杯有效授權飲品。
-12. 每杯折扣使用 `floor(適用級距總折扣 / 有效授權杯數)`；例如總折扣 100 元、有效 3 杯時，每杯折 33 元，實際分配 99 元。
-13. 無法整除的尾差不進入任何顧客訂單折扣。現行優惠由商家出資，因此尾差退回商家；未來若活動明確由平台出資，尾差才由平台保留。進行中依目前有效授權杯數即時顯示「預估每杯折扣」，截止時重新計算；PostgreSQL 最終快照保存 `discount_per_cup`、`allocated_discount_amount`、`undistributed_discount_amount`、`discount_funder` 與 `calculation_version`。
-14. 活動發布時逐級驗證可達杯數區間。一般級距上限為下一級距 `target_cups - 1`，最高級距上限為 `maximum_cups`；必須滿足 `floor(discount_amount / 區間上限) >= 1`，且門檻杯數時計算的每杯折扣不得高於店內最低可售單杯權威金額。招募中的菜單降價／上架、訂單寫入、重新授權與截止結算皆須重驗，任何應付金額不得為負數。
-15. 顧客端只有在 Backend 已保存並回傳 `activity_settlements` 快照後才顯示「最終結算結果」；顯示最終有效杯數、每杯折扣、訂單 `final_amount` 與未分配尾差。單純抵達截止時間仍只能等待 Backend 結算，不得由 Mobile 自行宣告最終金額。
+10. `promotion_tiers.discount_percent`（2026-09-18 起，取代原本的 `discount_amount` 固定金額）代表該優惠級距的折扣百分比（1-99 的整數，例如 30 代表打 7 折／付原價 70%），不是固定金額，也不是單杯折扣。
+11. 達標結算時，系統對**每一筆訂單各自**依該訂單自己的 `original_amount` 計算折扣，不是先算出一個活動共用的金額或每杯折扣再平分——因為不同訂單品項單價不同，同一個折扣百分比套用在不同訂單上，折扣金額本來就不會一樣。
+12. 每筆訂單的應付金額使用 `ceil(original_amount * (100 - discount_percent) / 100)`（無條件進位到整數元，進位方向有利商家，跟舊制「尾差退商家」精神一致）；例如訂單原價 65 元、折扣 21%（7.9 折）時，`ceil(65 * 0.79) = 52` 元，折扣 13 元。
+13. 因為是逐筆訂單直接算完直接進位，沒有「一包總折扣先分攤、分不完的尾差」這個概念，也不需要另外追蹤未分配尾差。進行中依目前杯數即時顯示「目前／下一級距的折扣百分比」，截止時重新計算；PostgreSQL 最終快照（`activity_settlements`）保存 `discount_percent`、`total_discount_amount`（結算後把每筆訂單折扣加總得出的衍生值）、`discount_funder` 與 `calculation_version`（`percentage_v1`）。
+14. 活動發布時驗證：`discount_percent` 必須是 1-99 的整數；杯數門檻由小到大排列且不可重疊；**級距杯數門檻越高，折扣百分比必須嚴格更好**（例如 20 杯 7 折、30 杯 6 折要被拒絕，門檻更高卻折得更少不合理）。百分比折扣對非負價格數學上不可能讓應付金額變負數，所以不再需要「折扣是否超過店內最低單杯價格」這類跟菜單金額比較的檢查（舊制 `discount_per_cup_below_minimum`／`discount_per_cup_exceeds_minimum_unit_price` 已移除）。
+15. 顧客端只有在 Backend 已保存並回傳 `activity_settlements` 快照後才顯示「最終結算結果」；顯示最終有效杯數、折扣百分比、訂單 `final_amount`。單純抵達截止時間仍只能等待 Backend 結算，不得由 Mobile 自行宣告最終金額。
+
+> **2026-09-18 遷移備註**：改成百分比折扣時，`promotion_tiers.discount_amount`／`activity_settlements` 的 `discount_per_cup`／`allocated_discount_amount`／`undistributed_discount_amount` 欄位與 migration 003 的相關 CHECK constraint 已被 `database/migrations/008_percentage_discount_postgres.sql` 移除，改為 `discount_percent`／`total_discount_amount`。這是不相容的 schema 變更，套用 migration 008 前必須先清空 `group_buy_activities`（會 cascade 清掉 `promotion_tiers`／`orders`／`activity_settlements`），否則舊的金額折扣資料在新程式碼下會被誤讀成百分比。
 
 ### 活動時間限制
 
@@ -210,7 +212,7 @@ LINE Pay 實作與驗證進度詳見 `docs/AI-current-progress.md`「2026-08-08 
 11. LINE Pay void 使用官方 `POST /v3/payments/authorizations/{transactionId}/void`；成功後更新 `payment_authorizations.status = authorization_voided`，並同步更新訂單付款狀態與稽核紀錄；失敗時至少記錄 provider event 與 audit log。
 12. LINE Pay capture 使用官方 `POST /v3/payments/authorizations/{transactionId}/capture`；成功後新增 `payment_captures`，更新 `payment_authorizations.status = captured`、`orders.payment_status = captured` 與 `orders.final_amount`，並記錄 provider event、status history 與 audit log。
 13. LINE Pay refund 使用官方 `POST /v3/payments/{transactionId}/refund`；成功後新增 `payment_refunds`，全額退款時更新 `orders.payment_status = refunded`，並記錄 provider event 與 audit log。
-14. 結算的折扣分攤規則：每杯折扣為 `floor(promotion_tiers.discount_amount / 截止時有效授權總杯數)`，各訂單折扣為每杯折扣乘以該訂單杯數；未分配尾差由優惠出資方保留，現行商家出資活動的尾差退回商家。PostgreSQL `003` 會保存不可變快照並以 constraints 驗證分配總額；活動列表的 SQLite／PostgreSQL read runtime 均已回傳該快照供 Mobile 顯示。
+14. 結算的折扣計算規則：各訂單折扣為 `original_amount - ceil(original_amount * (100 - promotion_tiers.discount_percent) / 100)`，逐筆訂單各自依自己的原價計算，不是先算出一個活動共用的每杯折扣再分攤。PostgreSQL `activity_settlements` 會保存不可變快照（`discount_percent`、`total_discount_amount`）；活動列表的 SQLite／PostgreSQL read runtime 均已回傳該快照供 Mobile 顯示。
 15. 第一階段商家只能提出退款申請，由營運／補救權限確認後執行 LINE Pay refund；正式流程需檢查門市權限、可退餘額、冪等、跨程序鎖、audit log、reconciliation 與失敗告警。
 16. 本機開發可使用 `mock_line_pay` 測試截止結算與退款，不呼叫外部 LINE Pay API；`npm run settlement:smoke` 會使用乾淨 schema 暫時建立 mock 預授權訂單，驗證達標 capture、未達標 fallback capture、void、scheduler due activity 結算、order revision 套用與 refund idempotency，並在測試後還原開發資料庫。
 
