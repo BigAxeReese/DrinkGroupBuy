@@ -1,0 +1,518 @@
+<!DOCTYPE html>
+<html lang="zh-Hant">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>方向 C：奶茶上色</title>
+<style>
+/* ===== 1. 全部設計值先放成變數（來源：方向 C 規格） ===== */
+:root{
+  --cup-blue:#2043B8; --milk-white:#FFFFFF; --milk-tea:#F3E4D2; --pearl-black:#2A1B17; --sugar-grey:#6F5A4E;
+  --taro:#5B3D8C; --taro-bg:#EFE8F7; --matcha:#2F5A14; --matcha-bg:#E5F0D3;
+  --milk-line:#EADBCB; --row-line:#C9B39C; --input-line:#A38670; --code-fg:#FFF8F2;
+  --info-bg:#E8EDFB; --info-fg:#1B3A99; --info-bd:#C5D2F5;
+  --ok-bg:#E5F0D3; --ok-fg:#2F5A14; --ok-bd:#C4DBA3;
+  --warn-bg:#FBEBC8; --warn-fg:#7A4A00; --warn-bd:#F0D08A;
+  --bad-bg:#FBE3E6; --bad-fg:#9E1F3A; --bad-bd:#F2B8C2;
+  --neu-bg:#EFE7DF; --neu-fg:#5A4A40; --neu-bd:#DCCFC3;
+  --r-8:8px; --r-14:14px; --r-20:20px; --r-28:28px; --r-btn:26px; --r-pill:999px;
+  --s-4:4px; --s-8:8px; --s-12:12px; --s-16:16px; --s-20:20px; --s-24:24px; --s-28:28px; --s-32:32px;
+  --stroke:2px; --btn-h:52px; --tap:44px; --nav-h:64px; --disc:44px; --mk:14px;
+  --pearl-lg:40px; --pearl-gap:8px; --pearl-mini:10px; --pearl-mini-gap:4px; --pearl-pass:14px;
+  --phone-w:360px; --phone-h:760px; --bezel:8px;
+  --w-reg:400; --w-bold:700;
+  --font:"Noto Sans TC","PingFang TC","Microsoft JhengHei",system-ui,sans-serif;
+  --fs-pearl:32px; --lh-pearl:36px; --fs-code:52px; --lh-code:60px;
+  --fs-title:24px; --lh-title:32px; --fs-section:17px; --lh-section:24px;
+  --fs-body:15px; --lh-body:23px; --fs-dense:14px; --lh-dense:20px;
+  --fs-price:18px; --lh-price:24px; --fs-btn:16px; --lh-btn:22px;
+  --fs-label:12px; --lh-label:16px; --fs-note:12px; --lh-note:17px;
+  --fs-hero:40px; --lh-hero:48px; /* 只給本頁標題用，不是 App 字級 */
+}
+*{box-sizing:border-box;margin:0}
+html{background:var(--milk-white);color:var(--pearl-black);-webkit-text-size-adjust:100%}
+body{font:var(--w-reg) var(--fs-body)/var(--lh-body) var(--font);padding-bottom:var(--s-32)}
+.num{font-variant-numeric:tabular-nums}
+.grey{color:var(--sugar-grey)}
+.t-page{font:var(--w-bold) var(--fs-title)/var(--lh-title) var(--font)}
+.t-sec{font:var(--w-bold) var(--fs-section)/var(--lh-section) var(--font)}
+.t-body{font:var(--w-reg) var(--fs-body)/var(--lh-body) var(--font)}
+.t-dense{font:var(--w-reg) var(--fs-dense)/var(--lh-dense) var(--font)}
+.t-price{font:var(--w-bold) var(--fs-price)/var(--lh-price) var(--font);font-variant-numeric:tabular-nums;text-align:right;white-space:nowrap}
+.t-lab{font:var(--w-bold) var(--fs-label)/var(--lh-label) var(--font)}
+.t-note{font:var(--w-reg) var(--fs-note)/var(--lh-note) var(--font);color:var(--sugar-grey)}
+.big{font:var(--w-bold) var(--fs-pearl)/var(--lh-pearl) var(--font);font-variant-numeric:tabular-nums}
+.row{display:flex;align-items:center;gap:var(--s-8)}
+.between{justify-content:space-between}
+.col{display:flex;flex-direction:column;gap:var(--s-8)}
+
+/* ===== 2. 頁面（說明用，不是 App 畫面） ===== */
+.wrap{max-width:1180px;margin:0 auto;padding:0 var(--s-24)}
+.hero{padding:var(--s-32) 0 var(--s-16);display:flex;flex-direction:column;gap:var(--s-12)}
+.eyebrow{align-self:flex-start;min-height:28px;padding:0 var(--s-12);display:inline-flex;align-items:center;border-radius:var(--r-pill);background:var(--milk-tea);font:var(--w-bold) var(--fs-label)/var(--lh-label) var(--font)}
+.hero h1{font:var(--w-bold) var(--fs-hero)/var(--lh-hero) var(--font)}
+.hero h1 .en{display:block;font:var(--w-reg) var(--fs-section)/var(--lh-section) var(--font);color:var(--sugar-grey)}
+.hero .thesis{max-width:820px}
+.hero .sig{display:inline-flex;align-items:center;gap:var(--s-8);align-self:flex-start;padding:var(--s-8) var(--s-16);border:var(--stroke) solid var(--cup-blue);border-radius:var(--r-pill);color:var(--cup-blue);font-weight:var(--w-bold)}
+h2.sec{font:var(--w-bold) var(--fs-title)/var(--lh-title) var(--font);margin:var(--s-16) 0 var(--s-4)}
+.lead{color:var(--sugar-grey);margin-bottom:var(--s-8)}
+
+/* ===== 3. 手機外框 ===== */
+.phones{display:flex;gap:var(--s-24);overflow-x:auto;justify-content:safe center;padding:var(--s-8) var(--s-24) var(--s-24)}
+.fig{flex:none;width:calc(var(--phone-w) + 2*var(--bezel));display:flex;flex-direction:column;gap:var(--s-12)}
+.fig figcaption{text-align:center;font:var(--w-bold) var(--fs-body)/var(--lh-body) var(--font)}
+.fig figcaption span{display:block;font:var(--w-reg) var(--fs-note)/var(--lh-note) var(--font);color:var(--sugar-grey)}
+.phone{height:var(--phone-h);padding:var(--bezel);background:var(--pearl-black);border-radius:44px}
+.dev{position:relative;height:100%;background:var(--milk-white);border-radius:36px;overflow:hidden;display:flex;flex-direction:column}
+.sb{flex:none;height:28px;display:flex;align-items:center;justify-content:space-between;padding:0 var(--s-20);font:var(--w-bold) var(--fs-label)/var(--lh-label) var(--font)}
+.sb .bat{width:22px;height:11px;border:var(--stroke) solid var(--pearl-black);border-radius:4px;padding:1px}
+.sb .bat i{display:block;height:100%;width:70%;background:var(--pearl-black);border-radius:1px}
+.gb{flex:none;height:20px;display:flex;justify-content:center;align-items:center}
+.gb i{width:108px;height:4px;border-radius:2px;background:var(--pearl-black)}
+.scr{flex:1;min-height:0;display:flex;flex-direction:column}
+.body{flex:1;min-height:0;overflow-y:auto;padding:var(--s-8) var(--s-20) var(--s-20);display:flex;flex-direction:column;gap:var(--s-24)}
+.body.dense{padding:var(--s-8) var(--s-16) var(--s-16);gap:var(--s-12)}
+.foot{flex:none;padding:var(--s-12) var(--s-20) var(--s-16);border-top:var(--stroke) solid var(--milk-line);display:flex;flex-direction:column;gap:var(--s-8)}
+.foot.dense{padding:var(--s-12) var(--s-16)}
+.sect{display:flex;flex-direction:column;gap:var(--s-12)}
+.back{width:var(--tap);height:var(--tap);margin-left:calc(-1 * var(--s-12));display:flex;align-items:center;justify-content:center}
+.arrow{width:10px;height:10px;border:solid var(--sugar-grey);border-width:var(--stroke) var(--stroke) 0 0;transform:rotate(45deg)}
+.back .arrow{transform:rotate(-135deg);border-color:var(--pearl-black)}
+
+/* ===== 4. 共用元件 ===== */
+.card{background:var(--milk-white);border:var(--stroke) solid var(--milk-line);border-radius:var(--r-28);padding:var(--s-20);display:flex;flex-direction:column;gap:var(--s-12)}
+.card.dense{border-radius:var(--r-20);padding:0;gap:0}
+.press{cursor:pointer;transition:transform 100ms}
+.press:active{transform:scale(.98)}
+.avatar{flex:none;width:var(--tap);height:var(--tap);border-radius:50%;background:var(--milk-tea);display:flex;align-items:center;justify-content:center;font:var(--w-bold) var(--fs-section)/var(--lh-section) var(--font)}
+.chip{display:inline-flex;align-items:center;min-height:var(--tap);padding:0 var(--s-16);border:var(--stroke) solid transparent;border-radius:var(--r-pill);background:var(--milk-tea);font:var(--w-bold) var(--fs-label)/var(--lh-label) var(--font)}
+.chip.on{background:var(--milk-white);border-color:var(--cup-blue);color:var(--cup-blue)}
+.lab{display:inline-flex;align-items:center;min-height:24px;padding:0 var(--s-8);border-radius:var(--r-8);background:var(--milk-tea);font:var(--w-bold) var(--fs-label)/var(--lh-label) var(--font)}
+.tag{display:inline-flex;align-items:center;min-height:24px;padding:0 var(--s-8);border-radius:var(--r-8);background:var(--warn-bg);color:var(--warn-fg);font:var(--w-bold) var(--fs-label)/var(--lh-label) var(--font)}
+/* 按鈕：實心藍 = 可以按 */
+.btn{display:flex;align-items:center;justify-content:center;min-height:var(--btn-h);padding:0 var(--s-24);border:var(--stroke) solid var(--cup-blue);border-radius:var(--r-btn);font:var(--w-bold) var(--fs-btn)/var(--lh-btn) var(--font);cursor:pointer;transition:transform 100ms}
+.btn:active,.btn.pressed{transform:scale(.98)}
+.btn-p{background:var(--cup-blue);color:var(--milk-white)}
+.btn-s{background:var(--milk-white);color:var(--cup-blue)}
+.btn-d{background:var(--milk-tea);border-color:var(--milk-tea);color:var(--sugar-grey);cursor:not-allowed}
+.grow{flex:1}
+/* 狀態藥丸：淡底不加外框，前面一個 14dp 記號 */
+.pill{display:inline-flex;align-items:center;gap:6px;min-height:28px;padding:0 10px;border-radius:var(--r-pill);white-space:nowrap;background:var(--tb);color:var(--tf);font:var(--w-bold) var(--fs-label)/var(--lh-label) var(--font)}
+.tone-info{--tb:var(--info-bg);--tf:var(--info-fg)} .tone-ok{--tb:var(--ok-bg);--tf:var(--ok-fg)}
+.tone-warn{--tb:var(--warn-bg);--tf:var(--warn-fg)} .tone-bad{--tb:var(--bad-bg);--tf:var(--bad-fg)}
+.tone-neu{--tb:var(--neu-bg);--tf:var(--neu-fg)} .tone-taro{--tb:var(--taro-bg);--tf:var(--taro)}
+.mk{position:relative;flex:none;width:var(--mk);height:var(--mk);display:flex;align-items:center;gap:2.5px}
+.mk i{display:block;position:absolute;background:currentColor;border-radius:1px}
+.mk-check i{left:4px;top:1px;width:5px;height:9px;background:none;border:solid currentColor;border-width:0 var(--stroke) var(--stroke) 0;transform:rotate(45deg)}
+.mk-dots i{position:static;width:3px;height:3px;border-radius:50%}
+.mk-bang i:first-child{left:6px;top:0;width:2px;height:9px}
+.mk-bang i:last-child{left:5.5px;top:11px;width:3px;height:3px;border-radius:50%}
+.mk-cross i{left:6px;top:0;width:2px;height:14px;transform:rotate(45deg)}
+.mk-cross i+i{transform:rotate(-45deg)}
+.mk-dash i{left:2px;top:6px;width:10px;height:2px}
+/* 折扣摘要：預估芋頭紫、鎖定抹茶綠 */
+.disc{display:flex;flex-direction:column;gap:var(--s-4);padding:var(--s-12) var(--s-16);border-radius:var(--r-14);background:var(--taro-bg);color:var(--taro)}
+.disc.final{background:var(--matcha-bg);color:var(--matcha)}
+.disc.line{border:var(--stroke) solid var(--cup-blue);border-radius:var(--r-20);padding:var(--s-16)}
+/* 底部導覽：小圓點＋文字，不用圖示 */
+.nav{flex:none;height:var(--nav-h);display:flex;align-items:center;border-top:var(--stroke) solid var(--milk-line);background:var(--milk-white)}
+.nav a{flex:1;min-height:var(--tap);display:flex;flex-direction:column;align-items:center;justify-content:center;gap:var(--s-4);color:var(--sugar-grey);text-decoration:none;font:var(--w-reg) var(--fs-label)/var(--lh-label) var(--font)}
+.nav a::before{content:"";width:12px;height:12px;border-radius:50%;border:var(--stroke) solid var(--sugar-grey)}
+.nav a.on{color:var(--cup-blue);font-weight:var(--w-bold)}
+.nav a.on::before{background:var(--cup-blue);border-color:var(--cup-blue)}
+.nav a.go{flex:none;flex-direction:row;margin:0 var(--s-16);padding:0 var(--s-24);border-radius:var(--r-pill);background:var(--cup-blue);color:var(--milk-white);font-weight:var(--w-bold)}
+.nav a.go::before{display:none}
+/* 招牌：當級珍珠盤 */
+.tray{display:flex;flex-direction:column;align-items:center;gap:var(--pearl-gap);padding:var(--s-16);background:var(--milk-tea);border:var(--stroke) solid var(--cup-blue);border-radius:var(--r-28)}
+.trow{display:flex;gap:var(--pearl-gap)}
+.pearl{flex:none;width:var(--pearl-lg);height:var(--pearl-lg);border-radius:50%;border:var(--stroke) solid var(--cup-blue)}
+.pearl.on{background:var(--pearl-black);border-color:var(--pearl-black)}
+.pearl.new{animation:drop 300ms cubic-bezier(.3,1.6,.5,1) both}
+@keyframes drop{from{transform:translateY(-10px) scale(.4)}to{transform:none}}
+@keyframes fade{from{opacity:0}to{opacity:1}}
+.fade{animation:fade 200ms both}
+.strip{display:flex;gap:var(--pearl-mini-gap)}
+.strip .pearl{width:var(--pearl-mini);height:var(--pearl-mini)}
+.capsule{display:inline-flex;align-items:center;min-height:28px;padding:0 var(--s-12);border-radius:var(--r-pill);background:var(--milk-tea)}
+.tier{display:flex;align-items:center;justify-content:space-between;gap:var(--s-8);min-height:52px;padding:var(--s-8) var(--s-16);border:var(--stroke) solid transparent;border-radius:var(--r-14);background:var(--milk-tea)}
+.tier.cur{background:var(--milk-white);border-color:var(--cup-blue)}
+/* 取餐憑證 */
+.pass{display:flex;flex-direction:column;align-items:center;gap:var(--s-12);padding:var(--s-24) var(--s-16);background:var(--pearl-black);color:var(--code-fg);border-radius:var(--r-28)}
+.code{display:flex;gap:var(--s-16);white-space:nowrap;letter-spacing:4px;font:var(--w-bold) var(--fs-code)/var(--lh-code) var(--font);font-variant-numeric:tabular-nums}
+.pass .pearl{width:var(--pearl-pass);height:var(--pearl-pass);background:var(--code-fg);border-color:var(--code-fg)}
+/* 商家密集列 */
+.disc-n{flex:none;width:var(--disc);height:var(--disc);border-radius:50%;background:var(--pearl-black);color:var(--code-fg);display:flex;align-items:center;justify-content:center;font:var(--w-bold) var(--fs-section)/var(--lh-section) var(--font);font-variant-numeric:tabular-nums}
+.mrow{display:flex;gap:var(--s-12);align-items:flex-start;min-height:56px;padding:var(--s-12) var(--s-16)}
+.mrow+.mrow{border-top:1px solid var(--row-line)}
+.sum{flex:1;min-height:56px;padding:var(--s-8) var(--s-12);border-radius:var(--r-14);background:var(--milk-tea);display:flex;flex-direction:column;justify-content:center;gap:var(--s-4)}
+.chips{display:flex;flex-wrap:wrap;gap:var(--s-4) var(--s-8);margin-top:var(--s-4)}
+
+/* ===== 5. 風格表 ===== */
+.sheet{display:flex;flex-direction:column;gap:var(--s-32)}
+.grid{display:grid;gap:var(--s-16);grid-template-columns:repeat(auto-fill,minmax(260px,1fr))}
+.sw{display:flex;flex-direction:column;border:var(--stroke) solid var(--milk-line);border-radius:var(--r-20);overflow:hidden}
+.sw .c{min-height:64px;padding:var(--s-12) var(--s-16);display:flex;align-items:flex-end;font:var(--w-bold) var(--fs-label)/var(--lh-label) var(--font)}
+.sw .d{padding:var(--s-12) var(--s-16);display:flex;flex-direction:column;gap:var(--s-4)}
+.ts{display:grid;grid-template-columns:minmax(0,1fr) minmax(180px,260px);gap:var(--s-16);align-items:center;padding:var(--s-12) 0;border-bottom:var(--stroke) solid var(--milk-line)}
+.gal{display:grid;gap:var(--s-16);grid-template-columns:repeat(auto-fill,minmax(300px,1fr))}
+.gal section{display:flex;flex-direction:column;gap:var(--s-8)}
+.st{display:flex;align-items:center;justify-content:space-between;gap:var(--s-8);min-height:var(--tap);padding:var(--s-4) var(--s-12);border:var(--stroke) solid var(--milk-line);border-radius:var(--r-14)}
+.st code{font:var(--w-reg) var(--fs-note)/var(--lh-note) var(--font);color:var(--sugar-grey)}
+.btns{display:flex;flex-wrap:wrap;gap:var(--s-16)}
+.btns figure{width:220px;display:flex;flex-direction:column;gap:var(--s-8)}
+.states{display:grid;gap:var(--s-16);grid-template-columns:repeat(auto-fit,minmax(320px,1fr))}
+.state{padding:var(--s-20);border:var(--stroke) solid var(--milk-line);border-radius:var(--r-28);display:flex;flex-direction:column;gap:var(--s-12)}
+.shapes{display:flex;flex-wrap:wrap;gap:var(--s-12)}
+.shapes span{min-width:88px;min-height:var(--disc);display:flex;align-items:center;justify-content:center;background:var(--milk-tea);font:var(--w-bold) var(--fs-label)/var(--lh-label) var(--font)}
+.pc{display:grid;gap:var(--s-16);grid-template-columns:repeat(auto-fit,minmax(280px,1fr))}
+.pc>div{padding:var(--s-20);border-radius:var(--r-20);display:flex;flex-direction:column;gap:var(--s-8)}
+.pc ul{padding-left:var(--s-20);display:flex;flex-direction:column;gap:var(--s-8)}
+.body>*{flex:none}
+.states{grid-template-columns:repeat(auto-fit,minmax(min(320px,100%),1fr))}
+.gal{grid-template-columns:repeat(auto-fill,minmax(min(300px,100%),1fr))}
+@media (max-width:640px){.ts{grid-template-columns:minmax(0,1fr)}.hero h1{font-size:var(--fs-pearl);line-height:var(--lh-pearl)}}
+@media (prefers-reduced-motion:reduce){*{animation:none!important;transition:none!important}}
+</style>
+</head>
+<body>
+<div class="wrap">
+<header class="hero">
+  <span class="eyebrow">方向 C・UI 風格提案</span>
+  <h1>奶茶上色<span class="en">Milk Tea, Coloured In</span></h1>
+  <p class="t-body thesis">App 的顏色來自杯子裡的東西：珍珠黑當字、奶茶色當凹槽、抹茶綠代表已鎖定、芋頭紫代表預估。品牌藍是畫杯子的那支筆，畫出線稿、畫出被選中的東西；杯子的線稿進到 App 之後被「上了色」。</p>
+  <p class="sig t-lab">招牌元素：當級珍珠盤（Tier Tray）</p>
+  <p class="t-note">這是網頁模擬，不是真的 App。所有畫面只用 React Native 內建功能做得出來（不新增任何套件）。</p>
+</header>
+<h2 class="sec">四個畫面</h2>
+<p class="lead t-body">左右捲動可看完四支手機；每支手機的內容可以上下捲動。螢幕寬度以 360dp（Android 常見寬度）計算。</p>
+</div>
+
+<section class="phones" aria-label="四個手機畫面">
+<!-- 畫面 1：首頁 -->
+<figure class="fig">
+ <div class="phone"><div class="dev">
+  <div class="sb"><span class="num">14:32</span><span class="bat"><i></i></span></div>
+  <div class="scr">
+   <div class="body">
+    <div class="row" style="gap:var(--s-12)">
+     <div class="avatar" aria-hidden="true">美</div>
+     <div class="col" style="gap:0"><h3 class="t-page">嗨，小美</h3><p class="t-note">附近有 4 團正在招募。</p></div>
+    </div>
+    <div class="row" style="flex-wrap:wrap"><span class="chip on">3 公里內</span><span class="chip">只看招募中</span><span class="chip">杯數最多</span></div>
+    <section class="sect">
+     <h3 class="t-sec">進行中的團購</h3>
+     <article class="card press" aria-label="週五下午茶團，已有 7 杯，目標 10 杯">
+      <div class="row between"><span class="pill tone-info" data-m="dots">招募中</span><span class="pill tone-warn" data-m="bang">剩 1 小時 24 分</span></div>
+      <h4 class="t-sec">週五下午茶團</h4>
+      <div class="row" style="gap:var(--s-12)"><span class="capsule"><span class="strip" data-strip="10,7"></span></span><span class="t-sec num">7 / 10 杯</span></div>
+      <p class="t-dense">目標：滿 10 杯打 9 折・剩餘 3 杯</p>
+      <div class="disc"><span class="t-sec">預估打 9 折</span><span class="t-dense">再 3 杯達到 10 杯級距</span></div>
+      <div class="row between"><span class="t-note">森林紅茶・台北市大安區示範路 12 號</span><i class="arrow" aria-hidden="true"></i></div>
+     </article>
+    </section>
+    <section class="sect">
+     <h3 class="t-sec">附近熱門活動推薦</h3>
+     <div class="col">
+      <article class="card dense press"><div class="mrow between" style="align-items:center">
+       <div class="col" style="gap:0"><span class="t-body" style="font-weight:var(--w-bold)">雲頂茶室・烏龍鮮奶茶團</span><span class="t-note">0.6 公里・剩 3 小時</span></div>
+       <div class="col" style="align-items:flex-end;gap:var(--s-4)"><span class="t-lab num">4 / 10 杯</span><span class="strip" data-strip="10,4"></span></div>
+      </div></article>
+      <article class="card dense press"><div class="mrow between" style="align-items:center">
+       <div class="col" style="gap:0"><span class="t-body" style="font-weight:var(--w-bold)">阿嬤的冰茶・古早味紅茶團</span><span class="t-note">0.9 公里・剩 5 小時</span></div>
+       <div class="col" style="align-items:flex-end;gap:var(--s-4)"><span class="t-lab num">2 / 10 杯</span><span class="strip" data-strip="10,2"></span></div>
+      </div></article>
+      <article class="card dense press"><div class="mrow between" style="align-items:center">
+       <div class="col" style="gap:0"><span class="t-body" style="font-weight:var(--w-bold)">竹影茶坊・青茶拿鐵團</span><span class="t-note">1.4 公里・剩 6 小時</span></div>
+       <div class="col" style="align-items:flex-end;gap:var(--s-4)"><span class="t-lab num">6 / 10 杯</span><span class="strip" data-strip="10,6"></span></div>
+      </div></article>
+     </div>
+    </section>
+   </div>
+   <nav class="nav" aria-label="顧客底部導覽"><a class="on">首頁</a><a>即時地圖</a><a>我的訂單</a><a>個人中心</a></nav>
+  </div>
+  <div class="gb"><i></i></div>
+ </div></div>
+ <figcaption>1　首頁（顧客）<span>白底、內距 20、整張卡片可以按</span></figcaption>
+</figure>
+
+<!-- 畫面 2：團購詳情 -->
+<figure class="fig">
+ <div class="phone"><div class="dev">
+  <div class="sb"><span class="num">14:33</span><span class="bat"><i></i></span></div>
+  <div class="scr">
+   <div class="body">
+    <div class="back" aria-label="返回"><i class="arrow"></i></div>
+    <div class="col" style="gap:var(--s-4)">
+     <h3 class="t-page">森林紅茶 週五下午茶團</h3>
+     <p class="t-body grey">森林紅茶・台北市大安區示範路 12 號</p>
+    </div>
+    <div class="row"><span class="pill tone-warn" data-m="bang">剩 1 小時 24 分截止</span><span class="pill tone-info" data-m="dots">招募中</span></div>
+    <div class="sect">
+     <div class="tray" data-tray="10,7" role="img" aria-label="已有 7 杯，10 杯成團，還差 3 杯"></div>
+     <p class="row" style="align-items:baseline"><span class="t-body">已有</span><span class="big">7</span><span class="t-body">杯，目標 10 杯</span></p>
+     <p class="t-body">再 3 杯就打 9 折，截止前都還可以揪朋友。</p>
+    </div>
+    <section class="sect">
+     <h3 class="t-sec">折扣級距</h3>
+     <div class="tier cur"><span class="t-sec num">10 杯・9 折</span><span class="pill tone-taro" data-m="dots">預估・還差 3 杯</span></div>
+     <div class="tier"><span class="t-sec num">20 杯・8.5 折</span><span class="pill tone-taro" data-m="dots">尚未達成</span></div>
+     <div class="tier"><span class="t-sec num">30 杯・8 折</span><span class="pill tone-taro" data-m="dots">尚未達成</span></div>
+     <p class="t-note">最終折扣在截止時才會定案，現在看到的是預估。</p>
+    </section>
+    <section class="sect">
+     <h3 class="t-sec">參加狀況</h3>
+     <p class="t-body">已有 5 人加入，共 7 杯。</p>
+     <div class="card dense"><div class="mrow between" style="align-items:center">
+      <div class="col" style="gap:var(--s-4)"><span class="t-sec">我的訂單</span><span class="t-note">珍珠奶茶 x1・大杯 半糖 少冰</span><span><span class="pill tone-info" data-m="dots">訂單成立</span></span></div>
+      <span class="t-price">$60</span>
+     </div></div>
+    </section>
+   </div>
+   <div class="foot">
+    <p class="t-note" style="text-align:center">現在只預留額度，截止後才會扣款。</p>
+    <div class="row"><button class="btn btn-p grow" type="button">選飲料加入團購</button><button class="btn btn-s" type="button">分享給朋友</button></div>
+   </div>
+  </div>
+  <div class="gb"><i></i></div>
+ </div></div>
+ <figcaption>2　團購詳情<span>當級珍珠盤＋級距階梯＋固定底部按鈕</span></figcaption>
+</figure>
+<!-- 畫面 3：取貨資訊 -->
+<figure class="fig">
+ <div class="phone"><div class="dev">
+  <div class="sb"><span class="num">15:41</span><span class="bat"><i></i></span></div>
+  <div class="scr">
+   <div class="body">
+    <div class="row between">
+     <div class="row" style="gap:var(--s-4)"><div class="back" aria-label="返回"><i class="arrow"></i></div><h3 class="t-page">取貨資訊</h3></div>
+     <span class="pill tone-ok" data-m="check">可取貨</span>
+    </div>
+    <p class="t-body">你的 2 杯好了，把這組六位數字給店員看。</p>
+    <section class="pass" aria-label="取餐憑證，取餐碼 4 8 2 9 1 7">
+     <h4 class="t-sec">取餐憑證</h4>
+     <div class="code"><span>482</span><span>917</span></div>
+     <div class="row"><i class="pearl"></i><i class="pearl"></i><span class="t-body" style="margin-left:var(--s-4)">2 杯</span></div>
+     <p class="t-body">到店取餐時，將此代碼提供給店家。</p>
+    </section>
+    <section class="card">
+     <div class="col" style="gap:var(--s-4)">
+      <h4 class="t-sec">森林紅茶</h4>
+      <p class="t-body grey">台北市大安區示範路 12 號</p>
+      <p class="row between"><span class="t-note">取貨時間</span><span class="t-body" style="font-weight:var(--w-bold)">今天 15:30 - 18:30</span></p>
+     </div>
+     <div class="row between" style="align-items:flex-start">
+      <div class="col" style="gap:var(--s-4)"><span class="t-body" style="font-weight:var(--w-bold)">珍珠奶茶 x1</span><span class="row" style="gap:var(--s-4)"><span class="lab">大杯</span><span class="lab">半糖</span><span class="lab">少冰</span></span></div>
+      <span class="t-price">$60</span>
+     </div>
+     <div class="row between" style="align-items:flex-start">
+      <div class="col" style="gap:var(--s-4)"><span class="t-body" style="font-weight:var(--w-bold)">抹茶拿鐵 x1</span><span class="row" style="gap:var(--s-4)"><span class="lab">中杯</span><span class="lab">微糖</span><span class="lab">去冰</span></span></div>
+      <span class="t-price">$65</span>
+     </div>
+    </section>
+   </div>
+  </div>
+  <div class="gb"><i></i></div>
+ </div></div>
+ <figcaption>3　取貨資訊<span>取餐碼 52px、珍珠黑面板、3＋3 分組</span></figcaption>
+</figure>
+
+<!-- 畫面 4：店家製作清單（密集版） -->
+<figure class="fig">
+ <div class="phone"><div class="dev">
+  <div class="sb"><span class="num">14:35</span><span class="bat"><i></i></span></div>
+  <div class="scr">
+   <div class="body dense">
+    <div class="col" style="gap:var(--s-4)"><h3 class="t-page">製作清單</h3><p class="t-dense grey">森林紅茶・週五下午茶團</p></div>
+    <div class="row">
+     <div class="sum"><span class="t-note">訂單數</span><span class="t-sec num">12</span></div>
+     <div class="sum"><span class="t-note">總杯數</span><span class="t-sec num">23</span></div>
+     <div class="sum" style="flex:1.7"><span class="t-note">狀態</span><span><span class="pill tone-info" data-m="dots">訂單製作中</span></span></div>
+    </div>
+    <div class="card dense">
+     <div class="mrow"><div class="disc-n" aria-label="珍珠奶茶 x6">6</div><div class="grow"><div class="t-dense" style="font-weight:var(--w-bold)">珍珠奶茶</div><div class="t-note">大杯 4・中杯 2</div><div class="chips"><span class="lab">半糖少冰 x3</span><span class="lab">微糖去冰 x2</span><span class="lab">全糖正常冰 x1</span></div></div></div>
+     <div class="mrow"><div class="disc-n" aria-label="烏龍鮮奶茶 x9">9</div><div class="grow"><div class="t-dense" style="font-weight:var(--w-bold)">烏龍鮮奶茶</div><div class="t-note">大杯 9</div><div class="chips"><span class="lab">無糖去冰 x4</span><span class="lab">半糖少冰 x3</span><span class="lab">微糖微冰 x2</span></div></div></div>
+     <div class="mrow"><div class="disc-n" aria-label="蜂蜜綠茶 x5">5</div><div class="grow"><div class="t-dense" style="font-weight:var(--w-bold)">蜂蜜綠茶</div><div class="t-note">中杯 5</div><div class="chips"><span class="lab">微糖去冰 x3</span><span class="lab">半糖少冰 x2</span></div></div></div>
+     <div class="mrow"><div class="disc-n" aria-label="芋頭鮮奶 x3">3</div><div class="grow"><div class="t-dense" style="font-weight:var(--w-bold)">芋頭鮮奶</div><div class="t-note">大杯 3</div><div class="chips"><span class="lab">半糖少冰 x2</span><span class="lab">全糖正常冰 x1</span></div></div></div>
+    </div>
+    <div class="card dense"><div class="mrow between" style="align-items:center">
+     <div class="col" style="gap:0"><span class="t-dense" style="font-weight:var(--w-bold)">退款申請</span><span class="t-note">小陳・1 杯</span></div>
+     <span class="pill tone-warn" data-m="bang">待審核</span>
+    </div></div>
+   </div>
+   <div class="foot dense"><button class="btn btn-p" type="button">標記可取餐</button></div>
+   <nav class="nav" aria-label="商家底部導覽"><a class="on">首頁</a><a class="go">開團</a></nav>
+  </div>
+  <div class="gb"><i></i></div>
+ </div></div>
+ <figcaption>4　店家製作清單（商家）<span>緊湊版：內距 16、列高 56、列線 1px</span></figcaption>
+</figure>
+</section>
+<main class="wrap sheet">
+
+<section class="sect" id="palette">
+ <h2 class="sec">顏色</h2>
+ <p class="t-body grey">每一種顏色只管一件事。淡底標籤只是資訊，絕不加外框。</p>
+ <div class="grid">
+  <div class="sw"><div class="c" style="background:var(--cup-blue);color:var(--milk-white)">#2043B8</div><div class="d"><b class="t-body">杯線藍 Cup-line Blue</b><span class="t-dense grey">筆：畫出來的線稿（珍珠盤與折扣卡外框、空心珍珠）、被選中的外框、主要按鈕（白字對它 8.21:1）、連結。</span></div></div>
+  <div class="sw"><div class="c" style="background:var(--milk-white);color:var(--pearl-black)">#FFFFFF</div><div class="d"><b class="t-body">鮮奶白 Fresh-milk White</b><span class="t-dense grey">頁面與卡片的底，跟兩張品牌 PNG 的白底一致，登入插圖不必再包白卡。</span></div></div>
+  <div class="sw"><div class="c" style="background:var(--milk-tea);color:var(--pearl-black)">#F3E4D2</div><div class="d"><b class="t-body">奶茶 Milk Tea</b><span class="t-dense grey">凹槽：珍珠盤底板、已選的甜度／冰量標籤、次要面板。藍色空心珍珠放在上面 6.59:1，黑珍珠 13.28:1。</span></div></div>
+  <div class="sw"><div class="c" style="background:var(--pearl-black);color:var(--code-fg)">#2A1B17</div><div class="d"><b class="t-body">珍珠黑 Tapioca Black</b><span class="t-dense grey">主要文字（對白 16.57:1）、實心珍珠、取餐碼面板。</span></div></div>
+  <div class="sw"><div class="c" style="background:var(--sugar-grey);color:var(--milk-white)">#6F5A4E</div><div class="d"><b class="t-body">黑糖灰 Brown-sugar Grey</b><span class="t-dense grey">次要文字（對白 6.46:1、對奶茶 5.18:1），只放在白或奶茶底上。</span></div></div>
+  <div class="sw"><div class="c" style="background:var(--taro-bg);color:var(--taro)">#5B3D8C　底 #EFE8F7</div><div class="d"><b class="t-body">芋頭紫 Taro</b><span class="t-dense grey">只做一件事：標示「預估」的折扣與尚未達成的級距（對比 7.05:1）。結算後換成抹茶綠。</span></div></div>
+  <div class="sw"><div class="c" style="background:var(--matcha-bg);color:var(--matcha)">#2F5A14　底 #E5F0D3</div><div class="d"><b class="t-body">深抹茶 Matcha</b><span class="t-dense grey">「已鎖定／成功」：最終折扣、已付款、可取貨、已核准、已成團（對比 6.84:1）。</span></div></div>
+  <div class="sw"><div class="c" style="background:var(--milk-line);color:var(--pearl-black)">#EADBCB</div><div class="d"><b class="t-body">奶茶線 Milk-tea Line</b><span class="t-dense grey">顧客畫面卡片的裝飾外框（對白 1.36:1，只是裝飾）。</span></div></div>
+  <div class="sw"><div class="c" style="background:var(--row-line);color:var(--pearl-black)">#C9B39C</div><div class="d"><b class="t-body">商家列線</b><span class="t-dense grey">商家密集頁列與列之間 1px 分隔線（對白 2.02:1，唯一例外）。</span></div></div>
+  <div class="sw"><div class="c" style="background:var(--input-line);color:var(--milk-white)">#A38670</div><div class="d"><b class="t-body">輸入框線</b><span class="t-dense grey">輸入框未選取的外框（對白 3.39:1）。</span></div></div>
+  <div class="sw"><div class="c" style="background:var(--pearl-black);color:var(--code-fg)">#FFF8F2　字</div><div class="d"><b class="t-body">取餐碼米白</b><span class="t-dense grey">珍珠黑面板上的取餐碼與說明字（對比 15.75:1）。</span></div></div>
+ </div>
+ <h3 class="t-sec" style="margin-top:var(--s-8)">五種狀態色調（底／字／線）</h3>
+ <div class="grid">
+  <div class="sw"><div class="c" style="background:var(--info-bg);color:var(--info-fg)">資訊 info</div><div class="d"><span class="t-note">底 #E8EDFB・字 #1B3A99・線 #C5D2F5</span></div></div>
+  <div class="sw"><div class="c" style="background:var(--ok-bg);color:var(--ok-fg)">成功 success</div><div class="d"><span class="t-note">底 #E5F0D3・字 #2F5A14・線 #C4DBA3</span></div></div>
+  <div class="sw"><div class="c" style="background:var(--warn-bg);color:var(--warn-fg)">留意 warning</div><div class="d"><span class="t-note">底 #FBEBC8・字 #7A4A00・線 #F0D08A</span></div></div>
+  <div class="sw"><div class="c" style="background:var(--bad-bg);color:var(--bad-fg)">失敗 danger</div><div class="d"><span class="t-note">底 #FBE3E6・字 #9E1F3A・線 #F2B8C2</span></div></div>
+  <div class="sw"><div class="c" style="background:var(--neu-bg);color:var(--neu-fg)">已結束 neutral</div><div class="d"><span class="t-note">底 #EFE7DF・字 #5A4A40・線 #DCCFC3</span></div></div>
+ </div>
+</section>
+
+<section class="sect" id="type">
+ <h2 class="sec">字級</h2>
+ <p class="t-body grey">中文用手機內建字型，只用一般（400）與粗體（700）兩種粗細；層次靠字級、顏色與留白。</p>
+ <div>
+  <div class="ts"><div class="row" style="align-items:baseline;gap:var(--s-8)"><span class="big">7</span><span class="t-body">杯　已有 7 杯</span><span class="tag">數字圓頭字型需新增套件</span></div><span class="t-note">珍珠大數字 32／36・700・只用在「已有 7 杯」的 7</span></div>
+  <div class="ts"><div class="row" style="gap:var(--s-12)"><div class="code"><span>482</span><span>917</span></div><span class="tag">需新增套件</span></div><span class="t-note">取餐碼 52／60・700・字距 4・3＋3 分組</span></div>
+  <div class="ts"><span class="t-page">附近的團購</span><span class="t-note">頁面標題 24／32・700</span></div>
+  <div class="ts"><span class="t-sec">飲品清單・取餐憑證</span><span class="t-note">區塊標題與卡片標題 17／24・700</span></div>
+  <div class="ts"><span class="t-body">珍珠奶茶 大杯 半糖 少冰，數量 1。</span><span class="t-note">內文 15／23・400（商家密集畫面 14／20）</span></div>
+  <div class="ts"><div class="row" style="gap:var(--s-12)"><span class="t-price">$120</span><span class="tag">需新增套件</span></div><span class="t-note">價格 18／24・700・等寬數字・靠右・不上色</span></div>
+  <div class="ts"><span class="t-body" style="font:var(--w-bold) var(--fs-btn)/var(--lh-btn) var(--font)">選飲料加入團購</span><span class="t-note">按鈕文字 16／22・700</span></div>
+  <div class="ts"><span class="lab">半糖少冰 x3</span><span class="t-note">標籤 12／16・700（狀態藥丸、級距標籤、導覽、篩選）</span></div>
+  <div class="ts"><span class="t-note">距離 0.6 公里・截止時間 今天 18:00</span><span class="t-note">說明小字 12／17・400・黑糖灰</span></div>
+ </div>
+ <p class="t-note">「需新增套件」＝ 要加 expo-font 與一個只留數字的 Nunito 粗體字型檔（約 10 到 40KB，約半天工，可能要重新打包 APK），要你同意才做。這裡先用系統字型代替。</p>
+</section>
+
+<section class="sect" id="status">
+ <h2 class="sec">狀態藥丸（全部 33 種）</h2>
+ <p class="t-body grey">每個色調配一個畫出來的記號：勾勾＝成功、三點＝進行中、驚嘆號＝要留意、叉叉＝失敗、短橫線＝已結束。不靠顏色也分得出來。</p>
+ <div class="gal" id="gal"></div>
+</section>
+
+<section class="sect" id="buttons">
+ <h2 class="sec">按鈕</h2>
+ <div class="btns">
+  <figure><button class="btn btn-p" type="button">加入團購・預留 $120</button><figcaption class="t-note">主要：實心杯線藍、白字、高 52、全圓角</figcaption></figure>
+  <figure><button class="btn btn-s" type="button">分享給朋友</button><figcaption class="t-note">次要：2px 藍框、藍字</figcaption></figure>
+  <figure><button class="btn btn-d" type="button" disabled>已額滿</button><figcaption class="t-note">停用：奶茶色底、黑糖灰字</figcaption></figure>
+  <figure><button class="btn btn-p pressed" type="button">加入團購・預留 $120</button><figcaption class="t-note">按下：縮到 0.98 倍（不變色）</figcaption></figure>
+ </div>
+</section>
+
+<section class="sect" id="signature">
+ <h2 class="sec">招牌：當級珍珠盤（Tier Tray）</h2>
+ <p class="t-body grey">黑色實心珍珠＝已訂，2px 藍色空圈＝還沒人訂。級距很大時一顆代表多杯，旁邊文字永遠寫精確杯數。預估用芋頭紫，鎖定後換抹茶綠。</p>
+ <div class="states">
+  <div class="state"><b class="t-sec">尚未有人訂　0 / 10 杯</b><div class="tray" data-tray="10,0" role="img" aria-label="已有 0 杯，10 杯成團，還差 10 杯"></div><span class="pill tone-taro" data-m="dots">預估打 9 折・還差 10 杯</span></div>
+  <div class="state"><b class="t-sec">進行中　6 / 10 杯</b><div class="tray" data-tray="10,6" role="img" aria-label="已有 6 杯，10 杯成團，還差 4 杯"></div><span class="pill tone-taro" data-m="dots">預估打 9 折・還差 4 杯</span></div>
+  <div class="state"><b class="t-sec">達標並鎖定　10 / 10 杯</b><div class="tray" data-tray="10,10" role="img" aria-label="已有 10 杯，10 杯成團，已達成"></div><span class="pill tone-ok" data-m="check">已鎖定 9 折</span></div>
+  <div class="state"><b class="t-sec">一顆代表多杯　20 杯級距</b><div class="tray" data-tray="20,7" role="img" aria-label="已有 7 杯，20 杯成團，還差 13 杯"></div><span class="pill tone-taro" data-m="dots">一顆＝2 杯・已有 7 杯</span></div>
+  <div class="state"><b class="t-sec">試試看：加一杯</b><div class="tray" id="demo" role="img" aria-label="示範珍珠盤"></div>
+   <div class="row"><span class="pill tone-taro" id="dpill"></span></div>
+   <div class="row"><button class="btn btn-p grow" id="add" type="button">加一杯</button><button class="btn btn-s" id="reset" type="button">重來</button></div>
+   <span class="t-note">新的一杯會掉進盤子（約 300ms）；系統開了「減少動畫」就不動。</span></div>
+  <div class="state"><b class="t-sec">迷你版（首頁卡片）永遠 5 顆</b>
+   <div class="row"><span class="capsule"><span class="strip" data-strip="10,0"></span></span><span class="t-note">0 杯</span></div>
+   <div class="row"><span class="capsule"><span class="strip" data-strip="10,7"></span></span><span class="t-note">7 杯</span></div>
+   <div class="row"><span class="capsule"><span class="strip" data-strip="10,10"></span></span><span class="t-note">10 杯</span></div>
+   <b class="t-sec" style="margin-top:var(--s-4)">沒有級距資料時</b>
+   <div style="height:20px;padding:2px;border:var(--stroke) solid var(--cup-blue);border-radius:var(--r-pill)"><div style="width:70%;height:100%;border-radius:var(--r-pill);background:var(--cup-blue)"></div></div>
+   <span class="t-note">才退回 2px 外框的圓角進度條</span></div>
+ </div>
+</section>
+
+<section class="sect" id="shape">
+ <h2 class="sec">圓角與線條</h2>
+ <div class="shapes">
+  <span style="border-radius:var(--r-8)">8　標籤內小塊</span><span style="border-radius:var(--r-14)">14　輸入框</span><span style="border-radius:var(--r-20)">20　商家卡片</span><span style="border-radius:var(--r-28)">28　顧客卡片</span><span style="border-radius:var(--r-pill)">999　按鈕</span>
+ </div>
+ <p class="t-body grey">全 App 只有 2px 一種線粗。實心杯線藍＝可以按；2px 藍外框＝畫出來的線稿或目前被選中的東西。整個 App 是平的，不用陰影、漸層、濾鏡；只有蓋在畫面上方的東西（底部彈窗、提示條）用一層 Android 原生 elevation（浮起高度）。</p>
+</section>
+
+<section class="sect" id="proscons">
+ <h2 class="sec">優點與缺點</h2>
+ <div class="pc">
+  <div style="background:var(--ok-bg);color:var(--ok-fg)"><h3 class="t-sec">優點</h3><ul class="t-body"><li>顏色從飲料裡來（奶茶、珍珠、抹茶、芋頭），最有食慾、最有生活感。</li><li>預估用芋頭紫、定案換抹茶綠，顏色一變就知道「鎖定了」。</li><li>導覽用圓點加文字，完全不需要圖示檔，素材風險最低。</li></ul></div>
+  <div style="background:var(--warn-bg);color:var(--warn-fg)"><h3 class="t-sec">缺點與風險</h3><ul class="t-body"><li>暖色系容易被看成「又一個手搖飲 App」，藍色 Logo 的連續感比 A 弱。</li><li>顏色種類多（藍、紫、綠、琥珀、紅、褐），要有紀律地各管一件事。</li><li>珍珠一顆代表多杯時，要看商家實際設定好不好懂。</li></ul></div>
+ </div>
+ <p class="t-body"><b>適合：</b>想讓 App 看起來像飲料、親切好入口，又願意接受品牌藍退到「筆」的角色。覺得顏色太雜，就先砍芋頭紫（預估折扣退回資訊藍）。</p>
+</section>
+
+</main>
+<script>
+(function(){
+  const Q = s => Array.from(document.querySelectorAll(s));
+
+  /* 珍珠盤純函式：getPearlTray(bandCups, filledCups, maxCount)（規格 rnHowTo 第 1 點） */
+  function getPearlTray(band, filled, max){
+    max = max || 10;
+    const per = Math.ceil(band / max), count = Math.ceil(band / per);
+    let f;
+    if (filled <= 0) f = 0;
+    else if (filled >= band) f = count;
+    else f = Math.min(count - 1, Math.max(1, Math.floor(filled / per)));
+    return { count: count, filled: f, per: per };
+  }
+  const pearls = (t, newIdx) => Array.from({ length: t.count }, (_, i) =>
+    '<i class="pearl' + (i < t.filled ? ' on' : '') + (i === newIdx ? ' new' : '') + '"></i>');
+  const rows = (t, newIdx) => {           // 固定五欄：每 5 顆一排
+    const p = pearls(t, newIdx), out = [];
+    for (let i = 0; i < p.length; i += 5) out.push('<div class="trow">' + p.slice(i, i + 5).join('') + '</div>');
+    return out.join('');
+  };
+  // 珍珠邊長 = min(40, floor((w - 4*8) / 5))，w 是量到的盤內寬（RN 用 onLayout）
+  const sizeTray = el => {
+    if (!el.clientWidth) return;
+    el.style.setProperty('--pearl-lg', Math.min(40, Math.floor((el.clientWidth - 32 - 32) / 5)) + 'px');
+  };
+  const nums = s => s.split(',').map(Number);
+
+  Q('[data-tray]').forEach(el => { const a = nums(el.dataset.tray); el.innerHTML = rows(getPearlTray(a[0], a[1], 10)); sizeTray(el); });
+  Q('[data-strip]').forEach(el => { const a = nums(el.dataset.strip); el.setAttribute('aria-hidden', 'true'); el.innerHTML = pearls(getPearlTray(a[0], a[1], 5)).join(''); });
+  if (window.ResizeObserver) { const ro = new ResizeObserver(es => es.forEach(e => sizeTray(e.target))); Q('.tray').forEach(t => ro.observe(t)); }
+
+  /* 記號：每個色調一個，用 View 畫（這裡用 CSS 模擬） */
+  const PARTS = { check: 1, dots: 3, bang: 2, cross: 2, dash: 1 };
+  const TONE = { dots: 'info', check: 'ok', bang: 'warn', cross: 'bad', dash: 'neu' };
+  const mk = kind => '<span class="mk mk-' + kind + '" aria-hidden="true">' + '<i></i>'.repeat(PARTS[kind]) + '</span>';
+
+  /* 33 種狀態：[英文代碼, 畫面文字, 記號, 色調覆蓋] */
+  const G = [
+    ['團購狀態（groupBuyActivity）', [['recruiting','招募中','dots'],['confirmed','已成團','check'],['formed','已成團','check'],['ordering','訂單製作中','dots'],['ready_for_pickup','可取餐','check'],['completed','已完成','dash'],['failed','流團','cross'],['cancelled','已取消','dash'],['full','已額滿','bang']]],
+    ['付款狀態（payment）', [['pending','待付款','bang'],['submitted','付款回報已送出（舊流程）','dots'],['confirmed','付款已確認（舊流程）','check'],['not_required','無需付款','dash'],['authorized・尚未扣款','訂單成立','dots'],['captured・已扣款','已付款','check'],['authorization_voided','授權已取消','dash'],['released','已釋放授權','dash'],['failed','扣款失敗','cross'],['refunded','已退款','dash']]],
+    ['商家端付款（merchantPayment）', [['authorized','已付款','check'],['failed','待付款','dash']]],
+    ['取貨狀態（pickup）', [['not_ready','尚未可取貨','dash'],['preparing','訂單製作中','dots'],['ready','可取貨','check'],['picked_up','已取貨','dash'],['cancelled','已取消','dash'],['expired','已逾期','cross']]],
+    ['退款申請（refundRequest）', [['pending','待審核','bang'],['approved','已核准','check'],['rejected','已駁回','cross']]],
+    ['折扣（discount）', [['not_yet_qualified・預估','尚未達標','dots','taro'],['qualified','優惠成立','check'],['failed','未達標','cross']]]
+  ];
+  Q('#gal')[0].innerHTML = G.map(g => '<section><h3 class="t-sec">' + g[0] + '</h3>' + g[1].map(r =>
+    '<div class="st"><span class="pill tone-' + (r[3] || TONE[r[2]]) + '" data-m="' + r[2] + '">' + r[1] + '</span><code>' + r[0] + '</code></div>').join('') + '</section>').join('');
+  Q('[data-m]').forEach(el => el.insertAdjacentHTML('afterbegin', mk(el.dataset.m)));
+
+  /* 示範：加一杯（只有新出現那一顆會動；達標時標籤淡入換色） */
+  let n = 0;
+  const demo = Q('#demo')[0], dp = Q('#dpill')[0];
+  function paint(added) {
+    const t = getPearlTray(10, n, 10), fin = n >= 10;
+    demo.innerHTML = rows(t, added ? t.filled - 1 : -1); sizeTray(demo);
+    demo.setAttribute('aria-label', '已有 ' + n + ' 杯，10 杯成團，' + (fin ? '已達成' : '還差 ' + (10 - n) + ' 杯'));
+    dp.className = 'pill tone-' + (fin ? 'ok' : 'taro');
+    dp.innerHTML = mk(fin ? 'check' : 'dots') + (fin ? '已鎖定 9 折' : '預估打 9 折・還差 ' + (10 - n) + ' 杯');
+    if (added && fin) { void dp.offsetWidth; dp.classList.add('fade'); }
+  }
+  Q('#add')[0].onclick = () => { if (n < 10) { n++; paint(true); } };
+  Q('#reset')[0].onclick = () => { n = 0; paint(false); };
+  paint(false);
+})();
+</script>
+</body>
+</html>

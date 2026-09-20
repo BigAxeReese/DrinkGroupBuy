@@ -1,0 +1,431 @@
+<!DOCTYPE html>
+<html lang="zh-Hant">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>一筆珍珠 UI 風格提案 A</title>
+<style>
+/* ===== 1. Tokens：全部取自方向 A 規格，之後只用變數 ===== */
+:root{
+  --cobalt:#1E44BF; --ink:#14286F; --paper:#FFFFFF; --pencil-blue:#5B6B99; --pencil-line:#7A88B4; --faint:#B4BEDC; --wash:#EEF2FF; --scrim:#14286F80;
+  --info-bg:#EEF2FF; --info-fg:#14286F; --info-bd:#1E44BF;
+  --success-bg:#E8F6EF; --success-fg:#0C5A3A; --success-bd:#1F8A5B;
+  --warning-bg:#FFF6E0; --warning-fg:#7A4A00; --warning-bd:#C27A00;
+  --danger-bg:#FDECEE; --danger-fg:#8E1420; --danger-bd:#C62F3B;
+  --neutral-bg:#FFFFFF; --neutral-fg:#4A5680; --neutral-bd:#7A88B4;
+  --stroke:2px; --r6:6px; --r10:10px; --r16:16px; --r-pill:999px;
+  --s4:4px; --s8:8px; --s12:12px; --s16:16px; --s24:24px; --s32:32px; --gutter:16px;
+  --fs-hero:44px; --lh-hero:48px; --fs-title:24px; --lh-title:32px; --fs-section:18px; --lh-section:26px;
+  --fs-body:15px; --lh-body:23px; --fs-dense:14px; --lh-dense:21px; --fs-caption:12px; --lh-caption:18px;
+  --fs-price:17px; --lh-price:22px; --fs-code:52px; --lh-code:60px; --fs-btn:16px; --lh-btn:22px; --fs-pill:12px; --lh-pill:16px;
+  --fw-reg:400; --fw-bold:700;
+  --font:"Noto Sans TC","PingFang TC","Microsoft JhengHei",system-ui,sans-serif;
+  --tap:44px; --btn-h:52px; --mark:10px; --stamp-w:44px; --stamp-h:28px; --pearl-max:24px; --pearl-gap:6px;
+  --phone-w:360px; --phone-h:760px; --r-phone:36px; --nav-h:60px;
+  --r-stamp:14px; --pearl-mini:12px; --mini-w:138px; --pearl-dot:6px; --pearl-dot-mini:4px; --row-h:56px; --fs-mod:13px; --fs-tag:11px;
+}
+/* ===== 2. 基礎 ===== */
+*{box-sizing:border-box;margin:0;padding:0}
+body{font-family:var(--font);background:var(--paper);color:var(--ink);font-size:var(--fs-body);line-height:var(--lh-body);font-weight:var(--fw-reg)}
+button{font:inherit;color:inherit;background:none;border:0;cursor:pointer}
+b,.b{font-weight:var(--fw-bold)}
+.num{font-variant-numeric:tabular-nums}
+.t-hero{font-size:var(--fs-hero);line-height:var(--lh-hero);font-weight:var(--fw-bold)}
+.t-title{font-size:var(--fs-title);line-height:var(--lh-title);font-weight:var(--fw-bold)}
+.t-sec{font-size:var(--fs-section);line-height:var(--lh-section);font-weight:var(--fw-bold)}
+.t-body{font-size:var(--fs-body);line-height:var(--lh-body)}
+.t-cap{font-size:var(--fs-caption);line-height:var(--lh-caption);color:var(--pencil-blue)}
+.t-price{font-size:var(--fs-price);line-height:var(--lh-price);font-weight:var(--fw-bold);font-variant-numeric:tabular-nums}
+.ell{white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.row{display:flex;align-items:center;gap:var(--s8)}
+.sp{justify-content:space-between}
+.tag{display:inline-block;font-size:var(--fs-tag);line-height:16px;padding:0 var(--s8);border:var(--stroke) dashed var(--pencil-line);border-radius:var(--r-pill);color:var(--pencil-blue);font-weight:var(--fw-bold)}
+/* ===== 3. 簡報外殼（不是 App 本身） ===== */
+.hero,.sheet{max-width:1180px;margin:0 auto;padding:var(--s32) var(--s24)}
+.hero h1{font-size:var(--fs-hero);line-height:var(--lh-hero);font-weight:var(--fw-bold)}
+.hero h1 small{font-size:var(--fs-section);line-height:var(--lh-section);color:var(--pencil-blue);font-weight:var(--fw-reg);margin-left:var(--s12)}
+.thesis{max-width:780px;margin-top:var(--s12)}
+.sigbox{display:flex;flex-wrap:wrap;align-items:center;gap:var(--s16);margin-top:var(--s16)}
+.sigbox .pearls{width:280px;flex:none}
+.rail{background:var(--wash);border-block:var(--stroke) solid var(--faint);overflow-x:auto;padding:var(--s32)}
+.rail-in{display:flex;gap:var(--s32);width:max-content;margin:0 auto}
+figure.fig{width:var(--phone-w)}
+figcaption{margin-top:var(--s16);text-align:center;font-weight:var(--fw-bold)}
+figcaption span{display:block;font-weight:var(--fw-reg);font-size:var(--fs-caption);line-height:var(--lh-caption);color:var(--pencil-blue)}
+/* ===== 4. 手機外框（簡報用）與 Android 系統列 ===== */
+.phone{width:var(--phone-w);height:var(--phone-h);border-radius:var(--r-phone);outline:6px solid var(--ink);background:var(--paper);display:flex;flex-direction:column;overflow:hidden}
+.sb{height:28px;flex:none;display:flex;align-items:center;justify-content:space-between;padding:0 var(--s16) 0 var(--s24);font-size:var(--fs-caption);font-weight:var(--fw-bold)}
+.sys{display:flex;align-items:flex-end;gap:2px;height:12px}
+.sys i{width:3px;border-radius:2px;background:var(--ink)}
+.sys i:nth-child(1){height:5px}.sys i:nth-child(2){height:8px}.sys i:nth-child(3){height:11px}
+.sys b{width:18px;height:10px;border:var(--stroke) solid var(--ink);border-radius:3px;margin-left:6px;position:relative}
+.sys b::after{content:"";position:absolute;inset:1px 4px 1px 1px;background:var(--ink);border-radius:1px}
+.gest{height:20px;flex:none;display:flex;justify-content:center;align-items:center}
+.gest i{width:108px;height:4px;border-radius:var(--r-pill);background:var(--ink)}
+/* ===== 5. App：畫面骨架（View = flex div） ===== */
+.scroll{flex:1;min-height:0;overflow-y:auto;display:flex;flex-direction:column;gap:var(--s8);padding:var(--s8) var(--gutter) var(--s16);scrollbar-width:none}
+.scroll::-webkit-scrollbar{display:none}
+.scroll>*{flex:none}
+.topbar{height:48px;flex:none;display:flex;align-items:center;padding:0 var(--s4)}
+.back{width:var(--tap);height:var(--tap);display:grid;place-items:center}
+.back i{width:12px;height:12px;border-left:var(--stroke) solid var(--ink);border-bottom:var(--stroke) solid var(--ink);transform:rotate(45deg);margin-left:var(--s4)}
+.sh{margin-top:var(--s8)}
+.card{border:var(--stroke) solid var(--pencil-line);border-radius:var(--r16);padding:var(--s16);display:flex;flex-direction:column;gap:var(--s8);position:relative;background:var(--paper)}
+.card.brand{border-color:var(--cobalt)}
+.card.list{padding:0 var(--s16);gap:0}
+.dense{border-radius:var(--r10);padding:var(--s12);font-size:var(--fs-dense);line-height:var(--lh-dense)}
+.li{display:flex;align-items:center;gap:var(--s8);min-height:var(--row-h);padding:var(--s8) 0}
+.li+.li{border-top:var(--stroke) solid var(--faint)}
+.li>.col{flex:1;min-width:0}
+.col{display:flex;flex-direction:column}
+.ava{width:var(--tap);height:var(--tap);flex:none;border-radius:var(--r-pill);border:var(--stroke) solid var(--cobalt);display:grid;place-items:center;color:var(--cobalt);font-size:var(--fs-section);font-weight:var(--fw-bold)}
+.chip{min-height:var(--tap);padding:0 var(--s16);border-radius:var(--r-pill);border:var(--stroke) solid var(--pencil-line);background:var(--paper);font-size:var(--fs-body);font-weight:var(--fw-bold)}
+.chip.on{background:var(--cobalt);border-color:var(--cobalt);color:var(--paper)}
+.callout{background:var(--wash);border-radius:var(--r10);padding:var(--s8) var(--s12);display:flex;align-items:center;gap:var(--s8)}
+.est{font-size:var(--fs-caption);font-weight:var(--fw-bold);color:var(--pencil-blue)}
+.foot{flex:none;border-top:var(--stroke) solid var(--faint);padding:var(--s12) var(--gutter);display:flex;flex-direction:column;gap:var(--s8)}
+.hint{background:var(--wash);border-radius:var(--r10);padding:var(--s4) var(--s12);display:flex;justify-content:center;align-items:center;gap:var(--s8);font-size:var(--fs-caption);line-height:var(--lh-caption);font-weight:var(--fw-bold)}
+/* 底部導覽：View 圓點＋文字，不用 Unicode 符號 */
+.nav{display:flex;flex:none;height:var(--nav-h);border-top:var(--stroke) solid var(--faint)}
+.nav a{flex:1;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:var(--s4);font-size:var(--fs-caption);line-height:var(--lh-caption);color:var(--pencil-blue)}
+.dot{width:16px;height:16px;border-radius:var(--r-pill);border:var(--stroke) solid var(--pencil-line);position:relative}
+.nav .on{color:var(--cobalt);font-weight:var(--fw-bold)}
+.nav .on .dot{background:var(--cobalt);border-color:var(--cobalt)}
+.dot.plus::before,.dot.plus::after{content:"";position:absolute;background:var(--pencil-line);border-radius:var(--stroke)}
+.dot.plus::before{left:3px;right:3px;top:50%;height:var(--stroke);margin-top:-1px}
+.dot.plus::after{top:3px;bottom:3px;left:50%;width:var(--stroke);margin-left:-1px}
+/* ===== 6. 按鈕：實心＝唯一重點；虛線停用要寫原因 ===== */
+.btn{display:flex;align-items:center;justify-content:center;width:100%;min-height:var(--btn-h);padding:0 var(--s24);border-radius:var(--r-pill);border:var(--stroke) solid var(--cobalt);font-size:var(--fs-btn);line-height:var(--lh-btn);font-weight:var(--fw-bold)}
+.btn.sm{min-height:var(--tap)}
+.btn.pri{background:var(--cobalt);color:var(--paper)}
+.btn.pri:active,.btn.pressed{background:var(--ink);border-color:var(--ink)}
+.btn.sec{background:var(--paper);color:var(--cobalt)}
+.btn.dis{background:var(--paper);border:var(--stroke) dashed var(--pencil-line);color:var(--pencil-blue);cursor:default}
+.reason{margin-top:var(--s8);text-align:center;font-size:var(--fs-caption);line-height:var(--lh-caption);color:var(--pencil-blue)}
+.link{color:var(--cobalt);text-decoration:underline;font-weight:var(--fw-bold)}
+/* ===== 7. 狀態標籤：小記號＋線型，文字一定在 ===== */
+.pill{display:inline-flex;align-items:center;gap:6px;min-height:var(--stamp-h);padding:0 10px;border-radius:var(--r-pill);border:var(--stroke) solid var(--bd);background:var(--bg);color:var(--fg);font-size:var(--fs-pill);line-height:var(--lh-pill);font-weight:var(--fw-bold);white-space:nowrap}
+.pill.dashed{border-style:dashed}
+.info{--bg:var(--info-bg);--fg:var(--info-fg);--bd:var(--info-bd)}
+.success{--bg:var(--success-bg);--fg:var(--success-fg);--bd:var(--success-bd)}
+.warning{--bg:var(--warning-bg);--fg:var(--warning-fg);--bd:var(--warning-bd)}
+.danger{--bg:var(--danger-bg);--fg:var(--danger-fg);--bd:var(--danger-bd)}
+.neutral{--bg:var(--neutral-bg);--fg:var(--neutral-fg);--bd:var(--neutral-bd)}
+.brand.pill{--bg:var(--wash);--fg:var(--cobalt);--bd:var(--cobalt)}
+.mk{width:var(--mark);height:var(--mark);flex:none;position:relative;display:inline-block;color:currentColor}
+.mk.wait{border:var(--stroke) dashed currentColor;border-radius:var(--r-pill)}
+.mk.solid{background:currentColor;border-radius:var(--r-pill)}
+.mk.half{border:var(--stroke) solid currentColor;border-radius:var(--r-pill);overflow:hidden}
+.mk.half::after{content:"";position:absolute;left:0;right:0;bottom:0;height:50%;background:currentColor}
+.mk.diamond{width:8px;height:8px;margin:0 1px;background:currentColor;transform:rotate(45deg)}
+.mk.dash{height:var(--stroke);border-radius:var(--stroke);background:currentColor}
+/* ===== 8. 簽名元件：一杯一珠進度盤 ===== */
+.pearls{display:flex;gap:var(--pearl-gap);flex:1;min-width:0}
+.pearl{flex:1;aspect-ratio:1;max-width:var(--pearl-max);border-radius:var(--r-pill);border:var(--stroke) solid var(--cobalt);position:relative}
+.pearl.on{background:var(--cobalt)}
+.pearl.next::after{content:"";position:absolute;inset:0;margin:auto;width:var(--pearl-dot);height:var(--pearl-dot);border-radius:var(--r-pill);background:var(--cobalt)}
+.pearls.mini{gap:2px;flex:none;width:var(--mini-w)}
+.mini .pearl{flex:none;width:var(--pearl-mini)}
+.mini .pearl.next::after{width:var(--pearl-dot-mini);height:var(--pearl-dot-mini)}
+.stamp{position:relative;min-width:var(--stamp-w);min-height:var(--stamp-h);padding:0 var(--s8);border-radius:var(--r-stamp);border:var(--stroke) solid var(--cobalt);display:inline-flex;align-items:center;justify-content:center;font-size:var(--fs-pill);line-height:var(--lh-pill);font-weight:var(--fw-bold);background:var(--paper);color:var(--ink);flex:none}
+.stamp.est{border-style:dashed}
+.stamp.fin{background:var(--cobalt);color:var(--paper)}
+.sparks{position:absolute;right:-6px;top:-12px;width:22px;height:12px}
+.sparks i{position:absolute;bottom:0;width:var(--stroke);height:8px;border-radius:var(--stroke);background:var(--cobalt);transform-origin:50% 100%}
+.sparks i:nth-child(1){left:2px;transform:rotate(-35deg)}.sparks i:nth-child(2){left:10px}.sparks i:nth-child(3){left:18px;transform:rotate(35deg)}
+.tier{display:flex;align-items:center;gap:var(--s8);min-height:var(--tap);padding:0 var(--s8);border-radius:var(--r10)}
+.tier.cur{background:var(--wash)}
+.tier .lab{width:38px;flex:none;font-size:var(--fs-caption);font-weight:var(--fw-bold);color:var(--pencil-blue)}
+.tier.cur .lab{color:var(--ink)}
+.notch{position:absolute;top:-10px;left:var(--s12);padding:0 var(--s8);background:var(--paper);font-size:var(--fs-pill);line-height:var(--lh-pill);font-weight:var(--fw-bold);color:var(--cobalt)}
+/* ===== 9. 取餐憑證：全 App 唯一的大塊實心鈷藍 ===== */
+.ticket{background:var(--cobalt);color:var(--paper);border:var(--stroke) solid var(--cobalt);border-radius:var(--r16);padding:var(--s32) var(--s16) var(--s24);text-align:center}
+.ticket .lab{font-size:var(--fs-pill);line-height:var(--lh-pill);font-weight:var(--fw-bold)}
+.code{display:flex;justify-content:center;align-items:center;gap:var(--s12);margin:var(--s12) 0 var(--s16);font-size:var(--fs-code);line-height:var(--lh-code);font-weight:var(--fw-bold);letter-spacing:4px;font-variant-numeric:tabular-nums;white-space:nowrap}
+.code .sep{width:12px;height:12px;border:var(--stroke) solid var(--paper);border-radius:var(--r-pill);flex:none}
+.ticket .cut{border-top:var(--stroke) dashed var(--paper);opacity:.6;margin-bottom:var(--s16)}
+.ticket.wait{background:var(--paper);color:var(--pencil-blue);border:var(--stroke) dashed var(--pencil-line)}
+.ticket.wait .code{gap:var(--s8);margin:var(--s16) 0}
+.ticket.wait .c{width:var(--pearl-max);height:var(--pearl-max);border:var(--stroke) dashed var(--pencil-line);border-radius:var(--r-pill)}
+.ticket.wait .cut{border-color:var(--pencil-line);opacity:1}
+/* 商家密集表格：不畫格線，只有表頭一條墨線 */
+.th{display:flex;gap:var(--s12);padding:var(--s8) 0;border-bottom:var(--stroke) solid var(--ink);font-size:var(--fs-caption);line-height:var(--lh-caption);font-weight:var(--fw-bold);color:var(--pencil-blue)}
+.tr{display:flex;gap:var(--s12);padding:var(--s12) 0}
+.tr+.tr{border-top:var(--stroke) solid var(--faint)}
+.qty{width:var(--tap);height:var(--tap);flex:none;border-radius:var(--r-pill);border:var(--stroke) solid var(--cobalt);display:grid;place-items:center;color:var(--cobalt);font-size:var(--fs-body);font-weight:var(--fw-bold);font-variant-numeric:tabular-nums}
+.mods{display:flex;flex-wrap:wrap;gap:var(--s4);margin-top:var(--s4)}
+.mod{min-height:var(--stamp-h);padding:0 var(--s8);display:inline-flex;align-items:center;border:var(--stroke) solid var(--pencil-line);border-radius:var(--r-pill);font-size:var(--fs-mod);font-weight:var(--fw-bold);font-variant-numeric:tabular-nums}
+.sc{flex:none;min-height:var(--tap);padding:var(--s4) var(--s12);border:var(--stroke) solid var(--pencil-line);border-radius:var(--r10)}
+.sc b{display:flex;align-items:center;gap:6px;font-size:var(--fs-dense);line-height:var(--lh-dense)}
+/* ===== 10. 樣式表區 ===== */
+.sheet section{margin-top:var(--s32)}
+.sheet h2{font-size:var(--fs-section);line-height:var(--lh-section);font-weight:var(--fw-bold);padding-bottom:var(--s8);border-bottom:var(--stroke) solid var(--faint);margin-bottom:var(--s16)}
+.sheet h3{font-size:var(--fs-body);font-weight:var(--fw-bold);margin:var(--s16) 0 var(--s8)}
+.grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(260px,1fr));gap:var(--s16)}
+.sw{border:var(--stroke) solid var(--pencil-line);border-radius:var(--r16);overflow:hidden;display:flex;flex-direction:column}
+.sw .c{height:56px;border-bottom:var(--stroke) solid var(--pencil-line)}
+.sw .m{padding:var(--s12);display:flex;flex-direction:column;gap:var(--s4)}
+.tr2{display:grid;grid-template-columns:200px 1fr;gap:var(--s16);align-items:center;padding:var(--s8) 0;border-top:var(--stroke) solid var(--faint)}
+.tr2 .t-cap{color:var(--pencil-blue)}
+.pg{display:flex;flex-wrap:wrap;gap:var(--s16) var(--s24)}
+.cell{display:flex;flex-direction:column;gap:var(--s4);align-items:flex-start}
+.demo{display:flex;flex-wrap:wrap;gap:var(--s24);align-items:flex-start}
+.demo>div{width:260px}
+.state{display:flex;flex-direction:column;gap:var(--s8);border:var(--stroke) solid var(--pencil-line);border-radius:var(--r16);padding:var(--s16);width:340px}
+.pc{display:grid;grid-template-columns:1fr 1fr;gap:var(--s16)}
+.pc>div{border:var(--stroke) solid var(--pencil-line);border-radius:var(--r16);padding:var(--s16)}
+.pc li{margin:var(--s8) 0 0 var(--s16)}
+/* 小工具 */
+.mut{color:var(--pencil-blue)}.ink{color:var(--ink)}.r{text-align:right}.ml{margin-left:auto}.self-start{align-self:flex-start}
+.mt8{margin-top:var(--s8)}.mt12{margin-top:var(--s12)}.f1{flex:1}
+.li>.col.r{flex:none;width:var(--mini-w);align-items:flex-end}
+.tray{padding:var(--s16) var(--s8) var(--s8);gap:var(--s4);margin-top:var(--s8)}
+.tr>.col{flex:1;min-width:0}
+.d14{font-size:var(--fs-dense);line-height:var(--lh-dense)}
+.qty-h{width:var(--tap);text-align:center}
+@media (max-width:640px){.tr2,.pc{grid-template-columns:1fr}.rail{padding:var(--s24) var(--s16)}.hero,.sheet{padding:var(--s24) var(--s16)}}
+.demo>.state,.demo>.tk{width:340px}
+</style>
+</head>
+<body>
+<header class="hero">
+  <div class="row" style="flex-wrap:wrap"><span class="tag">方向 A</span><span class="tag">Tier 0：零新增套件</span><span class="tag">只用 View / Text / Image / Pressable / Animated</span></div>
+  <h1 class="mt12">一筆珍珠<small>One-Stroke Pearl (Monoline)</small></h1>
+  <p class="thesis">整個 App 用同一支筆畫出來：一種線條粗細、一種墨藍、一張白紙，跟你的杯子 Logo 和登入插圖一樣。每有人訂一杯，就有一顆珍珠被填滿；虛線代表「還會變」，實線代表「已經定了」，所以「只預留額度、還沒扣款」是被畫出來的，不只是寫出來的。</p>
+  <div class="sigbox"><b>簽名元件：一杯一珠進度盤（Pearl Tray）</b><div class="pearls" data-band="10" data-filled="7"></div><span class="stamp est">9折</span><span class="t-cap">虛線章＝預估，實心章＝定案</span></div>
+  <p class="t-cap mt12">下面是四個 360dp 寬的模擬手機畫面，可以左右滑動。所有效果都是 React Native 內建元件做得到的：實線、虛線、圓角、旋轉，沒有陰影、漸層、外部字型。</p>
+</header>
+
+<div class="rail"><div class="rail-in">
+<!-- ① 首頁（顧客） -->
+<figure class="fig"><div class="phone">
+  <div class="sb"><span>9:41</span><span class="sys"><i></i><i></i><i></i><b></b></span></div>
+  <div class="scroll">
+    <div class="row"><div class="ava">美</div><div class="col"><span class="t-cap">歡迎回來</span><span class="t-title">嗨，小美</span></div></div>
+    <div class="row"><button class="chip on">1 公里</button><button class="chip">3 公里</button><button class="chip">5 公里</button></div>
+    <h2 class="t-sec sh">進行中的團購</h2>
+    <div class="card brand">
+      <div class="row sp"><div class="col"><span class="t-sec">週五下午茶團購</span><span class="t-cap">森林紅茶 · 中山北路 88 號</span></div><span class="pill info dashed"><i class="mk wait"></i>招募中</span></div>
+      <div class="row sp"><div><span class="t-hero num">7</span> <span class="t-sec num mut">/ 10 杯</span></div><div class="col r"><span class="t-cap">目標：滿 10 杯打 9 折</span><b class="t-cap ink">剩餘 3 杯</b></div></div>
+      <div class="row"><div class="pearls" data-band="10" data-filled="7"></div><span class="stamp est">9折</span></div>
+      <div class="callout"><b class="t-body">預估打 9 折</b><span class="t-cap">再 3 杯達到 10 杯級距</span></div>
+      <div class="row sp t-cap"><span>截止倒數 <b class="ink">剩 1 小時 24 分</b></span><span>0.4 公里</span></div>
+    </div>
+    <h2 class="t-sec sh">附近熱門活動推薦</h2>
+    <div class="card list">
+      <div class="li"><div class="col"><b class="t-body">雲頂茶室</b><span class="t-cap ell">烏龍茶下午場 · 0.6 公里</span></div><div class="col r"><b class="t-body num">4 / 10 杯</b><div class="pearls mini" data-band="10" data-filled="4"></div></div></div>
+      <div class="li"><div class="col"><b class="t-body">阿嬤的冰茶</b><span class="t-cap ell">古早味紅茶冰 · 1.2 公里</span></div><div class="col r"><b class="t-body num">8 / 10 杯</b><div class="pearls mini" data-band="10" data-filled="8"></div></div></div>
+      <div class="li"><div class="col"><b class="t-body">月光茶舖</b><span class="t-cap ell">黑糖珍珠團 · 2.1 公里</span></div><div class="col r"><b class="t-body num">2 / 10 杯</b><div class="pearls mini" data-band="10" data-filled="2"></div></div></div>
+    </div>
+  </div>
+  <nav class="nav"><a class="on"><i class="dot"></i>首頁</a><a><i class="dot"></i>即時地圖</a><a><i class="dot"></i>我的訂單</a><a><i class="dot"></i>個人中心</a></nav>
+  <div class="gest"><i></i></div>
+</div><figcaption>① 首頁（顧客）<span>標題直接寫在白紙上，拿掉滿版藍標頭與黃色頭像</span></figcaption></figure>
+
+<!-- ② 團購詳情 -->
+<figure class="fig"><div class="phone">
+  <div class="sb"><span>9:41</span><span class="sys"><i></i><i></i><i></i><b></b></span></div>
+  <div class="topbar"><button class="back" aria-label="返回"><i></i></button><span class="t-sec">團購詳情</span></div>
+  <div class="scroll">
+    <h1 class="t-title">週五下午茶團購</h1>
+    <div class="row"><span class="pill info dashed"><i class="mk wait"></i>招募中</span><b class="t-body num">剩 1 小時 24 分</b><span class="t-cap">· 5 人參與</span></div>
+    <div class="col mt8"><b class="t-body">森林紅茶</b><span class="t-cap">台北市中山區中山北路 88 號</span></div>
+    <div class="card brand tray">
+      <span class="notch">珍珠盤 · 已訂 7 杯</span>
+      <div class="tier cur"><span class="lab num">10 杯</span><div class="pearls" data-band="10" data-filled="7"></div><span class="stamp est">9折</span></div>
+      <div class="tier"><span class="lab num">20 杯</span><div class="pearls" data-band="10" data-filled="0" data-nodot></div><span class="stamp est">8.5折</span></div>
+      <div class="tier"><span class="lab num">30 杯</span><div class="pearls" data-band="10" data-filled="0" data-nodot></div><span class="stamp est">8折</span></div>
+    </div>
+    <p class="t-cap">虛線＝預估，截止後才定案 · 一顆珍珠＝1 杯</p>
+    <div class="card">
+      <div class="row sp"><b class="t-body">我的訂單</b><span class="pill info dashed"><i class="mk wait"></i>訂單成立</span></div>
+      <div class="row sp"><span class="t-cap">珍珠奶茶 x1、四季春青茶 x1<br>原價 NT$ 110</span><span class="r"><span class="est">預估</span> <b class="t-price">NT$ 99</b></span></div>
+    </div>
+    <button class="btn sec sm">分享給朋友</button>
+  </div>
+  <div class="foot"><div class="hint"><i class="mk wait"></i>現在只預留額度，不會扣款</div><button class="btn pri">選飲料加入團購</button></div>
+  <div class="gest"><i></i></div>
+</div><figcaption>② 團購詳情<span>珍珠盤：一行一個折扣級距，行尾蓋折數章</span></figcaption></figure>
+<!-- ③ 取貨資訊 -->
+<figure class="fig"><div class="phone">
+  <div class="sb"><span>9:41</span><span class="sys"><i></i><i></i><i></i><b></b></span></div>
+  <div class="topbar"><button class="back" aria-label="返回"><i></i></button><span class="t-sec">取貨資訊</span></div>
+  <div class="scroll">
+    <span class="pill brand self-start"><i class="mk solid"></i>可取貨</span>
+    <div class="col"><span class="t-sec">森林紅茶</span><span class="t-cap">台北市中山區中山北路 88 號</span></div>
+    <div class="ticket mt8">
+      <div class="lab">取餐憑證</div>
+      <div class="code" role="img" aria-label="取餐碼 482 917"><span>482</span><i class="sep"></i><span>917</span></div>
+      <div class="cut"></div>
+      <div class="t-body">到店取餐時，將此代碼提供給店家。</div>
+    </div>
+    <div class="card list">
+      <div class="li"><span class="t-cap">取餐時段</span><b class="t-body num ml">今天 15:30 - 18:30</b></div>
+      <div class="li"><span class="t-cap">訂單內容</span><span class="t-body ml">珍珠奶茶 x1、四季春青茶 x1</span></div>
+      <div class="li"><span class="t-cap">付款</span><span class="row ml"><span class="pill success"><i class="mk solid"></i>已付款</span><b class="t-price">NT$ 99</b></span></div>
+    </div>
+    <button class="btn sec sm">查看店家位置</button>
+  </div>
+  <div class="gest"><i></i></div>
+</div><figcaption>③ 取貨資訊<span>全 App 唯一的一大塊實心鈷藍，隔著手臂也看得清楚</span></figcaption></figure>
+
+<!-- ④ 店家製作清單（商家密集版） -->
+<figure class="fig"><div class="phone">
+  <div class="sb"><span>9:41</span><span class="sys"><i></i><i></i><i></i><b></b></span></div>
+  <div class="scroll">
+    <div class="col"><span class="t-title">製作清單</span><span class="t-cap">森林紅茶 · 週五下午茶團購</span></div>
+    <div class="row">
+      <div class="sc"><span class="t-cap">訂單數</span><b class="num">9</b></div>
+      <div class="sc"><span class="t-cap">總杯數</span><b class="num">18</b></div>
+      <div class="sc f1"><span class="t-cap">狀態</span><b><i class="mk half"></i>訂單製作中</b></div>
+    </div>
+    <div>
+      <div class="th"><span class="qty-h">杯數</span><span>品名與規格</span></div>
+      <div class="tr"><div class="qty">×6</div><div class="col"><b class="t-body d14">珍珠奶茶</b><div class="mods"><span class="mod">半糖少冰 x3</span><span class="mod">微糖去冰 x2</span><span class="mod">全糖去冰 x1</span></div></div></div>
+      <div class="tr"><div class="qty">×5</div><div class="col"><b class="t-body d14">四季春青茶</b><div class="mods"><span class="mod">無糖去冰 x3</span><span class="mod">半糖少冰 x2</span></div></div></div>
+      <div class="tr"><div class="qty">×4</div><div class="col"><b class="t-body d14">黑糖鮮奶</b><div class="mods"><span class="mod">微糖熱 x2</span><span class="mod">半糖少冰 x2</span></div></div></div>
+      <div class="tr"><div class="qty">×3</div><div class="col"><b class="t-body d14">芒果冰茶</b><div class="mods"><span class="mod">微糖少冰 x2</span><span class="mod">半糖去冰 x1</span></div></div></div>
+    </div>
+  </div>
+  <div class="foot"><div class="t-cap">有 9 筆可製作的訂單，按下後會通知顧客取餐。</div><button class="btn pri">標記可取餐</button></div>
+  <nav class="nav"><a class="on"><i class="dot"></i>首頁</a><a><i class="dot plus"></i>開團</a></nav>
+  <div class="gest"><i></i></div>
+</div><figcaption>④ 店家製作清單<span>同一種墨線，排版更密：圓角 10、內距 12、內文 14</span></figcaption></figure>
+</div></div>
+<main class="sheet">
+<section>
+  <h2>1. 色票（整個 App 只有一個色相：鈷藍）</h2>
+  <div class="grid">
+    <div class="sw"><div class="c" style="background:var(--cobalt)"></div><div class="m"><b>鈷藍墨 Cobalt · #1E44BF</b><span class="t-cap">全 App 唯一的品牌藍：線條、主要按鈕、被選中的東西、連結、珍珠。對白底 7.97:1。</span></div></div>
+    <div class="sw"><div class="c" style="background:var(--ink)"></div><div class="m"><b>深墨 Deep Ink · #14286F</b><span class="t-cap">標題與內文（對白底 13.44:1），也是按鈕按下去的顏色。</span></div></div>
+    <div class="sw"><div class="c" style="background:var(--paper)"></div><div class="m"><b>紙白 Paper · #FFFFFF</b><span class="t-cap">頁面與所有卡片的底，跟兩張 PNG 的白底一致。</span></div></div>
+    <div class="sw"><div class="c" style="background:var(--pencil-blue)"></div><div class="m"><b>鉛筆藍灰 Pencil Blue · #5B6B99</b><span class="t-cap">次要文字、未選中的圖示、停用按鈕的字（對白底 5.24:1，對水洗藍 4.69:1）。</span></div></div>
+    <div class="sw"><div class="c" style="background:var(--pencil-line)"></div><div class="m"><b>鉛筆線 Pencil Line · #7A88B4</b><span class="t-cap">一般卡片外框、未選中的晶片、空輸入框、停用按鈕的虛線框。對白底 3.50:1，過 3:1 的元件邊界標準。</span></div></div>
+    <div class="sw"><div class="c" style="background:var(--faint)"></div><div class="m"><b>淡線 Faint Line · #B4BEDC</b><span class="t-cap">只給純裝飾的分隔線（1.85:1），絕不用來畫可點元件的邊。</span></div></div>
+    <div class="sw"><div class="c" style="background:var(--wash)"></div><div class="m"><b>水洗藍 Wash · #EEF2FF</b><span class="t-cap">輸入框聚焦底、提示條（例如「現在只預留額度，不會扣款」）、可取餐標籤底。每畫面最多兩三處。</span></div></div>
+    <div class="sw"><div class="c" style="background:var(--scrim)"></div><div class="m"><b>墨藍遮罩 Scrim · #14286F80</b><span class="t-cap">底部彈窗與對話框後面的遮罩（深墨加 50% 透明），不用純黑。</span></div></div>
+  </div>
+  <h3>語意色（狀態標籤用：底色 / 文字 / 邊線）</h3>
+  <div class="pg">
+    <div class="cell"><span class="pill info"><i class="mk solid"></i>info 資訊</span><span class="t-cap num">底 #EEF2FF · 字 #14286F · 線 #1E44BF</span></div>
+    <div class="cell"><span class="pill success"><i class="mk solid"></i>success 成功</span><span class="t-cap num">底 #E8F6EF · 字 #0C5A3A · 線 #1F8A5B</span></div>
+    <div class="cell"><span class="pill warning"><i class="mk solid"></i>warning 注意</span><span class="t-cap num">底 #FFF6E0 · 字 #7A4A00 · 線 #C27A00</span></div>
+    <div class="cell"><span class="pill danger"><i class="mk solid"></i>danger 出問題</span><span class="t-cap num">底 #FDECEE · 字 #8E1420 · 線 #C62F3B</span></div>
+    <div class="cell"><span class="pill neutral"><i class="mk solid"></i>neutral 中性</span><span class="t-cap num">底 #FFFFFF · 字 #4A5680 · 線 #7A88B4</span></div>
+    <div class="cell"><span class="pill brand"><i class="mk solid"></i>brand 品牌（可取餐）</span><span class="t-cap num">底 #EEF2FF · 字 #1E44BF · 線 #1E44BF</span></div>
+  </div>
+</section>
+
+<section>
+  <h2>2. 字級（中文只用 400 與 700 兩檔，層次靠字級、顏色、留白）</h2>
+  <div class="tr2"><div><b>數字主角 numeralHero</b><div class="t-cap">44 / 48 · 700 · 每畫面最多一個</div></div><div><span class="t-hero num">7</span> <span class="t-sec num mut">/ 10 杯</span> <span class="tag">選配・需新增套件：圓頭數字 Nunito（沒裝就用系統字）</span></div></div>
+  <div class="tr2"><div><b>頁面標題 screenTitle</b><div class="t-cap">24 / 32 · 700</div></div><div class="t-title">附近團購</div></div>
+  <div class="tr2"><div><b>區塊標題 sectionTitle</b><div class="t-cap">18 / 26 · 700</div></div><div class="t-sec">森林紅茶 · 進行中的團購</div></div>
+  <div class="tr2"><div><b>內文 body</b><div class="t-cap">15 / 23 · 400（商家密集頁 14 / 21）</div></div><div class="t-body">珍珠奶茶，半糖少冰。說明文字用 400，<b>要強調的字改 700</b>。</div></div>
+  <div class="tr2"><div><b>輔助字 caption</b><div class="t-cap">12 / 18 · 400 · 鉛筆藍灰</div></div><div class="t-cap">0.6 公里 · 剩 1 小時 24 分 · 5 人參與</div></div>
+  <div class="tr2"><div><b>價格 price</b><div class="t-cap">17 / 22 · 700 · 等寬數字 · 深墨不上色</div></div><div><span class="est">預估</span> <span class="t-price">NT$ 99</span></div></div>
+  <div class="tr2"><div><b>取餐碼 pickupCode</b><div class="t-cap">52 / 60 · 700 · 3＋3 分組 · letterSpacing 4</div></div><div class="code" style="justify-content:flex-start;margin:0"><span>482</span><i class="sep" style="border-color:var(--cobalt)"></i><span>917</span></div></div>
+  <div class="tr2"><div><b>按鈕文字 buttonLabel</b><div class="t-cap">16 / 22 · 700</div></div><div style="font-size:var(--fs-btn);line-height:var(--lh-btn);font-weight:var(--fw-bold)">選飲料加入團購</div></div>
+  <div class="tr2"><div><b>標籤字 pillLabel</b><div class="t-cap">12 / 16 · 700 · 最小字級，高度用 minHeight</div></div><div class="row"><span class="pill info dashed"><i class="mk wait"></i>招募中</span><span class="stamp est">9折</span></div></div>
+  <h3>文案口氣：像講話清楚的櫃檯店員，牽涉到錢一定講明「現在有沒有扣款」</h3>
+  <div class="callout"><span class="t-body">「再 3 杯達到 20 杯級距，預估打 8.5 折」「現在只預留額度，不會扣款；團購截止後，依最終折扣扣款」「取餐碼 482 917，請出示給店員」</span></div>
+</section>
+
+<section>
+  <h2>3. 狀態標籤全表（33 種；記號＋線型＋文字，不只靠顏色）</h2>
+  <div class="row mt8" style="flex-wrap:wrap;gap:var(--s16)">
+    <span class="row t-cap"><i class="mk wait"></i>空圈＋虛線＝等待</span><span class="row t-cap"><i class="mk half"></i>半實心＝正在做</span><span class="row t-cap"><i class="mk solid"></i>實心＝已落地</span><span class="row t-cap"><i class="mk diamond"></i>菱形＝出問題</span><span class="row t-cap"><i class="mk dash"></i>短橫線＝已結束</span>
+  </div>
+  <div id="pills"></div>
+</section>
+
+<section>
+  <h2>4. 按鈕（實心只給每頁一顆主要動作）</h2>
+  <div class="demo">
+    <div><div class="t-cap">主要 primary</div><button class="btn pri">選飲料加入團購</button></div>
+    <div><div class="t-cap">按下去 pressed（立刻變深墨）</div><button class="btn pri pressed">選飲料加入團購</button></div>
+    <div><div class="t-cap">次要 secondary</div><button class="btn sec">分享給朋友</button></div>
+    <div><div class="t-cap">停用 disabled（虛線框，下面寫原因）</div><button class="btn dis" aria-disabled="true">選飲料加入團購</button><p class="reason">請先選好尺寸與甜度</p></div>
+    <div><div class="t-cap">文字連結 · 篩選晶片</div><p class="mt8"><a class="link">看完整規則</a></p><div class="row mt12"><button class="chip on">選中</button><button class="chip">未選中</button></div></div>
+  </div>
+  <h3>圓角四階與線寬（全 App 只有 2dp、圓頭）</h3>
+  <div class="row" style="flex-wrap:wrap;gap:var(--s16)">
+    <div class="sc" style="border-radius:var(--r6)"><b>6</b><span class="t-cap">勾選框、小標記</span></div>
+    <div class="sc" style="border-radius:var(--r10)"><b>10</b><span class="t-cap">輸入框、商家列</span></div>
+    <div class="sc" style="border-radius:var(--r16)"><b>16</b><span class="t-cap">卡片、彈窗</span></div>
+    <div class="sc" style="border-radius:var(--r-pill)"><b>999</b><span class="t-cap">珍珠、晶片、按鈕</span></div>
+  </div>
+</section>
+
+<section>
+  <h2>5. 簽名元件：一杯一珠進度盤（三種狀態）</h2>
+  <div class="demo">
+    <div class="state"><b>0%・還沒人訂</b><div class="row"><div class="pearls" data-band="10" data-filled="0"></div><span class="stamp est">9折</span></div><span class="t-cap">0 / 10 杯 · 第一個空圈中間的小實點＝下一個名額（不靠顏色）· 虛線章＝預估</span></div>
+    <div class="state"><b>約 60%・招募中</b><div class="row"><div class="pearls" data-band="10" data-filled="6"></div><span class="stamp est">9折</span></div><span class="t-cap">6 / 10 杯 · 再 4 杯達到 10 杯級距，預估打 9 折</span></div>
+    <div class="state"><b>完成・定案</b><div class="row"><div class="pearls" data-band="10" data-filled="10"></div><span class="stamp fin">9折<span class="sparks"><i></i><i></i><i></i></span></span></div><span class="t-cap">10 / 10 杯 · 實心章＝定案 · 達標當下三條火花只播一次</span></div>
+    <div class="state"><b>一顆代表多杯（級距超過 12 杯）</b><div class="row"><div class="pearls" data-band="20" data-filled="17"></div><span class="stamp est">8.5折</span></div><span class="t-cap">17 / 20 杯 · <span class="calc"></span></span></div>
+    <div class="state"><b>99 / 100 杯不會畫成全滿</b><div class="row"><div class="pearls" data-band="100" data-filled="99"></div><span class="stamp est">8折</span></div><span class="t-cap">99 / 100 杯 · <span class="calc"></span></span></div>
+  </div>
+  <p class="t-cap mt12" id="tests"></p>
+  <h3>取餐憑證的兩種狀態（同一個元件；只有憑證有效時才畫碼，不畫假的碼）</h3>
+  <div class="demo">
+    <div class="tk"><div class="ticket"><div class="lab">取餐憑證 · 可取貨</div><div class="code"><span>482</span><i class="sep"></i><span>917</span></div><div class="cut"></div><div class="t-body">到店取餐時，將此代碼提供給店家。</div></div></div>
+    <div class="tk"><div class="ticket wait"><div class="lab">取餐憑證 · 還沒備好</div><div class="code"><span class="c"></span><span class="c"></span><span class="c"></span><span class="c"></span><span class="c"></span><span class="c"></span></div><div class="cut"></div><div class="t-body">店家備好餐點後，代碼會出現在這裡。</div></div></div>
+  </div>
+</section>
+
+<section>
+  <h2>6. 優點、缺點與技術等級</h2>
+  <div class="pc">
+    <div><b>優點</b><ul><li>最貼近你現有的杯子 Logo 與登入插圖，整個 App 像同一支筆畫的。</li><li>用虛線與實線把「還沒扣款」和「已經定了」畫出來，錢的畫面最安心。</li><li>完全不需要新套件、不用陰影，技術風險最低，也最容易一小步一小步上線。</li></ul></div>
+    <div><b>缺點</b><ul><li>整個 App 只有一種藍，可能像銀行 App，要靠珍珠與口氣撐出個性。</li><li>導覽圖示的 PNG 要有人畫，畫之前先用圓點加文字撐著。</li><li>虛線在 Android 實機的樣子還沒驗證，第一個切片就要先在真機看。</li></ul></div>
+  </div>
+  <p class="t-body mt12"><b>適合你的情況：</b>想要最貼近現有品牌、最好分小步上線、又要把「授權不等於扣款」講清楚的話，選這個。</p>
+  <h3>選配升級（都要你先同意才會新增）</h3>
+  <div class="row" style="flex-wrap:wrap"><span class="tag">需新增套件</span><span class="t-cap">@expo/vector-icons（只用 Feather 那組）＋ expo-font：商家頁圖示越來越多時，不用一張一張畫 PNG。</span></div>
+  <div class="row mt8" style="flex-wrap:wrap"><span class="tag">需新增套件</span><span class="t-cap">@expo-google-fonts/nunito ＋ expo-font（低優先）：圓頭英數字體，只用在大數字與取餐碼。</span></div>
+</section>
+</main>
+<script>
+/* 純函式 getPearlRow：跟 mobile/tests 要測的規格一致。一顆珍珠代表 ceil(級距/12) 杯；
+   未達標時至少 1 顆、至多 count-1 顆，所以 99/100 杯不會全滿、1 杯不會全空。 */
+function getPearlRow(band, filled) {
+  const per = Math.ceil(band / 12), count = Math.ceil(band / per);
+  let n = 0;
+  if (filled >= band) n = count;
+  else if (filled > 0) n = Math.min(count - 1, Math.max(1, Math.floor(filled / per)));
+  return { per: per, count: count, n: n };
+}
+document.querySelectorAll('.pearls[data-band]').forEach(function (el) {
+  const band = +el.dataset.band, filled = +el.dataset.filled, r = getPearlRow(band, filled);
+  const showNext = !el.hasAttribute('data-nodot');
+  el.setAttribute('role', 'img');
+  el.setAttribute('aria-label', '已訂 ' + filled + ' 杯，目標 ' + band + ' 杯');
+  let h = '';
+  for (let i = 0; i < r.count; i++) {
+    h += '<i class="pearl' + (i < r.n ? ' on' : '') + (showNext && i === r.n && r.n < r.count ? ' next' : '') + '" aria-hidden="true"></i>';
+  }
+  el.innerHTML = h;
+  const st = el.closest('.state'), calc = st && st.querySelector('.calc');
+  if (calc) calc.textContent = '每顆＝' + r.per + ' 杯，畫 ' + r.count + ' 顆、填 ' + r.n + ' 顆';
+});
+const T = [[1,0],[1,1],[10,7],[12,11],[13,1],[13,12],[20,17],[100,1],[100,99]];
+document.getElementById('tests').textContent = 'getPearlRow 測試樣本（級距杯數、已訂杯數 → 畫幾顆、填幾顆）：' +
+  T.map(function (p) { const r = getPearlRow(p[0], p[1]); return p[0] + ' 杯級距已訂 ' + p[1] + ' → ' + r.count + ' 顆填 ' + r.n; }).join('；');
+/* 狀態標籤全表：[值, 文字, 語意色, 記號]；虛線只給「等待」 */
+const G = [
+ ['團購活動', 'groupBuyActivity', [['recruiting','招募中','info','wait'],['confirmed','已成團','success','solid'],['formed','已成團','success','solid'],['ordering','訂單製作中','info','half'],['ready_for_pickup','可取餐','brand','solid'],['completed','已完成','neutral','dash'],['failed','流團','danger','diamond'],['cancelled','已取消','neutral','dash'],['full','已額滿','warning','dash']]],
+ ['付款', 'payment', [['pending','待付款','warning','wait'],['submitted','付款回報已送出（舊流程）','info','wait'],['confirmed','付款已確認（舊流程）','success','solid'],['not_required','無需付款','neutral','dash'],['authorized','訂單成立','info','wait'],['captured','已付款','success','solid'],['authorization_voided','授權已取消','neutral','dash'],['released','已釋放授權','neutral','dash'],['failed','扣款失敗','danger','diamond'],['refunded','已退款','neutral','dash']]],
+ ['商家端付款（沿用現有字）', 'merchantPayment', [['authorized','已付款','success','solid'],['failed','待付款','warning','wait']]],
+ ['取貨', 'pickup', [['not_ready','尚未可取貨','neutral','wait'],['preparing','訂單製作中','info','half'],['ready','可取貨','brand','solid'],['picked_up','已取貨','neutral','dash'],['cancelled','已取消','neutral','dash'],['expired','已逾期','warning','diamond']]],
+ ['退款申請', 'refundRequest', [['pending','待審核','warning','wait'],['approved','已核准','success','solid'],['rejected','已駁回','danger','diamond']]],
+ ['折扣', 'discount', [['not_yet_qualified','尚未達標','neutral','wait'],['qualified','優惠成立','success','solid'],['failed','未達標','danger','diamond']]]
+];
+document.getElementById('pills').innerHTML = G.map(function (g) {
+  return '<h3>' + g[0] + ' <span class="t-cap">' + g[1] + '</span></h3><div class="pg">' + g[2].map(function (s) {
+    return '<div class="cell"><span class="pill ' + s[2] + (s[3] === 'wait' ? ' dashed' : '') + '"><i class="mk ' + s[3] + '"></i>' + s[1] + '</span><span class="t-cap">' + g[1] + '.' + s[0] + '</span></div>';
+  }).join('') + '</div>';
+}).join('');
+</script>
+</body>
+</html>
