@@ -47,6 +47,7 @@ export const maxFontSizeMultiplier = 1.1;
 // Chinese system fonts differ per device; only weights 400 and 700 are reliable steps.
 export const typeScale = {
   pearlNumber: { fontSize: 32, lineHeight: 36, fontWeight: "700" },
+  amount: { fontSize: 28, lineHeight: 32, fontWeight: "700" }, // order total, amount to pay
   pickupCode: { fontSize: 52, lineHeight: 60, fontWeight: "700" },
   screenTitle: { fontSize: 24, lineHeight: 32, fontWeight: "700" },
   sectionTitle: { fontSize: 17, lineHeight: 24, fontWeight: "700" },

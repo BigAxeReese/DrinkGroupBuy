@@ -1,12 +1,15 @@
 import { useEffect, useState } from "react";
-import { Modal, Platform, Pressable, StyleSheet, Switch, Text, View } from "react-native";
+import { Modal, Platform, Pressable, ScrollView, StyleSheet, Switch, Text, View } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
+import { colors, radii, sizes, spacing, typeScale } from "../theme/tokens";
 import {
   DEFAULT_MAP_FILTERS,
   MIN_CUPS_OPTIONS,
   PICKUP_WITHIN_MINUTES_OPTIONS,
   RADIUS_OPTIONS
 } from "../utils/groupBuyActivityMapFilters";
+import { ChoiceChip } from "./ChoiceChip";
+import { PrimaryButton } from "./PrimaryButton";
 
 export function ActivityFilterPanel({
   visible,
@@ -40,92 +43,93 @@ export function ActivityFilterPanel({
         <Pressable
           accessibilityRole="button"
           accessibilityLabel="關閉篩選面板"
-          style={StyleSheet.absoluteFillObject}
+          style={styles.backdrop}
           onPress={onClose}
         />
-        <View style={[styles.sheet, { paddingBottom: 28 + insets.bottom }]}>
+        <View style={[styles.sheet, { paddingBottom: spacing.s24 + insets.bottom }]}>
           <View style={styles.headerRow}>
             <Text style={styles.title}>搜尋偏好</Text>
-            <Pressable accessibilityRole="button" accessibilityLabel="關閉" onPress={onClose} style={styles.closeButton}>
-              <Text style={styles.closeIcon}>✕</Text>
+            <Pressable
+              accessibilityRole="button"
+              accessibilityLabel="關閉"
+              onPress={onClose}
+              style={({ pressed }) => [styles.closeButton, pressed && styles.pressed]}
+            >
+              <View style={styles.closeIcon}>
+                <View style={[styles.closeBar, styles.closeBarDown]} />
+                <View style={[styles.closeBar, styles.closeBarUp]} />
+              </View>
             </Pressable>
           </View>
 
-          <View style={styles.toggleRow}>
-            <Text style={styles.rowLabel}>只看招募中</Text>
-            <Switch
-              accessibilityLabel="只看招募中"
-              value={draft.recruitingOnly}
-              onValueChange={(next) => setDraft((current) => ({ ...current, recruitingOnly: next }))}
-              trackColor={{ true: "#2563eb", false: "#cbd5e1" }}
-              thumbColor="#ffffff"
-            />
-          </View>
+          {/* 44px chips make the options taller than the sheet on shorter phones or larger system
+              fonts, so they scroll while the header and the apply button stay in view. */}
+          <ScrollView style={styles.options} contentContainerStyle={styles.optionsContent}>
+            <View style={styles.toggleRow}>
+              <Text style={styles.rowLabel}>只看招募中</Text>
+              <Switch
+                accessibilityLabel="只看招募中"
+                value={draft.recruitingOnly}
+                onValueChange={(next) => setDraft((current) => ({ ...current, recruitingOnly: next }))}
+                trackColor={{ true: colors.accent, false: colors.lineInput }}
+                thumbColor={colors.page}
+                activeThumbColor={colors.page}
+              />
+            </View>
 
-          <View style={styles.block}>
-            <Text style={styles.blockLabel}>搜尋半徑</Text>
-            {!hasLocation ? (
-              <View style={styles.locationHintRow}>
-                <Text style={styles.blockHint}>需要開啟定位權限才能依距離篩選。</Text>
-                {onOpenLocationSettings ? (
-                  <Pressable
-                    accessibilityRole="button"
-                    onPress={onOpenLocationSettings}
-                    style={({ pressed }) => [styles.locationSettingsButton, pressed && styles.pressed]}
-                  >
-                    <Text style={styles.locationSettingsButtonText}>前往設定開啟</Text>
-                  </Pressable>
-                ) : null}
+            <View style={styles.block}>
+              <Text style={styles.blockLabel}>搜尋半徑</Text>
+              {!hasLocation ? (
+                <View style={styles.locationHintRow}>
+                  <Text style={styles.blockHint}>需要開啟定位權限才能依距離篩選。</Text>
+                  {onOpenLocationSettings ? (
+                    <PrimaryButton label="前往設定開啟" onPress={onOpenLocationSettings} variant="secondary" />
+                  ) : null}
+                </View>
+              ) : null}
+              <View style={styles.optionRow}>
+                {RADIUS_OPTIONS.map((option) => (
+                  <SegmentButton
+                    key={option.label}
+                    label={option.label}
+                    active={hasLocation && draft.radiusKm === option.value}
+                    disabled={!hasLocation}
+                    onPress={() => setDraft((current) => ({ ...current, radiusKm: option.value }))}
+                  />
+                ))}
               </View>
-            ) : null}
-            <View style={styles.optionRow}>
-              {RADIUS_OPTIONS.map((option) => (
-                <SegmentButton
-                  key={option.label}
-                  label={option.label}
-                  active={hasLocation && draft.radiusKm === option.value}
-                  disabled={!hasLocation}
-                  onPress={() => setDraft((current) => ({ ...current, radiusKm: option.value }))}
-                />
-              ))}
             </View>
-          </View>
 
-          <View style={styles.block}>
-            <Text style={styles.blockLabel}>優惠門檻</Text>
-            <View style={styles.optionRow}>
-              {MIN_CUPS_OPTIONS.map((option) => (
-                <SegmentButton
-                  key={option.label}
-                  label={option.label}
-                  active={draft.minCups === option.value}
-                  onPress={() => setDraft((current) => ({ ...current, minCups: option.value }))}
-                />
-              ))}
+            <View style={styles.block}>
+              <Text style={styles.blockLabel}>優惠門檻</Text>
+              <View style={styles.optionRow}>
+                {MIN_CUPS_OPTIONS.map((option) => (
+                  <SegmentButton
+                    key={option.label}
+                    label={option.label}
+                    active={draft.minCups === option.value}
+                    onPress={() => setDraft((current) => ({ ...current, minCups: option.value }))}
+                  />
+                ))}
+              </View>
             </View>
-          </View>
 
-          <View style={styles.block}>
-            <Text style={styles.blockLabel}>取餐時間</Text>
-            <View style={styles.optionRow}>
-              {PICKUP_WITHIN_MINUTES_OPTIONS.map((option) => (
-                <SegmentButton
-                  key={option.label}
-                  label={option.label}
-                  active={draft.pickupWithinMinutes === option.value}
-                  onPress={() => setDraft((current) => ({ ...current, pickupWithinMinutes: option.value }))}
-                />
-              ))}
+            <View style={styles.block}>
+              <Text style={styles.blockLabel}>取餐時間</Text>
+              <View style={styles.optionRow}>
+                {PICKUP_WITHIN_MINUTES_OPTIONS.map((option) => (
+                  <SegmentButton
+                    key={option.label}
+                    label={option.label}
+                    active={draft.pickupWithinMinutes === option.value}
+                    onPress={() => setDraft((current) => ({ ...current, pickupWithinMinutes: option.value }))}
+                  />
+                ))}
+              </View>
             </View>
-          </View>
+          </ScrollView>
 
-          <Pressable
-            accessibilityRole="button"
-            onPress={handleApply}
-            style={({ pressed }) => [styles.applyButton, pressed && styles.pressed]}
-          >
-            <Text style={styles.applyButtonText}>套用篩選條件</Text>
-          </Pressable>
+          <PrimaryButton label="套用篩選條件" onPress={handleApply} />
         </View>
       </View>
   );
@@ -146,153 +150,117 @@ export function ActivityFilterPanel({
   );
 }
 
+// One option of a pick-one group; ChoiceChip draws the selected / unselected / disabled looks.
 function SegmentButton({ label, active, onPress, disabled = false }) {
-  return (
-    <Pressable
-      accessibilityRole="radio"
-      accessibilityState={{ checked: active, disabled }}
-      disabled={disabled}
-      onPress={onPress}
-      style={({ pressed }) => [
-        styles.segment,
-        active && styles.segmentActive,
-        disabled && styles.segmentDisabled,
-        pressed && !disabled && styles.pressed
-      ]}
-    >
-      <Text style={[styles.segmentText, active && styles.segmentTextActive, disabled && styles.segmentTextDisabled]}>
-        {label}
-      </Text>
-    </Pressable>
-  );
+  return <ChoiceChip disabled={disabled} label={label} onPress={onPress} role="radio" selected={active} />;
 }
+
+const ICON_SIZE = spacing.s24;
 
 const styles = StyleSheet.create({
   overlay: {
     flex: 1,
-    justifyContent: "flex-end",
-    backgroundColor: "rgba(15,23,42,0.45)"
+    justifyContent: "flex-end"
+  },
+  // The scrim is `text` at partial opacity. It sits on the backdrop button, not on the overlay, so
+  // the sheet above it stays fully opaque.
+  backdrop: {
+    ...StyleSheet.absoluteFillObject,
+    backgroundColor: colors.text,
+    opacity: 0.45
   },
   sheet: {
     maxHeight: "88%",
-    gap: 20,
-    borderTopLeftRadius: 24,
-    borderTopRightRadius: 24,
-    backgroundColor: "#ffffff",
-    paddingHorizontal: 20,
-    paddingTop: 18,
-    paddingBottom: 28
+    gap: spacing.s20,
+    borderTopLeftRadius: radii.lg,
+    borderTopRightRadius: radii.lg,
+    backgroundColor: colors.page,
+    paddingHorizontal: spacing.s20,
+    paddingTop: spacing.s20,
+    paddingBottom: spacing.s24
   },
   headerRow: {
+    minHeight: sizes.tap,
     flexDirection: "row",
     alignItems: "center",
     justifyContent: "space-between"
   },
   title: {
-    color: "#0f172a",
-    fontSize: 18,
-    fontWeight: "900"
+    ...typeScale.sectionTitle,
+    color: colors.text
   },
+  // 44px hit area; the negative margin lines the drawn cross up with the sheet's right padding.
   closeButton: {
-    width: 32,
-    height: 32,
+    minWidth: sizes.tap,
+    minHeight: sizes.tap,
+    marginRight: -spacing.s12,
     alignItems: "center",
     justifyContent: "center"
   },
   closeIcon: {
-    color: "#64748b",
-    fontSize: 16,
-    fontWeight: "900"
+    width: ICON_SIZE,
+    height: ICON_SIZE
+  },
+  closeBar: {
+    position: "absolute",
+    top: (ICON_SIZE - sizes.stroke) / 2,
+    left: 0,
+    width: ICON_SIZE,
+    height: sizes.stroke,
+    borderRadius: sizes.stroke / 2,
+    backgroundColor: colors.text
+  },
+  closeBarDown: {
+    transform: [{ rotate: "45deg" }]
+  },
+  closeBarUp: {
+    transform: [{ rotate: "-45deg" }]
+  },
+  pressed: {
+    opacity: 0.8
+  },
+  options: {
+    flexShrink: 1
+  },
+  optionsContent: {
+    gap: spacing.s20
   },
   toggleRow: {
+    minHeight: sizes.tap,
     flexDirection: "row",
     alignItems: "center",
     justifyContent: "space-between",
-    paddingBottom: 4,
-    borderBottomWidth: 1,
-    borderBottomColor: "#eef2f7"
+    paddingBottom: spacing.s12,
+    borderBottomWidth: sizes.stroke,
+    borderBottomColor: colors.lineDecor
   },
   rowLabel: {
-    color: "#0f172a",
-    fontSize: 15,
-    fontWeight: "800"
+    ...typeScale.body,
+    fontWeight: typeScale.label.fontWeight,
+    color: colors.text
   },
   block: {
-    gap: 10
+    gap: spacing.s12
   },
   blockLabel: {
-    color: "#0f172a",
-    fontSize: 15,
-    fontWeight: "800"
+    ...typeScale.body,
+    fontWeight: typeScale.label.fontWeight,
+    color: colors.text
   },
   locationHintRow: {
     flexDirection: "row",
     alignItems: "center",
     justifyContent: "space-between",
-    gap: 8
+    gap: spacing.s8
   },
   blockHint: {
     flex: 1,
-    color: "#94a3b8",
-    fontSize: 12,
-    fontWeight: "700"
-  },
-  locationSettingsButton: {
-    minHeight: 30,
-    borderRadius: 10,
-    alignItems: "center",
-    justifyContent: "center",
-    paddingHorizontal: 12,
-    backgroundColor: "#2563eb"
-  },
-  locationSettingsButtonText: {
-    color: "#ffffff",
-    fontSize: 12,
-    fontWeight: "900"
+    ...typeScale.caption,
+    color: colors.textSecondary
   },
   optionRow: {
     flexDirection: "row",
     flexWrap: "wrap",
-    gap: 8
-  },
-  segment: {
-    minHeight: 40,
-    borderRadius: 12,
-    alignItems: "center",
-    justifyContent: "center",
-    paddingHorizontal: 14,
-    backgroundColor: "#eef2f7"
-  },
-  segmentActive: {
-    backgroundColor: "#111827"
-  },
-  segmentText: {
-    color: "#475569",
-    fontSize: 13,
-    fontWeight: "900"
-  },
-  segmentTextActive: {
-    color: "#ffffff"
-  },
-  segmentDisabled: {
-    opacity: 0.5
-  },
-  segmentTextDisabled: {
-    color: "#94a3b8"
-  },
-  pressed: {
-    opacity: 0.8
-  },
-  applyButton: {
-    minHeight: 50,
-    borderRadius: 14,
-    alignItems: "center",
-    justifyContent: "center",
-    backgroundColor: "#2563eb"
-  },
-  applyButtonText: {
-    color: "#ffffff",
-    fontSize: 15,
-    fontWeight: "900"
+    gap: spacing.s8
   }
 });

@@ -1138,3 +1138,39 @@
 - **SQL 一律使用參數化查詢**：這次改動到的所有 repository 查詢（含新 migration）都用 `$1`／`$2`／`ANY($n::text[])` 參數化，沒有字串拼接組出來的 SQL。
 - 附帶檢查了同一批 `git diff` 裡出現、但**不是這次任務範圍**的 `backend/database/repositories/adminStatisticsRepository.js`（新檔案）與 `server.js` 的 `/admin/statistics` 路由——這是另一位協作者（Codex）同時在處理的東西，本次任務沒有修改也沒有依賴它；順帶確認它沿用既有的 `requireAdminWebUser` 授權檢查、輸出經過 `escapeHtml()`，沒有明顯問題，但正式驗收應由該項改動自己的作者或另一次 review 負責，不算在本次記錄的審查範圍內。
 - `npm test` 146/146 全過；另外用本機真實 PostgreSQL 走過一次乾淨的單一結算情境（活動打 7.9 折、訂單原價 $65），確認 `orders.final_amount`／`payment_captures.capture_amount` 正確寫入 $52（`ceil(65*0.79)`），LINE Pay（mock provider）沒有多扣或少扣。尚未針對 Azure 展示環境做遷移驗證（需要使用者自行清空 `group_buy_activities` 後才能套用 migration 008，已在對話中提醒）。
+
+## 2026-09-22 — 顧客端 UI 全面換皮（奶茶上色第二批：付款、我的訂單等 10 個畫面）
+
+**範圍**：`docs/ui-style-guide.md` 第一批之後的第二批，10 個顧客畫面全部換成奶茶樣式：`StoreGroupBuyActivitiesScreen.jsx`、`GroupBuyActivityDetailScreen.jsx`、`GroupProgressScreen.jsx`、`StoreMenuScreen.jsx`、`DrinkSelectionScreen.jsx`、`CartScreen.jsx`、**`PaymentAuthorizationScreen.jsx`**、**`CustomerOrdersScreen.jsx`**、`ProfileScreen.jsx`、`LiveMapScreen.web.jsx`／`LiveMapScreen.native.jsx`／`ActivityFilterPanel.jsx`；新增多個共用元件（`Card`／`Notice`／`ChoiceChip`／`CheckRow`／`QuantityStepper`／`EmptyPanel`／`ValueRow`／`PearlTray`／`TierLadder`）與分頁切換滑動動畫（`ScreenTransition.jsx`）；另外新增一支獨立唯讀診斷腳本 `scripts/preview-clear-activities.js`（清空展示資料前先看會刪掉多少筆，全程 `BEGIN READ ONLY` 後 `ROLLBACK`，不接觸 Azure）。
+**觸發原因**：付款預授權（`PaymentAuthorizationScreen.jsx`）與我的訂單（`CustomerOrdersScreen.jsx`）是付款相關畫面，依專案規則換皮完成後主動跑一次 `/security-review`；同一批一併記錄。
+
+### 方法
+
+- 10 個畫面分別由獨立的「實作 → 審查 → 修正」三階段 subagent 處理，審查階段對照 `git diff HEAD -w` 逐個 hunk 分類（樣式值／JSX 結構／樣式限定 prop／文案／`handler`／`condition`／`effect`／資料流），任何非前三類的差異一律視為需要修正或說明的發現。付款相關的兩個畫面額外要求「逐行列出每一個非樣式值的改動、並說明為什麼不會影響行為」。
+- 我自己針對付款相關的改動另外做了一次獨立複查（不只是信任 subagent 的自述）：直接讀 `git diff HEAD -w` 確認每一處被移除的 `onPress`／`disabled`／金額運算式都能在新版找到逐字相同的對應（只是從 `onPress` 換成共用元件的 `onDecrease`／`onIncrease`／`onToggle`），並用渲染截圖實際驗證修正後的畫面。
+- 用 `/security-review` 對整條分支的完整 diff（含本批全部 10 個畫面、新共用元件、新診斷腳本）做一次注入／權限／機密／資料外洩掃描。
+- `npm test`、`npm run check:sql-safety`、Android 目標 Babel 編譯（45 個 mobile 檔案）全部重新跑過，確認最終狀態。
+
+### 發現
+
+`/security-review` 沒有找到信心度達到門檻（0.7 以上）的漏洞。
+
+有一個**流程上的插曲**，記錄下來但不是安全漏洞：兩輪獨立審查對「這是不是邏輯改動」的認定不一致。第一輪審查認為付款畫面新增的 `showLinePaySection`（LINE Pay 區塊在授權/請款後且沒有任何訊息時不顯示空標題）與 `getSyncNoticeTone`（同步狀態的顏色依 `order?.paymentStatus` 決定，而不是「非錯誤一律綠色勾勾」）屬於「純呈現」；第二輪審查認定這兩者都新增了條件式／資料依賴，屬於邏輯改動，依規則「發現邏輯改動一律還原、不得自行判斷」把兩者都刪掉了，現在的程式碼對 `PaymentAuthorizationScreen.jsx` 是**跟 HEAD 零邏輯差異**（已用 `grep` 確認 `showLinePaySection`／`getSyncNoticeTone` 兩個識別字都不存在）。同一批「我的訂單」的取消訂單提示改成依成功/失敗顯示不同顏色，因為是在已知的 `try`／`catch` 分支「當下」直接指定顏色（不是另外讀取別的欄位），沒有被判定為邏輯改動，予以保留——已用 `git diff` 確認 `setCancelNotice({ tone: "success" })`／`{ tone: "danger" }` 分別寫在對應分支裡。
+
+### 沒發現問題的部分
+
+- **付款畫面最終是零邏輯差異**：`git diff HEAD -w -- mobile/src/screens/PaymentAuthorizationScreen.jsx` 只剩樣式值替換、共用元件包裝（`Card`／`Notice`／`ValueRow`／`CheckRow`）與兩處圖示文字符號改成用 View 畫出來；`disabled` 運算式、`onPress` 呼叫、`startPayment`／dev-capture 的守門條件、金額運算式（`formatCurrency`、`payment.originalAmount`／`authorizedAmount`／`captureAmount`）逐字未變。
+- **我的訂單的可動邏輯改動只有一處**（取消提示的顏色分流），且只讀取已經在同一個 `try`／`catch` 分支裡確定的成功/失敗結果，不涉及任何新的資料來源、權限或金額。
+- **診斷腳本 `scripts/preview-clear-activities.js`**：只用一條靜態、參數化的 SQL（`format('SELECT count(*) AS c FROM %I.%I', ...)` 走 `query_to_xml`，表名來自 `pg_constraint`／`pg_class` 系統目錄查詢結果，不是外部輸入拼接），全程包在 `BEGIN READ ONLY` 交易並在 `finally` 一律 `ROLLBACK`；不印出連線字串、帳號或密碼，只印主機名稱與資料庫名稱；`npm run check:sql-safety` 通過。
+- **無新增套件、無新增後端路由、無新增資料寫入路徑**：這批全部是 Mobile 端 UI 改動加一支唯讀腳本。
+
+### 待人工決定（不是漏洞，是產品/UX 取捨）
+
+以下兩項是第二輪審查基於「這批只做外觀，任何條件式改動一律還原」的嚴格標準而還原掉的改善，我認為原本的修法是安全的（已驗證過），但因為超出「純外觀」的授權範圍，沒有自行恢復：
+
+1. **付款同步狀態顏色**：目前「已授權未扣款」與「已扣款」的同步訊息都顯示同一種綠色打勾（沿用既有行為），沒有依實際狀態分色。如果要修，做法要跟「我的訂單」的取消提示一樣——在呼叫端直接指定顏色，不要另外抽一個讀取 `order?.paymentStatus` 的獨立函式。
+2. **團購詳情的級距階梯**：目前不會標示「目前在哪一級」，只是靜態清單；「團購進度」畫面的階梯有標示。
+
+若要處理，建議另開一個小改動、走一次獨立的 `/code-review`，不要跟這次的外觀換皮綁在一起。
+
+**驗證限制**：`npm test` 174/174、`check:sql-safety`、Android 目標 Babel 編譯（45 個檔案）全過；驗證都是網頁模擬環境（react-native-web）截圖比對，**沒有在 Android 真機或模擬器上操作過**，TalkBack、系統字體放大、真實手勢與觸控回饋都還沒有實機確認。`preview-clear-activities.js` 只在本機資料庫測試過，沒有對 Azure 執行。

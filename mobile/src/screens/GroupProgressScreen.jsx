@@ -1,10 +1,15 @@
 import { StyleSheet, Text, View } from "react-native";
 import { ActivitySyncNotice } from "../components/ActivitySyncNotice";
+import { Card } from "../components/Card";
 import { MobileScreen, Section } from "../components/MobileScreen";
 import { DiscountSummaryCard } from "../components/DiscountSummaryCard";
+import { EmptyPanel } from "../components/EmptyPanel";
+import { Notice } from "../components/Notice";
 import { PrimaryButton } from "../components/PrimaryButton";
 import { ProgressSummary } from "../components/ProgressSummary";
 import { StatusBadge } from "../components/StatusBadge";
+import { ValueRow } from "../components/ValueRow";
+import { colors, maxFontSizeMultiplier, spacing, typeScale } from "../theme/tokens";
 import { getGroupBuyActivityById, formatCurrency } from "../utils/calculations";
 import { formatDealFactorLabel } from "../utils/discountPercentFormat";
 import { getFinalSettlementSnapshot, getGroupBuyActivityProgress } from "../utils/groupBuyActivityProgress";
@@ -23,7 +28,7 @@ export function GroupProgressScreen({ navigation, route, appState, actions, memb
       >
         <ActivitySyncNotice status={activitySyncStatus} onRetry={retryActivitySync} />
         <Section title="目前沒有團購資料">
-          <Text style={styles.meta}>團購已清空，或目前尚未有商家建立活動。</Text>
+          <EmptyPanel>團購已清空，或目前尚未有商家建立活動。</EmptyPanel>
           <PrimaryButton label="返回首頁" variant="secondary" onPress={() => navigation.replace("nearby")} />
         </Section>
       </MobileScreen>
@@ -64,17 +69,19 @@ export function GroupProgressScreen({ navigation, route, appState, actions, memb
           participantCount={groupBuyActivity.participantCount}
           remainingTimeText={groupBuyActivity.remainingTimeText}
         />
-        <Text style={styles.explain}>只有預授權成功的杯數才計入優惠門檻。</Text>
-        <Text style={styles.meta}>{nextTierText}</Text>
+        <View style={styles.notes}>
+          <Text style={styles.meta}>只有預授權成功的杯數才計入優惠門檻。</Text>
+          <Text style={styles.meta}>{nextTierText}</Text>
+        </View>
         <DiscountSummaryCard groupBuyActivity={groupBuyActivity} />
       </Section>
 
       {finalSettlement ? (
         <Section title="最終結算結果">
-          <View style={styles.finalSettlementCard}>
-            <DetailLine label="結算結果" value={finalSettlement.outcomeLabel} />
-            <DetailLine label="最終有效杯數" value={`${finalSettlement.authorizedCups} 杯`} />
-            <DetailLine
+          <View style={styles.rows}>
+            <ValueRow label="結算結果" value={finalSettlement.outcomeLabel} />
+            <ValueRow label="最終有效杯數" value={`${finalSettlement.authorizedCups} 杯`} />
+            <ValueRow
               label="最終折數"
               value={finalSettlement.discountPercent ? formatDealFactorLabel(finalSettlement.discountPercent) : "未達優惠門檻"}
             />
@@ -86,6 +93,7 @@ export function GroupProgressScreen({ navigation, route, appState, actions, memb
                 label="我的實際應付"
                 value={finalSettlement.finalAmount}
                 emptyLabel="待同步訂單"
+                emphasis
               />
             ) : null}
             {finalSettlement.hasOrder ? (
@@ -95,32 +103,36 @@ export function GroupProgressScreen({ navigation, route, appState, actions, memb
                 emptyLabel="待同步訂單"
               />
             ) : null}
-            <Text style={styles.finalSettlementNotice}>
-              此區使用 Backend 保存的截止結算快照，與截止前的預估折扣不同，結算後不再變動。
-            </Text>
           </View>
+          {/* Same text for every outcome, so a fixed neutral tone: it must not read as a success or failure signal. */}
+          <Notice
+            tone="neutral"
+            message="此區使用 Backend 保存的截止結算快照，與截止前的預估折扣不同，結算後不再變動。"
+          />
         </Section>
       ) : null}
 
       <Section title="我的訂單摘要">
         {order ? (
-          <View style={styles.summary}>
+          <Card>
             <Text style={styles.title}>{order.itemName} x {order.quantity}</Text>
             <Text style={styles.meta}>{formatOrderItemCustomizations(order)}</Text>
-            <Text style={styles.amount}>{formatCurrency(order.subtotal)}</Text>
+            <Text maxFontSizeMultiplier={maxFontSizeMultiplier} style={styles.amount}>{formatCurrency(order.subtotal)}</Text>
             <StatusBadge owner="payment" value={order.paymentStatus} />
             <Text style={styles.meta}>流團偏好：{order.fallbackPurchasePreference === "accept_original_price" ? "接受原價購買" : "不原價購買"}</Text>
-          </View>
+          </Card>
         ) : (
-          <Text style={styles.meta}>尚未加入此團購。</Text>
+          <EmptyPanel>尚未加入此團購。</EmptyPanel>
         )}
       </Section>
 
       {discountStatus === "qualified" && payment ? (
         <Section title="優惠請款試算">
-          <AmountLine label="預估結算金額" value={payment.finalAmount} />
-          <AmountLine label="實際請款金額" value={payment.captureAmount} />
-          <AmountLine label="釋放授權金額" value={payment.releasedAmount} />
+          <View style={styles.rows}>
+            <AmountLine label="預估結算金額" value={payment.finalAmount} />
+            <AmountLine label="實際請款金額" value={payment.captureAmount} />
+            <AmountLine label="釋放授權金額" value={payment.releasedAmount} />
+          </View>
         </Section>
       ) : null}
 
@@ -140,81 +152,28 @@ export function GroupProgressScreen({ navigation, route, appState, actions, memb
 
 const styles = StyleSheet.create({
   meta: {
-    color: "#475569",
-    fontSize: 14,
-    lineHeight: 21
+    ...typeScale.bodyDense,
+    color: colors.textSecondary
   },
-  summary: {
-    gap: 6
+  notes: {
+    gap: spacing.s4
   },
   title: {
-    color: "#0f172a",
-    fontSize: 18,
-    fontWeight: "900"
+    ...typeScale.sectionTitle,
+    color: colors.text
   },
   amount: {
-    color: "#1f6feb",
-    fontSize: 24,
-    fontWeight: "900"
+    ...typeScale.amount,
+    color: colors.text
+  },
+  rows: {
+    gap: spacing.s8
   },
   actions: {
-    gap: 10
-  },
-  explain: {
-    color: "#1f6feb",
-    fontSize: 13,
-    fontWeight: "900",
-    lineHeight: 19
-  },
-  finalSettlementCard: {
-    gap: 8,
-    borderRadius: 14,
-    borderWidth: 1,
-    borderColor: "#86efac",
-    backgroundColor: "#f0fdf4",
-    padding: 12
-  },
-  finalSettlementNotice: {
-    color: "#047857",
-    fontSize: 12,
-    fontWeight: "700",
-    lineHeight: 18
-  },
-  amountLine: {
-    minHeight: 42,
-    flexDirection: "row",
-    alignItems: "center",
-    justifyContent: "space-between",
-    borderRadius: 12,
-    backgroundColor: "#f8fafc",
-    paddingHorizontal: 12
-  },
-  amountLineLabel: {
-    color: "#475569",
-    fontSize: 13,
-    fontWeight: "800"
-  },
-  amountLineValue: {
-    color: "#0f172a",
-    fontSize: 15,
-    fontWeight: "900"
+    gap: spacing.s12
   }
 });
 
-function AmountLine({ label, value, emptyLabel = "待計算" }) {
-  return (
-    <View style={styles.amountLine}>
-      <Text style={styles.amountLineLabel}>{label}</Text>
-      <Text style={styles.amountLineValue}>{value == null ? emptyLabel : formatCurrency(value)}</Text>
-    </View>
-  );
-}
-
-function DetailLine({ label, value }) {
-  return (
-    <View style={styles.amountLine}>
-      <Text style={styles.amountLineLabel}>{label}</Text>
-      <Text style={styles.amountLineValue}>{value}</Text>
-    </View>
-  );
+function AmountLine({ label, value, emptyLabel = "待計算", emphasis }) {
+  return <ValueRow label={label} value={value == null ? emptyLabel : formatCurrency(value)} emphasis={emphasis} />;
 }

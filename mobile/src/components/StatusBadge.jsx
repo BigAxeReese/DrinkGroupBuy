@@ -1,4 +1,6 @@
 import { StyleSheet, Text, View } from "react-native";
+import { useMilkTea } from "../theme/MilkTeaContext";
+import { getStatusTone } from "../theme/statusTones";
 import {
   groupBuyActivityStatusLabels,
   merchantPaymentStatusLabels,
@@ -6,8 +8,12 @@ import {
   pickupStatusLabels,
   refundRequestStatusLabels
 } from "../types/prototypeTypes";
+import { TonePill } from "./TonePill";
 
+// Migrated routes get the new style (tone colours plus a drawn mark, see theme/statusTones.js and
+// theme/MilkTeaContext.js); the old pastel pill below stays until the last screen has migrated.
 export function StatusBadge({ owner = "groupBuyActivity", value }) {
+  const milkTea = useMilkTea();
   const fallbackLabels = {
     ordering: "訂單製作中"
   };
@@ -19,6 +25,8 @@ export function StatusBadge({ owner = "groupBuyActivity", value }) {
     refundRequest: refundRequestStatusLabels
   };
   const label = labelMaps[owner]?.[value] ?? fallbackLabels[value] ?? value;
+  if (milkTea) return <TonePill tone={getStatusTone(owner, value) ?? "neutral"} label={label} />;
+
   const styleKey = owner === "merchantPayment" && value === "failed"
     ? "merchantPaymentFailed"
     : value;

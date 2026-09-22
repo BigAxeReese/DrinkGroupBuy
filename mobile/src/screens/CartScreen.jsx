@@ -1,7 +1,13 @@
 import { useState } from "react";
 import { Pressable, StyleSheet, Text, View } from "react-native";
+import { Card } from "../components/Card";
+import { CheckRow } from "../components/CheckRow";
+import { EmptyPanel } from "../components/EmptyPanel";
 import { MobileScreen, Section } from "../components/MobileScreen";
+import { Notice } from "../components/Notice";
 import { PrimaryButton } from "../components/PrimaryButton";
+import { QuantityStepper } from "../components/QuantityStepper";
+import { colors, maxFontSizeMultiplier, sizes, spacing, tones, typeScale } from "../theme/tokens";
 import { formatCurrency, getGroupBuyActivityById, isWithdrawalLocked } from "../utils/calculations";
 import { isDeadlineReached } from "../utils/deadlineTime";
 import { getGroupBuyActivityCapacityInfo } from "../utils/groupBuyActivityProgress";
@@ -20,7 +26,7 @@ export function CartScreen({ navigation, route, appState, actions, memberAction,
         onMemberPress={memberAction}
       >
         <Section title="目前沒有團購資料">
-          <Text style={styles.emptyText}>團購已清空，購物車暫時不能送出。</Text>
+          <EmptyPanel>團購已清空，購物車暫時不能送出。</EmptyPanel>
           <PrimaryButton label="返回首頁" variant="secondary" onPress={() => navigation.replace("nearby")} />
         </Section>
       </MobileScreen>
@@ -72,116 +78,100 @@ export function CartScreen({ navigation, route, appState, actions, memberAction,
       onBack={() => navigation.back()}
       onMemberPress={memberAction}
     >
+      {/* MobileScreen puts 24px between its direct children, so the notices and the continue button
+          stay inside this Section (12px rhythm) and appearing / disappearing notices don't move it. */}
       <Section title={`飲料明細（${totalQuantity} 杯）`}>
         {cartItems.length > 0 ? cartItems.map((item) => (
-          <View key={item.id} style={styles.itemCard}>
+          <Card compact key={item.id} style={styles.itemCard}>
             <View style={styles.itemTop}>
               <View style={styles.itemText}>
                 <Text style={styles.itemName}>{item.itemName} x {item.quantity}</Text>
                 <Text style={styles.meta}>{formatOrderItemCustomizations(item)}</Text>
               </View>
-              <Text style={styles.itemAmount}>{formatCurrency(item.subtotal)}</Text>
+              <Text maxFontSizeMultiplier={maxFontSizeMultiplier} style={styles.itemAmount}>{formatCurrency(item.subtotal)}</Text>
             </View>
             <View style={styles.itemActions}>
-              <View style={styles.stepper}>
-                <Pressable
-                  accessibilityRole="button"
-                  accessibilityLabel="減少一杯"
-                  onPress={() => actions.updateCartItemQuantity(item.id, item.quantity - 1)}
-                  style={({ pressed }) => [styles.stepperButton, pressed && styles.pressed]}
-                >
-                  <Text style={styles.stepperButtonText}>－</Text>
-                </Pressable>
-                <Text style={styles.stepperValue}>{item.quantity}</Text>
-                <Pressable
-                  accessibilityRole="button"
-                  accessibilityLabel="增加一杯"
-                  onPress={() => actions.updateCartItemQuantity(item.id, item.quantity + 1)}
-                  style={({ pressed }) => [styles.stepperButton, pressed && styles.pressed]}
-                >
-                  <Text style={styles.stepperButtonText}>＋</Text>
-                </Pressable>
-              </View>
+              <QuantityStepper
+                value={item.quantity}
+                decreaseLabel="減少一杯"
+                increaseLabel="增加一杯"
+                onDecrease={() => actions.updateCartItemQuantity(item.id, item.quantity - 1)}
+                onIncrease={() => actions.updateCartItemQuantity(item.id, item.quantity + 1)}
+              />
               <Pressable
                 accessibilityRole="button"
                 onPress={() => actions.removeCartItem(item.id)}
                 style={({ pressed }) => [styles.removeButton, pressed && styles.pressed]}
               >
-                <Text style={styles.removeText}>刪除</Text>
+                <Text maxFontSizeMultiplier={maxFontSizeMultiplier} style={styles.removeText}>刪除</Text>
               </Pressable>
             </View>
-          </View>
+          </Card>
         )) : (
-          <Text style={styles.emptyText}>購物車目前沒有飲料。</Text>
+          <EmptyPanel>購物車目前沒有飲料。</EmptyPanel>
         )}
+
+        {groupBuyActivityClosed ? (
+          <Notice tone="danger" message="活動已截止，系統已鎖定訂單，不能再送出或修改購物車。" />
+        ) : null}
+        {!groupBuyActivityClosed && exceedsCapacity ? (
+          <Notice
+            tone="warning"
+            message={`此團購最高 ${capacityInfo.maximumCups} 杯，目前剩餘容量不足，請調整購物車數量。`}
+          />
+        ) : null}
+        {submitError ? <Notice tone="danger" accessibilityRole="alert" message={submitError} /> : null}
+        {canUpdatePendingOrder && cartItems.length > 0 ? (
+          <Notice
+            tone="info"
+            message="此團購已有一筆尚未完成預授權的訂單。送出後會用目前購物車內容更新該訂單，再重新進行 LINE Pay 預授權。"
+          />
+        ) : null}
+        {blockedByWithdrawalDecrease && cartItems.length > 0 ? (
+          <Notice
+            tone="warning"
+            message={`${withdrawalLockedNoticeText}請調整購物車數量至不低於原本的 ${existingOrder?.quantity ?? 0} 杯，或前往訂單頁查看。`}
+          />
+        ) : null}
+        {blocksOrderUpdate && !blockedByWithdrawalDecrease && cartItems.length > 0 ? (
+          <Notice
+            tone="warning"
+            message="此團購已有一筆已請款或已鎖定的訂單，請先回到訂單頁查看。"
+          />
+        ) : null}
+        {canCreateRevision && withdrawalLocked && cartItems.length > 0 ? (
+          <Notice tone="warning" message={withdrawalLockedNoticeText} />
+        ) : null}
+
+        <PrimaryButton
+          label="繼續選購飲料"
+          variant="secondary"
+          onPress={() => !groupBuyActivityClosed && navigation.go("drinkSelection", { groupBuyActivityId: groupBuyActivity.id })}
+        />
       </Section>
-
-      {groupBuyActivityClosed ? (
-        <Text style={styles.closedNotice}>活動已截止，系統已鎖定訂單，不能再送出或修改購物車。</Text>
-      ) : null}
-      {!groupBuyActivityClosed && exceedsCapacity ? (
-        <Text style={styles.closedNotice}>
-          此團購最高 {capacityInfo.maximumCups} 杯，目前剩餘容量不足，請調整購物車數量。
-        </Text>
-      ) : null}
-      {submitError ? <Text style={styles.closedNotice}>{submitError}</Text> : null}
-      {canUpdatePendingOrder && cartItems.length > 0 ? (
-        <Text style={styles.closedNotice}>
-          此團購已有一筆尚未完成預授權的訂單。送出後會用目前購物車內容更新該訂單，再重新進行 LINE Pay 預授權。
-        </Text>
-      ) : null}
-      {blockedByWithdrawalDecrease && cartItems.length > 0 ? (
-        <Text style={styles.closedNotice}>
-          {withdrawalLockedNoticeText}
-          請調整購物車數量至不低於原本的 {existingOrder?.quantity ?? 0} 杯，或前往訂單頁查看。
-        </Text>
-      ) : null}
-      {blocksOrderUpdate && !blockedByWithdrawalDecrease && cartItems.length > 0 ? (
-        <Text style={styles.closedNotice}>
-          此團購已有一筆已請款或已鎖定的訂單，請先回到訂單頁查看。
-        </Text>
-      ) : null}
-      {canCreateRevision && withdrawalLocked && cartItems.length > 0 ? (
-        <Text style={styles.closedNotice}>{withdrawalLockedNoticeText}</Text>
-      ) : null}
-
-      <PrimaryButton
-        label="繼續選購飲料"
-        variant="secondary"
-        onPress={() => !groupBuyActivityClosed && navigation.go("drinkSelection", { groupBuyActivityId: groupBuyActivity.id })}
-      />
 
       <Section title="訂單金額">
-        <View style={styles.totalRow}>
-          <Text style={styles.totalLabel}>原價合計</Text>
-          <Text style={styles.totalAmount}>{formatCurrency(totalAmount)}</Text>
-        </View>
-        {canUpdatePendingOrder || blocksOrderUpdate ? (
-          <Text style={styles.notice}>
-            {canUpdatePendingOrder
-              ? "送出後會以目前購物車內容更新尚未授權的訂單。預授權成功後，購物車才會清空。"
-              : blockedByWithdrawalDecrease
-                ? withdrawalLockedNoticeText
-                : "此團購已有一筆已請款或已鎖定的訂單，請先回到訂單頁查看。"}
-          </Text>
-        ) : null}
-      </Section>
-
-      <Section title="">
-        <Pressable
-          accessibilityRole="checkbox"
-          accessibilityState={{ checked: acceptOriginalPrice }}
-          onPress={() => setAcceptOriginalPrice((value) => !value)}
-          style={({ pressed }) => [styles.checkboxRow, acceptOriginalPrice && styles.checkboxRowActive, pressed && styles.pressed]}
-        >
-          <View style={[styles.checkbox, acceptOriginalPrice && styles.checkboxActive]}>
-            <Text style={styles.checkboxMark}>{acceptOriginalPrice ? "✓" : ""}</Text>
+        <Card compact tone="recess" style={styles.totalCard}>
+          <View style={styles.totalRow}>
+            <Text style={styles.totalLabel}>原價合計</Text>
+            <Text maxFontSizeMultiplier={maxFontSizeMultiplier} style={styles.totalAmount}>{formatCurrency(totalAmount)}</Text>
           </View>
+          {canUpdatePendingOrder || blocksOrderUpdate ? (
+            <Text style={styles.totalNote}>
+              {canUpdatePendingOrder
+                ? "送出後會以目前購物車內容更新尚未授權的訂單。預授權成功後，購物車才會清空。"
+                : blockedByWithdrawalDecrease
+                  ? withdrawalLockedNoticeText
+                  : "此團購已有一筆已請款或已鎖定的訂單，請先回到訂單頁查看。"}
+            </Text>
+          ) : null}
+        </Card>
+        <CheckRow checked={acceptOriginalPrice} onToggle={() => setAcceptOriginalPrice((value) => !value)}>
           <View style={styles.checkboxTextGroup}>
             <Text style={styles.checkboxTitle}>若無優惠接受原價購買</Text>
             <Text style={styles.checkboxHint}>未勾選時，若未達優惠門檻則不付款。</Text>
           </View>
-        </Pressable>
+        </CheckRow>
       </Section>
 
       <PrimaryButton
@@ -232,171 +222,85 @@ export function CartScreen({ navigation, route, appState, actions, memberAction,
 
 const styles = StyleSheet.create({
   itemCard: {
-    gap: 10,
-    borderRadius: 14,
-    borderWidth: 1,
-    borderColor: "#e2e8f0",
-    backgroundColor: "#f8fafc",
-    padding: 12
+    gap: spacing.s12
   },
   itemTop: {
     flexDirection: "row",
     alignItems: "flex-start",
     justifyContent: "space-between",
-    gap: 10
+    gap: spacing.s12
   },
   itemText: {
     flex: 1,
-    gap: 5
+    gap: spacing.s4
   },
   itemName: {
-    color: "#0f172a",
-    fontSize: 15,
-    fontWeight: "900"
+    ...typeScale.button,
+    color: colors.text
   },
   itemAmount: {
-    color: "#1f6feb",
-    fontSize: 16,
-    fontWeight: "900"
+    ...typeScale.price,
+    color: colors.text
   },
   meta: {
-    color: "#64748b",
-    fontSize: 12,
-    lineHeight: 18
+    ...typeScale.bodyDense,
+    color: colors.textSecondary
   },
   itemActions: {
     flexDirection: "row",
     alignItems: "center",
-    gap: 10
+    justifyContent: "space-between",
+    gap: spacing.s12
   },
-  stepper: {
-    flexDirection: "row",
-    alignItems: "center",
-    gap: 2,
-    borderRadius: 10,
-    borderWidth: 1,
-    borderColor: "#cbd5e1",
-    backgroundColor: "#ffffff",
-    padding: 3
-  },
-  stepperButton: {
-    width: 34,
-    height: 32,
-    alignItems: "center",
-    justifyContent: "center",
-    borderRadius: 8,
-    backgroundColor: "#eef2f7"
-  },
-  stepperButtonText: {
-    color: "#0f172a",
-    fontSize: 16,
-    fontWeight: "900"
-  },
-  stepperValue: {
-    minWidth: 30,
-    textAlign: "center",
-    color: "#0f172a",
-    fontSize: 15,
-    fontWeight: "900"
-  },
+  // Text-only delete action. The negative margin cancels the horizontal padding so the word lines
+  // up with the price above it while the tap area stays at least 44px.
   removeButton: {
-    flex: 1,
-    minHeight: 38,
-    borderRadius: 10,
+    minWidth: sizes.tap,
+    minHeight: sizes.tap,
+    marginRight: -spacing.s12,
+    paddingHorizontal: spacing.s12,
     alignItems: "center",
-    justifyContent: "center",
-    backgroundColor: "#fee2e2"
+    justifyContent: "center"
   },
   removeText: {
-    color: "#b91c1c",
-    fontSize: 12,
-    fontWeight: "900"
+    ...typeScale.button,
+    color: tones.danger.fg
+  },
+  totalCard: {
+    gap: spacing.s8
   },
   totalRow: {
     flexDirection: "row",
     alignItems: "center",
-    justifyContent: "space-between"
+    justifyContent: "space-between",
+    gap: spacing.s12
   },
   totalLabel: {
-    color: "#475569",
-    fontSize: 14,
-    fontWeight: "800"
+    ...typeScale.body,
+    flex: 1,
+    color: colors.textSecondary
   },
   totalAmount: {
-    color: "#0f172a",
-    fontSize: 28,
-    fontWeight: "900"
+    ...typeScale.amount,
+    color: colors.text
   },
-  notice: {
-    color: "#475569",
-    fontSize: 12,
-    lineHeight: 18
-  },
-  closedNotice: {
-    borderRadius: 12,
-    backgroundColor: "#fef3c7",
-    color: "#92400e",
-    fontSize: 12,
-    fontWeight: "800",
-    lineHeight: 18,
-    padding: 10
-  },
-  checkboxRow: {
-    minHeight: 50,
-    flexDirection: "row",
-    alignItems: "center",
-    gap: 9,
-    borderRadius: 12,
-    borderWidth: 1,
-    borderColor: "#cbd5e1",
-    backgroundColor: "#ffffff",
-    paddingHorizontal: 10,
-    paddingVertical: 8
-  },
-  checkboxRowActive: {
-    borderColor: "#1f6feb",
-    backgroundColor: "#eff6ff"
-  },
-  checkbox: {
-    width: 21,
-    height: 21,
-    borderRadius: 6,
-    alignItems: "center",
-    justifyContent: "center",
-    borderWidth: 2,
-    borderColor: "#94a3b8",
-    backgroundColor: "#ffffff"
-  },
-  checkboxActive: {
-    borderColor: "#1f6feb",
-    backgroundColor: "#1f6feb"
-  },
-  checkboxMark: {
-    color: "#ffffff",
-    fontSize: 13,
-    fontWeight: "900"
+  totalNote: {
+    ...typeScale.bodyDense,
+    color: colors.textSecondary
   },
   checkboxTextGroup: {
-    flex: 1,
-    gap: 3
+    gap: spacing.s4
   },
   checkboxTitle: {
-    color: "#0f172a",
-    fontSize: 13,
-    fontWeight: "900"
+    ...typeScale.body,
+    fontWeight: typeScale.label.fontWeight,
+    color: colors.text
   },
   checkboxHint: {
-    color: "#64748b",
-    fontSize: 10,
-    lineHeight: 14
-  },
-  emptyText: {
-    color: "#64748b",
-    fontSize: 13,
-    textAlign: "center",
-    paddingVertical: 18
+    ...typeScale.caption,
+    color: colors.textSecondary
   },
   pressed: {
-    opacity: 0.72
+    opacity: 0.8
   }
 });

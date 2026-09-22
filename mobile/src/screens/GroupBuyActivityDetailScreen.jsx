@@ -1,10 +1,14 @@
 import { StyleSheet, Text, View } from "react-native";
 import { ActivitySyncNotice } from "../components/ActivitySyncNotice";
+import { Card } from "../components/Card";
+import { EmptyPanel } from "../components/EmptyPanel";
 import { MobileScreen, Section } from "../components/MobileScreen";
 import { DiscountSummaryCard } from "../components/DiscountSummaryCard";
+import { Notice } from "../components/Notice";
 import { PrimaryButton } from "../components/PrimaryButton";
 import { ProgressSummary } from "../components/ProgressSummary";
 import { StatusBadge } from "../components/StatusBadge";
+import { colors, radii, sizes, spacing, typeScale } from "../theme/tokens";
 import { getGroupBuyActivityById, isWithdrawalLocked } from "../utils/calculations";
 import { formatDealFactorLabel } from "../utils/discountPercentFormat";
 import { getGroupBuyActivityStore } from "../utils/groupBuyActivityStores";
@@ -31,7 +35,7 @@ export function GroupBuyActivityDetailScreen({ navigation, route, appState, acti
       >
         <ActivitySyncNotice status={activitySyncStatus} onRetry={retryActivitySync} />
         <Section title="目前沒有團購資料">
-          <Text style={styles.meta}>團購已清空，或目前尚未有商家建立活動。</Text>
+          <EmptyPanel>團購已清空，或目前尚未有商家建立活動。</EmptyPanel>
           <PrimaryButton label="返回首頁" variant="secondary" onPress={() => navigation.replace("nearby")} />
         </Section>
       </MobileScreen>
@@ -56,14 +60,14 @@ export function GroupBuyActivityDetailScreen({ navigation, route, appState, acti
     >
       <ActivitySyncNotice status={activitySyncStatus} onRetry={retryActivitySync} />
       <Section title="店家資訊">
-        <View style={styles.rowBetween}>
-          <View style={styles.flex}>
-            <Text style={styles.title}>{store?.name ?? "店家資料未提供"}</Text>
-            <Text style={styles.meta}>{store?.address || "地址未提供"}</Text>
-            {store?.phone ? <Text style={styles.meta}>{store.phone}</Text> : null}
+        <Card>
+          <View style={styles.rowBetween}>
+            <Text style={[styles.title, styles.flex]}>{store?.name ?? "店家資料未提供"}</Text>
+            <StatusBadge value={groupBuyActivity.status} />
           </View>
-          <StatusBadge value={groupBuyActivity.status} />
-        </View>
+          <Text style={styles.meta}>{store?.address || "地址未提供"}</Text>
+          {store?.phone ? <Text style={styles.meta}>{store.phone}</Text> : null}
+        </Card>
       </Section>
 
       <Section title="目前進度">
@@ -75,8 +79,10 @@ export function GroupBuyActivityDetailScreen({ navigation, route, appState, acti
           remainingTimeText={groupBuyActivity.remainingTimeText}
         />
         <DiscountSummaryCard groupBuyActivity={groupBuyActivity} />
-        <Text style={styles.meta}>截止：{groupBuyActivity.endTime}</Text>
-        <Text style={styles.meta}>取貨：{groupBuyActivity.pickupTime}</Text>
+        <View style={styles.schedule}>
+          <Text style={styles.meta}>截止：{groupBuyActivity.endTime}</Text>
+          <Text style={styles.meta}>取貨：{groupBuyActivity.pickupTime}</Text>
+        </View>
       </Section>
 
       <Section title="杯數級距">
@@ -89,26 +95,32 @@ export function GroupBuyActivityDetailScreen({ navigation, route, appState, acti
       </Section>
 
       <Section title="注意事項">
-        {withdrawalLocked ? <Text style={styles.lockNotice}>目前距截止時間 30 分鐘內：仍可加入，既有訂單只能增加飲料，不能減少或退出。</Text> : null}
-        {groupBuyActivity.cancellationReason ? <Text style={styles.warning}>取消原因：{groupBuyActivity.cancellationReason}</Text> : null}
-        {groupBuyActivity.notices.map((notice) => <Text key={notice} style={styles.meta}>· {notice}</Text>)}
+        {withdrawalLocked ? <Notice tone="warning" message="目前距截止時間 30 分鐘內：仍可加入，既有訂單只能增加飲料，不能減少或退出。" /> : null}
+        {groupBuyActivity.cancellationReason ? <Notice tone="danger" message={`取消原因：${groupBuyActivity.cancellationReason}`} /> : null}
+        {groupBuyActivity.notices.length > 0 ? (
+          <View style={styles.notes}>
+            {groupBuyActivity.notices.map((notice) => <Text key={notice} style={styles.meta}>· {notice}</Text>)}
+          </View>
+        ) : null}
       </Section>
 
-      <PrimaryButton
-        label={joinAction.label}
-        onPress={() => {
-          if (joinAction.target === "customerOrders") {
-            navigation.go("customerOrders");
-          } else if (joinAction.target === "drinkSelection") {
-            navigation.go("drinkSelection", { groupBuyActivityId: groupBuyActivity.id });
-          }
-        }}
-      />
-      <PrimaryButton
-        label="查看團購進度"
-        variant="secondary"
-        onPress={() => navigation.go("groupProgress", { groupBuyActivityId: groupBuyActivity.id })}
-      />
+      <View style={styles.actions}>
+        <PrimaryButton
+          label={joinAction.label}
+          onPress={() => {
+            if (joinAction.target === "customerOrders") {
+              navigation.go("customerOrders");
+            } else if (joinAction.target === "drinkSelection") {
+              navigation.go("drinkSelection", { groupBuyActivityId: groupBuyActivity.id });
+            }
+          }}
+        />
+        <PrimaryButton
+          label="查看團購進度"
+          variant="secondary"
+          onPress={() => navigation.go("groupProgress", { groupBuyActivityId: groupBuyActivity.id })}
+        />
+      </View>
     </MobileScreen>
   );
 }
@@ -117,46 +129,45 @@ const styles = StyleSheet.create({
   rowBetween: {
     flexDirection: "row",
     justifyContent: "space-between",
-    gap: 10
+    gap: spacing.s12
   },
   flex: {
     flex: 1
   },
   title: {
-    color: "#0f172a",
-    fontSize: 18,
-    fontWeight: "900"
+    ...typeScale.sectionTitle,
+    color: colors.text
   },
   meta: {
-    color: "#475569",
-    fontSize: 14,
-    lineHeight: 21
+    ...typeScale.body,
+    color: colors.textSecondary
   },
-  warning: {
-    color: "#b42318",
-    fontSize: 14,
-    fontWeight: "800"
-  },
-  lockNotice: {
-    color: "#b45309",
-    fontSize: 13,
-    fontWeight: "900"
+  schedule: {
+    gap: spacing.s4
   },
   tierRow: {
-    minHeight: 48,
+    minHeight: sizes.tap,
     flexDirection: "row",
     alignItems: "center",
     justifyContent: "space-between",
-    borderRadius: 14,
-    backgroundColor: "#f8fafc",
-    paddingHorizontal: 14
+    borderRadius: radii.sm,
+    backgroundColor: colors.recess,
+    paddingHorizontal: spacing.s16
   },
   tierText: {
-    color: "#334155",
-    fontWeight: "800"
+    ...typeScale.body,
+    color: colors.text
   },
   tierValue: {
-    color: "#1f6feb",
-    fontWeight: "900"
+    ...typeScale.body,
+    fontWeight: typeScale.label.fontWeight,
+    color: colors.accentInk
+  },
+  notes: {
+    gap: spacing.s8
+  },
+  // MobileScreen leaves 24 between its direct children; the two buttons belong together.
+  actions: {
+    gap: spacing.s12
   }
 });

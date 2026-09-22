@@ -1,8 +1,14 @@
 import { StyleSheet, Text, View } from "react-native";
+import { useMilkTea } from "../theme/MilkTeaContext";
+import { maxFontSizeMultiplier, radii, spacing, tones, typeScale } from "../theme/tokens";
 import { formatDealFactorLabel } from "../utils/discountPercentFormat";
 import { getGroupBuyActivityDiscountInfo } from "../utils/groupBuyActivityProgress";
 
+// Migrated routes get the new style: an estimated discount uses the "estimate" tone, a settled one
+// the "success" tone (docs/ui-style-guide.md, see theme/MilkTeaContext.js). The old blue / green
+// card below stays until the last screen has migrated.
 export function DiscountSummaryCard({ groupBuyActivity, compact = false }) {
+  const milkTea = useMilkTea();
   const discount = getGroupBuyActivityDiscountInfo(groupBuyActivity);
   const isFinal = discount.isQualified && !discount.isEstimated;
   const dealFactorLabel = formatDealFactorLabel(discount.currentTierDiscountPercent);
@@ -14,6 +20,22 @@ export function DiscountSummaryCard({ groupBuyActivity, compact = false }) {
     : discount.nextTierTargetCups
       ? `再 ${discount.cupsToNextTier} 杯達到 ${discount.nextTierTargetCups} 杯級距`
       : "目前沒有可套用的優惠級距";
+
+  if (milkTea) {
+    const tone = tones[isFinal ? "success" : "estimate"];
+    return (
+      <View style={[milkTeaStyles.card, { backgroundColor: tone.bg }]}>
+        <Text maxFontSizeMultiplier={maxFontSizeMultiplier} style={[milkTeaStyles.heading, { color: tone.fg }]}>{heading}</Text>
+        <Text style={[milkTeaStyles.meta, { color: tone.fg }]}>{tierText}</Text>
+        {!compact && discount.isEstimated ? (
+          <Text style={[milkTeaStyles.note, { color: tone.fg }]}>截止前為預估值，實際折扣依每筆訂單自己的金額結算。</Text>
+        ) : null}
+        {!compact && isFinal ? (
+          <Text style={[milkTeaStyles.note, { color: tone.fg }]}>已結算，此折數為最終折扣，不會再變動。</Text>
+        ) : null}
+      </View>
+    );
+  }
 
   return (
     <View style={[styles.card, compact && styles.compactCard, isFinal && styles.finalCard]}>
@@ -69,5 +91,23 @@ const styles = StyleSheet.create({
     fontSize: 11,
     fontWeight: "700",
     lineHeight: 16
+  }
+});
+
+const milkTeaStyles = StyleSheet.create({
+  card: {
+    gap: spacing.s4,
+    paddingVertical: spacing.s12,
+    paddingHorizontal: spacing.s16,
+    borderRadius: radii.sm
+  },
+  heading: {
+    ...typeScale.sectionTitle
+  },
+  meta: {
+    ...typeScale.bodyDense
+  },
+  note: {
+    ...typeScale.caption
   }
 });
