@@ -328,7 +328,7 @@ function RoleSelectContent({ navigation, isDevAuthMode, googleLogin = null, emai
       <Text style={styles.terms}>
         登入代表你同意<Text style={styles.termsLink}>服務條款</Text>與<Text style={styles.termsLink}>隱私政策</Text>
       </Text>
-      <Text style={styles.version}>DrinkGroupBuy Prototype</Text>
+      <Text style={styles.version}>飲料團購</Text>
     </ScrollView>
   );
 }

@@ -10,7 +10,7 @@ async function main() {
   await verifySqliteDelegation();
   await verifyPostgresTransactionContract();
   await verifyPostgresAccessBoundary();
-  await verifyPostgresDiscountRollback();
+  await verifyPostgresLowPriceNoLongerBlocked();
   verifyRuntimeValidation();
   console.log("Merchant menu write repository smoke test passed.");
 }
@@ -72,15 +72,19 @@ async function verifyPostgresAccessBoundary() {
   assert.equal(calls.some((call) => call.sql.includes("INSERT INTO")), false);
 }
 
-async function verifyPostgresDiscountRollback() {
+// Percentage discounts don't depend on menu prices at all (unlike the old flat-amount model), so
+// saving a very low base_price while an active group-buy activity exists must no longer roll
+// back with menu_discount_conflict -- confirms validatePostgresActiveStoreDiscountPricing's
+// removal was intentional and correct, not an accidental regression.
+async function verifyPostgresLowPriceNoLongerBlocked() {
   const calls = [];
-  const database = createFakePostgresDatabase(calls, { discountConflict: true });
+  const database = createFakePostgresDatabase(calls, { lowPrice: true });
   const repository = createMerchantMenuRepository({ runtime: "postgres", database });
   const result = await repository.saveMenuItem(validInput());
-  assert.equal(result.error, "menu_discount_conflict");
-  assert.equal(result.activityId, "activity-active");
-  assert.equal(database.rollbackCount, 1);
-  assert.equal(calls.some((call) => call.sql.includes("INSERT INTO audit_logs")), false);
+  assert.equal(result.error, undefined);
+  assert.equal(result.menuItem.name, "Repository 測試茶");
+  assert.equal(database.rollbackCount, 0);
+  assert.ok(calls.some((call) => call.sql.includes("INSERT INTO audit_logs")));
 }
 
 function verifyRuntimeValidation() {
@@ -142,7 +146,7 @@ function createFakePostgresDatabase(calls, options = {}) {
     if (sql.includes("SELECT id, base_price, is_available")) {
       return { rows: [{
         id: createdMenuItemId,
-        base_price: options.discountConflict ? 5 : 65,
+        base_price: options.lowPrice ? 5 : 65,
         is_available: true,
       }] };
     }
@@ -166,19 +170,6 @@ function createFakePostgresDatabase(calls, options = {}) {
         option_type: "sweetness",
         price_delta: 0,
         is_available: true,
-      }] };
-    }
-    if (sql.includes("FROM group_buy_activities")) {
-      return { rows: options.discountConflict
-        ? [{ id: "activity-active", maximum_cups: 1 }]
-        : [] };
-    }
-    if (sql.includes("FROM promotion_tiers")) {
-      return { rows: [{
-        id: "tier-active",
-        target_cups: 1,
-        discount_amount: 10,
-        sort_order: 0,
       }] };
     }
     if (sql.includes("SELECT id, merchant_id, name, address, phone, business_status")) {

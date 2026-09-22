@@ -9,6 +9,7 @@ import {
   mapGroupBuyActivityCreateError,
   validateGroupBuyActivityTierDrafts
 } from "../utils/groupBuyActivityErrors";
+import { parseDealFactorToDiscountPercent } from "../utils/discountPercentFormat";
 
 const NativeDateTimePicker = Platform.OS === "web"
   ? null
@@ -22,7 +23,7 @@ export function MerchantGroupBuyActivityCreateScreen({ navigation, actions, memb
   const initialDeadlineDate = new Date(createDeadlineIsoFromInput(getDefaultDeadlineInput()));
   const [title, setTitle] = useState("離峰優惠團購");
   const [tiers, setTiers] = useState([
-    { id: "tier-draft-1", cups: "20", discountAmount: "200" }
+    { id: "tier-draft-1", cups: "20", dealFactor: "9" }
   ]);
   const [deadlineDate, setDeadlineDate] = useState(initialDeadlineDate);
   const [pickupStartDate, setPickupStartDate] = useState(() => getDefaultPickupStartDate(initialDeadlineDate));
@@ -54,13 +55,16 @@ export function MerchantGroupBuyActivityCreateScreen({ navigation, actions, memb
   const addTier = () => {
     const previousTier = tiers[tiers.length - 1];
     const nextCups = (Number(previousTier?.cups) || 20) + 10;
-    const nextDiscount = (Number(previousTier?.discountAmount) || 200) + 100;
+    // Each added tier defaults to a better (lower) 折 than the one before it, since a higher cup
+    // threshold has to offer a strictly better discount (see validateDiscountTierConfiguration's
+    // tier_discount_percent_not_increasing check) -- floored at 1折 (90% off).
+    const nextDealFactor = Math.max((Number(previousTier?.dealFactor) || 10) - 1, 1);
     setTiers((items) => [
       ...items,
       {
         id: `tier-draft-${Date.now()}`,
         cups: String(nextCups),
-        discountAmount: String(nextDiscount)
+        dealFactor: String(nextDealFactor)
       }
     ]);
   };
@@ -125,7 +129,7 @@ export function MerchantGroupBuyActivityCreateScreen({ navigation, actions, memb
         pickupStartAt,
         tiers: tiers.map((tier) => ({
           targetCups: Number(tier.cups),
-          discountAmount: Number(tier.discountAmount)
+          discountPercent: parseDealFactorToDiscountPercent(tier.dealFactor)
         })),
         notice: notices
       });
@@ -184,7 +188,7 @@ export function MerchantGroupBuyActivityCreateScreen({ navigation, actions, memb
       </Section>
 
       <Section title="優惠規則">
-        <Text style={styles.helperText}>可設定多個杯數級距，例如 20 杯折 200、30 杯折 450。</Text>
+        <Text style={styles.helperText}>可設定多個杯數級距，例如 20 杯打 9 折、30 杯打 7 折。</Text>
         {tiers.map((tier, index) => (
           <View key={tier.id} style={styles.tierCard}>
             <View style={styles.tierHeader}>
@@ -210,15 +214,16 @@ export function MerchantGroupBuyActivityCreateScreen({ navigation, actions, memb
               </View>
               <View style={styles.tierInput}>
                 <MobileInput
-                  label="折扣金額"
-                  value={tier.discountAmount}
-                  onChangeText={(value) => updateTier(tier.id, "discountAmount", value)}
-                  keyboardType="number-pad"
+                  label="打幾折"
+                  value={tier.dealFactor}
+                  onChangeText={(value) => updateTier(tier.id, "dealFactor", value)}
+                  keyboardType="decimal-pad"
+                  placeholder="例如 7 或 7.9"
                 />
               </View>
             </View>
             <Text style={styles.tierSummary}>
-              滿 {tier.cups || "0"} 杯折 {tier.discountAmount || "0"} 元
+              滿 {tier.cups || "0"} 杯打 {tier.dealFactor || "0"} 折
             </Text>
             {tierErrors[tier.id] ? (
               <Text accessibilityRole="alert" style={styles.tierError}>{tierErrors[tier.id]}</Text>

@@ -55,11 +55,12 @@ async function main() {
     });
     assert.equal(result.plan.outcome, "qualified");
     assert.equal(result.plan.authorizedCups, 3);
-    assert.equal(result.plan.discountPerCup, 33);
-    assert.equal(result.plan.allocatedDiscountAmount, 99);
-    assert.equal(result.plan.undistributedDiscountAmount, 1);
+    assert.equal(result.plan.discountPercent, 30);
+    // Order original_amount=195 (3 cups @ $65) @ 7折 (discountPercent=30, pay 70%):
+    // ceil(195*0.7)=137, discount=58.
+    assert.equal(result.plan.totalDiscountAmount, 58);
     assert.equal(result.capturedOrderCount, 1);
-    assert.equal(result.settlement.calculationVersion, "floor_per_cup_v1");
+    assert.equal(result.settlement.calculationVersion, "percentage_v1");
 
     const persisted = await database.query(`
       SELECT activity.status AS activity_status,
@@ -69,10 +70,8 @@ async function main() {
              payment_auth.status AS authorization_status,
              capture.capture_amount,
              capture.released_amount,
-             settlement.discount_amount,
-             settlement.discount_per_cup,
-             settlement.allocated_discount_amount,
-             settlement.undistributed_discount_amount,
+             settlement.total_discount_amount,
+             settlement.discount_percent,
              settlement.discount_funder,
              settlement.calculation_version
       FROM group_buy_activities activity
@@ -86,16 +85,14 @@ async function main() {
       activity_status: "ordering",
       order_status: "locked",
       payment_status: "captured",
-      final_amount: 96,
+      final_amount: 137,
       authorization_status: "captured",
-      capture_amount: 96,
-      released_amount: 99,
-      discount_amount: 100,
-      discount_per_cup: 33,
-      allocated_discount_amount: 99,
-      undistributed_discount_amount: 1,
+      capture_amount: 137,
+      released_amount: 58,
+      total_discount_amount: 58,
+      discount_percent: 30,
       discount_funder: "merchant",
-      calculation_version: "floor_per_cup_v1",
+      calculation_version: "percentage_v1",
     });
     console.log("PostgreSQL settlement, snapshot, persistent job, and cross-instance lock proof passed.");
   } finally {
@@ -198,8 +195,8 @@ async function createFixture(database) {
     `, [activityId, merchant.rows[0].user_id, new Date(now.getTime() - 60 * 60_000).toISOString(),
       deadline.toISOString(), pickupStart.toISOString(), pickupEnd.toISOString()]);
     await transaction.query(`
-      INSERT INTO promotion_tiers (id, activity_id, target_cups, discount_amount, sort_order)
-      VALUES ($1, $2, 3, 100, 1)
+      INSERT INTO promotion_tiers (id, activity_id, target_cups, discount_percent, sort_order)
+      VALUES ($1, $2, 3, 30, 1)
     `, [tierId, activityId]);
     await transaction.query(`
       INSERT INTO orders (

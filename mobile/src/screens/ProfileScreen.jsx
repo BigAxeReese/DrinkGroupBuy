@@ -1,41 +1,36 @@
 import { StyleSheet, Text, View } from "react-native";
+import { Card } from "../components/Card";
+import { EmptyPanel } from "../components/EmptyPanel";
 import { MobileScreen, Section } from "../components/MobileScreen";
 import { PrimaryButton } from "../components/PrimaryButton";
-
-const roleLabels = {
-  customer: "顧客",
-  merchant: "店家",
-  admin: "管理員"
-};
+import { colors, maxFontSizeMultiplier, radii, sizes, spacing, typeScale } from "../theme/tokens";
 
 export function ProfileScreen({ navigation, currentUserProfile, memberAction }) {
   if (!currentUserProfile) {
     return (
       <MobileScreen title="個人中心" onMemberPress={memberAction}>
         <Section title="會員資料">
-          <Text style={styles.description}>找不到目前登入的會員資料，請重新登入。</Text>
+          <EmptyPanel>找不到目前登入的會員資料，請重新登入。</EmptyPanel>
           <PrimaryButton label="重新登入" onPress={() => navigation.replace("roleSelect")} />
         </Section>
       </MobileScreen>
     );
   }
 
-  const roleText = (currentUserProfile.roles ?? []).map((role) => roleLabels[role] ?? role).join("、") || "—";
   const contactText = currentUserProfile.phoneNumber || currentUserProfile.email || "—";
 
   return (
     <MobileScreen title="個人中心" onMemberPress={memberAction}>
       <Section title="會員資料">
-        <View style={styles.memberCard}>
+        <Card style={styles.memberCard}>
           <View style={styles.avatar}>
-            <Text style={styles.avatarText}>{(currentUserProfile.displayName || "會").slice(0, 1)}</Text>
+            <Text maxFontSizeMultiplier={maxFontSizeMultiplier} style={styles.avatarText}>{(currentUserProfile.displayName || "會").slice(0, 1)}</Text>
           </View>
           <View style={styles.memberInfo}>
             <Text style={styles.memberName}>{currentUserProfile.displayName || "會員"}</Text>
             <Text style={styles.memberMeta}>{contactText}</Text>
-            <Text style={styles.memberMeta}>身分：{roleText}</Text>
           </View>
-        </View>
+        </Card>
       </Section>
 
       <Section title="付款與取貨紀錄">
@@ -52,40 +47,36 @@ export function ProfileScreen({ navigation, currentUserProfile, memberAction }) 
 
 const styles = StyleSheet.create({
   description: {
-    color: "#475569",
-    fontSize: 15,
-    lineHeight: 22
+    ...typeScale.body,
+    color: colors.textSecondary
   },
   memberCard: {
     flexDirection: "row",
     alignItems: "center",
-    gap: 12
+    gap: spacing.s12
   },
   avatar: {
-    width: 52,
-    height: 52,
-    borderRadius: 26,
+    width: sizes.tap,
+    height: sizes.tap,
+    borderRadius: radii.pill,
     alignItems: "center",
     justifyContent: "center",
-    backgroundColor: "#1f6feb"
+    backgroundColor: colors.recess
   },
   avatarText: {
-    color: "#ffffff",
-    fontSize: 22,
-    fontWeight: "900"
+    ...typeScale.sectionTitle,
+    color: colors.text
   },
   memberInfo: {
     flex: 1,
-    gap: 3
+    gap: spacing.s4
   },
   memberName: {
-    color: "#0f172a",
-    fontSize: 18,
-    fontWeight: "900"
+    ...typeScale.sectionTitle,
+    color: colors.text
   },
   memberMeta: {
-    color: "#64748b",
-    fontSize: 13,
-    fontWeight: "700"
+    ...typeScale.body,
+    color: colors.textSecondary
   }
 });

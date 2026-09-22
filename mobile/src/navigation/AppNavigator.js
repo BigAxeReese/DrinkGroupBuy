@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import * as Location from "expo-location";
 import * as Updates from "expo-updates";
 import { ActivityIndicator, Alert, AppState, BackHandler, Linking, View, StyleSheet } from "react-native";
@@ -26,6 +26,8 @@ import { StoreMenuScreen } from "../screens/StoreMenuScreen";
 import { StoreGroupBuyActivitiesScreen } from "../screens/StoreGroupBuyActivitiesScreen";
 import { DevBusinessTimeBanner } from "../components/DevBusinessTimeBanner";
 import { useDevBusinessTime } from "../hooks/useDevBusinessTime";
+import { MilkTeaProvider } from "../theme/MilkTeaContext";
+import { LEGACY_PAGE_COLOR, MILK_TEA_ROUTES } from "../theme/milkTeaRoutes";
 import { getBusinessNow } from "../utils/businessTime";
 import { formatDeadlineLabel, formatPickupTimeRangeLabel, getMinutesUntilDeadline, isDeadlineReached } from "../utils/deadlineTime";
 import { getGroupBuyActivityCapacityInfo, wouldExceedGroupBuyActivityCapacity } from "../utils/groupBuyActivityProgress";
@@ -53,6 +55,7 @@ import {
 import { clearAuthSession, loadAuthSession } from "../utils/authSession";
 import { getRouteForUser } from "../utils/authRouting";
 import { signOutFirebaseUser } from "../utils/firebaseAuth";
+import { ScreenTransition } from "./ScreenTransition";
 
 const initialRoute = { name: "roleSelect", params: {} };
 const backendCustomerUserIds = {
@@ -117,10 +120,8 @@ function normalizeBackendSettlement(settlement) {
     outcome: settlement.outcome,
     authorizedCups: Number(settlement.authorizedCups ?? 0),
     appliedTierId: settlement.appliedTierId ?? null,
-    discountAmount: Number(settlement.discountAmount ?? 0),
-    discountPerCup: Number(settlement.discountPerCup ?? 0),
-    allocatedDiscountAmount: Number(settlement.allocatedDiscountAmount ?? 0),
-    undistributedDiscountAmount: Number(settlement.undistributedDiscountAmount ?? 0),
+    totalDiscountAmount: Number(settlement.totalDiscountAmount ?? 0),
+    discountPercent: settlement.discountPercent == null ? null : Number(settlement.discountPercent),
     discountFunder: settlement.discountFunder ?? "merchant",
     calculationVersion: settlement.calculationVersion ?? null,
     settledAt: settlement.settledAt ?? null,
@@ -133,7 +134,7 @@ function normalizeBackendGroupBuyActivity(activity, existingActivity = {}) {
     id: tier.id ?? null,
     cups: Number(tier.targetCups ?? tier.cups),
     targetCups: Number(tier.targetCups ?? tier.cups),
-    discountAmount: Number(tier.discountAmount),
+    discountPercent: Number(tier.discountPercent),
     sortOrder: tier.sortOrder
   }));
   const currentCups = Number(
@@ -169,10 +170,7 @@ function normalizeBackendGroupBuyActivity(activity, existingActivity = {}) {
     participantCount: Number(activity?.participantCount ?? existingActivity.participantCount ?? 0),
     currentTierId: activity?.currentTierId ?? null,
     currentTierTargetCups: activity?.currentTierTargetCups ?? null,
-    currentTierDiscountAmount: Number(activity?.currentTierDiscountAmount ?? 0),
-    estimatedDiscountPerCup: Number(activity?.estimatedDiscountPerCup ?? 0),
-    estimatedAllocatedDiscountAmount: Number(activity?.estimatedAllocatedDiscountAmount ?? 0),
-    estimatedUndistributedDiscountAmount: Number(activity?.estimatedUndistributedDiscountAmount ?? 0),
+    currentTierDiscountPercent: Number(activity?.currentTierDiscountPercent ?? 0),
     nextTierTargetCups: activity?.nextTierTargetCups ?? null,
     cupsToNextTier: Number(activity?.cupsToNextTier ?? 0),
     discountSummaryAuthorizedCups: currentCups,
@@ -366,7 +364,7 @@ function parseLinePayResultDeepLink(rawUrl) {
   };
 }
 
-export function AppNavigator() {
+export function AppNavigator({ onMilkTeaChange }) {
   const businessTime = useDevBusinessTime();
   const [stack, setStack] = useState([initialRoute]);
   const [sessionRestoreStatus, setSessionRestoreStatus] = useState("checking");
@@ -386,6 +384,12 @@ export function AppNavigator() {
   const [storageLoaded, setStorageLoaded] = useState(false);
   const handledDeepLinkRef = useRef(null);
   const current = stack[stack.length - 1];
+  // One decision per route: migrated routes get MilkTeaContext (shared components switch to the new
+  // look) and App paints the new page colour behind the status bar and system navigation bar.
+  const milkTea = MILK_TEA_ROUTES.has(current.name);
+  useLayoutEffect(() => {
+    onMilkTeaChange?.(milkTea);
+  }, [milkTea, onMilkTeaChange]);
 
   useEffect(() => {
     // Updates.isEnabled is false on web and in dev/Expo Go builds -- nothing to check there.
@@ -1378,39 +1382,52 @@ export function AppNavigator() {
     memberAction: current.name !== "roleSelect" ? () => navigation.replace("roleSelect") : undefined
   };
 
+  // The screen of one route entry. ScreenTransition also asks for the screen that is sliding out during a
+  // tab switch, so each screen gets its own route entry and the MilkTeaContext value of ITS route.
+  const renderScreen = (entry) => {
+    const props = { ...screenProps, route: entry };
+    return (
+      <MilkTeaProvider value={MILK_TEA_ROUTES.has(entry.name)}>
+        {entry.name === "roleSelect" && <RoleSelectScreen {...props} />}
+        {entry.name === "merchantApply" && <MerchantApplyScreen {...props} />}
+        {entry.name === "nearby" && <NearbyGroupBuyActivitiesScreen {...props} />}
+        {entry.name === "liveMap" && <LiveMapScreen {...props} />}
+        {entry.name === "storeMenu" && <StoreMenuScreen {...props} />}
+        {entry.name === "groupBuyActivityDetail" && <GroupBuyActivityDetailScreen {...props} />}
+        {entry.name === "drinkSelection" && <DrinkSelectionScreen {...props} />}
+        {entry.name === "cart" && <CartScreen {...props} />}
+        {entry.name === "groupProgress" && <GroupProgressScreen {...props} />}
+        {entry.name === "storeGroupBuyActivities" && <StoreGroupBuyActivitiesScreen {...props} />}
+        {entry.name === "paymentAuthorization" && <PaymentAuthorizationScreen {...props} />}
+        {entry.name === "pickupInfo" && <PickupInfoScreen {...props} />}
+        {entry.name === "merchantCreate" && <MerchantGroupBuyActivityCreateScreen {...props} />}
+        {entry.name === "merchantDashboard" && <MerchantDashboardScreen {...props} />}
+        {entry.name === "merchantMenu" && <MerchantMenuManagementScreen {...props} />}
+        {entry.name === "merchantProductionList" && <MerchantProductionListScreen {...props} />}
+        {entry.name === "merchantRefundRequests" && <MerchantRefundRequestsScreen {...props} />}
+        {entry.name === "customerOrders" && <CustomerOrdersScreen {...props} />}
+        {entry.name === "profile" && <ProfileScreen {...props} />}
+      </MilkTeaProvider>
+    );
+  };
+
   return (
-    <View style={styles.container}>
-      <DevBusinessTimeBanner businessTime={businessTime} />
-      <View style={styles.screen}>
-        {current.name === "roleSelect" && <RoleSelectScreen {...screenProps} />}
-        {current.name === "merchantApply" && <MerchantApplyScreen {...screenProps} />}
-        {current.name === "nearby" && <NearbyGroupBuyActivitiesScreen {...screenProps} />}
-        {current.name === "liveMap" && <LiveMapScreen {...screenProps} />}
-        {current.name === "storeMenu" && <StoreMenuScreen {...screenProps} />}
-        {current.name === "groupBuyActivityDetail" && <GroupBuyActivityDetailScreen {...screenProps} />}
-        {current.name === "drinkSelection" && <DrinkSelectionScreen {...screenProps} />}
-        {current.name === "cart" && <CartScreen {...screenProps} />}
-        {current.name === "groupProgress" && <GroupProgressScreen {...screenProps} />}
-        {current.name === "storeGroupBuyActivities" && <StoreGroupBuyActivitiesScreen {...screenProps} />}
-        {current.name === "paymentAuthorization" && <PaymentAuthorizationScreen {...screenProps} />}
-        {current.name === "pickupInfo" && <PickupInfoScreen {...screenProps} />}
-        {current.name === "merchantCreate" && <MerchantGroupBuyActivityCreateScreen {...screenProps} />}
-        {current.name === "merchantDashboard" && <MerchantDashboardScreen {...screenProps} />}
-        {current.name === "merchantMenu" && <MerchantMenuManagementScreen {...screenProps} />}
-        {current.name === "merchantProductionList" && <MerchantProductionListScreen {...screenProps} />}
-        {current.name === "merchantRefundRequests" && <MerchantRefundRequestsScreen {...screenProps} />}
-        {current.name === "customerOrders" && <CustomerOrdersScreen {...screenProps} />}
-        {current.name === "profile" && <ProfileScreen {...screenProps} />}
+    <MilkTeaProvider value={milkTea}>
+      <View style={styles.container}>
+        <DevBusinessTimeBanner businessTime={businessTime} />
+        <View style={styles.screen}>
+          <ScreenTransition current={current} renderScreen={renderScreen} />
+        </View>
+        {current.name !== "roleSelect" && current.name !== "merchantApply" ? (
+          <BottomNav
+            current={current.name}
+            currentParams={current.params}
+            currentRole={currentRole}
+            navigation={navigation}
+          />
+        ) : null}
       </View>
-      {current.name !== "roleSelect" && current.name !== "merchantApply" ? (
-        <BottomNav
-          current={current.name}
-          currentParams={current.params}
-          currentRole={currentRole}
-          navigation={navigation}
-        />
-      ) : null}
-    </View>
+    </MilkTeaProvider>
   );
 }
 
@@ -1424,6 +1441,6 @@ const styles = StyleSheet.create({
   sessionCheckContainer: {
     alignItems: "center",
     justifyContent: "center",
-    backgroundColor: "#f6f8fb"
+    backgroundColor: LEGACY_PAGE_COLOR
   }
 });

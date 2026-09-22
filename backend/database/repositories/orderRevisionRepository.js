@@ -2,10 +2,7 @@
 
 const { randomUUID } = require("node:crypto");
 const { createRuntimeDatabaseAdapter } = require("..");
-const {
-  pricePostgresOrderItems,
-  validatePostgresOrderDiscount,
-} = require("./customerOrderWriteRepository");
+const { pricePostgresOrderItems } = require("./customerOrderWriteRepository");
 
 function resolveOrderRevisionRuntime(input = {}) {
   const env = input.env || process.env;
@@ -99,9 +96,6 @@ async function createPostgresOrderRevision(database, input) {
     if (pricedItems.priceChanged) {
       return { error: "order_price_changed", originalAmount, items: toAuthoritativeOrderItems(items) };
     }
-
-    const discountValidation = await validatePostgresOrderDiscount(transaction, order.activity_id, items);
-    if (!discountValidation.valid) return discountValidation;
 
     const lockMinutes = Number(order.withdrawal_lock_minutes || 30);
     const deadlineTime = Date.parse(order.deadline_at);
