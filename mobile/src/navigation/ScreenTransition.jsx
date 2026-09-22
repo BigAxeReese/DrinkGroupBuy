@@ -12,7 +12,7 @@ const WATCHDOG_MARGIN_MS = 300;
 export function ScreenTransition({ current, renderScreen, duration = SLIDE_DURATION_MS }) {
   const reduceMotion = useReduceMotion();
   const [width, setWidth] = useState(0);
-  const [state, setState] = useState({ shown: current, leaving: null, direction: 0, progress: null });
+  const [state, setState] = useState({ shown: current, leaving: null, direction: 0, progress: null, contentReady: true });
 
   // Adjusting state while rendering (instead of in an effect) means the first frame of the new screen is
   // already at its starting position, not flashing at its final one.
@@ -20,11 +20,23 @@ export function ScreenTransition({ current, renderScreen, duration = SLIDE_DURAT
     setState(getNextState(state, current, reduceMotion));
   }
 
-  const { shown, leaving, direction, progress } = state;
+  const { shown, leaving, direction, progress, contentReady } = state;
+
+  // Mounting the destination screen (a data-heavy list, or the native map) is synchronous work that can
+  // block the UI thread for the first frames of the slide, which is what makes it stutter. Letting the
+  // slide's native-driven transform get moving for one frame BEFORE that mount happens gives the
+  // animation a head start it can keep even while the mount briefly blocks the thread afterwards.
+  useEffect(() => {
+    if (contentReady) return undefined;
+    const frame = requestAnimationFrame(() => {
+      setState((latest) => (latest.shown === shown ? { ...latest, contentReady: true } : latest));
+    });
+    return () => cancelAnimationFrame(frame);
+  }, [contentReady, shown]);
 
   useEffect(() => {
     if (!progress) return undefined;
-    const finish = () => setState((latest) => (latest.progress === progress ? { ...latest, leaving: null, progress: null } : latest));
+    const finish = () => setState((latest) => (latest.progress === progress ? { ...latest, leaving: null, progress: null, contentReady: true } : latest));
     const animation = Animated.timing(progress, {
       toValue: 1,
       duration,
@@ -60,7 +72,7 @@ export function ScreenTransition({ current, renderScreen, duration = SLIDE_DURAT
         </Animated.View>
       ) : null}
       <Animated.View key={shown.name} style={[styles.layer, enterStyle]}>
-        {renderScreen(shown)}
+        {contentReady ? renderScreen(shown) : null}
       </Animated.View>
     </View>
   );
@@ -69,8 +81,8 @@ export function ScreenTransition({ current, renderScreen, duration = SLIDE_DURAT
 function getNextState(state, current, reduceMotion) {
   if (state.shown.name === current.name) return { ...state, shown: current };
   const direction = reduceMotion ? 0 : getSlideDirection(state.shown.name, current.name);
-  if (!direction) return { shown: current, leaving: null, direction: 0, progress: null };
-  return { shown: current, leaving: state.shown, direction, progress: new Animated.Value(0) };
+  if (!direction) return { shown: current, leaving: null, direction: 0, progress: null, contentReady: true };
+  return { shown: current, leaving: state.shown, direction, progress: new Animated.Value(0), contentReady: false };
 }
 
 // The system "remove animations" setting turns the slide off. If the setting cannot be read the slide
