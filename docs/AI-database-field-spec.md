@@ -177,7 +177,7 @@ PostgreSQL 直接連結 `store_id`，不保存舊 SQLite 相容 schema 的 `merc
 | 1   | `id`              | 優惠門檻編號 | TEXT    | PK              | 建議使用 `tier_` 加唯一後綴                                  | `tier_001`     |
 | 2   | `activity_id`     | 團購活動編號 | TEXT    | FK, UNIQUE pair | References `group_buy_activities(id)`；與 `target_cups` 唯一 | `activity_001` |
 | 3   | `target_cups`     | 目標杯數     | INTEGER | UNIQUE pair     | `> 0`                                                        | `20`           |
-| 4   | `discount_amount` | 總折扣金額   | INTEGER |                 | `>= 0`，以 NTD 整數保存；每杯折扣為 `floor(discount_amount / 有效授權杯數)`，商家出資優惠的未分配尾差退回商家；應用層須驗證可達杯數區間內每杯至少折 1 元且不高於最低可售單杯權威金額 | `200`          |
+| 4   | `discount_percent` | 折扣百分比（2026-09-18 起取代 `discount_amount`） | INTEGER |                 | `1-99` 整數；代表折掉的百分比（例如 30 代表打 7 折／付原價 70%）；每筆訂單各自依自己的原價計算應付金額（`ceil(原價 * (100-discount_percent) / 100)`），不是固定金額也不是單杯折扣；應用層須驗證門檻杯數越高折扣百分比必須嚴格更好 | `30`          |
 | 5   | `sort_order`      | 排序         | INTEGER |                 | 數字越小越前面                                               | `1`            |
 
 ## `activity_notices`
@@ -493,7 +493,7 @@ PostgreSQL 直接連結 `store_id`，不保存舊 SQLite 相容 schema 的 `merc
 
 ## `activity_settlements`
 
-第 7 至 11 項由 PostgreSQL `003_activity_settlement_discount_snapshot_postgres.sql` 加入，已屬目前 schema。
+第 9-10 項由 PostgreSQL `003_activity_settlement_discount_snapshot_postgres.sql` 加入；2026-09-18 `008_percentage_discount_postgres.sql` 把固定金額折扣改成百分比折扣，移除了 `discount_per_cup`／`allocated_discount_amount`／`undistributed_discount_amount`（百分比折扣逐筆訂單計算，沒有「一包總額分攤」這個概念），`discount_amount` 改名 `total_discount_amount`，並新增 `discount_percent`。
 
 | No. | Field name        | 中文名稱         | Type    | Key        | 規則 / 格式 / 範圍                    | Example                     |
 | --- | ----------------- | ---------------- | ------- | ---------- | ------------------------------------- | --------------------------- |
@@ -502,14 +502,12 @@ PostgreSQL 直接連結 `store_id`，不保存舊 SQLite 相容 schema 的 `merc
 | 3   | `outcome`         | 結算結果         | TEXT    |            | `qualified`, `failed`, `cancelled`    | `qualified`                 |
 | 4   | `authorized_cups` | 預授權杯數       | INTEGER |            | `>= 0`；結算時的權威杯數              | `25`                        |
 | 5   | `applied_tier_id` | 適用優惠門檻編號 | TEXT    | FK         | 未達標或取消時可為 NULL               | `tier_002`                  |
-| 6   | `discount_amount` | 適用總折扣金額   | INTEGER |            | `>= 0`；保存結算時套用級距的總折扣金額 | `300`                       |
-| 7   | `discount_per_cup` | 每杯實際折扣 | INTEGER | | `>= 0`；`floor(discount_amount / authorized_cups)` | `12` |
-| 8   | `allocated_discount_amount` | 實際分配折扣總額 | INTEGER | | 等於每杯折扣乘以有效授權杯數 | `300` |
-| 9   | `undistributed_discount_amount` | 未分配尾差 | INTEGER | | 與實際分配合計必須等於總折扣 | `0` |
-| 10  | `discount_funder` | 優惠出資方 | TEXT | | `merchant` 或 `platform` | `merchant` |
-| 11  | `calculation_version` | 折扣計算版本 | TEXT | | 第一版為 `floor_per_cup_v1` | `floor_per_cup_v1` |
-| 12  | `settled_at`      | 結算時間         | timestamptz |            | ISO 8601 日期時間                     | `2026-06-25T15:30:00+08:00` |
-| 13  | `reason`          | 結算原因         | TEXT    |            | 可為 NULL                             | `deadline_reached`          |
+| 6   | `total_discount_amount` | 折扣總金額（衍生值） | INTEGER |            | `>= 0`；結算後把每筆訂單自己算出的折扣加總得出，不是預先定義的一包金額 | `13`                       |
+| 7   | `discount_percent` | 適用折扣百分比 | INTEGER | | 未達標或取消時為 NULL；否則 `1-99` 整數 | `21` |
+| 8   | `discount_funder` | 優惠出資方 | TEXT | | `merchant` 或 `platform` | `merchant` |
+| 9   | `calculation_version` | 折扣計算版本 | TEXT | | 百分比制版本為 `percentage_v1`（舊制 `floor_per_cup_v1` 僅存在於 2026-09-18 前的歷史結算紀錄） | `percentage_v1` |
+| 10  | `settled_at`      | 結算時間         | timestamptz |            | ISO 8601 日期時間                     | `2026-06-25T15:30:00+08:00` |
+| 11  | `reason`          | 結算原因         | TEXT    |            | 可為 NULL                             | `deadline_reached`          |
 
 ## `pickup_credentials`
 

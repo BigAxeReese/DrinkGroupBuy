@@ -1,4 +1,5 @@
 import { StyleSheet, Text, View } from "react-native";
+import { colors, radii, spacing, typeScale } from "../theme/tokens";
 
 export function PlaceholderBox({ title, description }) {
   return (
@@ -12,25 +13,20 @@ export function PlaceholderBox({ title, description }) {
 const styles = StyleSheet.create({
   box: {
     minHeight: 96,
-    borderRadius: 18,
+    borderRadius: radii.md,
     alignItems: "center",
     justifyContent: "center",
-    gap: 6,
-    borderWidth: 1,
-    borderStyle: "dashed",
-    borderColor: "#94a3b8",
-    backgroundColor: "#f8fafc",
-    padding: 14
+    gap: spacing.s8,
+    backgroundColor: colors.recess,
+    padding: spacing.s16
   },
   title: {
-    color: "#0f172a",
-    fontSize: 16,
-    fontWeight: "900"
+    ...typeScale.button,
+    color: colors.textSecondary
   },
   description: {
-    color: "#64748b",
-    fontSize: 13,
-    textAlign: "center",
-    lineHeight: 19
+    ...typeScale.bodyDense,
+    color: colors.textSecondary,
+    textAlign: "center"
   }
 });

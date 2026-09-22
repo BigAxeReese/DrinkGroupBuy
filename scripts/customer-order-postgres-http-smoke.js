@@ -497,8 +497,8 @@ async function createProofFixture(database) {
   ]);
   await database.query(`
     INSERT INTO promotion_tiers (
-      id, activity_id, target_cups, discount_amount, sort_order
-    ) VALUES ($1, $2, 2, 2, 0)
+      id, activity_id, target_cups, discount_percent, sort_order
+    ) VALUES ($1, $2, 2, 20, 0)
   `, [tierId, activityId]);
 
   return {

@@ -2,12 +2,6 @@
 
 const { randomUUID } = require("node:crypto");
 const { createRuntimeDatabaseAdapter } = require("..");
-const {
-  validateDiscountTierConfiguration,
-} = require("../../pricing/groupBuyDiscount");
-const {
-  getLockedPostgresStoreDiscountPricingContext,
-} = require("./groupBuyActivityWriteRepository");
 const { getPostgresStoreMenu } = require("./storeMenuReadRepository");
 
 function resolveMerchantMenuRuntime(input = {}) {
@@ -240,12 +234,6 @@ async function savePostgresMerchantMenuItem(database, input) {
         }
       }
 
-      const discountValidation = await validatePostgresActiveStoreDiscountPricing(
-        transaction,
-        input.storeId
-      );
-      if (!discountValidation.valid) rejectWrite(discountValidation);
-
       await transaction.query(`
         INSERT INTO audit_logs (
           id, actor_user_id, action_type, resource_type,
@@ -287,63 +275,8 @@ function rejectWrite(result) {
   throw new MerchantMenuWriteRejected(result);
 }
 
-async function validatePostgresActiveStoreDiscountPricing(database, storeId) {
-  const menuPricing = await getLockedPostgresStoreDiscountPricingContext(
-    database,
-    storeId
-  );
-  if (menuPricing.menuItemCount === 0) {
-    return { valid: true, skipped: "store_menu_empty" };
-  }
-  if (menuPricing.error) {
-    return {
-      valid: false,
-      error: "menu_discount_conflict",
-      reason: menuPricing.error,
-      menuItemId: menuPricing.menuItemId,
-    };
-  }
-  const { minimumSellableUnitPrice } = menuPricing;
-  const activitiesResult = await database.query(`
-    SELECT id, maximum_cups
-    FROM group_buy_activities
-    WHERE store_id = $1
-      AND status IN ('recruiting', 'confirmed')
-    ORDER BY created_at ASC
-  `, [storeId]);
-
-  for (const activity of activitiesResult.rows) {
-    const tiersResult = await database.query(`
-      SELECT id, target_cups, discount_amount, sort_order
-      FROM promotion_tiers
-      WHERE activity_id = $1
-      ORDER BY target_cups ASC, sort_order ASC
-    `, [activity.id]);
-    const validation = validateDiscountTierConfiguration({
-      tiers: tiersResult.rows,
-      maximumCups: activity.maximum_cups,
-      minimumSellableUnitPrice,
-    });
-    if (!validation.valid) {
-      return {
-        ...validation,
-        error: "menu_discount_conflict",
-        activityId: activity.id,
-        minimumSellableUnitPrice,
-      };
-    }
-  }
-
-  return {
-    valid: true,
-    minimumSellableUnitPrice,
-    activityCount: activitiesResult.rows.length,
-  };
-}
-
 module.exports = {
   createMerchantMenuRepository,
   resolveMerchantMenuRuntime,
   savePostgresMerchantMenuItem,
-  validatePostgresActiveStoreDiscountPricing,
 };

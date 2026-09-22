@@ -1,12 +1,10 @@
 "use strict";
 
-const {
-  calculateDiscountPerCup,
-  calculateMinimumSellableUnitPrice,
-  findOrderDiscountConflicts,
-  validateDiscountTierConfiguration
-} = require("./groupBuyDiscount");
+const { calculateMinimumSellableUnitPrice } = require("./groupBuyDiscount");
 
+// Still used by the activity-creation path (db.js) to reject activities on stores with no
+// priced/valid menu -- an orthogonal concern to tier math, unaffected by the amount->percent
+// change (a percentage discount doesn't depend on menu prices at all, see groupBuyDiscount.js).
 function getStoreDiscountPricingContext(database, storeId) {
   const menuItems = database.prepare(`
     SELECT id, base_price, is_available
@@ -78,88 +76,6 @@ function getStoreDiscountPricingContext(database, storeId) {
   };
 }
 
-function getActivityDiscountTiers(database, activityId) {
-  return database.prepare(`
-    SELECT id, target_cups, discount_amount, sort_order
-    FROM promotion_tiers
-    WHERE activity_id = ?
-    ORDER BY target_cups ASC, sort_order ASC
-  `).all(activityId);
-}
-
-function getActivityMaximumDiscountPerCup(database, activityId) {
-  return getActivityDiscountTiers(database, activityId).reduce(
-    (maximum, tier) => Math.max(
-      maximum,
-      calculateDiscountPerCup(tier.discount_amount, tier.target_cups)
-    ),
-    0
-  );
-}
-
-function validateOrderItemsForActivityDiscount(database, activityId, items) {
-  const maximumDiscountPerCup = getActivityMaximumDiscountPerCup(database, activityId);
-  const issues = findOrderDiscountConflicts(items, maximumDiscountPerCup);
-  if (issues.length === 0) {
-    return { valid: true, maximumDiscountPerCup };
-  }
-  return {
-    valid: false,
-    error: "order_discount_conflict",
-    reason: "order_unit_price_below_maximum_discount_per_cup",
-    activityId,
-    maximumDiscountPerCup,
-    issues
-  };
-}
-
-function validateActiveStoreDiscountPricing(database, storeId) {
-  const menuPricing = getStoreDiscountPricingContext(database, storeId);
-  if (menuPricing.menuItemCount === 0) return { valid: true, skipped: "store_menu_empty" };
-  if (menuPricing.error) {
-    return {
-      valid: false,
-      error: "menu_discount_conflict",
-      reason: menuPricing.error,
-      menuItemId: menuPricing.menuItemId
-    };
-  }
-
-  const activities = database.prepare(`
-    SELECT id, maximum_cups
-    FROM group_buy_activities
-    WHERE store_id = ?
-      AND status IN ('recruiting', 'confirmed')
-    ORDER BY created_at ASC
-  `).all(storeId);
-
-  for (const activity of activities) {
-    const validation = validateDiscountTierConfiguration({
-      tiers: getActivityDiscountTiers(database, activity.id),
-      maximumCups: activity.maximum_cups,
-      minimumSellableUnitPrice: menuPricing.minimumSellableUnitPrice
-    });
-    if (!validation.valid) {
-      return {
-        ...validation,
-        error: "menu_discount_conflict",
-        activityId: activity.id,
-        minimumSellableUnitPrice: menuPricing.minimumSellableUnitPrice
-      };
-    }
-  }
-
-  return {
-    valid: true,
-    minimumSellableUnitPrice: menuPricing.minimumSellableUnitPrice,
-    activityCount: activities.length
-  };
-}
-
 module.exports = {
-  getActivityDiscountTiers,
-  getActivityMaximumDiscountPerCup,
-  getStoreDiscountPricingContext,
-  validateActiveStoreDiscountPricing,
-  validateOrderItemsForActivityDiscount
+  getStoreDiscountPricingContext
 };

@@ -1,6 +1,22 @@
 import { StyleSheet, Text, View } from "react-native";
+import { useMilkTea } from "../theme/MilkTeaContext";
+import { PearlTray } from "./PearlTray";
 
+// Migrated routes show the big pearl tray (docs/ui-style-guide.md, see theme/MilkTeaContext.js).
+// Everything below the early return is the old bar, untouched, because the merchant dashboard still uses it.
 export function ProgressSummary({ currentCups, targetCups, participantCount, remainingTimeText }) {
+  const milkTea = useMilkTea();
+  if (milkTea) {
+    return (
+      <PearlTray
+        currentCups={currentCups}
+        targetCups={targetCups}
+        participantCount={participantCount}
+        remainingTimeText={remainingTimeText}
+      />
+    );
+  }
+
   const progress = Math.min(100, Math.round((currentCups / targetCups) * 100));
 
   return (

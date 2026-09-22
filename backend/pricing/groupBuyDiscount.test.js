@@ -4,87 +4,80 @@ const { describe, it } = require("node:test");
 const assert = require("node:assert/strict");
 
 const {
-  calculateDiscountPerCup,
-  calculateGroupBuyDiscountSummary,
   calculateMinimumSellableUnitPrice,
-  findOrderDiscountConflicts,
+  calculatePercentageDiscount,
   normalizeDiscountTiers,
+  resolveAppliedDiscountTier,
   validateDiscountTierConfiguration
 } = require("./groupBuyDiscount");
 
-describe("calculateDiscountPerCup", () => {
-  it("divides evenly when the discount splits cleanly across cups", () => {
-    assert.equal(calculateDiscountPerCup(100, 10), 10);
+describe("calculatePercentageDiscount", () => {
+  it("rounds the amount the customer pays up to the nearest dollar", () => {
+    // $65 @ 7折 (discountPercent=30, pay 70%): 65*0.7=45.5 -> ceil -> 46
+    assert.deepEqual(calculatePercentageDiscount(65, 30), { finalAmount: 46, discountAmount: 19 });
   });
 
-  it("floors down when the discount does not divide evenly", () => {
-    assert.equal(calculateDiscountPerCup(100, 3), 33);
+  it("divides evenly when the discount produces a whole number", () => {
+    // $100 @ 7折 (discountPercent=30): 100*0.7=70 exactly
+    assert.deepEqual(calculatePercentageDiscount(100, 30), { finalAmount: 70, discountAmount: 30 });
   });
 
-  it("returns 0 when cupCount is zero", () => {
-    assert.equal(calculateDiscountPerCup(100, 0), 0);
+  it("never floors a positive amount to zero, even at 99% off", () => {
+    assert.deepEqual(calculatePercentageDiscount(1, 99), { finalAmount: 1, discountAmount: 0 });
   });
 
-  it("returns 0 when cupCount is negative", () => {
-    assert.equal(calculateDiscountPerCup(100, -5), 0);
+  it("throws for a non-integer or negative originalAmount", () => {
+    assert.throws(() => calculatePercentageDiscount(10.5, 30));
+    assert.throws(() => calculatePercentageDiscount(-10, 30));
   });
 
-  it("returns 0 when discountAmount is negative", () => {
-    assert.equal(calculateDiscountPerCup(-100, 10), 0);
-  });
-
-  it("returns 0 when discountAmount is not an integer", () => {
-    assert.equal(calculateDiscountPerCup(10.5, 10), 0);
-  });
-
-  it("returns 0 when discountAmount is 0", () => {
-    assert.equal(calculateDiscountPerCup(0, 10), 0);
+  it("throws for a discountPercent outside 1-99", () => {
+    assert.throws(() => calculatePercentageDiscount(100, 0));
+    assert.throws(() => calculatePercentageDiscount(100, 100));
+    assert.throws(() => calculatePercentageDiscount(100, 30.5));
   });
 });
 
-describe("calculateGroupBuyDiscountSummary", () => {
+describe("resolveAppliedDiscountTier", () => {
   const tiers = [
-    { id: 1, targetCups: 10, discountAmount: 100 },
-    { id: 2, targetCups: 20, discountAmount: 300 }
+    { id: 1, targetCups: 10, discountPercent: 10 },
+    { id: 2, targetCups: 20, discountPercent: 30 }
   ];
 
   it("applies the highest reached tier and reports progress to the next one", () => {
-    const summary = calculateGroupBuyDiscountSummary(tiers, 15);
+    const summary = resolveAppliedDiscountTier(tiers, 15);
     assert.deepEqual(summary, {
       currentTierId: 1,
       currentTierTargetCups: 10,
-      currentTierDiscountAmount: 100,
-      estimatedDiscountPerCup: 6,
-      estimatedAllocatedDiscountAmount: 90,
-      estimatedUndistributedDiscountAmount: 10,
+      currentTierDiscountPercent: 10,
       nextTierTargetCups: 20,
       cupsToNextTier: 5
     });
   });
 
   it("reports no applied tier when cups fall below the lowest tier", () => {
-    const summary = calculateGroupBuyDiscountSummary(tiers, 5);
+    const summary = resolveAppliedDiscountTier(tiers, 5);
     assert.equal(summary.currentTierId, null);
-    assert.equal(summary.estimatedDiscountPerCup, 0);
+    assert.equal(summary.currentTierDiscountPercent, 0);
     assert.equal(summary.nextTierTargetCups, 10);
     assert.equal(summary.cupsToNextTier, 5);
   });
 
   it("reports no next tier once the highest tier is reached", () => {
-    const summary = calculateGroupBuyDiscountSummary(tiers, 25);
+    const summary = resolveAppliedDiscountTier(tiers, 25);
     assert.equal(summary.currentTierId, 2);
     assert.equal(summary.nextTierTargetCups, null);
     assert.equal(summary.cupsToNextTier, 0);
   });
 
   it("clamps negative authorizedCups to zero", () => {
-    const summary = calculateGroupBuyDiscountSummary(tiers, -5);
+    const summary = resolveAppliedDiscountTier(tiers, -5);
     assert.equal(summary.currentTierId, null);
     assert.equal(summary.cupsToNextTier, 10);
   });
 
   it("treats non-numeric authorizedCups as zero", () => {
-    const summary = calculateGroupBuyDiscountSummary(tiers, "not-a-number");
+    const summary = resolveAppliedDiscountTier(tiers, "not-a-number");
     assert.equal(summary.currentTierId, null);
     assert.equal(summary.cupsToNextTier, 10);
   });
@@ -93,102 +86,91 @@ describe("calculateGroupBuyDiscountSummary", () => {
 describe("validateDiscountTierConfiguration", () => {
   const validInput = {
     tiers: [
-      { targetCups: 10, discountAmount: 100 },
-      { targetCups: 20, discountAmount: 300 }
+      { targetCups: 10, discountPercent: 10 },
+      { targetCups: 20, discountPercent: 30 }
     ],
-    maximumCups: 20,
-    minimumSellableUnitPrice: 20
+    maximumCups: 20
   };
 
   it("accepts a well-formed tier configuration", () => {
     const result = validateDiscountTierConfiguration(validInput);
     assert.equal(result.valid, true);
-    assert.equal(result.maximumDiscountPerCup, 15);
+    assert.equal(result.maximumCups, 20);
   });
 
   it("rejects an empty tier list", () => {
-    const result = validateDiscountTierConfiguration({
-      tiers: [],
-      maximumCups: 10,
-      minimumSellableUnitPrice: 20
-    });
+    const result = validateDiscountTierConfiguration({ tiers: [], maximumCups: 10 });
     assert.equal(result.valid, false);
     assert.equal(result.reason, "tiers_required");
   });
 
   it("rejects a non-positive maximumCups", () => {
     const result = validateDiscountTierConfiguration({
-      tiers: [{ targetCups: 10, discountAmount: 100 }],
-      maximumCups: -1,
-      minimumSellableUnitPrice: 20
+      tiers: [{ targetCups: 10, discountPercent: 10 }],
+      maximumCups: -1
     });
     assert.equal(result.reason, "maximum_cups_invalid");
   });
 
-  it("rejects a non-positive minimumSellableUnitPrice", () => {
-    const result = validateDiscountTierConfiguration({
-      tiers: [{ targetCups: 10, discountAmount: 100 }],
-      maximumCups: 10,
-      minimumSellableUnitPrice: 0
-    });
-    assert.equal(result.reason, "minimum_sellable_unit_price_invalid");
-  });
-
   it("rejects a tier with a non-positive targetCups", () => {
     const result = validateDiscountTierConfiguration({
-      tiers: [{ targetCups: 0, discountAmount: 100 }],
-      maximumCups: 5,
-      minimumSellableUnitPrice: 20
+      tiers: [{ targetCups: 0, discountPercent: 10 }],
+      maximumCups: 5
     });
     assert.equal(result.reason, "tier_target_cups_invalid");
   });
 
-  it("rejects a tier with a negative discountAmount", () => {
-    const result = validateDiscountTierConfiguration({
-      tiers: [{ targetCups: 10, discountAmount: -5 }],
-      maximumCups: 10,
-      minimumSellableUnitPrice: 20
+  it("rejects a tier with a discountPercent outside 1-99", () => {
+    const zero = validateDiscountTierConfiguration({
+      tiers: [{ targetCups: 10, discountPercent: 0 }],
+      maximumCups: 10
     });
-    assert.equal(result.reason, "tier_discount_amount_invalid");
+    assert.equal(zero.reason, "tier_discount_percent_invalid");
+
+    const tooHigh = validateDiscountTierConfiguration({
+      tiers: [{ targetCups: 10, discountPercent: 100 }],
+      maximumCups: 10
+    });
+    assert.equal(tooHigh.reason, "tier_discount_percent_invalid");
   });
 
   it("rejects duplicate targetCups across tiers", () => {
     const result = validateDiscountTierConfiguration({
       tiers: [
-        { targetCups: 10, discountAmount: 100 },
-        { targetCups: 10, discountAmount: 200 }
+        { targetCups: 10, discountPercent: 10 },
+        { targetCups: 10, discountPercent: 20 }
       ],
-      maximumCups: 10,
-      minimumSellableUnitPrice: 20
+      maximumCups: 10
     });
     assert.equal(result.reason, "tier_target_cups_duplicate");
   });
 
   it("rejects maximumCups that does not match the highest tier", () => {
     const result = validateDiscountTierConfiguration({
-      tiers: [{ targetCups: 10, discountAmount: 100 }],
-      maximumCups: 20,
-      minimumSellableUnitPrice: 20
+      tiers: [{ targetCups: 10, discountPercent: 10 }],
+      maximumCups: 20
     });
     assert.equal(result.reason, "maximum_cups_must_equal_highest_tier");
   });
 
-  it("rejects a discount that floors to less than 1 per cup at the top of its range", () => {
-    const result = validateDiscountTierConfiguration({
-      tiers: [{ targetCups: 10, discountAmount: 5 }],
-      maximumCups: 10,
-      minimumSellableUnitPrice: 20
+  it("rejects a higher cup tier with a discount that is not strictly better", () => {
+    const same = validateDiscountTierConfiguration({
+      tiers: [
+        { targetCups: 10, discountPercent: 30 },
+        { targetCups: 20, discountPercent: 30 }
+      ],
+      maximumCups: 20
     });
-    assert.equal(result.reason, "discount_per_cup_below_minimum");
-  });
+    assert.equal(same.reason, "tier_discount_percent_not_increasing");
 
-  it("rejects a discount per cup that exceeds the minimum sellable unit price", () => {
-    const result = validateDiscountTierConfiguration({
-      tiers: [{ targetCups: 10, discountAmount: 500 }],
-      maximumCups: 10,
-      minimumSellableUnitPrice: 20
+    const worse = validateDiscountTierConfiguration({
+      tiers: [
+        { targetCups: 10, discountPercent: 30 },
+        { targetCups: 20, discountPercent: 20 }
+      ],
+      maximumCups: 20
     });
-    assert.equal(result.reason, "discount_per_cup_exceeds_minimum_unit_price");
+    assert.equal(worse.reason, "tier_discount_percent_not_increasing");
   });
 });
 
@@ -255,52 +237,35 @@ describe("calculateMinimumSellableUnitPrice", () => {
   });
 });
 
-describe("findOrderDiscountConflicts", () => {
-  it("returns items whose unit price is below the maximum discount per cup", () => {
-    const conflicts = findOrderDiscountConflicts(
-      [
-        { menuItemId: "a", unitPrice: 5 },
-        { menuItemId: "b", unitPrice: 20 }
-      ],
-      10
-    );
-    assert.deepEqual(conflicts, [
-      { itemIndex: 0, menuItemId: "a", unitPrice: 5, maximumDiscountPerCup: 10 }
-    ]);
-  });
-
-  it("flags items with a missing or non-integer unit price", () => {
-    const conflicts = findOrderDiscountConflicts([{ menuItemId: "c" }], 10);
-    assert.equal(conflicts.length, 1);
-    assert.equal(conflicts[0].menuItemId, "c");
-  });
-
-  it("returns an empty list when maximumDiscountPerCup is not a positive integer", () => {
-    assert.deepEqual(findOrderDiscountConflicts([{ unitPrice: 1 }], 0), []);
-    assert.deepEqual(findOrderDiscountConflicts([{ unitPrice: 1 }], -5), []);
-  });
-});
-
 describe("normalizeDiscountTiers", () => {
   it("sorts tiers ascending by targetCups", () => {
     const normalized = normalizeDiscountTiers([
-      { targetCups: 20, discountAmount: 300 },
-      { targetCups: 10, discountAmount: 100 }
+      { targetCups: 20, discountPercent: 30 },
+      { targetCups: 10, discountPercent: 10 }
     ]);
     assert.deepEqual(normalized.map((tier) => tier.targetCups), [10, 20]);
   });
 
   it("filters out invalid tiers by default", () => {
     const normalized = normalizeDiscountTiers([
-      { targetCups: 10, discountAmount: 100 },
-      { targetCups: -1, discountAmount: 100 }
+      { targetCups: 10, discountPercent: 10 },
+      { targetCups: -1, discountPercent: 10 }
     ]);
     assert.equal(normalized.length, 1);
   });
 
+  it("filters out a discountPercent outside 1-99", () => {
+    const normalized = normalizeDiscountTiers([
+      { targetCups: 10, discountPercent: 0 },
+      { targetCups: 20, discountPercent: 100 },
+      { targetCups: 30, discountPercent: 50 }
+    ]);
+    assert.deepEqual(normalized.map((tier) => tier.targetCups), [30]);
+  });
+
   it("keeps invalid tiers when preserveInvalid is set", () => {
     const normalized = normalizeDiscountTiers(
-      [{ targetCups: -1, discountAmount: 100 }],
+      [{ targetCups: -1, discountPercent: 10 }],
       { preserveInvalid: true }
     );
     assert.equal(normalized.length, 1);
@@ -309,12 +274,12 @@ describe("normalizeDiscountTiers", () => {
 
   it("accepts snake_case field names", () => {
     const normalized = normalizeDiscountTiers([
-      { target_cups: 10, discount_amount: 100 }
+      { target_cups: 10, discount_percent: 30 }
     ]);
     assert.deepEqual(normalized[0], {
       id: null,
       targetCups: 10,
-      discountAmount: 100,
+      discountPercent: 30,
       sortOrder: 0
     });
   });

@@ -3,11 +3,30 @@ import * as Location from "expo-location";
 import { Linking, Pressable, StyleSheet, Text, View } from "react-native";
 import MapView, { Marker, PROVIDER_GOOGLE } from "react-native-maps";
 import { ActivityFilterPanel } from "../components/ActivityFilterPanel";
+import { Card } from "../components/Card";
+import { PrimaryButton } from "../components/PrimaryButton";
 import { useActivityMapFilters } from "../hooks/useActivityMapFilters";
 import { useDevLocationConfig } from "../hooks/useDevLocationConfig";
 import { mapCenter, mapDefaults } from "../mock/mapConfig";
+import { colors, maxFontSizeMultiplier, radii, sizes, spacing, typeScale } from "../theme/tokens";
 import { reportAppliedDevLocation } from "../utils/devLocationControl";
 import { buildStoreMapStores, getStoreMapDestination, getStoreMarkerLabel } from "../utils/groupBuyActivityStores";
+
+// Android turns pinColor into a hue only (react-native-maps: Color.colorToHSV -> defaultMarker(hue)),
+// so these tokens choose the hue of the default pin, not its exact colour. The recruiting / no
+// recruiting difference is therefore also drawn on the label under the pin (solid vs hollow dot).
+// The user pin's hue has no status meaning -- it exists only so it reads as clearly different from
+// the accent-hued "recruiting" and text-hued "idle" store pins above. It is deliberately a local
+// value, not read from `tones` (whose entries ARE status colours, e.g. tones.success also means
+// "已成團/已付款"): borrowing a status colour just for its hue would risk a future status-colour
+// tweak silently changing this pin too. `colors.*` has no hue this different from accent/text
+// (this app's palette is a warm, no-blue family), so there is no existing token to point at instead.
+const USER_PIN_HUE = "#2F5A14";
+const PIN_COLORS = {
+  user: USER_PIN_HUE,
+  recruiting: colors.accent,
+  idle: colors.text
+};
 
 export function LiveMapScreen({ navigation, appState, selectedAuthUserId }) {
   const mapRef = useRef(null);
@@ -194,7 +213,7 @@ export function LiveMapScreen({ navigation, appState, selectedAuthUserId }) {
           coordinate={userPosition}
           title={locationName}
           description={effectiveLocationMode === "live" ? "顧客即時 GPS；失敗時使用固定備援位置" : "控制台指定的顧客固定位置"}
-          pinColor="#7c3aed"
+          pinColor={PIN_COLORS.user}
         />
         {visibleMapStores.map((store) => {
           const hasRecruitingGroupBuyActivity = store.hasRecruitingGroupBuyActivity;
@@ -208,7 +227,7 @@ export function LiveMapScreen({ navigation, appState, selectedAuthUserId }) {
                 setFilteredOutStoreName(null);
                 setSelectedStoreId(store.id);
               }}
-              pinColor={hasRecruitingGroupBuyActivity ? "#facc15" : "#2563eb"}
+              pinColor={hasRecruitingGroupBuyActivity ? PIN_COLORS.recruiting : PIN_COLORS.idle}
             />
           );
         })}
@@ -223,84 +242,76 @@ export function LiveMapScreen({ navigation, appState, selectedAuthUserId }) {
             pointerEvents="none"
             style={[styles.markerLabel, { left: point.x, top: point.y + 4 }]}
           >
-            <Text numberOfLines={1} style={styles.markerLabelText}>{store.name}</Text>
+            <View style={styles.markerLabelPill}>
+              <View style={[styles.markerDot, store.hasRecruitingGroupBuyActivity && styles.markerDotSolid]} />
+              <Text maxFontSizeMultiplier={maxFontSizeMultiplier} numberOfLines={1} style={styles.markerLabelText}>{store.name}</Text>
+            </View>
           </View>
         );
       })}
 
-      <Pressable
-        accessibilityRole="button"
-        onPress={openFilterPanel}
-        style={({ pressed }) => [styles.filterButton, pressed && styles.pressed]}
-      >
-        <Text style={styles.filterButtonText}>篩選</Text>
-      </Pressable>
-
-      <Pressable
-        accessibilityRole="button"
-        accessibilityLabel="回到目前位置"
-        onPress={recenterOnUser}
-        style={({ pressed }) => [styles.recenterButton, pressed && styles.recenterButtonPressed]}
-      >
-        <Text style={styles.recenterIcon}>⌖</Text>
-      </Pressable>
-
-      {!devControlEnabled && locationPermission === "denied" ? (
-        <View style={styles.locationPermissionPromptCard}>
-          <Text style={styles.locationPermissionPromptTitle}>請開啟定位權限</Text>
-          <Text style={styles.locationPermissionPromptBody}>
-            開啟定位後，地圖會顯示你目前的位置，才能使用距離篩選找到附近的店家。目前顯示的是預設位置。
-          </Text>
-          <View style={styles.locationPermissionPromptActions}>
-            <Pressable
-              accessibilityRole="button"
-              onPress={() => Linking.openSettings()}
-              style={({ pressed }) => [styles.locationPermissionPromptPrimaryButton, pressed && styles.pressed]}
-            >
-              <Text style={styles.locationPermissionPromptPrimaryText}>前往設定開啟</Text>
-            </Pressable>
-          </View>
-        </View>
-      ) : null}
-
-      {!selectedStore && filteredOutStoreName ? (
-        <View style={styles.storeCard}>
-          <View style={styles.storeInfo}>
-            <Text style={styles.storeMeta}>
-              {filteredOutStoreName} 已不符合目前的篩選條件，卡片已自動關閉。
-            </Text>
-          </View>
+      {/* The controls and the cards share one bottom column, so a taller card pushes the controls up
+          instead of covering them. box-none keeps the map draggable around them. */}
+      <View pointerEvents="box-none" style={styles.overlay}>
+        <View pointerEvents="box-none" style={styles.controls}>
           <Pressable
             accessibilityRole="button"
-            onPress={() => setFilteredOutStoreName(null)}
-            style={styles.viewGroupBuyActivitiesButton}
+            onPress={openFilterPanel}
+            style={({ pressed }) => [styles.filterButton, pressed && styles.pressed]}
           >
-            <Text style={styles.viewGroupBuyActivitiesText}>知道了</Text>
+            <Text maxFontSizeMultiplier={maxFontSizeMultiplier} style={styles.filterButtonText}>篩選</Text>
+          </Pressable>
+
+          <Pressable
+            accessibilityRole="button"
+            accessibilityLabel="回到目前位置"
+            onPress={recenterOnUser}
+            style={({ pressed }) => [styles.recenterButton, pressed && styles.pressed]}
+          >
+            <RecenterIcon />
           </Pressable>
         </View>
-      ) : null}
 
-      {selectedStore ? (
-        <View style={styles.storeCard}>
-          <View style={styles.storeInfo}>
-            <Text style={styles.storeName}>{selectedStore.name}</Text>
-            <Text style={styles.storeMeta} numberOfLines={2}>
-              {selectedStore.address || "地址未提供"} · {selectedStore.hasRecruitingGroupBuyActivity ? `招募中的團購 ${selectedStore.progressText}` : "目前沒有招募中團購"}
+        {!devControlEnabled && locationPermission === "denied" ? (
+          <Card compact style={styles.floatingCard}>
+            <Text style={styles.cardTitle}>請開啟定位權限</Text>
+            <Text style={styles.cardBody}>
+              開啟定位後，地圖會顯示你目前的位置，才能使用距離篩選找到附近的店家。目前顯示的是預設位置。
             </Text>
-          </View>
-          <Pressable
-            accessibilityRole="button"
-            onPress={openSelectedStore}
-            style={styles.viewGroupBuyActivitiesButton}
-          >
-            <Text style={styles.viewGroupBuyActivitiesText}>
-              {selectedStore.joinableGroupBuyActivities.length > 1
+            <View style={styles.cardActions}>
+              <PrimaryButton label="前往設定開啟" onPress={() => Linking.openSettings()} />
+            </View>
+          </Card>
+        ) : null}
+
+        {!selectedStore && filteredOutStoreName ? (
+          <Card compact style={styles.storeCard}>
+            <View style={styles.storeInfo}>
+              <Text style={styles.cardBody}>
+                {filteredOutStoreName} 已不符合目前的篩選條件，卡片已自動關閉。
+              </Text>
+            </View>
+            <PrimaryButton label="知道了" onPress={() => setFilteredOutStoreName(null)} />
+          </Card>
+        ) : null}
+
+        {selectedStore ? (
+          <Card compact style={styles.storeCard}>
+            <View style={styles.storeInfo}>
+              <Text style={styles.storeName}>{selectedStore.name}</Text>
+              <Text style={styles.storeMeta} numberOfLines={2}>
+                {selectedStore.address || "地址未提供"} · {selectedStore.hasRecruitingGroupBuyActivity ? `招募中的團購 ${selectedStore.progressText}` : "目前沒有招募中團購"}
+              </Text>
+            </View>
+            <PrimaryButton
+              label={selectedStore.joinableGroupBuyActivities.length > 1
                 ? "活動列表"
                 : selectedStore.hasRecruitingGroupBuyActivity ? "查看活動" : "查看菜單"}
-            </Text>
-          </Pressable>
-        </View>
-      ) : null}
+              onPress={openSelectedStore}
+            />
+          </Card>
+        ) : null}
+      </View>
 
       <ActivityFilterPanel
         visible={filterPanelVisible}
@@ -314,11 +325,29 @@ export function LiveMapScreen({ navigation, appState, selectedAuthUserId }) {
   );
 }
 
+// The "my location" crosshair, drawn with views instead of a font glyph.
+function RecenterIcon() {
+  return (
+    <View style={styles.crosshair}>
+      <View style={styles.crosshairRing} />
+      <View style={styles.crosshairDot} />
+      <View style={[styles.crosshairTick, styles.tickTop]} />
+      <View style={[styles.crosshairTick, styles.tickBottom]} />
+      <View style={[styles.crosshairTick, styles.tickLeft]} />
+      <View style={[styles.crosshairTick, styles.tickRight]} />
+    </View>
+  );
+}
+
+const ICON_SIZE = spacing.s24;
+const CROSSHAIR_RING = spacing.s16 - sizes.stroke;
+const CROSSHAIR_TICK = spacing.s8 - sizes.stroke;
+
 const styles = StyleSheet.create({
   screen: {
     flex: 1,
     overflow: "hidden",
-    backgroundColor: "#e2e8f0"
+    backgroundColor: colors.recess
   },
   markerLabel: {
     position: "absolute",
@@ -326,142 +355,162 @@ const styles = StyleSheet.create({
     marginLeft: -74,
     alignItems: "center"
   },
-  markerLabelText: {
+  markerLabelPill: {
     maxWidth: "100%",
-    color: "#111827",
-    fontSize: 10,
-    fontWeight: "900",
-    borderRadius: 7,
-    backgroundColor: "rgba(255,255,255,0.96)",
-    paddingHorizontal: 6,
-    paddingVertical: 2,
-    shadowColor: "#0f172a",
-    shadowOpacity: 0.18,
-    shadowRadius: 4,
-    shadowOffset: { width: 0, height: 2 },
-    elevation: 3,
-    overflow: "hidden"
-  },
-  filterButton: {
-    position: "absolute",
-    bottom: 44,
-    right: 14,
-    minHeight: 34,
-    borderRadius: 12,
-    alignItems: "center",
-    justifyContent: "center",
-    backgroundColor: "#eef2f7",
-    paddingHorizontal: 16,
-    elevation: 5
-  },
-  filterButtonText: {
-    color: "#0f172a",
-    fontSize: 13,
-    fontWeight: "900"
-  },
-  pressed: {
-    opacity: 0.75
-  },
-  recenterButton: {
-    position: "absolute",
-    bottom: 100,
-    right: 14,
-    width: 46,
-    height: 46,
-    borderRadius: 23,
-    alignItems: "center",
-    justifyContent: "center",
-    backgroundColor: "#111827",
-    elevation: 5
-  },
-  recenterButtonPressed: {
-    opacity: 0.8
-  },
-  recenterIcon: {
-    color: "#ffffff",
-    fontSize: 20,
-    fontWeight: "900"
-  },
-  storeCard: {
-    position: "absolute",
-    left: 14,
-    right: 14,
-    bottom: 16,
-    minHeight: 76,
     flexDirection: "row",
     alignItems: "center",
-    gap: 10,
-    borderRadius: 16,
-    backgroundColor: "#ffffff",
-    padding: 12,
+    gap: spacing.s4,
+    borderRadius: radii.xs,
+    backgroundColor: colors.page,
+    paddingHorizontal: spacing.s8,
+    paddingVertical: spacing.s4
+  },
+  markerLabelText: {
+    flexShrink: 1,
+    ...typeScale.label,
+    color: colors.text
+  },
+  // Solid = the store has a group to join, hollow = it has none (the web markers use the same idea).
+  markerDot: {
+    width: spacing.s12,
+    height: spacing.s12,
+    borderRadius: radii.pill,
+    borderWidth: sizes.stroke,
+    borderColor: colors.accent,
+    backgroundColor: colors.page
+  },
+  markerDotSolid: {
+    backgroundColor: colors.accent
+  },
+  // Bottom offset keeps the map's attribution strip visible under the controls and the cards.
+  overlay: {
+    position: "absolute",
+    left: spacing.s16,
+    right: spacing.s16,
+    bottom: spacing.s32 + spacing.s12,
+    gap: spacing.s12
+  },
+  // column-reverse: the recenter button sits above the filter button while the source order (the
+  // order screen readers walk) stays filter, recenter.
+  controls: {
+    alignSelf: "flex-end",
+    alignItems: "flex-end",
+    flexDirection: "column-reverse",
+    gap: spacing.s12
+  },
+  filterButton: {
+    minWidth: sizes.tap,
+    minHeight: sizes.tap,
+    borderRadius: radii.pill,
+    borderWidth: sizes.stroke,
+    borderColor: colors.accent,
+    alignItems: "center",
+    justifyContent: "center",
+    backgroundColor: colors.page,
+    paddingHorizontal: spacing.s16
+  },
+  filterButtonText: {
+    ...typeScale.button,
+    color: colors.accentInk
+  },
+  pressed: {
+    opacity: 0.8
+  },
+  recenterButton: {
+    minWidth: sizes.tap,
+    minHeight: sizes.tap,
+    borderRadius: radii.pill,
+    borderWidth: sizes.stroke,
+    borderColor: colors.accent,
+    alignItems: "center",
+    justifyContent: "center",
+    backgroundColor: colors.page
+  },
+  crosshair: {
+    width: ICON_SIZE,
+    height: ICON_SIZE
+  },
+  crosshairRing: {
+    position: "absolute",
+    top: (ICON_SIZE - CROSSHAIR_RING) / 2,
+    left: (ICON_SIZE - CROSSHAIR_RING) / 2,
+    width: CROSSHAIR_RING,
+    height: CROSSHAIR_RING,
+    borderRadius: radii.pill,
+    borderWidth: sizes.stroke,
+    borderColor: colors.accent
+  },
+  crosshairDot: {
+    position: "absolute",
+    top: (ICON_SIZE - spacing.s4) / 2,
+    left: (ICON_SIZE - spacing.s4) / 2,
+    width: spacing.s4,
+    height: spacing.s4,
+    borderRadius: radii.pill,
+    backgroundColor: colors.accent
+  },
+  crosshairTick: {
+    position: "absolute",
+    backgroundColor: colors.accent
+  },
+  tickTop: {
+    top: 0,
+    left: (ICON_SIZE - sizes.stroke) / 2,
+    width: sizes.stroke,
+    height: CROSSHAIR_TICK
+  },
+  tickBottom: {
+    bottom: 0,
+    left: (ICON_SIZE - sizes.stroke) / 2,
+    width: sizes.stroke,
+    height: CROSSHAIR_TICK
+  },
+  tickLeft: {
+    left: 0,
+    top: (ICON_SIZE - sizes.stroke) / 2,
+    width: CROSSHAIR_TICK,
+    height: sizes.stroke
+  },
+  tickRight: {
+    right: 0,
+    top: (ICON_SIZE - sizes.stroke) / 2,
+    width: CROSSHAIR_TICK,
+    height: sizes.stroke
+  },
+  // The cards float over the map, so they keep Android elevation (their 2px outline is very light).
+  floatingCard: {
+    gap: spacing.s8,
+    elevation: 6
+  },
+  storeCard: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: spacing.s12,
     elevation: 6
   },
   storeInfo: {
     flex: 1,
-    gap: 4
+    gap: spacing.s4
   },
   storeName: {
-    color: "#0f172a",
-    fontSize: 14,
-    fontWeight: "900"
+    ...typeScale.button,
+    color: colors.text
   },
   storeMeta: {
-    color: "#64748b",
-    fontSize: 11,
-    fontWeight: "700"
+    ...typeScale.caption,
+    color: colors.textSecondary
   },
-  viewGroupBuyActivitiesButton: {
-    minHeight: 42,
-    borderRadius: 12,
-    alignItems: "center",
-    justifyContent: "center",
-    backgroundColor: "#1f6feb",
-    paddingHorizontal: 14
+  cardTitle: {
+    ...typeScale.button,
+    color: colors.text
   },
-  viewGroupBuyActivitiesText: {
-    color: "#ffffff",
-    fontSize: 12,
-    fontWeight: "900"
+  cardBody: {
+    ...typeScale.bodyDense,
+    color: colors.text
   },
-  locationPermissionPromptCard: {
-    position: "absolute",
-    left: 14,
-    right: 14,
-    bottom: 16,
-    gap: 8,
-    borderRadius: 16,
-    backgroundColor: "#ffffff",
-    padding: 14,
-    elevation: 6
-  },
-  locationPermissionPromptTitle: {
-    color: "#0f172a",
-    fontSize: 15,
-    fontWeight: "900"
-  },
-  locationPermissionPromptBody: {
-    color: "#475569",
-    fontSize: 12.5,
-    lineHeight: 18,
-    fontWeight: "600"
-  },
-  locationPermissionPromptActions: {
+  cardActions: {
     flexDirection: "row",
     flexWrap: "wrap",
-    gap: 8,
-    marginTop: 2
-  },
-  locationPermissionPromptPrimaryButton: {
-    minHeight: 40,
-    borderRadius: 12,
-    alignItems: "center",
-    justifyContent: "center",
-    backgroundColor: "#1f6feb",
-    paddingHorizontal: 16
-  },
-  locationPermissionPromptPrimaryText: {
-    color: "#ffffff",
-    fontSize: 13,
-    fontWeight: "900"
+    gap: spacing.s8
   }
 });

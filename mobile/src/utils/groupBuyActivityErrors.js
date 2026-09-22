@@ -1,8 +1,10 @@
 import { lookupErrorMessage } from "./errorMessageLookup";
+import { parseDealFactorToDiscountPercent } from "./discountPercentFormat";
 
 const TIER_MESSAGES = {
   tier_target_cups_invalid: "杯數門檻必須是大於 0 的整數。",
-  tier_discount_amount_invalid: "折扣金額必須是大於 0 的整數。",
+  tier_discount_percent_invalid: "打幾折請輸入 0.1 到 9.9 之間的數字，最多一位小數（例如 7 或 7.9）。",
+  tier_discount_percent_not_increasing: "杯數門檻越高，折扣必須越好（折數要更低），請調整。",
   tier_target_cups_duplicate: "杯數門檻不可重複。",
   maximum_cups_must_equal_highest_tier: "最高杯數必須等於最後一個優惠級距。",
   tier_reachable_range_invalid: "級距杯數必須由小到大排列，且不可重疊。"
@@ -22,14 +24,14 @@ export function validateGroupBuyActivityTierDrafts(tiers = []) {
 
   for (const tier of tiers) {
     const targetCups = Number(tier.cups);
-    const discountAmount = Number(tier.discountAmount);
+    const discountPercent = parseDealFactorToDiscountPercent(tier.dealFactor);
 
     if (!Number.isInteger(targetCups) || targetCups <= 0) {
       tierErrors[tier.id] = "杯數門檻必須是大於 0 的整數。";
       continue;
     }
-    if (!Number.isInteger(discountAmount) || discountAmount <= 0) {
-      tierErrors[tier.id] = "折扣金額必須是大於 0 的整數。";
+    if (discountPercent == null) {
+      tierErrors[tier.id] = TIER_MESSAGES.tier_discount_percent_invalid;
       continue;
     }
 
@@ -103,14 +105,6 @@ export function mapGroupBuyActivityCreateError(error, tiers = []) {
   }
 
   if (payload.error === "discount_tier_invalid") {
-    if (payload.reason === "discount_per_cup_below_minimum") {
-      const message = `這個級距在最多 ${payload.reachableUpperCups ?? "目前設定的"} 杯時，每杯折扣會變成 0 元。請提高總折扣或降低下一級距杯數。`;
-      return { message: setTierError(message), tierErrors };
-    }
-    if (payload.reason === "discount_per_cup_exceeds_minimum_unit_price") {
-      const message = `這個級距每杯最多折 ${payload.maximumDiscountPerCup ?? "目前設定"} 元，超過店內最低可售單杯 ${payload.minimumSellableUnitPrice ?? "價格"} 元。請降低總折扣。`;
-      return { message: setTierError(message), tierErrors };
-    }
     const tierMessage = lookupErrorMessage(payload.reason, TIER_MESSAGES, null);
     if (tierMessage) {
       return { message: setTierError(tierMessage), tierErrors };
