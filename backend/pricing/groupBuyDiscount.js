@@ -1,13 +1,14 @@
 "use strict";
 
-const MIN_DISCOUNT_PERCENT = 1;
-const MAX_DISCOUNT_PERCENT = 99;
+function calculateDiscountPerCup(discountAmount, cupCount) {
+  const normalizedDiscount = Number(discountAmount);
+  const normalizedCups = Number(cupCount);
+  if (!Number.isInteger(normalizedDiscount) || normalizedDiscount < 0) return 0;
+  if (!Number.isInteger(normalizedCups) || normalizedCups <= 0) return 0;
+  return Math.floor(normalizedDiscount / normalizedCups);
+}
 
-// Resolves which tier (if any) a cup count currently qualifies for. Unlike the old flat-amount
-// model this returns NO dollar amount -- a percentage discount has to be computed per order
-// against that order's own original_amount (see calculatePercentageDiscount), since two orders
-// at the same tier can owe different discounts if their items are priced differently.
-function resolveAppliedDiscountTier(tiers, authorizedCups) {
+function calculateGroupBuyDiscountSummary(tiers, authorizedCups) {
   const normalizedCups = Number.isInteger(Number(authorizedCups))
     ? Math.max(Number(authorizedCups), 0)
     : 0;
@@ -16,36 +17,30 @@ function resolveAppliedDiscountTier(tiers, authorizedCups) {
     .filter((tier) => normalizedCups >= tier.targetCups)
     .at(-1) || null;
   const nextTier = normalizedTiers.find((tier) => normalizedCups < tier.targetCups) || null;
+  const discountPerCup = appliedTier
+    ? calculateDiscountPerCup(appliedTier.discountAmount, normalizedCups)
+    : 0;
+  const allocatedDiscountAmount = discountPerCup * normalizedCups;
+  const undistributedDiscountAmount = appliedTier
+    ? appliedTier.discountAmount - allocatedDiscountAmount
+    : 0;
 
   return {
     currentTierId: appliedTier?.id || null,
     currentTierTargetCups: appliedTier?.targetCups || null,
-    currentTierDiscountPercent: appliedTier?.discountPercent || 0,
+    currentTierDiscountAmount: appliedTier?.discountAmount || 0,
+    estimatedDiscountPerCup: discountPerCup,
+    estimatedAllocatedDiscountAmount: allocatedDiscountAmount,
+    estimatedUndistributedDiscountAmount: undistributedDiscountAmount,
     nextTierTargetCups: nextTier?.targetCups || null,
     cupsToNextTier: nextTier ? Math.max(nextTier.targetCups - normalizedCups, 0) : 0
   };
 }
 
-// Computes ONE order's discount from ITS OWN original amount. Rounds the amount the CUSTOMER
-// PAYS UP to the nearest whole NTD dollar (not the discount down), matching the product decision
-// that rounding favors the merchant the same way the old floor-per-cup-with-remainder model did:
-// $65 @ 7折 (discountPercent=30, pay 70%) -> 65*0.70=45.5 -> ceil -> pays $46, discount $19.
-function calculatePercentageDiscount(originalAmount, discountPercent) {
-  const originalAmt = Number(originalAmount);
-  const percent = Number(discountPercent);
-  if (!Number.isInteger(originalAmt) || originalAmt < 0) {
-    throw new Error(`Invalid originalAmount for percentage discount: ${originalAmount}`);
-  }
-  if (!Number.isInteger(percent) || percent < MIN_DISCOUNT_PERCENT || percent > MAX_DISCOUNT_PERCENT) {
-    throw new Error(`Invalid discountPercent for percentage discount: ${discountPercent}`);
-  }
-  const finalAmount = Math.ceil((originalAmt * (100 - percent)) / 100);
-  return { finalAmount, discountAmount: originalAmt - finalAmount };
-}
-
 function validateDiscountTierConfiguration(input = {}) {
   const tiers = normalizeDiscountTiers(input.tiers, { preserveInvalid: true });
   const maximumCups = Number(input.maximumCups ?? tiers.at(-1)?.targetCups);
+  const minimumSellableUnitPrice = Number(input.minimumSellableUnitPrice);
 
   if (tiers.length === 0) {
     return invalid("tiers_required");
@@ -53,18 +48,19 @@ function validateDiscountTierConfiguration(input = {}) {
   if (!Number.isInteger(maximumCups) || maximumCups <= 0) {
     return invalid("maximum_cups_invalid", { maximumCups });
   }
+  if (!Number.isInteger(minimumSellableUnitPrice) || minimumSellableUnitPrice <= 0) {
+    return invalid("minimum_sellable_unit_price_invalid", { minimumSellableUnitPrice });
+  }
 
   const seenTargets = new Set();
   for (const [index, tier] of tiers.entries()) {
     if (!Number.isInteger(tier.targetCups) || tier.targetCups <= 0) {
       return invalid("tier_target_cups_invalid", { tierIndex: index, targetCups: tier.targetCups });
     }
-    if (!Number.isInteger(tier.discountPercent)
-      || tier.discountPercent < MIN_DISCOUNT_PERCENT
-      || tier.discountPercent > MAX_DISCOUNT_PERCENT) {
-      return invalid("tier_discount_percent_invalid", {
+    if (!Number.isInteger(tier.discountAmount) || tier.discountAmount < 0) {
+      return invalid("tier_discount_amount_invalid", {
         tierIndex: index,
-        discountPercent: tier.discountPercent
+        discountAmount: tier.discountAmount
       });
     }
     if (seenTargets.has(tier.targetCups)) {
@@ -80,6 +76,7 @@ function validateDiscountTierConfiguration(input = {}) {
     });
   }
 
+  let maximumDiscountPerCup = 0;
   const ranges = [];
   for (const [index, tier] of tiers.entries()) {
     const nextTier = tiers[index + 1];
@@ -91,21 +88,50 @@ function validateDiscountTierConfiguration(input = {}) {
         reachableUpperCups
       });
     }
-    if (index > 0 && tier.discountPercent <= tiers[index - 1].discountPercent) {
-      return invalid("tier_discount_percent_not_increasing", {
+
+    const minimumDiscountPerCup = calculateDiscountPerCup(
+      tier.discountAmount,
+      reachableUpperCups
+    );
+    const tierMaximumDiscountPerCup = calculateDiscountPerCup(
+      tier.discountAmount,
+      tier.targetCups
+    );
+    if (minimumDiscountPerCup < 1) {
+      return invalid("discount_per_cup_below_minimum", {
         tierIndex: index,
         targetCups: tier.targetCups,
-        discountPercent: tier.discountPercent,
-        previousDiscountPercent: tiers[index - 1].discountPercent
+        reachableUpperCups,
+        discountAmount: tier.discountAmount,
+        minimumDiscountPerCup
       });
     }
-    ranges.push({ tierIndex: index, targetCups: tier.targetCups, reachableUpperCups });
+    if (tierMaximumDiscountPerCup > minimumSellableUnitPrice) {
+      return invalid("discount_per_cup_exceeds_minimum_unit_price", {
+        tierIndex: index,
+        targetCups: tier.targetCups,
+        discountAmount: tier.discountAmount,
+        maximumDiscountPerCup: tierMaximumDiscountPerCup,
+        minimumSellableUnitPrice
+      });
+    }
+
+    maximumDiscountPerCup = Math.max(maximumDiscountPerCup, tierMaximumDiscountPerCup);
+    ranges.push({
+      tierIndex: index,
+      targetCups: tier.targetCups,
+      reachableUpperCups,
+      minimumDiscountPerCup,
+      maximumDiscountPerCup: tierMaximumDiscountPerCup
+    });
   }
 
   return {
     valid: true,
     tiers,
     maximumCups,
+    minimumSellableUnitPrice,
+    maximumDiscountPerCup,
     ranges
   };
 }
@@ -145,12 +171,26 @@ function calculateMinimumSellableUnitPrice(menuItems) {
   return prices.length > 0 ? Math.min(...prices) : null;
 }
 
+function findOrderDiscountConflicts(items, maximumDiscountPerCup) {
+  const normalizedMaximum = Number(maximumDiscountPerCup);
+  if (!Number.isInteger(normalizedMaximum) || normalizedMaximum <= 0) return [];
+
+  return (Array.isArray(items) ? items : [])
+    .map((item, itemIndex) => ({
+      itemIndex,
+      menuItemId: item.menuItemId || null,
+      unitPrice: Number(item.unitPrice),
+      maximumDiscountPerCup: normalizedMaximum
+    }))
+    .filter((item) => !Number.isInteger(item.unitPrice) || item.unitPrice < normalizedMaximum);
+}
+
 function normalizeDiscountTiers(tiers, input = {}) {
   const normalized = (Array.isArray(tiers) ? tiers : [])
     .map((tier) => ({
       id: tier.id || null,
       targetCups: Number(tier.targetCups ?? tier.target_cups ?? tier.cups),
-      discountPercent: Number(tier.discountPercent ?? tier.discount_percent),
+      discountAmount: Number(tier.discountAmount ?? tier.discount_amount),
       sortOrder: Number(tier.sortOrder ?? tier.sort_order ?? 0)
     }))
     .sort((left, right) => left.targetCups - right.targetCups);
@@ -158,9 +198,8 @@ function normalizeDiscountTiers(tiers, input = {}) {
   if (input.preserveInvalid) return normalized;
   return normalized.filter((tier) => Number.isInteger(tier.targetCups)
     && tier.targetCups > 0
-    && Number.isInteger(tier.discountPercent)
-    && tier.discountPercent >= MIN_DISCOUNT_PERCENT
-    && tier.discountPercent <= MAX_DISCOUNT_PERCENT);
+    && Number.isInteger(tier.discountAmount)
+    && tier.discountAmount >= 0);
 }
 
 function invalid(reason, details = {}) {
@@ -173,11 +212,10 @@ function invalid(reason, details = {}) {
 }
 
 module.exports = {
-  MIN_DISCOUNT_PERCENT,
-  MAX_DISCOUNT_PERCENT,
+  calculateDiscountPerCup,
+  calculateGroupBuyDiscountSummary,
   calculateMinimumSellableUnitPrice,
-  calculatePercentageDiscount,
+  findOrderDiscountConflicts,
   normalizeDiscountTiers,
-  resolveAppliedDiscountTier,
   validateDiscountTierConfiguration
 };

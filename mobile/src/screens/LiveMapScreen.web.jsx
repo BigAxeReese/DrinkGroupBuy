@@ -2,25 +2,11 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import Constants from "expo-constants";
 import { Pressable, StyleSheet, Text, View } from "react-native";
 import { ActivityFilterPanel } from "../components/ActivityFilterPanel";
-import { Card } from "../components/Card";
-import { Notice } from "../components/Notice";
-import { PrimaryButton } from "../components/PrimaryButton";
 import { useActivityMapFilters } from "../hooks/useActivityMapFilters";
 import { useDevLocationConfig } from "../hooks/useDevLocationConfig";
 import { mapCenter, mapDefaults } from "../mock/mapConfig";
-import { colors, maxFontSizeMultiplier, radii, sizes, spacing, typeScale } from "../theme/tokens";
 import { reportAppliedDevLocation } from "../utils/devLocationControl";
 import { buildStoreMapStores, getStoreMapDestination, getStoreMarkerLabel } from "../utils/groupBuyActivityStores";
-
-// The markers are raw DOM nodes and cannot read the StyleSheet, so their looks are spelled out here.
-// Solid brown = the store has a group to join, white with a brown outline = it has none, dark = the
-// customer's own position. Fill versus outline keeps the difference from depending on colour alone.
-const MARKER_LOOKS = {
-  user: { fill: colors.text, border: colors.page, ink: colors.onDark },
-  recruiting: { fill: colors.accent, border: colors.page, ink: colors.onAccent },
-  idle: { fill: colors.page, border: colors.accent, ink: colors.accentInk }
-};
-const MARKER_SIZE = spacing.s32 + spacing.s4;
 
 export function LiveMapScreen({ navigation, appState, selectedAuthUserId }) {
   const mapElementRef = useRef(null);
@@ -208,7 +194,7 @@ export function LiveMapScreen({ navigation, appState, selectedAuthUserId }) {
       map,
       position: userMapCenter,
       title: locationName,
-      look: MARKER_LOOKS.user,
+      color: "#2563eb",
       markerText: "我",
       labelText: locationName
     });
@@ -220,7 +206,7 @@ export function LiveMapScreen({ navigation, appState, selectedAuthUserId }) {
         map,
         position: { lat: store.latitude, lng: store.longitude },
         title: store.name,
-        look: store.hasRecruitingGroupBuyActivity ? MARKER_LOOKS.recruiting : MARKER_LOOKS.idle,
+        color: store.hasRecruitingGroupBuyActivity ? "#facc15" : "#2563eb",
         markerText: "店",
         labelText: getStoreMarkerLabel(store),
         onPress: () => focusStore(store)
@@ -286,58 +272,57 @@ export function LiveMapScreen({ navigation, appState, selectedAuthUserId }) {
       <div ref={mapElementRef} style={styles.map} />
 
       {!mapReady && !mapError ? (
-        <Card compact style={styles.mapStatus}>
+        <View style={styles.loadingCard}>
           <Text style={styles.loadingText}>Google Maps 載入中...</Text>
-        </Card>
+        </View>
       ) : null}
+
+      <Pressable
+        accessibilityRole="button"
+        onPress={openFilterPanel}
+        style={({ pressed }) => [styles.filterButton, pressed && styles.pressed]}
+      >
+        <Text style={styles.filterButtonText}>篩選</Text>
+      </Pressable>
 
       {mapError ? (
-        <View style={styles.mapStatus}>
-          <Notice tone="danger" message={mapError} />
+        <View style={styles.errorCard}>
+          <Text style={styles.errorText}>{mapError}</Text>
         </View>
       ) : null}
 
-      {/* The controls and the store card share one bottom column, so a taller card pushes the
-          controls up instead of covering them. box-none keeps the map draggable around them. */}
-      <View style={styles.overlay}>
-        <View style={styles.controls}>
+      {mapReady ? (
+        <Pressable
+          accessibilityRole="button"
+          accessibilityLabel="回到目前位置"
+          onPress={recenterOnUser}
+          style={({ pressed }) => [styles.recenterButton, pressed && styles.recenterButtonPressed]}
+        >
+          <Text style={styles.recenterIcon}>⌖</Text>
+        </Pressable>
+      ) : null}
+
+      {selectedStore ? (
+        <View style={styles.storeCard}>
+          <View style={styles.storeInfo}>
+            <Text style={styles.storeName}>{selectedStore.name}</Text>
+            <Text style={styles.storeMeta} numberOfLines={2}>
+              {selectedStore.address || "地址未提供"} · {selectedStore.hasRecruitingGroupBuyActivity ? `團購進行中 ${selectedStore.progressText}` : "目前沒有進行中的團購"}
+            </Text>
+          </View>
           <Pressable
             accessibilityRole="button"
-            onPress={openFilterPanel}
-            style={({ pressed }) => [styles.filterButton, pressed && styles.pressed]}
+            onPress={openSelectedStore}
+            style={styles.viewGroupBuyActivitiesButton}
           >
-            <Text maxFontSizeMultiplier={maxFontSizeMultiplier} style={styles.filterButtonText}>篩選</Text>
-          </Pressable>
-
-          {mapReady ? (
-            <Pressable
-              accessibilityRole="button"
-              accessibilityLabel="回到目前位置"
-              onPress={recenterOnUser}
-              style={({ pressed }) => [styles.recenterButton, pressed && styles.pressed]}
-            >
-              <RecenterIcon />
-            </Pressable>
-          ) : null}
-        </View>
-
-        {selectedStore ? (
-          <Card compact style={styles.storeCard}>
-            <View style={styles.storeInfo}>
-              <Text style={styles.storeName}>{selectedStore.name}</Text>
-              <Text style={styles.storeMeta} numberOfLines={2}>
-                {selectedStore.address || "地址未提供"} · {selectedStore.hasRecruitingGroupBuyActivity ? `團購進行中 ${selectedStore.progressText}` : "目前沒有進行中的團購"}
-              </Text>
-            </View>
-            <PrimaryButton
-              label={selectedStore.joinableGroupBuyActivities.length > 1
+            <Text style={styles.viewGroupBuyActivitiesText}>
+              {selectedStore.joinableGroupBuyActivities.length > 1
                 ? "活動列表"
                 : selectedStore.hasRecruitingGroupBuyActivity ? "查看活動" : "查看菜單"}
-              onPress={openSelectedStore}
-            />
-          </Card>
-        ) : null}
-      </View>
+            </Text>
+          </Pressable>
+        </View>
+      ) : null}
 
       <ActivityFilterPanel
         visible={filterPanelVisible}
@@ -346,20 +331,6 @@ export function LiveMapScreen({ navigation, appState, selectedAuthUserId }) {
         onClose={closeFilterPanel}
         hasLocation={hasRealLocation}
       />
-    </View>
-  );
-}
-
-// The "my location" crosshair, drawn with views instead of a font glyph.
-function RecenterIcon() {
-  return (
-    <View style={styles.crosshair}>
-      <View style={styles.crosshairRing} />
-      <View style={styles.crosshairDot} />
-      <View style={[styles.crosshairTick, styles.tickTop]} />
-      <View style={[styles.crosshairTick, styles.tickBottom]} />
-      <View style={[styles.crosshairTick, styles.tickLeft]} />
-      <View style={[styles.crosshairTick, styles.tickRight]} />
     </View>
   );
 }
@@ -413,13 +384,13 @@ function loadGoogleMaps(apiKey) {
   return window.__drinkGroupBuyGoogleMapsPromise;
 }
 
-function createStoreOverlayMarker({ googleMaps, map, position, title, look, markerText, labelText, onPress }) {
+function createStoreOverlayMarker({ googleMaps, map, position, title, color, markerText, labelText, onPress }) {
   class StoreOverlayMarker extends googleMaps.OverlayView {
     constructor() {
       super();
       this.position = new googleMaps.LatLng(position.lat, position.lng);
       this.title = title;
-      this.look = look;
+      this.color = color;
       this.markerText = markerText;
       this.labelText = labelText;
       this.onPress = onPress;
@@ -442,38 +413,38 @@ function createStoreOverlayMarker({ googleMaps, map, position, title, look, mark
       element.style.display = "flex";
       element.style.flexDirection = "column";
       element.style.alignItems = "center";
-      element.style.gap = `${spacing.s4}px`;
+      element.style.gap = "3px";
       element.style.pointerEvents = "auto";
       element.style.willChange = "transform";
 
       const marker = document.createElement("div");
-      marker.style.boxSizing = "border-box";
-      marker.style.width = `${MARKER_SIZE}px`;
-      marker.style.height = `${MARKER_SIZE}px`;
-      marker.style.borderRadius = `${radii.pill}px`;
-      marker.style.borderStyle = "solid";
-      marker.style.borderWidth = `${sizes.stroke}px`;
+      marker.style.width = "30px";
+      marker.style.height = "30px";
+      marker.style.borderRadius = "999px";
+      marker.style.border = "3px solid #ffffff";
       marker.style.display = "flex";
       marker.style.alignItems = "center";
       marker.style.justifyContent = "center";
-      marker.style.fontSize = `${typeScale.label.fontSize}px`;
-      marker.style.fontWeight = typeScale.label.fontWeight;
+      marker.style.fontSize = "11px";
+      marker.style.fontWeight = "900";
+      marker.style.boxShadow = "0 4px 10px rgba(15,23,42,0.28)";
 
       const markerTextNode = document.createElement("span");
       marker.appendChild(markerTextNode);
 
       const label = document.createElement("div");
       label.style.maxWidth = "148px";
-      label.style.borderRadius = `${radii.xs}px`;
-      label.style.background = colors.page;
-      label.style.color = colors.text;
-      label.style.fontSize = `${typeScale.label.fontSize}px`;
-      label.style.fontWeight = typeScale.label.fontWeight;
-      label.style.lineHeight = `${typeScale.label.lineHeight}px`;
-      label.style.padding = `${spacing.s4}px ${spacing.s8}px`;
+      label.style.borderRadius = "7px";
+      label.style.background = "rgba(255,255,255,0.96)";
+      label.style.color = "#111827";
+      label.style.fontSize = "10px";
+      label.style.fontWeight = "900";
+      label.style.lineHeight = "14px";
+      label.style.padding = "2px 6px";
       label.style.whiteSpace = "nowrap";
       label.style.overflow = "hidden";
       label.style.textOverflow = "ellipsis";
+      label.style.boxShadow = "0 2px 8px rgba(15,23,42,0.18)";
 
       element.append(marker, label);
       if (this.onPress) {
@@ -512,10 +483,10 @@ function createStoreOverlayMarker({ googleMaps, map, position, title, look, mark
 
     render() {
       if (!this.element || !this.markerElement || !this.markerTextElement || !this.labelElement) return;
+      const isActive = this.color === "#facc15";
       this.element.title = this.title;
-      this.markerElement.style.background = this.look.fill;
-      this.markerElement.style.borderColor = this.look.border;
-      this.markerElement.style.color = this.look.ink;
+      this.markerElement.style.background = this.color;
+      this.markerElement.style.color = isActive ? "#713f12" : "#ffffff";
       this.markerTextElement.textContent = this.markerText;
       this.labelElement.textContent = this.labelText;
     }
@@ -526,15 +497,11 @@ function createStoreOverlayMarker({ googleMaps, map, position, title, look, mark
   return marker;
 }
 
-const ICON_SIZE = spacing.s24;
-const CROSSHAIR_RING = spacing.s16 - sizes.stroke;
-const CROSSHAIR_TICK = spacing.s8 - sizes.stroke;
-
 const styles = StyleSheet.create({
   screen: {
     flex: 1,
     overflow: "hidden",
-    backgroundColor: colors.recess
+    backgroundColor: "#e2e8f0"
   },
   map: {
     position: "absolute",
@@ -542,131 +509,115 @@ const styles = StyleSheet.create({
     right: 0,
     bottom: 0,
     left: 0,
-    backgroundColor: colors.recess
-  },
-  // Where the loading / error card floats: a little below the top edge.
-  mapStatus: {
-    position: "absolute",
-    left: spacing.s16,
-    right: spacing.s16,
-    top: spacing.s32 * 4
-  },
-  loadingText: {
-    ...typeScale.bodyDense,
-    color: colors.textSecondary
-  },
-  // The bottom offset keeps the map's attribution strip visible under the controls and the card.
-  overlay: {
-    position: "absolute",
-    left: spacing.s16,
-    right: spacing.s16,
-    bottom: spacing.s32 + spacing.s12,
-    gap: spacing.s12,
-    pointerEvents: "box-none"
-  },
-  // column-reverse: the recenter button sits above the filter button while the source order (the
-  // order screen readers walk) stays filter, recenter.
-  controls: {
-    alignSelf: "flex-end",
-    alignItems: "flex-end",
-    flexDirection: "column-reverse",
-    gap: spacing.s12,
-    pointerEvents: "box-none"
+    backgroundColor: "#dbe4ef"
   },
   filterButton: {
-    minWidth: sizes.tap,
-    minHeight: sizes.tap,
-    borderRadius: radii.pill,
-    borderWidth: sizes.stroke,
-    borderColor: colors.accent,
+    position: "absolute",
+    bottom: 44,
+    right: 14,
+    minHeight: 34,
+    borderRadius: 12,
     alignItems: "center",
     justifyContent: "center",
-    backgroundColor: colors.page,
-    paddingHorizontal: spacing.s16
+    backgroundColor: "#eef2f7",
+    paddingHorizontal: 16,
+    boxShadow: "0 6px 18px rgba(15,23,42,0.24)"
   },
   filterButtonText: {
-    ...typeScale.button,
-    color: colors.accentInk
+    color: "#0f172a",
+    fontSize: 13,
+    fontWeight: "900"
   },
   pressed: {
-    opacity: 0.8
+    opacity: 0.75
   },
-  recenterButton: {
-    minWidth: sizes.tap,
-    minHeight: sizes.tap,
-    borderRadius: radii.pill,
-    borderWidth: sizes.stroke,
-    borderColor: colors.accent,
-    alignItems: "center",
-    justifyContent: "center",
-    backgroundColor: colors.page
-  },
-  crosshair: {
-    width: ICON_SIZE,
-    height: ICON_SIZE
-  },
-  crosshairRing: {
+  errorCard: {
     position: "absolute",
-    top: (ICON_SIZE - CROSSHAIR_RING) / 2,
-    left: (ICON_SIZE - CROSSHAIR_RING) / 2,
-    width: CROSSHAIR_RING,
-    height: CROSSHAIR_RING,
-    borderRadius: radii.pill,
-    borderWidth: sizes.stroke,
-    borderColor: colors.accent
+    left: 14,
+    right: 14,
+    top: 120,
+    borderRadius: 14,
+    backgroundColor: "#fee2e2",
+    padding: 12
   },
-  crosshairDot: {
+  errorText: {
+    color: "#b91c1c",
+    fontSize: 12,
+    fontWeight: "800"
+  },
+  loadingCard: {
     position: "absolute",
-    top: (ICON_SIZE - spacing.s4) / 2,
-    left: (ICON_SIZE - spacing.s4) / 2,
-    width: spacing.s4,
-    height: spacing.s4,
-    borderRadius: radii.pill,
-    backgroundColor: colors.accent
+    left: 14,
+    right: 14,
+    top: 120,
+    borderRadius: 14,
+    backgroundColor: "#ffffff",
+    padding: 12
   },
-  crosshairTick: {
-    position: "absolute",
-    backgroundColor: colors.accent
-  },
-  tickTop: {
-    top: 0,
-    left: (ICON_SIZE - sizes.stroke) / 2,
-    width: sizes.stroke,
-    height: CROSSHAIR_TICK
-  },
-  tickBottom: {
-    bottom: 0,
-    left: (ICON_SIZE - sizes.stroke) / 2,
-    width: sizes.stroke,
-    height: CROSSHAIR_TICK
-  },
-  tickLeft: {
-    left: 0,
-    top: (ICON_SIZE - sizes.stroke) / 2,
-    width: CROSSHAIR_TICK,
-    height: sizes.stroke
-  },
-  tickRight: {
-    right: 0,
-    top: (ICON_SIZE - sizes.stroke) / 2,
-    width: CROSSHAIR_TICK,
-    height: sizes.stroke
+  loadingText: {
+    color: "#475569",
+    fontSize: 12,
+    fontWeight: "800"
   },
   storeCard: {
+    position: "absolute",
+    left: 14,
+    right: 14,
+    bottom: 16,
+    minHeight: 76,
     flexDirection: "row",
     alignItems: "center",
-    gap: spacing.s12
+    gap: 10,
+    borderRadius: 16,
+    backgroundColor: "#ffffff",
+    padding: 12,
+    boxShadow: "0 6px 18px rgba(15,23,42,0.24)"
+  },
+  recenterButton: {
+    position: "absolute",
+    bottom: 100,
+    right: 14,
+    width: 46,
+    height: 46,
+    borderRadius: 23,
+    alignItems: "center",
+    justifyContent: "center",
+    backgroundColor: "#111827",
+    boxShadow: "0 6px 18px rgba(15,23,42,0.24)"
+  },
+  recenterButtonPressed: {
+    opacity: 0.8
+  },
+  recenterIcon: {
+    color: "#ffffff",
+    fontSize: 20,
+    fontWeight: "900"
   },
   storeInfo: {
     flex: 1,
-    gap: spacing.s4
+    gap: 4
   },
   storeName: {
-    ...typeScale.button,
-    color: colors.text
+    color: "#0f172a",
+    fontSize: 14,
+    fontWeight: "900"
   },
   storeMeta: {
-    ...typeScale.caption,
-    color: colors.textSecondary
+    color: "#64748b",
+    fontSize: 11,
+    fontWeight: "700"
+  },
+  viewGroupBuyActivitiesButton: {
+    minHeight: 38,
+    borderRadius: 12,
+    alignItems: "center",
+    justifyContent: "center",
+    backgroundColor: "#1f6feb",
+    paddingHorizontal: 14
+  },
+  viewGroupBuyActivitiesText: {
+    color: "#ffffff",
+    fontSize: 12,
+    fontWeight: "900"
   }
 });

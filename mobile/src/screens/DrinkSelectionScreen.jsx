@@ -1,13 +1,7 @@
 import { useEffect, useMemo, useState } from "react";
 import { Pressable, StyleSheet, Text, View } from "react-native";
-import { Card } from "../components/Card";
-import { ChoiceChip } from "../components/ChoiceChip";
-import { EmptyPanel } from "../components/EmptyPanel";
 import { MobileScreen, Section } from "../components/MobileScreen";
-import { Notice } from "../components/Notice";
 import { PrimaryButton } from "../components/PrimaryButton";
-import { QuantityStepper } from "../components/QuantityStepper";
-import { colors, maxFontSizeMultiplier, radii, sizes, spacing, typeScale } from "../theme/tokens";
 import { getStoreMenu } from "../utils/apiClient";
 import { formatCurrency, getGroupBuyActivityById } from "../utils/calculations";
 
@@ -45,7 +39,7 @@ export function DrinkSelectionScreen({ navigation, route, appState, actions, mem
         onMemberPress={memberAction}
       >
         <Section title="目前沒有可加入的團購">
-          <EmptyPanel>團購已清空，或目前尚未有商家建立活動。</EmptyPanel>
+          <Text style={styles.meta}>團購已清空，或目前尚未有商家建立活動。</Text>
           <PrimaryButton label="返回首頁" variant="secondary" onPress={() => navigation.replace("nearby")} />
         </Section>
       </MobileScreen>
@@ -54,7 +48,7 @@ export function DrinkSelectionScreen({ navigation, route, appState, actions, mem
   if (loading) {
     return (
       <MobileScreen title="選擇飲料" onBack={() => navigation.back()} onMemberPress={memberAction}>
-        <Section title="正在載入"><EmptyPanel>正在讀取店家最新菜單與價格…</EmptyPanel></Section>
+        <Section title="正在載入"><Text style={styles.meta}>正在讀取店家最新菜單與價格…</Text></Section>
       </MobileScreen>
     );
   }
@@ -62,11 +56,7 @@ export function DrinkSelectionScreen({ navigation, route, appState, actions, mem
     return (
       <MobileScreen title="選擇飲料" onBack={() => navigation.back()} onMemberPress={memberAction}>
         <Section title="目前沒有可用菜單">
-          {error ? (
-            <Notice accessibilityRole="alert" message={error} tone="danger" />
-          ) : (
-            <EmptyPanel>這間店目前沒有上架飲品。</EmptyPanel>
-          )}
+          <Text style={styles.meta}>{error || "這間店目前沒有上架飲品。"}</Text>
         </Section>
       </MobileScreen>
     );
@@ -125,56 +115,52 @@ function DrinkMenuContent({ navigation, route, appState, actions, memberAction, 
         onBack={() => navigation.back()}
         onMemberPress={memberAction}
       >
-      <View style={styles.menuHeader}>
-        <View style={styles.menuHero}>
-          <Text style={styles.shopName}>{store?.name}</Text>
-          <Text style={styles.groupBuyActivityName}>{groupBuyActivity.title}</Text>
-        </View>
+      <View style={styles.menuHero}>
+        <Text style={styles.shopName}>{store?.name}</Text>
+        <Text style={styles.groupBuyActivityName}>{groupBuyActivity.title}</Text>
+      </View>
 
-        <View style={styles.categoryRow}>
-          {categories.map((item) => (
-            <ChoiceChip
-              key={item.id}
-              label={item.label}
-              onPress={() => setCategory(item.id)}
-              selected={category === item.id}
-            />
-          ))}
-        </View>
+      <View style={styles.categoryRow}>
+        {categories.map((item) => (
+          <Pressable
+            accessibilityRole="button"
+            key={item.id}
+            onPress={() => setCategory(item.id)}
+            style={[styles.categoryPill, category === item.id && styles.activeCategoryPill]}
+          >
+            <Text style={[styles.categoryText, category === item.id && styles.activeCategoryText]}>{item.label}</Text>
+          </Pressable>
+        ))}
       </View>
 
       <Section title={customizing ? "已選飲料" : "人氣推薦"}>
         {filteredDrinks.length ? filteredDrinks.map((item) => (
-          <Card
-            compact
-            accessibilityState={{ selected: customizing && drinkId === item.id }}
+          <Pressable
+            accessibilityRole="button"
             key={item.id}
             onPress={() => {
               setDrinkId(item.id);
               setSelectedOptionIds(buildInitialSelections(item, null));
               setCustomizing(true);
             }}
-            style={[
+            style={({ pressed }) => [
               styles.menuItem,
-              customizing && drinkId === item.id && styles.activeMenuItem,
-              customizing && drinkId !== item.id && styles.hiddenItem
+              drinkId === item.id && styles.activeMenuItem,
+              customizing && drinkId !== item.id && styles.hiddenItem,
+              pressed && styles.pressed
             ]}
           >
             <View style={styles.menuTextGroup}>
               <View style={styles.nameRow}>
                 <Text style={styles.menuItemName}>{item.name}</Text>
-                {item.id === storeDrinks[0]?.id ? (
-                  <View style={styles.hotTag}>
-                    <Text maxFontSizeMultiplier={maxFontSizeMultiplier} style={styles.hotTagText}>推</Text>
-                  </View>
-                ) : null}
+                {item.id === storeDrinks[0]?.id ? <Text style={styles.hotTag}>推</Text> : null}
               </View>
               <Text style={styles.menuDescription}>{item.description}</Text>
             </View>
-            <Text maxFontSizeMultiplier={maxFontSizeMultiplier} style={styles.menuPrice}>{formatCurrency(item.basePrice)}</Text>
-          </Card>
+            <Text style={styles.menuPrice}>{formatCurrency(item.basePrice)}</Text>
+          </Pressable>
         )) : (
-          <EmptyPanel>此分類目前沒有品項。</EmptyPanel>
+          <Text style={styles.meta}>此分類目前沒有品項。</Text>
         )}
         {customizing ? (
           <PrimaryButton label="重新選擇飲料" variant="secondary" onPress={() => setCustomizing(false)} />
@@ -186,7 +172,7 @@ function DrinkMenuContent({ navigation, route, appState, actions, memberAction, 
           {drink.customizationGroups.map((group) => (
             <Section key={group.optionType} title={getGroupTitle(group.optionType)}>
               {group.options.length === 0 || group.maxSelections === 0 ? (
-                <EmptyPanel>{`此飲品不提供${getGroupTitle(group.optionType)}選項。`}</EmptyPanel>
+                <Text style={styles.meta}>此飲品不提供{getGroupTitle(group.optionType)}選項。</Text>
               ) : (
                 <View style={styles.optionWrap}>
                   {group.options.map((option) => (
@@ -206,22 +192,21 @@ function DrinkMenuContent({ navigation, route, appState, actions, memberAction, 
           ))}
 
           <Section title="數量">
-            <QuantityStepper
-              decreaseLabel="減少一杯"
-              increaseLabel="增加一杯"
-              onDecrease={() => setQuantity((value) => Math.max(1, value - 1))}
-              onIncrease={() => setQuantity((value) => value + 1)}
-              value={quantity}
-            />
+            <View style={styles.quantityRow}>
+              <PrimaryButton label="-" variant="secondary" onPress={() => setQuantity((value) => Math.max(1, value - 1))} />
+              <Text style={styles.quantity}>{quantity}</Text>
+              <PrimaryButton label="+" variant="secondary" onPress={() => setQuantity((value) => value + 1)} />
+            </View>
           </Section>
 
           <Section title="小計">
-            <Text maxFontSizeMultiplier={maxFontSizeMultiplier} style={styles.subtotal}>{formatCurrency(subtotal)}</Text>
+            <Text style={styles.subtotal}>{formatCurrency(subtotal)}</Text>
           </Section>
 
-          <View style={styles.actionBlock}>
+          <View style={styles.stickyAction}>
             <PrimaryButton
               label={editOrderItem ? "儲存修改" : editOrderId ? "加入訂單並重新預授權" : "加入購物車"}
+              style={styles.stickyButton}
               onPress={() => {
                 const orderItem = buildCartItem({
                   drink,
@@ -260,13 +245,12 @@ function DrinkMenuContent({ navigation, route, appState, actions, memberAction, 
                 setQuantity(1);
               }}
             />
-            {submitted ? <Notice message="已加入購物車。" tone="success" /> : null}
           </View>
+          {submitted ? <Text style={styles.success}>已加入購物車。</Text> : null}
         </>
       ) : (
-        <EmptyPanel>請先選擇飲料，再設定甜度、冰塊與加料。</EmptyPanel>
+        <Text style={styles.selectHint}>請先選擇飲料，再設定甜度、冰塊與加料。</Text>
       )}
-      {cartQuantity > 0 ? <View style={styles.cartSpacer} /> : null}
       </MobileScreen>
       {cartQuantity > 0 ? (
         <Pressable
@@ -275,13 +259,13 @@ function DrinkMenuContent({ navigation, route, appState, actions, memberAction, 
           style={({ pressed }) => [styles.floatingCart, pressed && styles.pressed]}
         >
           <View style={styles.cartBadge}>
-            <Text maxFontSizeMultiplier={maxFontSizeMultiplier} style={styles.cartBadgeText}>{cartQuantity}</Text>
+            <Text style={styles.cartBadgeText}>{cartQuantity}</Text>
           </View>
           <View style={styles.floatingCartTextGroup}>
-            <Text maxFontSizeMultiplier={maxFontSizeMultiplier} style={styles.floatingCartTitle}>購物車</Text>
-            <Text maxFontSizeMultiplier={maxFontSizeMultiplier} style={styles.floatingCartMeta}>{formatCurrency(cartTotal)}</Text>
+            <Text style={styles.floatingCartTitle}>購物車</Text>
+            <Text style={styles.floatingCartMeta}>{formatCurrency(cartTotal)}</Text>
           </View>
-          <View style={styles.floatingCartArrow} />
+          <Text style={styles.floatingCartArrow}>›</Text>
         </Pressable>
       ) : null}
     </View>
@@ -345,146 +329,232 @@ function getGroupTitle(optionType) {
 }
 
 function OptionButton({ active, label, onPress }) {
-  return <ChoiceChip label={label} onPress={onPress} selected={active} />;
+  return (
+    <Pressable
+      accessibilityRole="button"
+      onPress={onPress}
+      style={({ pressed }) => [styles.option, active && styles.activeOption, pressed && styles.pressed]}
+    >
+      <Text style={[styles.optionText, active && styles.activeOptionText]}>{label}</Text>
+    </Pressable>
+  );
 }
 
 const styles = StyleSheet.create({
   screenWrap: {
     flex: 1
   },
-  menuHeader: {
-    gap: spacing.s12
+  optionWrap: {
+    flexDirection: "row",
+    flexWrap: "wrap",
+    gap: 8
   },
   menuHero: {
-    gap: spacing.s4
+    gap: 5,
+    paddingVertical: 8
   },
   shopName: {
-    ...typeScale.sectionTitle,
-    color: colors.text
+    color: "#0f172a",
+    fontSize: 22,
+    fontWeight: "900"
   },
   groupBuyActivityName: {
-    ...typeScale.bodyDense,
-    color: colors.textSecondary
+    color: "#64748b",
+    fontSize: 14,
+    fontWeight: "700"
   },
   categoryRow: {
     flexDirection: "row",
-    flexWrap: "wrap",
-    gap: spacing.s8
+    gap: 8,
+    paddingVertical: 4
+  },
+  categoryPill: {
+    minHeight: 42,
+    borderRadius: 999,
+    justifyContent: "center",
+    backgroundColor: "#eef2f7",
+    paddingHorizontal: 15
+  },
+  activeCategoryPill: {
+    backgroundColor: "#111827"
+  },
+  categoryText: {
+    color: "#475569",
+    fontSize: 13,
+    fontWeight: "900"
+  },
+  activeCategoryText: {
+    color: "#ffffff"
   },
   menuItem: {
+    minHeight: 78,
     flexDirection: "row",
     alignItems: "center",
     justifyContent: "space-between",
-    gap: spacing.s12
+    gap: 12,
+    borderBottomWidth: 1,
+    borderBottomColor: "#eef2f7",
+    paddingVertical: 12
   },
-  // The card keeps its 2px outline box; picking a drink only recolours it.
   activeMenuItem: {
-    borderColor: colors.accent
+    backgroundColor: "#f8fbff"
   },
   hiddenItem: {
     display: "none"
   },
+  pressed: {
+    opacity: 0.76
+  },
   menuTextGroup: {
     flex: 1,
-    gap: spacing.s4
+    gap: 5
   },
   nameRow: {
     flexDirection: "row",
     alignItems: "center",
-    gap: spacing.s8
+    gap: 6
   },
   menuItemName: {
-    ...typeScale.button,
-    flexShrink: 1,
-    color: colors.text
+    color: "#0f172a",
+    fontSize: 16,
+    fontWeight: "900"
   },
   hotTag: {
-    paddingHorizontal: spacing.s8,
-    borderRadius: radii.xs,
-    backgroundColor: colors.recess
-  },
-  hotTagText: {
-    ...typeScale.label,
-    color: colors.accentInk
+    color: "#ef4444",
+    fontSize: 11,
+    fontWeight: "900"
   },
   menuDescription: {
-    ...typeScale.caption,
-    color: colors.textSecondary
+    color: "#94a3b8",
+    fontSize: 12,
+    lineHeight: 18
   },
   menuPrice: {
-    ...typeScale.price,
-    color: colors.text
+    color: "#0f172a",
+    fontSize: 16,
+    fontWeight: "900"
   },
-  optionWrap: {
-    flexDirection: "row",
-    flexWrap: "wrap",
-    gap: spacing.s8
+  option: {
+    minHeight: 48,
+    justifyContent: "center",
+    borderRadius: 16,
+    borderWidth: 1,
+    borderColor: "#cbd5e1",
+    backgroundColor: "#ffffff",
+    paddingHorizontal: 14,
+    paddingVertical: 10
   },
-  subtotal: {
-    ...typeScale.amount,
-    color: colors.text
-  },
-  meta: {
-    ...typeScale.caption,
-    color: colors.textSecondary
-  },
-  actionBlock: {
-    gap: spacing.s12
-  },
-  // Keeps the last content clear of the floating cart button (only rendered while that button shows).
-  cartSpacer: {
-    height: sizes.buttonHeight
+  activeOption: {
+    borderColor: "#1f6feb",
+    backgroundColor: "#dbeafe"
   },
   pressed: {
-    opacity: 0.8
+    opacity: 0.75
   },
-  // Floats over the content, so it keeps an Android elevation (docs/ui-style-guide.md, principle 3).
-  floatingCart: {
-    position: "absolute",
-    right: spacing.s20,
-    bottom: spacing.s16,
-    minHeight: sizes.buttonHeight,
+  optionText: {
+    color: "#334155",
+    fontSize: 15,
+    fontWeight: "800"
+  },
+  activeOptionText: {
+    color: "#1f6feb"
+  },
+  quantityRow: {
     flexDirection: "row",
     alignItems: "center",
-    gap: spacing.s12,
-    paddingVertical: spacing.s8,
-    paddingLeft: spacing.s8,
-    paddingRight: spacing.s20,
-    borderRadius: radii.pill,
-    backgroundColor: colors.accent,
+    justifyContent: "space-between",
+    gap: 12
+  },
+  quantity: {
+    minWidth: 50,
+    textAlign: "center",
+    color: "#0f172a",
+    fontSize: 24,
+    fontWeight: "900"
+  },
+  subtotal: {
+    color: "#0f172a",
+    fontSize: 32,
+    fontWeight: "900"
+  },
+  meta: {
+    color: "#64748b",
+    fontSize: 13,
+    lineHeight: 19
+  },
+  selectHint: {
+    color: "#64748b",
+    fontSize: 14,
+    fontWeight: "800",
+    textAlign: "center",
+    paddingVertical: 8
+  },
+  stickyAction: {
+    width: "100%",
+    borderRadius: 18,
+    backgroundColor: "transparent",
+    paddingVertical: 4
+  },
+  stickyButton: {
+    minHeight: 58,
+    borderRadius: 18
+  },
+  success: {
+    color: "#047857",
+    fontSize: 14,
+    fontWeight: "800",
+    textAlign: "center"
+  },
+  floatingCart: {
+    position: "absolute",
+    right: 18,
+    bottom: 22,
+    minWidth: 156,
+    minHeight: 58,
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 10,
+    borderRadius: 18,
+    backgroundColor: "#111827",
+    paddingHorizontal: 13,
+    paddingVertical: 10,
+    shadowColor: "#0f172a",
+    shadowOpacity: 0.24,
+    shadowRadius: 14,
+    shadowOffset: { width: 0, height: 8 },
     elevation: 8
   },
   cartBadge: {
-    minWidth: spacing.s32,
-    minHeight: spacing.s32,
+    minWidth: 30,
+    height: 30,
+    borderRadius: 15,
     alignItems: "center",
     justifyContent: "center",
-    paddingHorizontal: spacing.s8,
-    borderRadius: radii.pill,
-    backgroundColor: colors.text
+    backgroundColor: "#2563eb",
+    paddingHorizontal: 8
   },
   cartBadgeText: {
-    ...typeScale.button,
-    color: colors.onDark
+    color: "#ffffff",
+    fontSize: 13,
+    fontWeight: "900"
   },
   floatingCartTextGroup: {
-    flexShrink: 1
+    flex: 1
   },
   floatingCartTitle: {
-    ...typeScale.button,
-    color: colors.onAccent
+    color: "#ffffff",
+    fontSize: 13,
+    fontWeight: "900"
   },
   floatingCartMeta: {
-    ...typeScale.caption,
-    color: colors.onAccent
+    color: "#bfdbfe",
+    fontSize: 12,
+    fontWeight: "800",
+    marginTop: 2
   },
-  // A right-pointing chevron drawn like the back arrow in MobileScreen (a 10px corner, rotated).
   floatingCartArrow: {
-    width: 10,
-    height: 10,
-    borderColor: colors.onAccent,
-    borderTopWidth: sizes.stroke,
-    borderRightWidth: sizes.stroke,
-    transform: [{ rotate: "45deg" }]
+    color: "#ffffff",
+    fontSize: 24,
+    fontWeight: "900"
   }
 });

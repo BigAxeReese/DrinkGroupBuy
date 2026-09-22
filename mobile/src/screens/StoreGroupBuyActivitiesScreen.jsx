@@ -1,11 +1,6 @@
-import { StyleSheet, Text, View } from "react-native";
+import { Pressable, StyleSheet, Text, View } from "react-native";
 import { ActivitySyncNotice } from "../components/ActivitySyncNotice";
-import { Card } from "../components/Card";
-import { EmptyPanel } from "../components/EmptyPanel";
 import { MobileScreen, Section } from "../components/MobileScreen";
-import { Notice } from "../components/Notice";
-import { PearlStrip } from "../components/PearlStrip";
-import { colors, maxFontSizeMultiplier, spacing, typeScale } from "../theme/tokens";
 import { isJoinableGroupBuyActivity } from "../utils/groupBuyActivityStores";
 import { getGroupBuyActivityProgress } from "../utils/groupBuyActivityProgress";
 
@@ -28,34 +23,38 @@ export function StoreGroupBuyActivitiesScreen({ navigation, route, appState, act
       />
 
       {appState.storeSyncStatus === "error" ? (
-        <Notice accessibilityRole="alert" title="店家資料載入失敗" tone="danger" />
+        <View style={styles.errorCard}>
+          <Text style={styles.errorText}>店家資料載入失敗</Text>
+        </View>
       ) : null}
 
       <Section title={`可加入活動（${activities.length}）`}>
         {activities.map((activity) => {
           const progress = getGroupBuyActivityProgress(activity);
           return (
-            <Card
-              compact
+            <Pressable
+              accessibilityRole="button"
               key={activity.id}
               onPress={() => navigation.go("groupBuyActivityDetail", { groupBuyActivityId: activity.id })}
-              style={styles.activityRow}
+              style={({ pressed }) => [styles.activityCard, pressed && styles.pressed]}
             >
               <View style={styles.activityContent}>
                 <Text style={styles.activityTitle}>{activity.title}</Text>
                 <Text style={styles.activityMeta}>{activity.remainingTimeText || "截止時間未提供"}</Text>
               </View>
               <View style={styles.progressGroup}>
-                <Text maxFontSizeMultiplier={maxFontSizeMultiplier} style={styles.progressText}>{progress.currentCups} / {progress.nextTarget} 杯</Text>
-                <PearlStrip current={progress.currentCups} target={progress.nextTarget} />
-                <Text maxFontSizeMultiplier={maxFontSizeMultiplier} style={styles.detailText}>查看詳情 →</Text>
+                <Text style={styles.progressText}>{progress.currentCups} / {progress.nextTarget} 杯</Text>
+                <Text style={styles.detailText}>查看詳情 →</Text>
               </View>
-            </Card>
+            </Pressable>
           );
         })}
 
         {activities.length === 0 ? (
-          <EmptyPanel title="目前沒有可加入活動">活動可能已截止或額滿，返回地圖後可選擇其他店家。</EmptyPanel>
+          <View style={styles.emptyCard}>
+            <Text style={styles.emptyTitle}>目前沒有可加入活動</Text>
+            <Text style={styles.emptyText}>活動可能已截止或額滿，返回地圖後可選擇其他店家。</Text>
+          </View>
         ) : null}
       </Section>
     </MobileScreen>
@@ -63,35 +62,73 @@ export function StoreGroupBuyActivitiesScreen({ navigation, route, appState, act
 }
 
 const styles = StyleSheet.create({
-  // Card is a column by default; this puts the title block and the progress block side by side.
-  activityRow: {
+  activityCard: {
+    minHeight: 74,
     flexDirection: "row",
     alignItems: "center",
     justifyContent: "space-between",
-    gap: spacing.s12
+    gap: 12,
+    borderRadius: 14,
+    borderWidth: 1,
+    borderColor: "#e2e8f0",
+    backgroundColor: "#f8fafc",
+    padding: 13
+  },
+  pressed: {
+    opacity: 0.78
   },
   activityContent: {
     flex: 1,
-    gap: spacing.s4
+    gap: 5
   },
   activityTitle: {
-    ...typeScale.button,
-    color: colors.text
+    color: "#0f172a",
+    fontSize: 15,
+    fontWeight: "900"
   },
   activityMeta: {
-    ...typeScale.caption,
-    color: colors.textSecondary
+    color: "#64748b",
+    fontSize: 11,
+    fontWeight: "700"
   },
   progressGroup: {
     alignItems: "flex-end",
-    gap: spacing.s4
+    gap: 5
   },
   progressText: {
-    ...typeScale.label,
-    color: colors.text
+    color: "#b45309",
+    fontSize: 13,
+    fontWeight: "900"
   },
   detailText: {
-    ...typeScale.label,
-    color: colors.accentInk
+    color: "#1f6feb",
+    fontSize: 11,
+    fontWeight: "800"
+  },
+  errorCard: {
+    borderRadius: 14,
+    backgroundColor: "#fee2e2",
+    padding: 12
+  },
+  errorText: {
+    color: "#b91c1c",
+    fontSize: 13,
+    fontWeight: "900"
+  },
+  emptyCard: {
+    gap: 5,
+    borderRadius: 14,
+    backgroundColor: "#f8fafc",
+    padding: 14
+  },
+  emptyTitle: {
+    color: "#0f172a",
+    fontSize: 14,
+    fontWeight: "900"
+  },
+  emptyText: {
+    color: "#64748b",
+    fontSize: 12,
+    lineHeight: 18
   }
 });

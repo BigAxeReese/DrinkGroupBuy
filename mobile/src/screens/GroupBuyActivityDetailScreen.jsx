@@ -1,16 +1,11 @@
 import { StyleSheet, Text, View } from "react-native";
 import { ActivitySyncNotice } from "../components/ActivitySyncNotice";
-import { Card } from "../components/Card";
-import { EmptyPanel } from "../components/EmptyPanel";
 import { MobileScreen, Section } from "../components/MobileScreen";
 import { DiscountSummaryCard } from "../components/DiscountSummaryCard";
-import { Notice } from "../components/Notice";
 import { PrimaryButton } from "../components/PrimaryButton";
 import { ProgressSummary } from "../components/ProgressSummary";
 import { StatusBadge } from "../components/StatusBadge";
-import { colors, radii, sizes, spacing, typeScale } from "../theme/tokens";
-import { getGroupBuyActivityById, isWithdrawalLocked } from "../utils/calculations";
-import { formatDealFactorLabel } from "../utils/discountPercentFormat";
+import { getGroupBuyActivityById, formatCurrency, isWithdrawalLocked } from "../utils/calculations";
 import { getGroupBuyActivityStore } from "../utils/groupBuyActivityStores";
 import { getGroupBuyActivityJoinAction } from "../utils/groupBuyActivityJoinState";
 import { getGroupBuyActivityProgress } from "../utils/groupBuyActivityProgress";
@@ -35,7 +30,7 @@ export function GroupBuyActivityDetailScreen({ navigation, route, appState, acti
       >
         <ActivitySyncNotice status={activitySyncStatus} onRetry={retryActivitySync} />
         <Section title="目前沒有團購資料">
-          <EmptyPanel>團購已清空，或目前尚未有商家建立活動。</EmptyPanel>
+          <Text style={styles.meta}>團購已清空，或目前尚未有商家建立活動。</Text>
           <PrimaryButton label="返回首頁" variant="secondary" onPress={() => navigation.replace("nearby")} />
         </Section>
       </MobileScreen>
@@ -60,14 +55,14 @@ export function GroupBuyActivityDetailScreen({ navigation, route, appState, acti
     >
       <ActivitySyncNotice status={activitySyncStatus} onRetry={retryActivitySync} />
       <Section title="店家資訊">
-        <Card>
-          <View style={styles.rowBetween}>
-            <Text style={[styles.title, styles.flex]}>{store?.name ?? "店家資料未提供"}</Text>
-            <StatusBadge value={groupBuyActivity.status} />
+        <View style={styles.rowBetween}>
+          <View style={styles.flex}>
+            <Text style={styles.title}>{store?.name ?? "店家資料未提供"}</Text>
+            <Text style={styles.meta}>{store?.address || "地址未提供"}</Text>
+            {store?.phone ? <Text style={styles.meta}>{store.phone}</Text> : null}
           </View>
-          <Text style={styles.meta}>{store?.address || "地址未提供"}</Text>
-          {store?.phone ? <Text style={styles.meta}>{store.phone}</Text> : null}
-        </Card>
+          <StatusBadge value={groupBuyActivity.status} />
+        </View>
       </Section>
 
       <Section title="目前進度">
@@ -79,48 +74,40 @@ export function GroupBuyActivityDetailScreen({ navigation, route, appState, acti
           remainingTimeText={groupBuyActivity.remainingTimeText}
         />
         <DiscountSummaryCard groupBuyActivity={groupBuyActivity} />
-        <View style={styles.schedule}>
-          <Text style={styles.meta}>截止：{groupBuyActivity.endTime}</Text>
-          <Text style={styles.meta}>取貨：{groupBuyActivity.pickupTime}</Text>
-        </View>
+        <Text style={styles.meta}>截止：{groupBuyActivity.endTime}</Text>
+        <Text style={styles.meta}>取貨：{groupBuyActivity.pickupTime}</Text>
       </Section>
 
       <Section title="杯數級距">
         {groupBuyActivity.tiers.map((tier) => (
           <View key={tier.cups} style={styles.tierRow}>
             <Text style={styles.tierText}>滿 {tier.cups} 杯</Text>
-            <Text style={styles.tierValue}>打 {formatDealFactorLabel(tier.discountPercent) || "—"}</Text>
+            <Text style={styles.tierValue}>折 {formatCurrency(tier.discountAmount)}</Text>
           </View>
         ))}
       </Section>
 
       <Section title="注意事項">
-        {withdrawalLocked ? <Notice tone="warning" message="目前距截止時間 30 分鐘內：仍可加入，既有訂單只能增加飲料，不能減少或退出。" /> : null}
-        {groupBuyActivity.cancellationReason ? <Notice tone="danger" message={`取消原因：${groupBuyActivity.cancellationReason}`} /> : null}
-        {groupBuyActivity.notices.length > 0 ? (
-          <View style={styles.notes}>
-            {groupBuyActivity.notices.map((notice) => <Text key={notice} style={styles.meta}>· {notice}</Text>)}
-          </View>
-        ) : null}
+        {withdrawalLocked ? <Text style={styles.lockNotice}>目前距截止時間 30 分鐘內：仍可加入，既有訂單只能增加飲料，不能減少或退出。</Text> : null}
+        {groupBuyActivity.cancellationReason ? <Text style={styles.warning}>取消原因：{groupBuyActivity.cancellationReason}</Text> : null}
+        {groupBuyActivity.notices.map((notice) => <Text key={notice} style={styles.meta}>· {notice}</Text>)}
       </Section>
 
-      <View style={styles.actions}>
-        <PrimaryButton
-          label={joinAction.label}
-          onPress={() => {
-            if (joinAction.target === "customerOrders") {
-              navigation.go("customerOrders");
-            } else if (joinAction.target === "drinkSelection") {
-              navigation.go("drinkSelection", { groupBuyActivityId: groupBuyActivity.id });
-            }
-          }}
-        />
-        <PrimaryButton
-          label="查看團購進度"
-          variant="secondary"
-          onPress={() => navigation.go("groupProgress", { groupBuyActivityId: groupBuyActivity.id })}
-        />
-      </View>
+      <PrimaryButton
+        label={joinAction.label}
+        onPress={() => {
+          if (joinAction.target === "customerOrders") {
+            navigation.go("customerOrders");
+          } else if (joinAction.target === "drinkSelection") {
+            navigation.go("drinkSelection", { groupBuyActivityId: groupBuyActivity.id });
+          }
+        }}
+      />
+      <PrimaryButton
+        label="查看團購進度"
+        variant="secondary"
+        onPress={() => navigation.go("groupProgress", { groupBuyActivityId: groupBuyActivity.id })}
+      />
     </MobileScreen>
   );
 }
@@ -129,45 +116,46 @@ const styles = StyleSheet.create({
   rowBetween: {
     flexDirection: "row",
     justifyContent: "space-between",
-    gap: spacing.s12
+    gap: 10
   },
   flex: {
     flex: 1
   },
   title: {
-    ...typeScale.sectionTitle,
-    color: colors.text
+    color: "#0f172a",
+    fontSize: 18,
+    fontWeight: "900"
   },
   meta: {
-    ...typeScale.body,
-    color: colors.textSecondary
+    color: "#475569",
+    fontSize: 14,
+    lineHeight: 21
   },
-  schedule: {
-    gap: spacing.s4
+  warning: {
+    color: "#b42318",
+    fontSize: 14,
+    fontWeight: "800"
+  },
+  lockNotice: {
+    color: "#b45309",
+    fontSize: 13,
+    fontWeight: "900"
   },
   tierRow: {
-    minHeight: sizes.tap,
+    minHeight: 48,
     flexDirection: "row",
     alignItems: "center",
     justifyContent: "space-between",
-    borderRadius: radii.sm,
-    backgroundColor: colors.recess,
-    paddingHorizontal: spacing.s16
+    borderRadius: 14,
+    backgroundColor: "#f8fafc",
+    paddingHorizontal: 14
   },
   tierText: {
-    ...typeScale.body,
-    color: colors.text
+    color: "#334155",
+    fontWeight: "800"
   },
   tierValue: {
-    ...typeScale.body,
-    fontWeight: typeScale.label.fontWeight,
-    color: colors.accentInk
-  },
-  notes: {
-    gap: spacing.s8
-  },
-  // MobileScreen leaves 24 between its direct children; the two buttons belong together.
-  actions: {
-    gap: spacing.s12
+    color: "#1f6feb",
+    fontWeight: "900"
   }
 });

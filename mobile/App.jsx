@@ -1,22 +1,14 @@
 import { StatusBar } from "expo-status-bar";
-import { useState } from "react";
 import { Platform, StyleSheet, View } from "react-native";
 import { SafeAreaProvider, SafeAreaView } from "react-native-safe-area-context";
 import { AppNavigator } from "./src/navigation/AppNavigator";
-import { LEGACY_PAGE_COLOR } from "./src/theme/milkTeaRoutes";
-import { colors } from "./src/theme/tokens";
 
 export default function App() {
-  // AppNavigator reports whether the current route is a migrated one, so the area behind the status
-  // bar and the system navigation bar (the safe-area insets) always matches the screen's own colour.
-  const [milkTea, setMilkTea] = useState(false);
-  const pageColor = milkTea ? colors.page : LEGACY_PAGE_COLOR;
-
   const app = (
     <SafeAreaProvider>
-      <SafeAreaView style={[styles.safeArea, { backgroundColor: pageColor }]} edges={["top", "bottom", "left", "right"]}>
-        <StatusBar style="dark" backgroundColor={pageColor} translucent={false} />
-        <AppNavigator onMilkTeaChange={setMilkTea} />
+      <SafeAreaView style={styles.safeArea} edges={["top", "bottom", "left", "right"]}>
+        <StatusBar style="dark" backgroundColor="#f6f8fb" translucent={false} />
+        <AppNavigator />
       </SafeAreaView>
     </SafeAreaProvider>
   );
@@ -34,7 +26,7 @@ export default function App() {
             white-space: nowrap;
           }
         `}</style>
-        <View style={[styles.phoneFrame, { backgroundColor: pageColor }]}>
+        <View style={styles.phoneFrame}>
           {app}
         </View>
       </View>
@@ -48,7 +40,8 @@ export default function App() {
 
 const styles = StyleSheet.create({
   safeArea: {
-    flex: 1
+    flex: 1,
+    backgroundColor: "#f6f8fb"
   },
   webPreview: {
     flex: 1,
@@ -63,6 +56,7 @@ const styles = StyleSheet.create({
     maxHeight: "100%",
     borderRadius: 30,
     overflow: "hidden",
+    backgroundColor: "#f6f8fb",
     borderWidth: 3,
     borderColor: "#020617",
     shadowColor: "#000000",

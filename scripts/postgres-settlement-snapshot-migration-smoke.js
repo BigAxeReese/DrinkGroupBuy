@@ -5,29 +5,28 @@ const fs = require("node:fs");
 const path = require("node:path");
 const { Client } = require("pg");
 
-// 2026-09-18: this script originally verified migration 003's floor-per-cup snapshot columns
-// (discount_per_cup / allocated_discount_amount / undistributed_discount_amount). Migration 008
-// replaced the flat-amount discount model with a percentage one and DROPPED those columns
-// outright (no per-order pool to allocate any more), so this script now verifies migration 008's
-// shape instead: discount_percent / total_discount_amount alongside the still-present
-// discount_funder / calculation_version columns from 003.
 const migrationPath = path.join(
   __dirname,
   "..",
   "database",
   "migrations",
-  "008_percentage_discount_postgres.sql"
+  "003_activity_settlement_discount_snapshot_postgres.sql"
 );
 const snapshotColumns = [
+  "allocated_discount_amount",
   "calculation_version",
   "discount_funder",
-  "discount_percent",
-  "total_discount_amount"
+  "discount_per_cup",
+  "undistributed_discount_amount"
 ];
 const snapshotConstraints = [
+  "activity_settlements_allocated_discount_nonnegative",
   "activity_settlements_calculation_version_present",
+  "activity_settlements_discount_allocation_consistent",
   "activity_settlements_discount_funder_valid",
-  "activity_settlements_discount_percent_check"
+  "activity_settlements_discount_per_cup_nonnegative",
+  "activity_settlements_discount_total_consistent",
+  "activity_settlements_undistributed_discount_nonnegative"
 ];
 
 async function main() {
@@ -48,12 +47,22 @@ async function main() {
       assert.deepEqual(
         existingColumns,
         snapshotColumns,
-        "percentage-discount migration is only partially applied"
+        "snapshot migration is only partially applied"
       );
     }
 
     assert.deepEqual(await getSnapshotColumns(client), snapshotColumns);
     assert.deepEqual(await getSnapshotConstraints(client), snapshotConstraints);
+
+    const backfillCheck = await client.query(`
+      SELECT count(*)::integer AS invalid_count
+      FROM activity_settlements
+      WHERE allocated_discount_amount::bigint + undistributed_discount_amount::bigint
+            <> discount_amount::bigint
+         OR allocated_discount_amount::bigint
+            <> discount_per_cup::bigint * authorized_cups::bigint
+    `);
+    assert.equal(backfillCheck.rows[0].invalid_count, 0);
 
     const store = await client.query("SELECT id FROM stores ORDER BY id LIMIT 1");
     const user = await client.query("SELECT id FROM users ORDER BY id LIMIT 1");
@@ -88,46 +97,50 @@ async function main() {
       now
     ]);
     await client.query(`
-      INSERT INTO promotion_tiers (id, activity_id, target_cups, discount_percent, sort_order)
-      VALUES ($1, $2, 3, 30, 0)
+      INSERT INTO promotion_tiers (id, activity_id, target_cups, discount_amount, sort_order)
+      VALUES ($1, $2, 3, 100, 0)
     `, [tierId, activityId]);
     await client.query(`
       INSERT INTO activity_settlements (
         id, activity_id, outcome, authorized_cups, applied_tier_id,
-        total_discount_amount, discount_percent, discount_funder, calculation_version,
+        discount_amount, discount_per_cup, allocated_discount_amount,
+        undistributed_discount_amount, discount_funder, calculation_version,
         settled_at, reason
-      ) VALUES ($1, $2, 'qualified', 3, $3, 58, 30,
-        'merchant', 'percentage_v1', $4, 'migration_smoke')
+      ) VALUES ($1, $2, 'qualified', 3, $3, 100, 33, 99, 1,
+        'merchant', 'floor_per_cup_v1', $4, 'migration_smoke')
     `, [settlementId, activityId, tierId, now]);
 
     const snapshot = await client.query(`
-      SELECT total_discount_amount, discount_percent, discount_funder, calculation_version
+      SELECT discount_per_cup, allocated_discount_amount,
+             undistributed_discount_amount, discount_funder, calculation_version
       FROM activity_settlements
       WHERE id = $1
     `, [settlementId]);
     assert.deepEqual(snapshot.rows[0], {
-      total_discount_amount: 58,
-      discount_percent: 30,
+      discount_per_cup: 33,
+      allocated_discount_amount: 99,
+      undistributed_discount_amount: 1,
       discount_funder: "merchant",
-      calculation_version: "percentage_v1"
+      calculation_version: "floor_per_cup_v1"
     });
 
     await client.query("SAVEPOINT invalid_snapshot");
-    let outOfRangePercentRejected = false;
+    let inconsistentSnapshotRejected = false;
     try {
       await client.query(`
         UPDATE activity_settlements
-        SET discount_percent = 150
+        SET allocated_discount_amount = 100,
+            undistributed_discount_amount = 0
         WHERE id = $1
       `, [settlementId]);
     } catch (error) {
-      outOfRangePercentRejected = error.code === "23514";
+      inconsistentSnapshotRejected = error.code === "23514";
       await client.query("ROLLBACK TO SAVEPOINT invalid_snapshot");
     }
-    assert.equal(outOfRangePercentRejected, true, "a discount_percent outside 1-99 must be rejected");
+    assert.equal(inconsistentSnapshotRejected, true, "inconsistent snapshot must be rejected");
 
     console.log("PostgreSQL settlement snapshot migration smoke passed.");
-    console.log("snapshot: percent=30, total_discount=58, funder=merchant, version=percentage_v1");
+    console.log("snapshot: per_cup=33, allocated=99, undistributed=1, funder=merchant");
     console.log("transaction: rolled_back=true");
   } finally {
     await client.query("ROLLBACK");

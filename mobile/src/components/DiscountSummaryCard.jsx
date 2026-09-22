@@ -1,51 +1,37 @@
 import { StyleSheet, Text, View } from "react-native";
-import { useMilkTea } from "../theme/MilkTeaContext";
-import { maxFontSizeMultiplier, radii, spacing, tones, typeScale } from "../theme/tokens";
-import { formatDealFactorLabel } from "../utils/discountPercentFormat";
+import { formatCurrency } from "../utils/calculations";
 import { getGroupBuyActivityDiscountInfo } from "../utils/groupBuyActivityProgress";
 
-// Migrated routes get the new style: an estimated discount uses the "estimate" tone, a settled one
-// the "success" tone (docs/ui-style-guide.md, see theme/MilkTeaContext.js). The old blue / green
-// card below stays until the last screen has migrated.
 export function DiscountSummaryCard({ groupBuyActivity, compact = false }) {
-  const milkTea = useMilkTea();
   const discount = getGroupBuyActivityDiscountInfo(groupBuyActivity);
   const isFinal = discount.isQualified && !discount.isEstimated;
-  const dealFactorLabel = formatDealFactorLabel(discount.currentTierDiscountPercent);
   const heading = discount.isQualified
-    ? `${discount.isEstimated ? "預估" : "最終"}打 ${dealFactorLabel || "—"}`
+    ? `${discount.isEstimated ? "預估" : "最終"}每杯折 ${formatCurrency(discount.estimatedDiscountPerCup)}`
     : "尚未達到優惠門檻";
   const tierText = discount.isQualified
-    ? `目前 ${discount.currentCups} 杯，達到 ${discount.currentTierTargetCups} 杯級距`
+    ? `目前 ${discount.currentCups} 杯，達到 ${discount.currentTierTargetCups} 杯級距（總折扣 ${formatCurrency(discount.currentTierDiscountAmount)}）`
     : discount.nextTierTargetCups
       ? `再 ${discount.cupsToNextTier} 杯達到 ${discount.nextTierTargetCups} 杯級距`
       : "目前沒有可套用的優惠級距";
-
-  if (milkTea) {
-    const tone = tones[isFinal ? "success" : "estimate"];
-    return (
-      <View style={[milkTeaStyles.card, { backgroundColor: tone.bg }]}>
-        <Text maxFontSizeMultiplier={maxFontSizeMultiplier} style={[milkTeaStyles.heading, { color: tone.fg }]}>{heading}</Text>
-        <Text style={[milkTeaStyles.meta, { color: tone.fg }]}>{tierText}</Text>
-        {!compact && discount.isEstimated ? (
-          <Text style={[milkTeaStyles.note, { color: tone.fg }]}>截止前為預估值，實際折扣依每筆訂單自己的金額結算。</Text>
-        ) : null}
-        {!compact && isFinal ? (
-          <Text style={[milkTeaStyles.note, { color: tone.fg }]}>已結算，此折數為最終折扣，不會再變動。</Text>
-        ) : null}
-      </View>
-    );
-  }
+  const allocationLabel = discount.isEstimated ? "預估分配" : "實際分配";
 
   return (
     <View style={[styles.card, compact && styles.compactCard, isFinal && styles.finalCard]}>
       <Text style={[styles.heading, isFinal && styles.finalHeading]}>{heading}</Text>
       <Text style={styles.meta}>{tierText}</Text>
+      {discount.isQualified && !compact ? (
+        <Text style={styles.meta}>
+          {allocationLabel} {formatCurrency(discount.estimatedAllocatedDiscountAmount)}
+          {discount.estimatedUndistributedDiscountAmount > 0
+            ? ` · 未分配尾差 ${formatCurrency(discount.estimatedUndistributedDiscountAmount)}（退回商家）`
+            : " · 無未分配尾差"}
+        </Text>
+      ) : null}
       {!compact && discount.isEstimated ? (
-        <Text style={styles.notice}>截止前為預估值，實際折扣依每筆訂單自己的金額結算。</Text>
+        <Text style={styles.notice}>截止前為預估值，將依最終有效授權杯數重新計算。</Text>
       ) : null}
       {!compact && isFinal ? (
-        <Text style={styles.finalNotice}>已結算，此折數為最終折扣，不會再變動。</Text>
+        <Text style={styles.finalNotice}>已結算，此金額為最終折扣，不會再變動。</Text>
       ) : null}
     </View>
   );
@@ -91,23 +77,5 @@ const styles = StyleSheet.create({
     fontSize: 11,
     fontWeight: "700",
     lineHeight: 16
-  }
-});
-
-const milkTeaStyles = StyleSheet.create({
-  card: {
-    gap: spacing.s4,
-    paddingVertical: spacing.s12,
-    paddingHorizontal: spacing.s16,
-    borderRadius: radii.sm
-  },
-  heading: {
-    ...typeScale.sectionTitle
-  },
-  meta: {
-    ...typeScale.bodyDense
-  },
-  note: {
-    ...typeScale.caption
   }
 });

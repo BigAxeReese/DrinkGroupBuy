@@ -1,14 +1,8 @@
 import { useEffect, useRef, useState } from "react";
 import { AppState, Linking, Platform, Pressable, StyleSheet, Text, View } from "react-native";
-import { Card } from "../components/Card";
-import { CheckRow } from "../components/CheckRow";
-import { EmptyPanel } from "../components/EmptyPanel";
 import { MobileScreen, Section } from "../components/MobileScreen";
-import { Notice } from "../components/Notice";
 import { PrimaryButton } from "../components/PrimaryButton";
 import { StatusBadge } from "../components/StatusBadge";
-import { ValueRow } from "../components/ValueRow";
-import { colors, maxFontSizeMultiplier, radii, sizes, spacing, tones, typeScale } from "../theme/tokens";
 import { formatCurrency } from "../utils/calculations";
 import { getManualRepaymentStateInfo } from "../utils/manualRepayment";
 import {
@@ -130,7 +124,7 @@ export function PaymentAuthorizationScreen({ navigation, route, appState, action
         onMemberPress={memberAction}
       >
         <Section title="目前沒有付款資料">
-          <EmptyPanel>訂單已清空，送出購物車後才會建立 LINE Pay 預授權。</EmptyPanel>
+          <Text style={styles.meta}>訂單已清空，送出購物車後才會建立 LINE Pay 預授權。</Text>
         </Section>
       </MobileScreen>
     );
@@ -153,57 +147,63 @@ export function PaymentAuthorizationScreen({ navigation, route, appState, action
       onMemberPress={memberAction}
     >
       <Section title={isManualRepayment ? "付款狀態" : "預授權狀態"}>
-        <Card>
-          <StatusBadge owner="payment" value={payment.status} />
-          <Text maxFontSizeMultiplier={maxFontSizeMultiplier} style={styles.amount}>{formatCurrency(isManualRepayment ? (manualRepayment?.finalAmount ?? payment.finalAmount ?? payment.originalAmount) : payment.originalAmount)}</Text>
-          {isManualRepayment ? (
-            <View style={styles.metaGroup}>
-              <Text style={styles.meta}>{repaymentState.statusText}</Text>
-              {manualRepayment?.reason !== "manual_repayment_expired" ? (
-                <Text style={styles.meta}>可付款至 {formatRepaymentCutoff(manualRepayment?.cutoffAt)}。</Text>
-              ) : null}
-            </View>
-          ) : (
-            <View style={styles.metaGroup}>
-              <Text style={styles.meta}>目前僅預授權，尚未正式扣款。</Text>
-              <Text style={styles.meta}>達標後將依優惠價請款。</Text>
-            </View>
-          )}
-        </Card>
+        <StatusBadge owner="payment" value={payment.status} />
+        <Text style={styles.amount}>{formatCurrency(isManualRepayment ? (manualRepayment?.finalAmount ?? payment.finalAmount ?? payment.originalAmount) : payment.originalAmount)}</Text>
+        {isManualRepayment ? (
+          <>
+            <Text style={styles.meta}>{repaymentState.statusText}</Text>
+            {manualRepayment?.reason !== "manual_repayment_expired" ? (
+              <Text style={styles.meta}>可付款至 {formatRepaymentCutoff(manualRepayment?.cutoffAt)}。</Text>
+            ) : null}
+          </>
+        ) : (
+          <>
+            <Text style={styles.meta}>目前僅預授權，尚未正式扣款。</Text>
+            <Text style={styles.meta}>達標後將依優惠價請款。</Text>
+          </>
+        )}
       </Section>
 
       <Section title="授權金額">
-        <Card compact>
+        <View style={styles.providerCard}>
           <Text style={styles.providerName}>LINE Pay</Text>
           <Text style={styles.providerMeta}>付款對象：{payment.recipientName}</Text>
-        </Card>
+        </View>
         <View style={styles.amountRows}>
           <AmountRow label="訂單原價" value={payment.originalAmount} />
-          <AmountRow emphasis label="已授權金額" value={payment.authorizedAmount} />
+          <AmountRow label="已授權金額" value={payment.authorizedAmount} />
         </View>
       </Section>
 
       {needsPickupRuleConsent ? (
         <Section title="付款前確認">
           {pickupRuleStatus === "loading" ? (
-            <EmptyPanel>正在載入取餐與逾期未取規則...</EmptyPanel>
+            <Text style={styles.meta}>正在載入取餐與逾期未取規則...</Text>
           ) : null}
           {pickupRuleStatus === "error" ? (
-            <Notice accessibilityRole="alert" tone="danger" message="規則載入失敗，為避免未經同意付款，目前不能建立預授權。">
-              {pickupRuleMessage ? <Text style={styles.noticeDetail}>{pickupRuleMessage}</Text> : null}
+            <>
+              <Text style={styles.errorText}>規則載入失敗，為避免未經同意付款，目前不能建立預授權。</Text>
+              {pickupRuleMessage ? <Text style={styles.meta}>{pickupRuleMessage}</Text> : null}
               <PrimaryButton
                 label="重新載入規則"
                 variant="secondary"
-                style={styles.retry}
                 onPress={() => setPickupRuleReloadKey((value) => value + 1)}
               />
-            </Notice>
+            </>
           ) : null}
           {pickupRuleStatus === "ready" && pickupRule ? (
-            <Card compact style={pickupRuleAccepted && styles.consentAccepted}>
-              <CheckRow checked={pickupRuleAccepted} onToggle={() => setPickupRuleAccepted((value) => !value)}>
-                {`我已閱讀並同意「${pickupRule.title}」`}
-              </CheckRow>
+            <View style={[styles.ruleConsentRow, pickupRuleAccepted && styles.ruleConsentRowActive]}>
+              <Pressable
+                accessibilityRole="checkbox"
+                accessibilityState={{ checked: pickupRuleAccepted }}
+                onPress={() => setPickupRuleAccepted((value) => !value)}
+                style={({ pressed }) => [styles.ruleConsentCheckboxRow, pressed && styles.pressed]}
+              >
+                <View style={[styles.checkbox, pickupRuleAccepted && styles.checkboxActive]}>
+                  <Text style={styles.checkboxMark}>{pickupRuleAccepted ? "✓" : ""}</Text>
+                </View>
+                <Text style={styles.ruleConsentTitle}>我已閱讀並同意「{pickupRule.title}」</Text>
+              </Pressable>
               <Pressable
                 accessibilityRole="button"
                 accessibilityLabel={pickupRuleContentExpanded ? "收合規則全文" : "展開閱讀規則全文"}
@@ -215,12 +215,8 @@ export function PaymentAuthorizationScreen({ navigation, route, appState, action
                 style={({ pressed }) => [styles.ruleConsentToggleRow, pressed && styles.pressed]}
               >
                 <Text style={styles.ruleConsentToggleText}>
-                  {pickupRuleContentExpanded ? "收合規則全文" : "展開閱讀規則全文"}
+                  {pickupRuleContentExpanded ? "收合規則全文 ▲" : "展開閱讀規則全文 ▼"}
                 </Text>
-                <View
-                  importantForAccessibility="no-hide-descendants"
-                  style={[styles.chevron, pickupRuleContentExpanded && styles.chevronUp]}
-                />
               </Pressable>
               {pickupRuleContentExpanded ? (
                 <View style={styles.ruleConsentTextGroup}>
@@ -229,34 +225,34 @@ export function PaymentAuthorizationScreen({ navigation, route, appState, action
                 </View>
               ) : null}
               {pickupRuleAccepted && !pickupRuleContentViewed ? (
-                <Notice tone="warning" message="請先展開閱讀規則全文，再進行付款。" />
+                <Text style={styles.ruleConsentHint}>請先展開閱讀規則全文，再進行付款。</Text>
               ) : null}
-            </Card>
+            </View>
           ) : null}
         </Section>
       ) : null}
 
       <Section title="LINE Pay">
         {linePayMessage ? (
-          <MessageNotice isError={linePayStatus === "error"} message={linePayMessage} />
+          <Text style={linePayStatus === "error" ? styles.errorText : styles.successText}>{linePayMessage}</Text>
         ) : null}
         {deepLinkResultMessage ? (
-          <MessageNotice isError={deepLinkResultMessage.type === "error"} message={deepLinkResultMessage.message} />
+          <Text style={deepLinkResultMessage.type === "error" ? styles.errorText : styles.successText}>
+            {deepLinkResultMessage.message}
+          </Text>
         ) : null}
         {!isAuthorized && !isCaptured ? (
           <>
-            <View style={styles.metaGroup}>
-              <Text style={styles.meta}>
-                {isManualRepayment
-                  ? "此按鈕會開啟 LINE Pay，並以結算後金額直接付款。"
-                  : "點擊後會開啟 LINE Pay 付款頁，完成授權即完成加入團購的付款程序。"}
-              </Text>
-              <Text style={styles.meta}>
-                {isManualRepayment
-                  ? "付款成功後會自動更新訂單並加入店家製作清單。"
-                  : "完成後畫面會自動更新付款狀態。"}
-              </Text>
-            </View>
+            <Text style={styles.meta}>
+              {isManualRepayment
+                ? "此按鈕會開啟 LINE Pay，並以結算後金額直接付款。"
+                : "點擊後會開啟 LINE Pay 付款頁，完成授權即完成加入團購的付款程序。"}
+            </Text>
+            <Text style={styles.meta}>
+              {isManualRepayment
+                ? "付款成功後會自動更新訂單並加入店家製作清單。"
+                : "完成後畫面會自動更新付款狀態。"}
+            </Text>
             <PrimaryButton
               label={repaymentState?.disabled
                 ? repaymentState.disabledLabel
@@ -302,7 +298,7 @@ export function PaymentAuthorizationScreen({ navigation, route, appState, action
               }}
             />
             {syncMessage ? (
-              <MessageNotice isError={syncStatus === "error"} message={syncMessage} />
+              <Text style={syncStatus === "error" ? styles.errorText : styles.successText}>{syncMessage}</Text>
             ) : null}
           </>
         ) : null}
@@ -310,11 +306,9 @@ export function PaymentAuthorizationScreen({ navigation, route, appState, action
 
       {isCaptured ? (
         <Section title="請款結果">
-          <View style={styles.amountRows}>
-            <AmountRow label="優惠後金額" value={payment.finalAmount} />
-            <AmountRow emphasis label="實際請款金額" value={payment.captureAmount} />
-            <AmountRow label="已釋放差額" value={payment.releasedAmount} />
-          </View>
+          <AmountRow label="優惠後金額" value={payment.finalAmount} />
+          <AmountRow label="實際請款金額" value={payment.captureAmount} />
+          <AmountRow label="已釋放差額" value={payment.releasedAmount} />
         </Section>
       ) : null}
 
@@ -322,22 +316,20 @@ export function PaymentAuthorizationScreen({ navigation, route, appState, action
           customer must never be able to trigger it themselves. captureQualifiedPayment is a
           local-only prototype mock (no real backend call), kept as a dev-testing convenience;
           gated so it can't render or fire outside dev auth mode. */}
-      <View style={styles.actions}>
-        {!isManualRepayment && (isAuthorized || isCaptured) ? (
-          <PrimaryButton
-            label={isCaptured
-              ? "已完成優惠價請款"
-              : isDevAuthMode && canCapture
-                ? "模擬達標後部分請款"
-                : "等待達標後請款"}
-            onPress={() => {
-              if (isCaptured || !isDevAuthMode || !canCapture) return;
-              actions.captureQualifiedPayment(payment.orderId, payment.finalAmount ?? Math.round(payment.originalAmount * 0.83));
-            }}
-          />
-        ) : null}
-        <PrimaryButton label="前往取貨資訊" variant="secondary" onPress={() => navigation.go("pickupInfo", { orderId: payment.orderId })} />
-      </View>
+      {!isManualRepayment && (isAuthorized || isCaptured) ? (
+        <PrimaryButton
+          label={isCaptured
+            ? "已完成優惠價請款"
+            : isDevAuthMode && canCapture
+              ? "模擬達標後部分請款"
+              : "等待達標後請款"}
+          onPress={() => {
+            if (isCaptured || !isDevAuthMode || !canCapture) return;
+            actions.captureQualifiedPayment(payment.orderId, payment.finalAmount ?? Math.round(payment.originalAmount * 0.83));
+          }}
+        />
+      ) : null}
+      <PrimaryButton label="前往取貨資訊" variant="secondary" onPress={() => navigation.go("pickupInfo", { orderId: payment.orderId })} />
     </MobileScreen>
   );
 }
@@ -691,101 +683,151 @@ function buildLinePayProducts(order, payment, revisionPayment = null) {
   ];
 }
 
-function AmountRow({ label, value, emphasis = false }) {
-  return <ValueRow emphasis={emphasis} label={label} value={value == null ? "待計算" : formatCurrency(value)} />;
-}
-
-// Draws a result message; whether it is an error is still decided by the caller's own condition.
-function MessageNotice({ isError, message }) {
+function AmountRow({ label, value }) {
   return (
-    <Notice
-      accessibilityRole={isError ? "alert" : undefined}
-      message={message}
-      tone={isError ? "danger" : "success"}
-    />
+    <View style={styles.amountRow}>
+      <Text style={styles.amountLabel}>{label}</Text>
+      <Text style={styles.amountValue}>{value == null ? "待計算" : formatCurrency(value)}</Text>
+    </View>
   );
 }
 
 const styles = StyleSheet.create({
   amount: {
-    ...typeScale.amount,
-    color: colors.text
+    color: "#0f172a",
+    fontSize: 34,
+    fontWeight: "900"
   },
   meta: {
-    ...typeScale.body,
-    color: colors.textSecondary
+    color: "#475569",
+    fontSize: 14,
+    lineHeight: 21
   },
-  // Two explanation lines that read as one paragraph.
-  metaGroup: {
-    gap: spacing.s4
+  providerCard: {
+    gap: 6,
+    borderRadius: 16,
+    backgroundColor: "#ecfdf5",
+    borderWidth: 1,
+    borderColor: "#bbf7d0",
+    padding: 14
   },
   providerName: {
-    ...typeScale.price,
-    color: colors.text
+    color: "#06c755",
+    fontSize: 20,
+    fontWeight: "900"
   },
   providerMeta: {
-    ...typeScale.body,
-    color: colors.textSecondary
+    color: "#047857",
+    fontSize: 13,
+    fontWeight: "800"
+  },
+  successText: {
+    color: "#047857",
+    fontSize: 13,
+    fontWeight: "800",
+    lineHeight: 20
+  },
+  errorText: {
+    color: "#dc2626",
+    fontSize: 13,
+    fontWeight: "800",
+    lineHeight: 20
   },
   amountRows: {
-    gap: spacing.s8
+    gap: 8
   },
-  consentAccepted: {
-    borderColor: colors.accent
-  },
-  noticeDetail: {
-    ...typeScale.bodyDense,
-    color: tones.danger.fg
-  },
-  retry: {
-    alignSelf: "flex-start"
-  },
-  ruleConsentToggleRow: {
-    minHeight: sizes.tap,
-    alignSelf: "flex-start",
+  amountRow: {
+    minHeight: 42,
     flexDirection: "row",
     alignItems: "center",
-    gap: spacing.s8,
-    // Lines the link up under the label text: the checkbox (24) plus the gap (12) of CheckRow.
-    marginLeft: spacing.s24 + spacing.s12
+    justifyContent: "space-between",
+    borderRadius: 12,
+    backgroundColor: "#f8fafc",
+    paddingHorizontal: 12
+  },
+  amountLabel: {
+    color: "#475569",
+    fontSize: 13,
+    fontWeight: "800"
+  },
+  amountValue: {
+    color: "#0f172a",
+    fontSize: 15,
+    fontWeight: "900"
+  },
+  ruleConsentRow: {
+    gap: 10,
+    borderRadius: 14,
+    borderWidth: 1,
+    borderColor: "#cbd5e1",
+    backgroundColor: "#ffffff",
+    padding: 12
+  },
+  ruleConsentRowActive: {
+    borderColor: "#1f6feb",
+    backgroundColor: "#eff6ff"
+  },
+  ruleConsentCheckboxRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 10
+  },
+  ruleConsentToggleRow: {
+    alignSelf: "flex-start",
+    marginLeft: 32
   },
   ruleConsentToggleText: {
-    ...typeScale.bodyDense,
-    fontWeight: typeScale.label.fontWeight,
-    color: colors.accentInk
+    color: "#1f6feb",
+    fontSize: 12,
+    fontWeight: "700",
+    textDecorationLine: "underline"
   },
-  // A drawn chevron: two borders of a square, rotated. The margin re-centres the visible "v".
-  chevron: {
-    width: 10,
-    height: 10,
-    marginTop: -spacing.s4,
-    borderRightWidth: sizes.stroke,
-    borderBottomWidth: sizes.stroke,
-    borderColor: colors.accentInk,
-    transform: [{ rotate: "45deg" }]
+  checkbox: {
+    width: 22,
+    height: 22,
+    borderRadius: 6,
+    alignItems: "center",
+    justifyContent: "center",
+    borderWidth: 2,
+    borderColor: "#94a3b8",
+    backgroundColor: "#ffffff",
+    marginTop: 1
   },
-  chevronUp: {
-    marginTop: spacing.s4,
-    transform: [{ rotate: "-135deg" }]
+  checkboxActive: {
+    borderColor: "#1f6feb",
+    backgroundColor: "#1f6feb"
+  },
+  checkboxMark: {
+    color: "#ffffff",
+    fontSize: 13,
+    fontWeight: "900"
   },
   ruleConsentTextGroup: {
-    gap: spacing.s8,
-    padding: spacing.s16,
-    borderRadius: radii.sm,
-    backgroundColor: colors.recess
+    flex: 1,
+    gap: 7
+  },
+  ruleConsentTitle: {
+    flex: 1,
+    color: "#0f172a",
+    fontSize: 14,
+    fontWeight: "900"
   },
   ruleConsentContent: {
-    ...typeScale.body,
-    color: colors.text
+    color: "#475569",
+    fontSize: 12,
+    lineHeight: 19
   },
   ruleVersion: {
-    ...typeScale.caption,
-    color: colors.textSecondary
+    color: "#64748b",
+    fontSize: 10,
+    fontWeight: "700"
   },
-  actions: {
-    gap: spacing.s12
+  ruleConsentHint: {
+    color: "#b45309",
+    fontSize: 11,
+    fontWeight: "700"
   },
   pressed: {
-    opacity: 0.8
+    opacity: 0.72
   }
 });

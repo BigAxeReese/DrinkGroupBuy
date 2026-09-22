@@ -49,36 +49,18 @@ async function main() {
     );
     await database.query(
       `INSERT INTO promotion_tiers (
-        id, activity_id, target_cups, discount_percent, sort_order
-      ) VALUES ($1, $2, 10, 30, 0)`,
+        id, activity_id, target_cups, discount_amount, sort_order
+      ) VALUES ($1, $2, 10, 100, 0)`,
       [tierId, proofId]
     );
 
-    // 2026-09-18: this used to deliberately mix STORE_MENU_READ_RUNTIME=sqlite with
-    // GROUP_BUY_ACTIVITY_READ_RUNTIME=postgres, proving activity data was sourced from PostgreSQL
-    // even mid-migration. The project has since fully and permanently switched to PostgreSQL (see
-    // AGENTS.md), and server.js now refuses to start with a mixed runtime configuration at all --
-    // that scenario can no longer occur for real, so every runtime here is set to postgres to
-    // match how the system actually runs, keeping only the still-useful part of this proof: that
-    // GET /api/group-buy-activities really returns data read from PostgreSQL over real HTTP.
     backend = spawn(process.execPath, [path.join(repoRoot, "backend", "server.js")], {
       cwd: repoRoot,
       env: {
         ...process.env,
         PORT: String(port),
-        AUTH_PROFILE_READ_RUNTIME: "postgres",
-        STORE_MENU_READ_RUNTIME: "postgres",
+        STORE_MENU_READ_RUNTIME: "sqlite",
         GROUP_BUY_ACTIVITY_READ_RUNTIME: "postgres",
-        GROUP_BUY_ACTIVITY_WRITE_RUNTIME: "postgres",
-        MERCHANT_MENU_RUNTIME: "postgres",
-        CUSTOMER_ORDER_WRITE_RUNTIME: "postgres",
-        CUSTOMER_ORDER_READ_RUNTIME: "postgres",
-        PAYMENT_AUTHORIZATION_REQUEST_RUNTIME: "postgres",
-        PAYMENT_AUTHORIZATION_CONFIRM_RUNTIME: "postgres",
-        PAYMENT_AUTHORIZATION_CANCEL_RUNTIME: "postgres",
-        CUSTOMER_ORDER_CANCEL_RUNTIME: "postgres",
-        MERCHANT_ACTIVITY_CANCEL_RUNTIME: "postgres",
-        AUTH_SESSION_SECRET: "activity-postgres-http-smoke-secret",
         PAYMENT_RECONCILIATION_ENABLED: "false",
         SETTLEMENT_SCHEDULER_ENABLED: "false",
         PICKUP_EXPIRATION_SCHEDULER_ENABLED: "false",

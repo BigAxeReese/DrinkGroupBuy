@@ -15,12 +15,14 @@ test("final settlement snapshot exposes immutable activity and customer amounts"
     settlement: {
       outcome: "qualified",
       authorizedCups: 23,
-      discountPercent: 30,
+      discountPerCup: 8,
+      allocatedDiscountAmount: 184,
+      undistributedDiscountAmount: 16,
       settledAt: "2026-08-15T02:00:00.000Z"
     }
   }, {
     originalAmount: 150,
-    finalAmount: 105
+    finalAmount: 134
   });
 
   assert.deepEqual(snapshot, {
@@ -28,10 +30,12 @@ test("final settlement snapshot exposes immutable activity and customer amounts"
     outcome: "qualified",
     outcomeLabel: "已達優惠門檻",
     authorizedCups: 23,
-    discountPercent: 30,
+    discountPerCup: 8,
+    allocatedDiscountAmount: 184,
+    undistributedDiscountAmount: 16,
     originalAmount: 150,
-    finalAmount: 105,
-    orderDiscountAmount: 45,
+    finalAmount: 134,
+    orderDiscountAmount: 16,
     settledAt: "2026-08-15T02:00:00.000Z"
   });
 });
@@ -41,7 +45,9 @@ test("failed settlement keeps the original amount and reports zero discount", ()
     settlement: {
       outcome: "failed",
       authorizedCups: 8,
-      discountPercent: null
+      discountPerCup: 0,
+      allocatedDiscountAmount: 0,
+      undistributedDiscountAmount: 0
     }
   }, {
     subtotal: 80,
@@ -49,7 +55,6 @@ test("failed settlement keeps the original amount and reports zero discount", ()
   });
 
   assert.equal(snapshot.outcomeLabel, "未達優惠門檻");
-  assert.equal(snapshot.discountPercent, null);
   assert.equal(snapshot.orderDiscountAmount, 0);
   assert.equal(snapshot.finalAmount, 80);
 });

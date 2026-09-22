@@ -3,9 +3,9 @@
 const { randomUUID } = require("node:crypto");
 const { createRuntimeDatabaseAdapter } = require("..");
 const {
+  calculateGroupBuyDiscountSummary,
   calculateMinimumSellableUnitPrice,
   normalizeDiscountTiers,
-  resolveAppliedDiscountTier,
   validateDiscountTierConfiguration,
 } = require("../../pricing/groupBuyDiscount");
 const {
@@ -135,6 +135,7 @@ async function createPostgresGroupBuyActivity(database, input) {
     const tierValidation = validateDiscountTierConfiguration({
       tiers,
       maximumCups: tiers.at(-1)?.targetCups,
+      minimumSellableUnitPrice: menuPricing.minimumSellableUnitPrice,
     });
     if (!tierValidation.valid) return tierValidation;
     tiers = tierValidation.tiers.map((tier, index) => ({
@@ -176,9 +177,9 @@ async function createPostgresGroupBuyActivity(database, input) {
     for (const tier of tiers) {
       await transaction.query(`
         INSERT INTO promotion_tiers (
-          id, activity_id, target_cups, discount_percent, sort_order
+          id, activity_id, target_cups, discount_amount, sort_order
         ) VALUES ($1, $2, $3, $4, $5)
-      `, [tier.id, activityId, tier.targetCups, tier.discountPercent, tier.sortOrder]);
+      `, [tier.id, activityId, tier.targetCups, tier.discountAmount, tier.sortOrder]);
     }
 
     if (input.notice) {
@@ -223,6 +224,7 @@ async function createPostgresGroupBuyActivity(database, input) {
       activityId,
       JSON.stringify({
         idempotencyKey,
+        minimumSellableUnitPrice: menuPricing.minimumSellableUnitPrice,
         discountRanges: tierValidation.ranges,
       }),
       now,
@@ -332,7 +334,7 @@ async function readPostgresGroupBuyActivityById(database, activityId) {
       WHERE activity.id = $1
     `, [activityId]),
     database.query(`
-      SELECT id, activity_id, target_cups, discount_percent, sort_order
+      SELECT id, activity_id, target_cups, discount_amount, sort_order
       FROM promotion_tiers
       WHERE activity_id = $1
       ORDER BY target_cups ASC
@@ -353,12 +355,12 @@ async function readPostgresGroupBuyActivityById(database, activityId) {
     id: tier.id,
     targetCups: tier.target_cups,
     cups: tier.target_cups,
-    discountPercent: tier.discount_percent,
+    discountAmount: tier.discount_amount,
     sortOrder: tier.sort_order,
   }));
   const authorizedCups = Number(progressResult.rows[0]?.authorized_cups ?? 0);
   const participantCount = Number(progressResult.rows[0]?.participant_count ?? 0);
-  const discountSummary = resolveAppliedDiscountTier(activityTiers, authorizedCups);
+  const discountSummary = calculateGroupBuyDiscountSummary(activityTiers, authorizedCups);
   const firstTargetCups = activityTiers[0]?.targetCups ?? row.maximum_cups ?? 0;
   const displayStatus = row.status === "recruiting" && authorizedCups >= firstTargetCups
     ? "confirmed"
@@ -395,7 +397,7 @@ async function readPostgresGroupBuyActivityById(database, activityId) {
 function normalizeWriteTiers(tiers) {
   const source = Array.isArray(tiers) && tiers.length > 0
     ? tiers
-    : [{ targetCups: 20, discountPercent: 10 }];
+    : [{ targetCups: 20, discountAmount: 200 }];
   return normalizeDiscountTiers(source, { preserveInvalid: true });
 }
 

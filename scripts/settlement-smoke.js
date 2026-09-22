@@ -266,14 +266,14 @@ function insertScenario(database, scenario) {
         id,
         activity_id,
         target_cups,
-        discount_percent,
+        discount_amount,
         sort_order
       ) VALUES (?, ?, ?, ?, 1)
     `).run(
       scenario.tierId,
       scenario.activityId,
       scenario.targetCups,
-      scenario.discountPercent
+      scenario.discountAmount
     );
 
     (scenario.extraTiers || []).forEach((tier, index) => {
@@ -282,14 +282,14 @@ function insertScenario(database, scenario) {
           id,
           activity_id,
           target_cups,
-          discount_percent,
+          discount_amount,
           sort_order
         ) VALUES (?, ?, ?, ?, ?)
       `).run(
         `tier-${scenario.id}-extra-${index + 1}`,
         scenario.activityId,
         tier.targetCups,
-        tier.discountPercent,
+        tier.discountAmount,
         index + 2
       );
     });
@@ -318,7 +318,7 @@ function buildScenario(name, targetCups, orders, options = {}) {
     menuItemId: `menu-item-${id}`,
     tierId: `tier-${id}`,
     targetCups,
-    discountPercent: options.discountPercent ?? 30,
+    discountAmount: options.discountAmount ?? 30,
     maximumCups: options.maximumCups ?? 20,
     extraTiers: options.extraTiers || [],
     startAt: new Date(now - 60 * 60 * 1000).toISOString(),
@@ -451,12 +451,12 @@ async function main() {
         itemName: "青山烏龍拿鐵"
       }
     ], {
-      discountPercent: 20,
+      discountAmount: 31,
       maximumCups: 5,
       extraTiers: [
         {
           targetCups: 5,
-          discountPercent: 40
+          discountAmount: 80
         }
       ]
     });
@@ -559,10 +559,9 @@ async function main() {
       qualifiedSummary
     );
     assert(
-      qualifiedSummary.find((row) => row.id === qualifiedScenario.orders[0].id)?.capture_amount === 104
-        && qualifiedSummary.find((row) => row.id === qualifiedScenario.orders[1].id)?.capture_amount === 52,
-      "qualified settlement should apply the tier's discount percent to each order's own original amount"
-        + " (ceil(130*0.8)=104, ceil(65*0.8)=52)",
+      qualifiedSummary.find((row) => row.id === qualifiedScenario.orders[0].id)?.capture_amount === 110
+        && qualifiedSummary.find((row) => row.id === qualifiedScenario.orders[1].id)?.capture_amount === 55,
+      "qualified settlement should split total discount by actual authorized cups and keep remainder undistributed",
       qualifiedSummary
     );
     assert(

@@ -45,10 +45,10 @@ async function verifyPostgresPlanAndCompletion() {
   });
   assert.equal(plan.outcome, "qualified");
   assert.equal(plan.authorizedCups, 3);
-  assert.equal(plan.discountPercent, 30);
-  // Order original_amount=225 @ 7折 (discountPercent=30, pay 70%): ceil(225*0.7)=158, discount=67.
-  assert.equal(plan.totalDiscountAmount, 67);
-  assert.equal(plan.orders[0].captureAmount, 158);
+  assert.equal(plan.discountPerCup, 33);
+  assert.equal(plan.allocatedDiscountAmount, 99);
+  assert.equal(plan.undistributedDiscountAmount, 1);
+  assert.equal(plan.orders[0].captureAmount, 126);
   assert.equal(plan.neverPaidOrderCount, 2);
   assert.ok(calls.some((call) => call.sql.includes("FOR UPDATE OF order_record")));
   assert.ok(calls.some((call) => call.sql.includes("payment_status = 'pending'")));
@@ -58,20 +58,25 @@ async function verifyPostgresPlanAndCompletion() {
     outcome: plan.outcome,
     authorizedCups: plan.authorizedCups,
     appliedTierId: plan.appliedTier.id,
-    discountPercent: plan.discountPercent,
-    totalDiscountAmount: plan.totalDiscountAmount,
+    discountAmount: plan.appliedTier.discountAmount,
+    discountPerCup: plan.discountPerCup,
+    allocatedDiscountAmount: plan.allocatedDiscountAmount,
+    undistributedDiscountAmount: plan.undistributedDiscountAmount,
     discountFunder: plan.discountFunder,
     capturedOrderCount: 1,
     now: "2026-07-31T00:01:00.000Z",
   });
-  assert.equal(completion.settlement.discountPercent, 30);
-  assert.equal(completion.settlement.calculationVersion, "percentage_v1");
-  assert.ok(calls.some((call) => call.sql.includes("discount_percent")));
+  assert.equal(completion.settlement.discountPerCup, 33);
+  assert.equal(completion.settlement.calculationVersion, "floor_per_cup_v1");
+  assert.ok(calls.some((call) => call.sql.includes("discount_per_cup")));
 
   const invalid = await repository.completeSettlement({
     activityId: "activity-001",
     authorizedCups: 3,
-    totalDiscountAmount: 100,
+    discountAmount: 100,
+    discountPerCup: 33,
+    allocatedDiscountAmount: 98,
+    undistributedDiscountAmount: 2,
   });
   assert.equal(invalid.error, "settlement_discount_snapshot_inconsistent");
 }
@@ -142,7 +147,7 @@ function activityRow() {
 }
 
 function tierRow() {
-  return { id: "tier-001", target_cups: 3, discount_percent: 30, sort_order: 1 };
+  return { id: "tier-001", target_cups: 3, discount_amount: 100, sort_order: 1 };
 }
 
 function orderRow() {
@@ -159,6 +164,7 @@ function orderRow() {
     payment_provider: "mock_line_pay",
     provider_authorization_id: "transaction-001",
     authorized_amount: 75,
+    minimum_unit_price: 75,
   };
 }
 
@@ -169,10 +175,12 @@ function settlementRow() {
     outcome: "qualified",
     authorized_cups: 3,
     applied_tier_id: "tier-001",
-    total_discount_amount: 67,
-    discount_percent: 30,
+    discount_amount: 100,
+    discount_per_cup: 33,
+    allocated_discount_amount: 99,
+    undistributed_discount_amount: 1,
     discount_funder: "merchant",
-    calculation_version: "percentage_v1",
+    calculation_version: "floor_per_cup_v1",
     settled_at: new Date("2026-07-31T00:01:00.000Z"),
     reason: "deadline_settlement_completed",
   };

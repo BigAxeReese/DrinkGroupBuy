@@ -181,7 +181,7 @@ function createActivityBody() {
     pickupStartAt: pickupStart.toISOString(),
     pickupEndAt: pickupEnd.toISOString(),
     withdrawalLockMinutes: 30,
-    tiers: [{ targetCups: 10, discountPercent: 30 }],
+    tiers: [{ targetCups: 10, discountAmount: 100 }],
     notice: "PostgreSQL write source proof notice",
     idempotencyKey: proofKey,
   };

@@ -11,7 +11,7 @@ async function main() {
   await verifyPostgresTransactionContract();
   await verifyPostgresIdempotency();
   await verifyPostgresAccessBoundary();
-  await verifyPostgresDiscountPercentValidation();
+  await verifyPostgresDiscountBoundary();
   verifyRuntimeValidation();
   console.log("Group-buy activity write repository smoke test passed.");
 }
@@ -46,7 +46,7 @@ async function verifyPostgresTransactionContract() {
   assert.equal(activity.targetCups, 10);
   assert.equal(activity.maximumCups, 10);
   assert.equal(activity.nextTierTargetCups, 10);
-  assert.equal(activity.currentTierDiscountPercent, 0);
+  assert.equal(activity.estimatedDiscountPerCup, 0);
   assert.equal(activity.tiers.length, 1);
 
   const storeLockCall = calls.find((call) => (
@@ -66,7 +66,7 @@ async function verifyPostgresTransactionContract() {
   const auditCall = calls.find((call) => call.sql.includes("INSERT INTO audit_logs"));
   const auditMetadata = JSON.parse(auditCall.parameters[3]);
   assert.equal(auditMetadata.idempotencyKey, "activity-write-smoke");
-  assert.ok(Array.isArray(auditMetadata.discountRanges) && auditMetadata.discountRanges.length === 1);
+  assert.equal(auditMetadata.minimumSellableUnitPrice, 40);
   await repository.close();
 }
 
@@ -100,33 +100,16 @@ async function verifyPostgresAccessBoundary() {
   assert.equal(calls.some((call) => call.sql.includes("INSERT INTO")), false);
 }
 
-async function verifyPostgresDiscountPercentValidation() {
-  const invalidPercentCalls = [];
-  const invalidPercentRepository = createGroupBuyActivityWriteRepository({
+async function verifyPostgresDiscountBoundary() {
+  const calls = [];
+  const repository = createGroupBuyActivityWriteRepository({
     runtime: "postgres",
-    database: createFakePostgresDatabase(invalidPercentCalls),
+    database: createFakePostgresDatabase(calls, { basePrice: 5 }),
   });
-  const invalidPercentResult = await invalidPercentRepository.createActivity({
-    ...validInput(),
-    tiers: [{ targetCups: 10, discountPercent: 150 }],
-  });
-  assert.equal(invalidPercentResult.error, "discount_tier_invalid");
-  assert.equal(invalidPercentResult.reason, "tier_discount_percent_invalid");
-  assert.equal(
-    invalidPercentCalls.some((call) => call.sql.includes("INSERT INTO group_buy_activities")),
-    false
-  );
-
-  // Percentage discounts don't depend on menu prices at all (unlike the old flat-amount model),
-  // so a very low base_price must NOT block activity creation anymore.
-  const lowPriceCalls = [];
-  const lowPriceRepository = createGroupBuyActivityWriteRepository({
-    runtime: "postgres",
-    database: createFakePostgresDatabase(lowPriceCalls, { basePrice: 5 }),
-  });
-  const lowPriceResult = await lowPriceRepository.createActivity(validInput());
-  assert.equal(lowPriceResult.error, undefined);
-  assert.ok(lowPriceCalls.some((call) => call.sql.includes("INSERT INTO group_buy_activities")));
+  const result = await repository.createActivity(validInput());
+  assert.equal(result.error, "discount_tier_invalid");
+  assert.equal(result.reason, "discount_per_cup_exceeds_minimum_unit_price");
+  assert.equal(calls.some((call) => call.sql.includes("INSERT INTO group_buy_activities")), false);
 }
 
 function verifyRuntimeValidation() {
@@ -201,7 +184,7 @@ function createFakePostgresDatabase(calls, options = {}) {
         id: "tier-pg-10",
         activity_id: options.existingActivityId || "activity-created",
         target_cups: 10,
-        discount_percent: 30,
+        discount_amount: 100,
         sort_order: 0,
       }] };
     }
@@ -245,7 +228,7 @@ function validInput() {
     pickupStartAt: "2026-08-01T02:30:00.000Z",
     pickupEndAt: "2026-08-01T04:00:00.000Z",
     withdrawalLockMinutes: 30,
-    tiers: [{ targetCups: 10, discountPercent: 30 }],
+    tiers: [{ targetCups: 10, discountAmount: 100 }],
     notice: "寫入切片測試公告",
     idempotencyKey: "activity-write-smoke",
   };

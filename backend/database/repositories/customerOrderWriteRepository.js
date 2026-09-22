@@ -2,6 +2,10 @@
 
 const { randomUUID } = require("node:crypto");
 const { createRuntimeDatabaseAdapter } = require("..");
+const {
+  calculateDiscountPerCup,
+  findOrderDiscountConflicts,
+} = require("../../pricing/groupBuyDiscount");
 
 const defaultCustomizationRules = {
   sweetness: { minSelections: 1, maxSelections: 1 },
@@ -125,6 +129,13 @@ async function createPostgresCustomerOrder(database, input) {
         items: toAuthoritativeOrderItems(items),
       };
     }
+
+    const discountValidation = await validatePostgresOrderDiscount(
+      transaction,
+      activity.id,
+      items
+    );
+    if (!discountValidation.valid) return discountValidation;
 
     const capacityResult = await transaction.query(`
       SELECT COALESCE(SUM(total_cups), 0)::integer AS authorized_cups
@@ -372,6 +383,9 @@ async function updatePostgresPendingOrder(database, input) {
         items: toAuthoritativeOrderItems(items),
       };
     }
+
+    const discountValidation = await validatePostgresOrderDiscount(transaction, activity.id, items);
+    if (!discountValidation.valid) return discountValidation;
 
     const capacityResult = await transaction.query(`
       SELECT COALESCE(SUM(total_cups), 0)::integer AS authorized_cups
@@ -725,6 +739,35 @@ function normalizeRequestedCustomizationIds(item, options, itemIndex, issues) {
   return [...new Set(ids)];
 }
 
+async function validatePostgresOrderDiscount(database, activityId, items) {
+  const tiersResult = await database.query(`
+    SELECT id, target_cups, discount_amount, sort_order
+    FROM promotion_tiers
+    WHERE activity_id = $1
+    ORDER BY target_cups ASC, sort_order ASC
+    FOR SHARE
+  `, [activityId]);
+  const maximumDiscountPerCup = tiersResult.rows.reduce(
+    (maximum, tier) => Math.max(
+      maximum,
+      calculateDiscountPerCup(tier.discount_amount, tier.target_cups)
+    ),
+    0
+  );
+  const conflicts = findOrderDiscountConflicts(items, maximumDiscountPerCup);
+  if (conflicts.length === 0) {
+    return { valid: true, maximumDiscountPerCup };
+  }
+  return {
+    valid: false,
+    error: "order_discount_conflict",
+    reason: "order_unit_price_below_maximum_discount_per_cup",
+    activityId,
+    maximumDiscountPerCup,
+    issues: conflicts,
+  };
+}
+
 function toAuthoritativeOrderItems(items) {
   return items.map((item) => ({
     menuItemId: item.menuItemId,
@@ -747,4 +790,5 @@ module.exports = {
   pricePostgresOrderItems,
   resolveCustomerOrderWriteRuntime,
   updatePostgresPendingOrder,
+  validatePostgresOrderDiscount,
 };

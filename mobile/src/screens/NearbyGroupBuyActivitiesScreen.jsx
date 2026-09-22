@@ -4,12 +4,7 @@ import { ActivitySyncNotice } from "../components/ActivitySyncNotice";
 import { DistanceRadiusFilter } from "../components/DistanceRadiusFilter";
 import { MobileScreen, Section } from "../components/MobileScreen";
 import { DiscountSummaryCard } from "../components/DiscountSummaryCard";
-import { PearlStrip } from "../components/PearlStrip";
-import { StatusBadge } from "../components/StatusBadge";
-import { TonePill } from "../components/TonePill";
 import { useDevLocationConfig } from "../hooks/useDevLocationConfig";
-import { colors, maxFontSizeMultiplier, radii, sizes, spacing, typeScale } from "../theme/tokens";
-import { formatDealFactorLabel } from "../utils/discountPercentFormat";
 import { calculateDistanceKm, formatDistanceKm } from "../utils/distance";
 import { getGroupBuyActivityStore } from "../utils/groupBuyActivityStores";
 import { getGroupBuyActivityProgress } from "../utils/groupBuyActivityProgress";
@@ -88,16 +83,16 @@ export function NearbyGroupBuyActivitiesScreen({ navigation, appState, actions, 
   const activeProgress = activeGroupBuyActivity ? getGroupBuyActivityProgress(activeGroupBuyActivity) : null;
 
   return (
-    <MobileScreen>
-      <View style={styles.memberRow}>
-        <View style={styles.avatar}>
-          <Text style={styles.avatarText}>{(currentUserProfile?.displayName || "會").slice(0, 1)}</Text>
-        </View>
-        <View style={styles.memberInfo}>
-          <Text numberOfLines={1} style={styles.memberName}>{currentUserProfile?.displayName || "顧客"}</Text>
-          {currentUserProfile?.email ? (
-            <Text numberOfLines={1} style={styles.memberSubtitle}>{currentUserProfile.email}</Text>
-          ) : null}
+    <MobileScreen title="" compactHeader>
+      <View style={styles.hero}>
+        <View style={styles.heroTop}>
+          <View style={styles.avatar}>
+            <Text style={styles.avatarText}>{(currentUserProfile?.displayName || "會").slice(0, 1)}</Text>
+          </View>
+          <View style={styles.memberInfo}>
+            <Text style={styles.memberName}>{currentUserProfile?.displayName || "顧客"}</Text>
+            <Text style={styles.memberSubtitle}>{currentUserProfile?.email || ""}</Text>
+          </View>
         </View>
       </View>
 
@@ -106,52 +101,52 @@ export function NearbyGroupBuyActivitiesScreen({ navigation, appState, actions, 
         onRetry={() => actions.syncGroupBuyActivities().catch(() => {})}
       />
 
-      <View style={styles.sectionBlock}>
-        <View style={styles.sectionHeader}>
-          <Text accessibilityRole="header" style={styles.sectionTitle}>進行中的團購</Text>
-          {activeGroupBuyActivity ? (
-            <Pressable
-              accessibilityRole="button"
-              onPress={() => navigation.go("groupProgress", { groupBuyActivityId: activeGroupBuyActivity.id })}
-              style={styles.manageLink}
-            >
-              <Text style={styles.manageLinkText}>管理 &gt;</Text>
-            </Pressable>
-          ) : null}
-        </View>
+      <View style={styles.sectionHeader}>
+        <Text style={styles.sectionTitle}>進行中的團購</Text>
+        {activeGroupBuyActivity ? (
+          <Pressable accessibilityRole="button" onPress={() => navigation.go("groupProgress", { groupBuyActivityId: activeGroupBuyActivity.id })}>
+            <Text style={styles.manageLink}>管理 &gt;</Text>
+          </Pressable>
+        ) : null}
+      </View>
 
-        {activeGroupBuyActivity && activeProgress ? (
-          <Pressable
-            accessibilityRole="button"
-            onPress={() => navigation.go("groupBuyActivityDetail", { groupBuyActivityId: activeGroupBuyActivity.id })}
-            style={({ pressed }) => [styles.card, pressed && styles.pressed]}
-          >
-            <View style={styles.pillRow}>
-              <StatusBadge owner="groupBuyActivity" value={activeGroupBuyActivity.status} />
-              {activeGroupBuyActivity.remainingTimeText ? (
-                <TonePill tone="warning" label={activeGroupBuyActivity.remainingTimeText} />
-              ) : null}
+      {activeGroupBuyActivity && activeProgress ? (
+        <Pressable
+          accessibilityRole="button"
+          onPress={() => navigation.go("groupBuyActivityDetail", { groupBuyActivityId: activeGroupBuyActivity.id })}
+          style={({ pressed }) => [styles.activeCard, pressed && styles.pressed]}
+        >
+          <View style={styles.orangeRail} />
+          <View style={styles.activeContent}>
+            <View style={styles.cardHeader}>
+              <View style={styles.cardTitleGroup}>
+                <Text style={styles.groupBuyActivityTitle}>{activeGroupBuyActivity.title}</Text>
+                <Text style={styles.deadline}>{activeGroupBuyActivity.remainingTimeText}</Text>
+              </View>
+              <Text style={styles.cupCount}>
+                {activeProgress.currentCups} / {activeProgress.nextTarget}
+                <Text style={styles.cupUnit}> 杯</Text>
+              </Text>
             </View>
-            <Text style={styles.activityTitle}>{activeGroupBuyActivity.title}</Text>
-            <View style={styles.cupsRow}>
-              <PearlStrip capsule current={activeProgress.currentCups} target={activeProgress.nextTarget} />
-              <Text maxFontSizeMultiplier={maxFontSizeMultiplier} style={styles.cupCount}>{activeProgress.currentCups} / {activeProgress.nextTarget} 杯</Text>
+            <View style={styles.groupBuyActivityMetaRow}>
+              <Text style={styles.meta}>{getTargetSummary(activeGroupBuyActivity, activeProgress.nextTarget)}</Text>
+              <Text style={styles.meta}>剩餘 {activeProgress.remainingCups} 杯</Text>
             </View>
-            <Text style={styles.meta}>
-              {getTargetSummary(activeGroupBuyActivity, activeProgress.nextTarget)}・剩餘 {activeProgress.remainingCups} 杯
-            </Text>
+            <View style={styles.progressTrack}>
+              <View style={[styles.progressFill, { width: `${activeProgress.progressPercent}%` }]} />
+            </View>
             <DiscountSummaryCard compact groupBuyActivity={activeGroupBuyActivity} />
             <Text style={styles.storeLine}>
               {activeStore?.name ?? "店家資料未提供"} · {activeStore?.address || "地址未提供"}
             </Text>
-          </Pressable>
-        ) : (
-          <View style={styles.card}>
-            <Text style={styles.cardTitle}>目前沒有進行中的團購</Text>
-            <Text style={styles.meta}>加入團購後，進行中的訂單會顯示在這裡。</Text>
           </View>
-        )}
-      </View>
+        </Pressable>
+      ) : (
+        <View style={styles.emptyCard}>
+          <Text style={styles.emptyTitle}>目前沒有進行中的團購</Text>
+          <Text style={styles.emptyText}>加入團購後，進行中的訂單會顯示在這裡。</Text>
+        </View>
+      )}
 
       <Section title="附近熱門活動推薦">
         <DistanceRadiusFilter onChange={setRadiusKm} value={radiusKm} />
@@ -174,16 +169,13 @@ export function NearbyGroupBuyActivitiesScreen({ navigation, appState, actions, 
                     {distanceText ? ` · ${distanceText}` : ""}
                   </Text>
                 </View>
-                <View style={styles.recommendProgress}>
-                  <Text maxFontSizeMultiplier={maxFontSizeMultiplier} style={styles.recommendCups}>{progress.currentCups} / {progress.nextTarget} 杯</Text>
-                  <PearlStrip current={progress.currentCups} target={progress.nextTarget} />
-                </View>
+                <Text style={styles.recommendCups}>{progress.currentCups} / {progress.nextTarget} 杯</Text>
               </Pressable>
             );
           })}
           {recruitingGroupBuyActivitiesWithDistance.length === 0 ? (
-            <View style={styles.emptyRecommend}>
-              <Text style={styles.meta}>目前沒有招募中的團購。</Text>
+            <View style={styles.emptyRecommendCard}>
+              <Text style={styles.emptyRecommendText}>目前沒有招募中的團購。</Text>
             </View>
           ) : null}
         </View>
@@ -194,8 +186,8 @@ export function NearbyGroupBuyActivitiesScreen({ navigation, appState, actions, 
 
 function getTargetSummary(groupBuyActivity, targetCups) {
   const tier = (groupBuyActivity.tiers ?? []).find((item) => Number(item.cups ?? item.targetCups) === Number(targetCups));
-  const discountPercent = tier?.discountPercent ?? groupBuyActivity.tiers?.[0]?.discountPercent ?? 0;
-  return `目標：滿 ${targetCups} 杯打 ${formatDealFactorLabel(discountPercent) || "—"}`;
+  const discountAmount = tier?.discountAmount ?? groupBuyActivity.tiers?.[0]?.discountAmount ?? 0;
+  return `目標：滿 ${targetCups} 杯折 ${discountAmount}`;
 }
 
 function isVisibleRecruitingGroupBuyActivity(groupBuyActivity) {
@@ -214,138 +206,212 @@ function isOngoingJoinedGroupBuyActivity(groupBuyActivity) {
 }
 
 const styles = StyleSheet.create({
-  memberRow: {
+  hero: {
+    marginHorizontal: -14,
+    marginTop: -70,
+    paddingTop: 82,
+    paddingHorizontal: 18,
+    paddingBottom: 18,
+    backgroundColor: "#2f6df6",
+    gap: 18
+  },
+  heroTop: {
     flexDirection: "row",
     alignItems: "center",
-    gap: spacing.s12
+    gap: 12
   },
   avatar: {
-    width: sizes.tap,
-    height: sizes.tap,
-    borderRadius: radii.pill,
+    width: 50,
+    height: 50,
+    borderRadius: 25,
     alignItems: "center",
     justifyContent: "center",
-    backgroundColor: colors.recess
+    backgroundColor: "#facc15",
+    borderWidth: 3,
+    borderColor: "rgba(255,255,255,0.72)"
   },
   avatarText: {
-    ...typeScale.sectionTitle,
-    color: colors.text
+    color: "#1e3a8a",
+    fontSize: 22,
+    fontWeight: "900"
   },
   memberInfo: {
     flex: 1
   },
   memberName: {
-    ...typeScale.screenTitle,
-    color: colors.text
+    color: "#ffffff",
+    fontSize: 20,
+    fontWeight: "900"
   },
   memberSubtitle: {
-    ...typeScale.caption,
-    color: colors.textSecondary
-  },
-  sectionBlock: {
-    gap: spacing.s12
+    color: "rgba(255,255,255,0.9)",
+    fontSize: 12,
+    fontWeight: "700",
+    marginTop: 3
   },
   sectionHeader: {
     flexDirection: "row",
     alignItems: "center",
-    justifyContent: "space-between"
+    justifyContent: "space-between",
+    marginTop: 4
   },
   sectionTitle: {
-    ...typeScale.sectionTitle,
-    color: colors.text
+    color: "#0f172a",
+    fontSize: 17,
+    fontWeight: "900"
   },
   manageLink: {
-    minHeight: sizes.tap,
-    justifyContent: "center",
-    paddingLeft: spacing.s12
+    color: "#1f6feb",
+    fontSize: 12,
+    fontWeight: "900"
   },
-  manageLinkText: {
-    ...typeScale.label,
-    color: colors.accentInk
+  activeCard: {
+    flexDirection: "row",
+    borderRadius: 18,
+    backgroundColor: "#ffffff",
+    borderWidth: 1,
+    borderColor: "#eef2f7",
+    shadowColor: "#0f172a",
+    shadowOpacity: 0.08,
+    shadowRadius: 16,
+    shadowOffset: { width: 0, height: 8 },
+    elevation: 4,
+    overflow: "hidden"
   },
-  card: {
-    gap: spacing.s12,
-    padding: spacing.s20,
-    borderRadius: radii.lg,
-    borderWidth: sizes.stroke,
-    borderColor: colors.lineDecor,
-    backgroundColor: colors.page
+  orangeRail: {
+    width: 5,
+    backgroundColor: "#f97316"
   },
-  cardTitle: {
-    ...typeScale.sectionTitle,
-    color: colors.text
+  activeContent: {
+    flex: 1,
+    gap: 10,
+    padding: 13
   },
   pressed: {
     opacity: 0.8
   },
-  pillRow: {
+  cardHeader: {
     flexDirection: "row",
-    flexWrap: "wrap",
-    alignItems: "center",
     justifyContent: "space-between",
-    gap: spacing.s8
+    gap: 10
   },
-  activityTitle: {
-    ...typeScale.sectionTitle,
-    color: colors.text
-  },
-  cupsRow: {
-    flexDirection: "row",
-    alignItems: "center",
-    gap: spacing.s12
-  },
-  cupCount: {
-    ...typeScale.sectionTitle,
-    color: colors.text
+  cardTitleGroup: {
+    flex: 1
   },
   meta: {
-    ...typeScale.bodyDense,
-    color: colors.textSecondary
+    color: "#64748b",
+    fontSize: 11,
+    fontWeight: "700"
+  },
+  groupBuyActivityTitle: {
+    color: "#0f172a",
+    fontSize: 16,
+    fontWeight: "900"
+  },
+  deadline: {
+    color: "#ef4444",
+    fontSize: 11,
+    fontWeight: "800",
+    marginTop: 5
+  },
+  cupCount: {
+    color: "#3b64d8",
+    fontSize: 23,
+    fontWeight: "900"
+  },
+  cupUnit: {
+    color: "#94a3b8",
+    fontSize: 12,
+    fontWeight: "800"
+  },
+  groupBuyActivityMetaRow: {
+    flexDirection: "row",
+    justifyContent: "space-between",
+    gap: 10
+  },
+  progressTrack: {
+    height: 7,
+    borderRadius: 999,
+    backgroundColor: "#e5e7eb",
+    overflow: "hidden"
+  },
+  progressFill: {
+    height: "100%",
+    borderRadius: 999,
+    backgroundColor: "#fb923c"
   },
   storeLine: {
-    ...typeScale.caption,
-    color: colors.textSecondary
+    color: "#475569",
+    fontSize: 11,
+    fontWeight: "800"
+  },
+  emptyCard: {
+    gap: 6,
+    borderRadius: 18,
+    borderWidth: 1,
+    borderColor: "#e2e8f0",
+    backgroundColor: "#ffffff",
+    padding: 16
+  },
+  emptyTitle: {
+    color: "#0f172a",
+    fontSize: 16,
+    fontWeight: "900"
+  },
+  emptyText: {
+    color: "#64748b",
+    fontSize: 13,
+    lineHeight: 19
   },
   recommendList: {
-    gap: spacing.s12
+    gap: 8
   },
   recommendRow: {
-    minHeight: 56,
+    minHeight: 54,
     flexDirection: "row",
     alignItems: "center",
     justifyContent: "space-between",
-    gap: spacing.s12,
-    padding: spacing.s16,
-    borderRadius: radii.md,
-    borderWidth: sizes.stroke,
-    borderColor: colors.lineDecor,
-    backgroundColor: colors.page
+    gap: 12,
+    borderRadius: 13,
+    backgroundColor: "#f8fafc",
+    borderWidth: 1,
+    borderColor: "#e2e8f0",
+    paddingHorizontal: 13,
+    paddingVertical: 10
   },
   flex: {
     flex: 1
   },
-  recommendStore: {
-    ...typeScale.button,
-    color: colors.text
-  },
-  recommendTitle: {
-    ...typeScale.caption,
-    color: colors.textSecondary
-  },
-  recommendProgress: {
-    alignItems: "flex-end",
-    gap: spacing.s4
-  },
-  recommendCups: {
-    ...typeScale.label,
-    color: colors.text
-  },
-  emptyRecommend: {
+  emptyRecommendCard: {
     minHeight: 70,
+    borderRadius: 15,
     alignItems: "center",
     justifyContent: "center",
-    padding: spacing.s16,
-    borderRadius: radii.md,
-    backgroundColor: colors.recess
+    backgroundColor: "#f8fafc",
+    borderWidth: 1,
+    borderColor: "#e2e8f0",
+    padding: 14
+  },
+  emptyRecommendText: {
+    color: "#64748b",
+    fontSize: 12,
+    fontWeight: "800"
+  },
+  recommendStore: {
+    color: "#0f172a",
+    fontSize: 14,
+    fontWeight: "900"
+  },
+  recommendTitle: {
+    color: "#64748b",
+    fontSize: 11,
+    fontWeight: "700",
+    marginTop: 3
+  },
+  recommendCups: {
+    color: "#1f6feb",
+    fontSize: 14,
+    fontWeight: "900",
+    textAlign: "right"
   }
 });

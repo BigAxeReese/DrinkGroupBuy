@@ -2,7 +2,7 @@
 
 const { randomUUID } = require("node:crypto");
 const { createRuntimeDatabaseAdapter } = require("..");
-const { calculatePercentageDiscount, resolveAppliedDiscountTier } = require("../../pricing/groupBuyDiscount");
+const { calculateGroupBuyDiscountSummary } = require("../../pricing/groupBuyDiscount");
 
 function resolveGroupBuySettlementRuntime(input = {}) {
   const env = input.env || process.env;
@@ -129,7 +129,7 @@ async function createPostgresSettlementPlan(database, input = {}) {
     }
 
     const tiersResult = await transaction.query(`
-      SELECT id, target_cups, discount_percent, sort_order
+      SELECT id, target_cups, discount_amount, sort_order
       FROM promotion_tiers
       WHERE activity_id = $1
       ORDER BY target_cups ASC, sort_order ASC
@@ -140,7 +140,9 @@ async function createPostgresSettlementPlan(database, input = {}) {
              selected_auth.provider AS payment_provider,
              selected_auth.provider_authorization_id,
              selected_auth.authorized_amount,
-             selected_auth.status AS payment_authorization_status
+             selected_auth.status AS payment_authorization_status,
+             (SELECT MIN(unit_price_snapshot) FROM order_items
+              WHERE order_id = order_record.id) AS minimum_unit_price
       FROM orders order_record
       LEFT JOIN LATERAL (
         SELECT payment_auth.*
@@ -161,19 +163,34 @@ async function createPostgresSettlementPlan(database, input = {}) {
     const tiers = tiersResult.rows;
     const orderRows = ordersResult.rows;
     const authorizedCups = orderRows.reduce((sum, order) => sum + Number(order.total_cups), 0);
-    const discountSummary = resolveAppliedDiscountTier(tiers, authorizedCups);
+    const discountSummary = calculateGroupBuyDiscountSummary(tiers, authorizedCups);
     const appliedTier = tiers.find((tier) => tier.id === discountSummary.currentTierId) || null;
     const outcome = appliedTier ? "qualified" : "failed";
-    const discountPercent = discountSummary.currentTierDiscountPercent;
-    // Each order's discount is computed against ITS OWN original_amount -- a percentage
-    // discount can't be pre-allocated per cup the way a flat-amount tier could, since two
-    // orders at the same tier can owe different discounts if their items are priced differently.
+    const discountPerCup = discountSummary.estimatedDiscountPerCup;
+    const issues = appliedTier
+      ? orderRows.filter((order) => !Number.isInteger(Number(order.minimum_unit_price))
+          || Number(order.minimum_unit_price) < discountPerCup)
+        .map((order) => ({
+          orderId: order.id,
+          minimumUnitPrice: Number(order.minimum_unit_price),
+          discountPerCup,
+        }))
+      : [];
+    if (issues.length > 0) {
+      return {
+        error: "settlement_discount_conflict",
+        reason: "order_unit_price_below_discount_per_cup",
+        activityId: input.activityId,
+        authorizedCups,
+        discountPerCup,
+        issues,
+      };
+    }
     const orders = orderRows.map((order) => mapSettlementOrder(order, {
       outcome,
       appliedTier,
-      discountPercent,
+      orderDiscount: discountPerCup * Number(order.total_cups),
     }));
-    const totalDiscountAmount = orders.reduce((sum, order) => sum + order.discountAmount, 0);
 
     if (activity.status !== "ordering") {
       await transaction.query(
@@ -208,8 +225,9 @@ async function createPostgresSettlementPlan(database, input = {}) {
       authorizedCups,
       outcome,
       appliedTierId: appliedTier?.id || null,
-      discountPercent,
-      totalDiscountAmount,
+      discountPerCup,
+      allocatedDiscountAmount: discountSummary.estimatedAllocatedDiscountAmount,
+      undistributedDiscountAmount: discountSummary.estimatedUndistributedDiscountAmount,
       discountFunder: "merchant",
       neverPaidOrderCount,
     }, now);
@@ -219,8 +237,9 @@ async function createPostgresSettlementPlan(database, input = {}) {
       outcome,
       authorizedCups,
       appliedTier: appliedTier ? mapTier(appliedTier) : null,
-      discountPercent,
-      totalDiscountAmount,
+      discountPerCup,
+      allocatedDiscountAmount: discountSummary.estimatedAllocatedDiscountAmount,
+      undistributedDiscountAmount: discountSummary.estimatedUndistributedDiscountAmount,
       discountFunder: "merchant",
       capturedOrderCount: orders.filter((order) => order.action === "already_captured").length,
       neverPaidOrderCount,
@@ -273,20 +292,12 @@ async function completePostgresSettlement(database, input = {}) {
   const outcome = input.outcome || "failed";
   const finalStatus = outcome === "qualified" || capturedOrderCount > 0 ? "ordering" : "failed";
   const authorizedCups = Number(input.authorizedCups || 0);
-  const totalDiscountAmount = Number(input.totalDiscountAmount || 0);
-  // Upstream (resolveAppliedDiscountTier via the settlement plan) reports 0, not null, when no
-  // tier is applied -- normalize to the DB's actual "no discount" representation (NULL, matching
-  // the discount_percent CHECK constraint's IS NULL OR BETWEEN 1 AND 99) based on outcome, rather
-  // than trusting the caller to already distinguish "no tier" from "not yet computed".
-  const discountPercent = outcome === "qualified"
-    ? (input.discountPercent == null ? null : Number(input.discountPercent))
-    : null;
-  const discountPercentValid = Number.isInteger(discountPercent)
-    && discountPercent >= 1 && discountPercent <= 99;
-  if (outcome === "qualified" && !discountPercentValid) {
-    return { error: "settlement_discount_snapshot_inconsistent" };
-  }
-  if (outcome !== "qualified" && totalDiscountAmount !== 0) {
+  const discountAmount = Number(input.discountAmount || 0);
+  const discountPerCup = Number(input.discountPerCup || 0);
+  const allocatedDiscountAmount = Number(input.allocatedDiscountAmount || 0);
+  const undistributedDiscountAmount = Number(input.undistributedDiscountAmount || 0);
+  if (allocatedDiscountAmount !== discountPerCup * authorizedCups
+      || discountAmount !== allocatedDiscountAmount + undistributedDiscountAmount) {
     return { error: "settlement_discount_snapshot_inconsistent" };
   }
 
@@ -307,13 +318,14 @@ async function completePostgresSettlement(database, input = {}) {
     const settlementId = `activity-settlement-${randomUUID()}`;
     const inserted = await transaction.query(`
       INSERT INTO activity_settlements (
-        id, activity_id, outcome, authorized_cups, applied_tier_id, total_discount_amount,
-        discount_percent, discount_funder, calculation_version, settled_at, reason
-      ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, 'percentage_v1', $9, $10)
+        id, activity_id, outcome, authorized_cups, applied_tier_id, discount_amount,
+        discount_per_cup, allocated_discount_amount, undistributed_discount_amount,
+        discount_funder, calculation_version, settled_at, reason
+      ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, 'floor_per_cup_v1', $11, $12)
       RETURNING *
     `, [
       settlementId, input.activityId, outcome, authorizedCups, input.appliedTierId || null,
-      totalDiscountAmount, discountPercent,
+      discountAmount, discountPerCup, allocatedDiscountAmount, undistributedDiscountAmount,
       input.discountFunder || "merchant", now, input.reason || "deadline_settlement_completed",
     ]);
     await transaction.query(
@@ -335,10 +347,12 @@ async function completePostgresSettlement(database, input = {}) {
       voidedOrderCount: Number(input.voidedOrderCount || 0),
       failedOrderCount: Number(input.failedOrderCount || 0),
       appliedTierId: input.appliedTierId || null,
-      totalDiscountAmount,
-      discountPercent,
+      discountAmount,
+      discountPerCup,
+      allocatedDiscountAmount,
+      undistributedDiscountAmount,
       discountFunder: input.discountFunder || "merchant",
-      calculationVersion: "percentage_v1",
+      calculationVersion: "floor_per_cup_v1",
     }, now);
     return {
       settlement: mapSettlement(inserted.rows[0]),
@@ -480,11 +494,13 @@ async function insertAudit(database, actorUserId, actionType, resourceId, metada
 }
 
 function mapSettlementOrder(row, context) {
+  const discountAmount = Number(context.orderDiscount || 0);
   const originalAmount = Number(row.original_amount);
   const alreadyCaptured = row.payment_status === "captured";
-  const { finalAmount, discountAmount } = context.appliedTier
-    ? calculatePercentageDiscount(originalAmount, context.discountPercent)
-    : { finalAmount: originalAmount, discountAmount: 0 };
+  const finalAmount = context.appliedTier ? originalAmount - discountAmount : originalAmount;
+  if (!Number.isInteger(finalAmount) || finalAmount < 0) {
+    throw new Error(`Invalid order discount allocation for order ${row.id}`);
+  }
   let action = "void";
   let actionReason = "discount_not_qualified";
   if (alreadyCaptured) {
@@ -528,8 +544,10 @@ function mapSettlement(row) {
     outcome: row.outcome,
     authorizedCups: Number(row.authorized_cups),
     appliedTierId: row.applied_tier_id,
-    totalDiscountAmount: Number(row.total_discount_amount),
-    discountPercent: row.discount_percent == null ? null : Number(row.discount_percent),
+    discountAmount: Number(row.discount_amount),
+    discountPerCup: Number(row.discount_per_cup),
+    allocatedDiscountAmount: Number(row.allocated_discount_amount),
+    undistributedDiscountAmount: Number(row.undistributed_discount_amount),
     discountFunder: row.discount_funder,
     calculationVersion: row.calculation_version,
     settledAt: toIsoString(row.settled_at),
@@ -550,7 +568,7 @@ function mapTier(row) {
   return {
     id: row.id,
     targetCups: Number(row.target_cups),
-    discountPercent: Number(row.discount_percent),
+    discountAmount: Number(row.discount_amount),
     sortOrder: Number(row.sort_order),
   };
 }

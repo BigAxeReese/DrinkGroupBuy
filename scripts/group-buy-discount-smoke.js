@@ -16,7 +16,7 @@ const {
   saveMerchantMenuItem
 } = require("../backend/db");
 const {
-  resolveAppliedDiscountTier
+  calculateGroupBuyDiscountSummary
 } = require("../backend/pricing/groupBuyDiscount");
 
 function assert(condition, message, details) {
@@ -98,45 +98,43 @@ function authorizeOrder(order) {
 try {
   initializeDatabase();
 
-  // 40 元品項打 7 折（discountPercent=30，付 70%）：ceil(40*0.7) = 28，折扣 12。
-  const example = resolveAppliedDiscountTier([
-    { id: "tier-example", targetCups: 3, discountPercent: 30 }
+  const example = calculateGroupBuyDiscountSummary([
+    { id: "tier-example", targetCups: 3, discountAmount: 100 }
   ], 3);
   assert(
-    example.currentTierId === "tier-example"
-      && example.currentTierDiscountPercent === 30
-      && example.nextTierTargetCups === null,
-    "3 cups reaching the only tier should resolve that tier with no next target",
+    example.estimatedDiscountPerCup === 33
+      && example.estimatedAllocatedDiscountAmount === 99
+      && example.estimatedUndistributedDiscountAmount === 1,
+    "3 cups / NT$100 must allocate NT$33 per cup with NT$1 undistributed",
     example
   );
 
-  const invalidPercent = createGroupBuyActivity(activityInput([
-    { targetCups: 3, discountPercent: 0 }
-  ], "invalid-percent"));
+  const zeroDiscount = createGroupBuyActivity(activityInput([
+    { targetCups: 3, discountAmount: 2 }
+  ], "zero"));
   assert(
-    invalidPercent.error === "discount_tier_invalid"
-      && invalidPercent.reason === "tier_discount_percent_invalid",
-    "a discountPercent outside 1-99 must be rejected",
-    invalidPercent
+    zeroDiscount.error === "discount_tier_invalid"
+      && zeroDiscount.reason === "discount_per_cup_below_minimum",
+    "a reachable zero per-cup discount must be rejected",
+    zeroDiscount
   );
 
-  const notIncreasing = createGroupBuyActivity(activityInput([
-    { targetCups: 3, discountPercent: 30 },
-    { targetCups: 6, discountPercent: 30 }
-  ], "not-increasing"));
+  const excessiveDiscount = createGroupBuyActivity(activityInput([
+    { targetCups: 3, discountAmount: 123 }
+  ], "excessive"));
   assert(
-    notIncreasing.error === "discount_tier_invalid"
-      && notIncreasing.reason === "tier_discount_percent_not_increasing",
-    "a higher cup tier that isn't a strictly better discount must be rejected",
-    notIncreasing
+    excessiveDiscount.error === "discount_tier_invalid"
+      && excessiveDiscount.reason === "discount_per_cup_exceeds_minimum_unit_price",
+    "a per-cup discount above the minimum sellable price must be rejected",
+    excessiveDiscount
   );
 
   const activity = createGroupBuyActivity(activityInput([
-    { targetCups: 3, discountPercent: 30 }
+    { targetCups: 3, discountAmount: 100 }
   ], "valid"));
   assert(activity.id, "valid discount activity should be created", activity);
   assert(
-    activity.currentTierDiscountPercent === 0
+    activity.estimatedDiscountPerCup === 0
       && activity.nextTierTargetCups === 3
       && activity.cupsToNextTier === 3,
     "activity read model should expose live pre-tier discount progress",
@@ -145,9 +143,7 @@ try {
 
   const menu = listStoreMenu("store-001", { includeUnavailable: true });
   const lowestItem = menu.menuItems.find((item) => item.id === "drink-002");
-  // Percentage discounts don't depend on menu prices at all (unlike the old flat-amount model),
-  // so lowering a menu item's price while an activity is recruiting must NOT be blocked anymore.
-  const menuUpdate = saveMerchantMenuItem({
+  const rejectedMenuUpdate = saveMerchantMenuItem({
     storeId: "store-001",
     menuItemId: lowestItem.id,
     actorUserId: "user-merchant-001",
@@ -159,23 +155,15 @@ try {
     customizationGroups: lowestItem.customizationGroups
   });
   assert(
-    !menuUpdate.error && menuUpdate.menuItem?.basePrice === 32,
-    "menu price changes must no longer be blocked by an active percentage-discount activity",
-    menuUpdate
+    rejectedMenuUpdate.error === "menu_discount_conflict",
+    "menu price changes that break an active discount must be rolled back",
+    rejectedMenuUpdate
   );
-  // Restore the original price so the rest of this script's $40 math stays valid.
-  const restored = saveMerchantMenuItem({
-    storeId: "store-001",
-    menuItemId: lowestItem.id,
-    actorUserId: "user-merchant-001",
-    name: lowestItem.name,
-    category: lowestItem.category,
-    description: lowestItem.description,
-    basePrice: 40,
-    isAvailable: true,
-    customizationGroups: lowestItem.customizationGroups
-  });
-  assert(!restored.error && restored.menuItem?.basePrice === 40, "menu price restore should succeed", restored);
+  assert(
+    listStoreMenu("store-001", { includeUnavailable: true })
+      .menuItems.find((item) => item.id === "drink-002").basePrice === 40,
+    "rejected menu price must not persist"
+  );
 
   const orderItem = buildMinimumPriceItem(lowestItem);
   const customers = [
@@ -195,8 +183,10 @@ try {
 
   const progressedActivity = listGroupBuyActivities().find((item) => item.id === activity.id);
   assert(
-    progressedActivity.currentTierDiscountPercent === 30 && progressedActivity.currentTierTargetCups === 3,
-    "live activity progress must reflect the now-qualified tier's discount percent",
+    progressedActivity.estimatedDiscountPerCup === 33
+      && progressedActivity.estimatedAllocatedDiscountAmount === 99
+      && progressedActivity.estimatedUndistributedDiscountAmount === 1,
+    "live activity progress must recalculate the current per-cup discount",
     progressedActivity
   );
 
@@ -205,15 +195,16 @@ try {
     actorUserId: "user-admin-001"
   });
   assert(
-    settlement.discountPercent === 30
-      && settlement.totalDiscountAmount === 36
+    settlement.discountPerCup === 33
+      && settlement.allocatedDiscountAmount === 99
+      && settlement.undistributedDiscountAmount === 1
       && settlement.discountFunder === "merchant",
-    "settlement plan must apply the tier's discount percent to every order (3 orders x 12 = 36)",
+    "settlement plan must preserve the floor allocation and merchant remainder",
     settlement
   );
   assert(
-    settlement.orders.every((order) => order.discountAmount === 12 && order.finalAmount === 28),
-    "each one-cup NT$40 order at 7折 must settle at ceil(40*0.7)=NT$28",
+    settlement.orders.every((order) => order.discountAmount === 33 && order.finalAmount === 7),
+    "each one-cup NT$40 order must settle at NT$7",
     settlement.orders
   );
 
@@ -227,8 +218,8 @@ try {
   });
 
   console.log("Group-buy discount smoke passed");
-  console.log("discount: percent=30, per_order=12, total=36, funder=merchant");
-  console.log("guards: invalid_percent=blocked, not_increasing=blocked, menu_price_change=no_longer_blocked");
+  console.log("discount: per_cup=33, allocated=99, undistributed=1, funder=merchant");
+  console.log("guards: zero_per_cup=blocked, excessive_discount=blocked, menu_conflict=rolled_back");
   console.log("database: integrity=ok, foreign_key_errors=0");
 } catch (error) {
   console.error(error.message);

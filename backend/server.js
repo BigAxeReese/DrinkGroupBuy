@@ -187,9 +187,6 @@ const {
   createAdminAccountRoleRepository
 } = require("./database/repositories/adminAccountRoleRepository");
 const {
-  createAdminStatisticsRepository
-} = require("./database/repositories/adminStatisticsRepository");
-const {
   createOrderRevisionRepository
 } = require("./database/repositories/orderRevisionRepository");
 const {
@@ -324,8 +321,6 @@ const merchantMenuImportRepository = createMerchantMenuImportRepository({});
 const customerRegistrationRepository = createCustomerRegistrationRepository({});
 // Postgres-only: roles are authoritative in the deployed runtime and must change atomically.
 const adminAccountRoleRepository = createAdminAccountRoleRepository({});
-// Postgres-only: read-only reporting, no reason to maintain a SQLite fallback for it.
-const adminStatisticsRepository = createAdminStatisticsRepository({});
 const orderRevisionRepository = createOrderRevisionRepository({
   sqliteGateway: {
     createRevision: (value) => createOrderRevision(value),
@@ -2233,16 +2228,6 @@ const server = http.createServer(async (request, response) => {
       return;
     }
 
-    if (request.method === "GET" && url.pathname === "/admin/statistics") {
-      const adminUser = await requireAdminWebUser(request, response);
-      if (!adminUser) return;
-
-      const statistics = await adminStatisticsRepository.getBasicStatistics();
-      const bodyHtml = renderAdminStatisticsBody(statistics);
-      sendHtml(response, 200, renderAdminPage({ title: "數據統計", bodyHtml, activeNav: "statistics" }));
-      return;
-    }
-
     const adminWebCancelActivityMatch = url.pathname.match(/^\/admin\/group-buy-activities\/([^/]+)\/cancel$/);
     if (request.method === "POST" && adminWebCancelActivityMatch) {
       const adminUser = await requireAdminWebUser(request, response);
@@ -3080,13 +3065,6 @@ ${ADMIN_THEME_VARIABLES}
   .dashboard-columns { display: grid; grid-template-columns: 1fr 1fr; gap: 24px; align-items: start; }
   .dashboard-columns h3.section-title { margin-top: 0; }
   @media (max-width: 720px) { .dashboard-columns { grid-template-columns: 1fr; } }
-  .stat-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); gap: 12px; margin-bottom: 24px; }
-  .stat-card { background: var(--surface); border: 1px solid var(--line); padding: 14px 16px; }
-  .stat-card .stat-value { font-size: 24px; font-weight: 700; }
-  .stat-card .stat-label { font-size: 12px; color: var(--muted); margin-top: 4px; }
-  table.stats-table { width: 100%; border-collapse: collapse; }
-  table.stats-table th, table.stats-table td { text-align: left; padding: 8px 10px; border-bottom: 1px solid var(--line); font-size: 13px; }
-  table.stats-table th { color: var(--muted); font-weight: 700; }
   .tabs { display: flex; gap: 6px; flex-wrap: wrap; margin-bottom: 14px; }
   .tab { border: 1px solid var(--line); border-radius: 999px; padding: 6px 14px; font-size: 12px; font-weight: 700; color: var(--muted); text-decoration: none; }
   .tab:hover { color: var(--text); border-color: var(--line-strong); }
@@ -3098,7 +3076,6 @@ ${ADMIN_THEME_VARIABLES}
   <h1>DrinkGroupBuy 管理後台</h1>
   <nav>
     <a class="${navLinkClass("dashboard")}" href="/admin">全平台團購</a>
-    <a class="${navLinkClass("statistics")}" href="/admin/statistics">數據統計</a>
     <a class="${navLinkClass("refunds")}" href="/admin/refund-requests">退款審核</a>
     <a class="${navLinkClass("merchantApplications")}" href="/admin/merchant-applications">商家申請審核</a>
     <a class="${navLinkClass("accounts")}" href="/admin/accounts">帳號角色</a>
@@ -3344,53 +3321,6 @@ function renderAdminDashboardBody({ activities, notice, csrfToken }) {
       ${historicalHtml}
     </div>
   </div>`;
-}
-
-function renderAdminStatisticsBody({ activities, orders, topStores }) {
-  const successRateText = activities.successRate == null
-    ? "尚無資料"
-    : `${Math.round(activities.successRate * 100)}%`;
-
-  const statCardsHtml = [
-    { label: "團購總場次", value: activities.totalCount },
-    { label: "已有結果的團購中，成功比例", value: successRateText },
-    { label: "訂單總數", value: orders.totalOrders },
-    { label: "已請款訂單數", value: orders.capturedOrders },
-    { label: "總營收（已請款）", value: formatAdminCurrency(orders.totalRevenue) },
-    { label: "平均客單價（已請款）", value: formatAdminCurrency(orders.averageOrderValue) },
-  ].map((card) => `
-    <div class="stat-card">
-      <div class="stat-value">${escapeHtml(String(card.value))}</div>
-      <div class="stat-label">${escapeHtml(card.label)}</div>
-    </div>`).join("\n");
-
-  const topStoresHtml = topStores.length === 0
-    ? `<section class="empty">目前沒有店家有團購資料。</section>`
-    : `
-    <table class="stats-table">
-      <thead>
-        <tr>
-          <th>店家</th>
-          <th>團購場次</th>
-          <th>已請款訂單數</th>
-          <th>營收</th>
-        </tr>
-      </thead>
-      <tbody>
-        ${topStores.map((store) => `
-        <tr>
-          <td>${escapeHtml(store.name)}</td>
-          <td>${store.activityCount}</td>
-          <td>${store.capturedOrderCount}</td>
-          <td>${formatAdminCurrency(store.revenue)}</td>
-        </tr>`).join("\n")}
-      </tbody>
-    </table>`;
-
-  return `
-    <div class="stat-grid">${statCardsHtml}</div>
-    <h3 class="section-title">熱門店家排行（依營收排序，最多 10 間）</h3>
-    ${topStoresHtml}`;
 }
 
 function renderAdminRefundRequestsBody({ pendingRequests, reviewedRequests, notice, csrfToken }) {

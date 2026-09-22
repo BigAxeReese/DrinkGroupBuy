@@ -16,7 +16,6 @@
     "db:init": "node database/init-dev-db.js",
     "db:seed": "node database/seed-dev-db.js",
     "db:migrate:menu-customizations": "node database/migrate-dev-menu-customizations.js",
-    "db:preview-clear-activities": "node scripts/preview-clear-activities.js",
     "payments:cleanup:preview": "node scripts/compact-duplicate-payment-failures.js",
     "payment-reliability:multiprocess": "node scripts/payment-reliability-multiprocess-smoke.js",
     "postgres-reliability:multiprocess": "node scripts/postgres-reliability-multiprocess-smoke.js",

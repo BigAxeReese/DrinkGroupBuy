@@ -46,10 +46,6 @@ export function wouldExceedGroupBuyActivityCapacity(groupBuyActivity, additional
   return currentCups + Number(additionalCups ?? 0) > maximumCups;
 }
 
-// Only reports which tier (if any) the activity currently qualifies for -- unlike the old
-// flat-amount model there is no single activity-wide $ figure to estimate here, since a
-// percentage discount depends on each order's own item prices. Use getOrderDiscountEstimate
-// below for a specific order's own estimated amount.
 export function getGroupBuyActivityDiscountInfo(groupBuyActivity) {
   const settlement = groupBuyActivity?.settlement;
   if (settlement) {
@@ -59,7 +55,10 @@ export function getGroupBuyActivityDiscountInfo(groupBuyActivity) {
       currentCups: settlement.authorizedCups,
       currentTierId: settlement.appliedTierId,
       currentTierTargetCups: appliedTier ? Number(appliedTier.cups ?? appliedTier.targetCups) : null,
-      currentTierDiscountPercent: settlement.discountPercent ?? 0,
+      currentTierDiscountAmount: settlement.discountAmount,
+      estimatedDiscountPerCup: settlement.discountPerCup,
+      estimatedAllocatedDiscountAmount: settlement.allocatedDiscountAmount,
+      estimatedUndistributedDiscountAmount: settlement.undistributedDiscountAmount,
       nextTierTargetCups: null,
       cupsToNextTier: 0,
       isQualified: settlement.outcome === "qualified",
@@ -72,18 +71,30 @@ export function getGroupBuyActivityDiscountInfo(groupBuyActivity) {
     .map((tier) => ({
       id: tier.id ?? null,
       targetCups: Number(tier.cups ?? tier.targetCups),
-      discountPercent: Number(tier.discountPercent)
+      discountAmount: Number(tier.discountAmount)
     }))
     .filter((tier) => Number.isInteger(tier.targetCups)
       && tier.targetCups > 0
-      && Number.isInteger(tier.discountPercent)
-      && tier.discountPercent >= 1
-      && tier.discountPercent <= 99)
+      && Number.isInteger(tier.discountAmount)
+      && tier.discountAmount >= 0)
     .sort((left, right) => left.targetCups - right.targetCups);
   const reachedTiers = tiers.filter((tier) => currentCups >= tier.targetCups);
   const reachedTier = reachedTiers[reachedTiers.length - 1] ?? null;
   const nextTier = tiers.find((tier) => currentCups < tier.targetCups) ?? null;
   const hasCurrentBackendSummary = Number(groupBuyActivity?.discountSummaryAuthorizedCups) === currentCups;
+  const discountPerCup = hasCurrentBackendSummary
+    ? normalizeNonNegativeInteger(groupBuyActivity?.estimatedDiscountPerCup)
+    : reachedTier && currentCups > 0
+      ? Math.floor(reachedTier.discountAmount / currentCups)
+      : 0;
+  const allocatedDiscountAmount = hasCurrentBackendSummary
+    ? normalizeNonNegativeInteger(groupBuyActivity?.estimatedAllocatedDiscountAmount)
+    : discountPerCup * currentCups;
+  const undistributedDiscountAmount = hasCurrentBackendSummary
+    ? normalizeNonNegativeInteger(groupBuyActivity?.estimatedUndistributedDiscountAmount)
+    : reachedTier
+      ? Math.max(reachedTier.discountAmount - allocatedDiscountAmount, 0)
+      : 0;
 
   return {
     currentCups,
@@ -93,9 +104,12 @@ export function getGroupBuyActivityDiscountInfo(groupBuyActivity) {
     currentTierTargetCups: hasCurrentBackendSummary
       ? normalizeNullablePositiveInteger(groupBuyActivity?.currentTierTargetCups)
       : reachedTier?.targetCups ?? null,
-    currentTierDiscountPercent: hasCurrentBackendSummary
-      ? normalizeNonNegativeInteger(groupBuyActivity?.currentTierDiscountPercent)
-      : reachedTier?.discountPercent ?? 0,
+    currentTierDiscountAmount: hasCurrentBackendSummary
+      ? normalizeNonNegativeInteger(groupBuyActivity?.currentTierDiscountAmount)
+      : reachedTier?.discountAmount ?? 0,
+    estimatedDiscountPerCup: discountPerCup,
+    estimatedAllocatedDiscountAmount: allocatedDiscountAmount,
+    estimatedUndistributedDiscountAmount: undistributedDiscountAmount,
     nextTierTargetCups: hasCurrentBackendSummary
       ? normalizeNullablePositiveInteger(groupBuyActivity?.nextTierTargetCups)
       : nextTier?.targetCups ?? null,
@@ -105,25 +119,6 @@ export function getGroupBuyActivityDiscountInfo(groupBuyActivity) {
     isQualified: Boolean(reachedTier),
     isEstimated: ["recruiting", "confirmed"].includes(groupBuyActivity?.status)
   };
-}
-
-// Estimates ONE order's own discount from its own original amount, using the currently
-// qualified tier's percent-off -- mirrors backend/pricing/groupBuyDiscount.js's
-// calculatePercentageDiscount (round the amount the customer pays UP to the nearest dollar) so
-// the pre-settlement estimate matches what settlement will actually charge. Returns null when
-// the order has no known original amount.
-export function getOrderDiscountEstimate(groupBuyActivity, order) {
-  const originalAmount = normalizeNullableNonNegativeInteger(order?.originalAmount ?? order?.subtotal);
-  if (originalAmount == null) return null;
-
-  const discountInfo = getGroupBuyActivityDiscountInfo(groupBuyActivity);
-  const discountPercent = discountInfo.isQualified ? discountInfo.currentTierDiscountPercent : 0;
-  if (!discountPercent) {
-    return { originalAmount, finalAmount: originalAmount, discountAmount: 0 };
-  }
-
-  const finalAmount = Math.ceil((originalAmount * (100 - discountPercent)) / 100);
-  return { originalAmount, finalAmount, discountAmount: originalAmount - finalAmount };
 }
 
 export function getFinalSettlementSnapshot(groupBuyActivity, order) {
@@ -143,7 +138,11 @@ export function getFinalSettlementSnapshot(groupBuyActivity, order) {
     outcome: settlement.outcome,
     outcomeLabel: getSettlementOutcomeLabel(settlement.outcome),
     authorizedCups: normalizeNonNegativeInteger(settlement.authorizedCups),
-    discountPercent: settlement.discountPercent ?? null,
+    discountPerCup: normalizeNonNegativeInteger(settlement.discountPerCup),
+    allocatedDiscountAmount: normalizeNonNegativeInteger(settlement.allocatedDiscountAmount),
+    undistributedDiscountAmount: normalizeNonNegativeInteger(
+      settlement.undistributedDiscountAmount
+    ),
     originalAmount,
     finalAmount,
     orderDiscountAmount,

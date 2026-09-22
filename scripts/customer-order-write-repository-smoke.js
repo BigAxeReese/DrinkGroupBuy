@@ -269,6 +269,14 @@ function createFakePostgresDatabase(calls, options = {}) {
     }
     if (sql.includes("FROM customization_options")) return { rows: [] };
     if (sql.includes("FROM menu_item_customization_rules")) return { rows: [] };
+    if (sql.includes("FROM promotion_tiers")) {
+      return { rows: [{
+        id: "tier-001",
+        target_cups: 2,
+        discount_amount: 2,
+        sort_order: 0,
+      }] };
+    }
     if (sql.includes("AS authorized_cups")) {
       return { rows: [{ authorized_cups: options.authorizedCups || 0 }] };
     }
@@ -327,9 +335,6 @@ function createFakePostgresUpdateDatabase(calls, options = {}) {
     if (sql.includes("AS authorized_cups")) {
       return { rows: [{ authorized_cups: options.authorizedCups || 0 }] };
     }
-    if (sql.includes("FROM users user_account")) {
-      return { rows: [{ id: "customer-001" }] };
-    }
     if (sql.includes("FROM orders")) {
       return { rows: [{
         id: "order-001",
@@ -359,6 +364,14 @@ function createFakePostgresUpdateDatabase(calls, options = {}) {
     }
     if (sql.includes("FROM customization_options")) return { rows: [] };
     if (sql.includes("FROM menu_item_customization_rules")) return { rows: [] };
+    if (sql.includes("FROM promotion_tiers")) {
+      return { rows: [{
+        id: "tier-001",
+        target_cups: 2,
+        discount_amount: 2,
+        sort_order: 0,
+      }] };
+    }
     if (sql.includes("FROM payment_authorizations")) {
       return {
         rows: options.pendingAuthorizationId ? [{
