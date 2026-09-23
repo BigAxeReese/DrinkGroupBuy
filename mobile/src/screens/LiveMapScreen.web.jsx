@@ -1,4 +1,5 @@
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useFocusEffect } from "@react-navigation/native";
 import Constants from "expo-constants";
 import { Pressable, StyleSheet, Text, View } from "react-native";
 import { ActivityFilterPanel } from "../components/ActivityFilterPanel";
@@ -71,7 +72,12 @@ export function LiveMapScreen({ navigation, appState, selectedAuthUserId }) {
     }
   }, [visibleStoreIds, selectedStoreId]);
 
-  useEffect(() => {
+  // useFocusEffect (not useEffect): with react-navigation keeping every tab mounted, a plain
+  // useEffect would leave the browser's geolocation watch running forever once started, even
+  // while this tab is in the background. This re-runs the same setup on focus and clears the
+  // watch on every blur (not just on unmount), matching the native variant's fix.
+  useFocusEffect(
+    useCallback(() => {
     const fallbackPosition = {
       latitude: config.fixedLocation.latitude,
       longitude: config.fixedLocation.longitude
@@ -118,14 +124,15 @@ export function LiveMapScreen({ navigation, appState, selectedAuthUserId }) {
       { enableHighAccuracy: true, maximumAge: 1000, timeout: 5000 }
     );
     return () => navigator.geolocation.clearWatch(watchId);
-  }, [
-    config.fixedLocation.latitude,
-    config.fixedLocation.longitude,
-    config.locationMode,
-    config.version,
-    devControlEnabled,
-    selectedAuthUserId
-  ]);
+    }, [
+      config.fixedLocation.latitude,
+      config.fixedLocation.longitude,
+      config.locationMode,
+      config.version,
+      devControlEnabled,
+      selectedAuthUserId
+    ])
+  );
 
   useEffect(() => {
     if (!apiKey || !mapElementRef.current) {
@@ -278,7 +285,7 @@ export function LiveMapScreen({ navigation, appState, selectedAuthUserId }) {
   const openSelectedStore = () => {
     if (!selectedStore) return;
     const destination = getStoreMapDestination(selectedStore);
-    navigation.go(destination.name, destination.params);
+    navigation.push(destination.name, destination.params);
   };
 
   return (

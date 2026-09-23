@@ -10,6 +10,7 @@ import { QuantityStepper } from "../components/QuantityStepper";
 import { colors, maxFontSizeMultiplier, radii, sizes, spacing, typeScale } from "../theme/tokens";
 import { getStoreMenu } from "../utils/apiClient";
 import { formatCurrency, getGroupBuyActivityById } from "../utils/calculations";
+import { goToCustomerHome } from "../navigation/goToCustomerHome";
 
 export function DrinkSelectionScreen({ navigation, route, appState, actions, memberAction, selectedCustomerId }) {
   const groupBuyActivity = getGroupBuyActivityById(appState.groupBuyActivities, route.params?.groupBuyActivityId);
@@ -41,26 +42,26 @@ export function DrinkSelectionScreen({ navigation, route, appState, actions, mem
     return (
       <MobileScreen
         title="選擇飲料"
-        onBack={() => navigation.back()}
+        onBack={() => navigation.goBack()}
         onMemberPress={memberAction}
       >
         <Section title="目前沒有可加入的團購">
           <EmptyPanel>團購已清空，或目前尚未有商家建立活動。</EmptyPanel>
-          <PrimaryButton label="返回首頁" variant="secondary" onPress={() => navigation.replace("nearby")} />
+          <PrimaryButton label="返回首頁" variant="secondary" onPress={() => goToCustomerHome(navigation)} />
         </Section>
       </MobileScreen>
     );
   }
   if (loading) {
     return (
-      <MobileScreen title="選擇飲料" onBack={() => navigation.back()} onMemberPress={memberAction}>
+      <MobileScreen title="選擇飲料" onBack={() => navigation.goBack()} onMemberPress={memberAction}>
         <Section title="正在載入"><EmptyPanel>正在讀取店家最新菜單與價格…</EmptyPanel></Section>
       </MobileScreen>
     );
   }
   if (error || !menu || menu.menuItems.length === 0) {
     return (
-      <MobileScreen title="選擇飲料" onBack={() => navigation.back()} onMemberPress={memberAction}>
+      <MobileScreen title="選擇飲料" onBack={() => navigation.goBack()} onMemberPress={memberAction}>
         <Section title="目前沒有可用菜單">
           {error ? (
             <Notice accessibilityRole="alert" message={error} tone="danger" />
@@ -92,6 +93,7 @@ function DrinkMenuContent({ navigation, route, appState, actions, memberAction, 
 
   const editOrderItem = route.params?.editOrderItem;
   const editOrderId = route.params?.editOrderId;
+  const editOrder = editOrderId ? appState.orders.find((order) => order.id === editOrderId) : null;
   const initialDrinkId = storeDrinks.find((item) => item.id === editOrderItem?.drinkId)?.id ?? storeDrinks[0]?.id;
   const [drinkId, setDrinkId] = useState(initialDrinkId);
   const drink = storeDrinks.find((item) => item.id === drinkId) || storeDrinks[0];
@@ -122,7 +124,7 @@ function DrinkMenuContent({ navigation, route, appState, actions, memberAction, 
       <MobileScreen
         title={editOrderItem ? "修改飲料" : "選擇飲料"}
         subtitle={`${store?.name} · ${groupBuyActivity.title}`}
-        onBack={() => navigation.back()}
+        onBack={() => navigation.goBack()}
         onMemberPress={memberAction}
       >
       <View style={styles.menuHeader}>
@@ -234,12 +236,17 @@ function DrinkMenuContent({ navigation, route, appState, actions, memberAction, 
                   selectedOptionIds
                 });
                 if (editOrderItem) {
-                  route.params?.onSaveOrderItem?.({
-                    ...editOrderItem,
-                    ...orderItem
-                  });
+                  // route.params must stay JSON-serializable, so the caller (CustomerOrdersScreen)
+                  // passes editOrderId instead of a save callback; the merge-and-replace logic that
+                  // used to live in that callback happens here instead, against the order's current
+                  // items looked up fresh from appState.
+                  const updatedItem = { ...editOrderItem, ...orderItem };
+                  const nextItems = (editOrder?.items ?? []).map((current) => (
+                    current.id === updatedItem.id ? updatedItem : current
+                  ));
+                  actions.updateOrderItems(editOrderId, nextItems);
                   setSubmitted(true);
-                  navigation.back();
+                  navigation.goBack();
                   return;
                 }
                 if (editOrderId) {
@@ -271,7 +278,7 @@ function DrinkMenuContent({ navigation, route, appState, actions, memberAction, 
       {cartQuantity > 0 ? (
         <Pressable
           accessibilityRole="button"
-          onPress={() => navigation.go("cart", { groupBuyActivityId: groupBuyActivity.id })}
+          onPress={() => navigation.push("cart", { groupBuyActivityId: groupBuyActivity.id })}
           style={({ pressed }) => [styles.floatingCart, pressed && styles.pressed]}
         >
           <View style={styles.cartBadge}>

@@ -126,7 +126,7 @@ export function PaymentAuthorizationScreen({ navigation, route, appState, action
     return (
       <MobileScreen
         title="付款預授權"
-        onBack={() => navigation.back()}
+        onBack={() => navigation.goBack()}
         onMemberPress={memberAction}
       >
         <Section title="目前沒有付款資料">
@@ -149,7 +149,7 @@ export function PaymentAuthorizationScreen({ navigation, route, appState, action
   return (
     <MobileScreen
       title={isManualRepayment ? "重新付款" : "付款預授權"}
-      onBack={() => navigation.back()}
+      onBack={() => navigation.goBack()}
       onMemberPress={memberAction}
     >
       <Section title={isManualRepayment ? "付款狀態" : "預授權狀態"}>
@@ -336,7 +336,7 @@ export function PaymentAuthorizationScreen({ navigation, route, appState, action
             }}
           />
         ) : null}
-        <PrimaryButton label="前往取貨資訊" variant="secondary" onPress={() => navigation.go("pickupInfo", { orderId: payment.orderId })} />
+        <PrimaryButton label="前往取貨資訊" variant="secondary" onPress={() => navigation.push("pickupInfo", { orderId: payment.orderId })} />
       </View>
     </MobileScreen>
   );

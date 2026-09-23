@@ -14,6 +14,7 @@ import { formatDealFactorLabel } from "../utils/discountPercentFormat";
 import { getGroupBuyActivityStore } from "../utils/groupBuyActivityStores";
 import { getGroupBuyActivityJoinAction } from "../utils/groupBuyActivityJoinState";
 import { getGroupBuyActivityProgress } from "../utils/groupBuyActivityProgress";
+import { goToCustomerHome } from "../navigation/goToCustomerHome";
 
 export function GroupBuyActivityDetailScreen({ navigation, route, appState, actions, memberAction, selectedCustomerId }) {
   const groupBuyActivity = getGroupBuyActivityById(appState.groupBuyActivities, route.params?.groupBuyActivityId);
@@ -30,13 +31,15 @@ export function GroupBuyActivityDetailScreen({ navigation, route, appState, acti
     return (
       <MobileScreen
         title="團購詳情"
-        onBack={() => navigation.back()}
+        onBack={() => navigation.goBack()}
         onMemberPress={memberAction}
       >
         <ActivitySyncNotice status={activitySyncStatus} onRetry={retryActivitySync} />
         <Section title="目前沒有團購資料">
           <EmptyPanel>團購已清空，或目前尚未有商家建立活動。</EmptyPanel>
-          <PrimaryButton label="返回首頁" variant="secondary" onPress={() => navigation.replace("nearby")} />
+          {/* This screen is reachable from three different tabs (Home/LiveMap/Orders); navigating by
+              root-level name lets react-navigation find the Home tab regardless of which one this is. */}
+          <PrimaryButton label="返回首頁" variant="secondary" onPress={() => goToCustomerHome(navigation)} />
         </Section>
       </MobileScreen>
     );
@@ -55,7 +58,7 @@ export function GroupBuyActivityDetailScreen({ navigation, route, appState, acti
   return (
     <MobileScreen
       title="團購詳情"
-      onBack={() => navigation.back()}
+      onBack={() => navigation.goBack()}
       onMemberPress={memberAction}
     >
       <ActivitySyncNotice status={activitySyncStatus} onRetry={retryActivitySync} />
@@ -109,16 +112,17 @@ export function GroupBuyActivityDetailScreen({ navigation, route, appState, acti
           label={joinAction.label}
           onPress={() => {
             if (joinAction.target === "customerOrders") {
-              navigation.go("customerOrders");
+              // Cross-tab: customerOrders is the Orders tab's own root, not a screen in this stack.
+              navigation.navigate("CustomerTabs", { screen: "OrdersTab" });
             } else if (joinAction.target === "drinkSelection") {
-              navigation.go("drinkSelection", { groupBuyActivityId: groupBuyActivity.id });
+              navigation.push("drinkSelection", { groupBuyActivityId: groupBuyActivity.id });
             }
           }}
         />
         <PrimaryButton
           label="查看團購進度"
           variant="secondary"
-          onPress={() => navigation.go("groupProgress", { groupBuyActivityId: groupBuyActivity.id })}
+          onPress={() => navigation.push("groupProgress", { groupBuyActivityId: groupBuyActivity.id })}
         />
       </View>
     </MobileScreen>

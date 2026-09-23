@@ -8,6 +8,7 @@ import {
 } from "../utils/apiClient";
 import { signOutFirebaseUser, useFirebaseEmailLogin, useFirebaseGoogleLogin } from "../utils/firebaseAuth";
 import { getRouteForUser } from "../utils/authRouting";
+import { useAppState } from "../state/AppStateContext";
 
 export function RoleSelectScreen(props) {
   const isDevAuthMode = getAuthMode() === "dev";
@@ -26,6 +27,7 @@ function FirebaseRoleSelectScreen(props) {
 }
 
 function RoleSelectContent({ navigation, isDevAuthMode, googleLogin = null, emailLogin = null }) {
+  const { selectRole } = useAppState();
   const { signInWithGoogle } = googleLogin || {};
   const { signInWithEmail, signUpWithEmail, resetPassword } = emailLogin || {};
   const [loginError, setLoginError] = useState("");
@@ -85,7 +87,7 @@ function RoleSelectContent({ navigation, isDevAuthMode, googleLogin = null, emai
     });
 
     const route = getRouteForUser(backendResult.user);
-    navigation.selectRole(route.role, route.routeName, route.params, backendResult.user);
+    selectRole(route.role, route.routeName, route.params, backendResult.user);
   };
 
   const login = async () => {
@@ -166,7 +168,7 @@ function RoleSelectContent({ navigation, isDevAuthMode, googleLogin = null, emai
       });
 
       const route = getRouteForUser(backendResult.user);
-      navigation.selectRole(route.role, route.routeName, route.params, backendResult.user);
+      selectRole(route.role, route.routeName, route.params, backendResult.user);
     } catch (error) {
       setLoginError(getDevLoginErrorMessage(error));
     } finally {
@@ -319,7 +321,7 @@ function RoleSelectContent({ navigation, isDevAuthMode, googleLogin = null, emai
 
       <Pressable
         accessibilityRole="button"
-        onPress={() => navigation.go("merchantApply")}
+        onPress={() => navigation.navigate("merchantApply")}
         style={({ pressed }) => [styles.textButton, pressed && styles.pressed]}
       >
         <Text style={styles.textButtonLabel}>申請成為商家</Text>

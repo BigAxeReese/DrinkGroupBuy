@@ -1,35 +1,12 @@
-import { useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import * as Location from "expo-location";
 import * as Updates from "expo-updates";
-import { ActivityIndicator, Alert, AppState, BackHandler, Linking, View, StyleSheet } from "react-native";
-import { BottomNav } from "../components/BottomNav";
+import { Alert, AppState, StyleSheet, View } from "react-native";
 import { orders as initialOrders } from "../mock/orders";
 import { paymentAuthorizations as initialPaymentAuthorizations } from "../mock/paymentAuthorizations";
-import { RoleSelectScreen } from "../screens/RoleSelectScreen";
-import { NearbyGroupBuyActivitiesScreen } from "../screens/NearbyGroupBuyActivitiesScreen";
-import { GroupBuyActivityDetailScreen } from "../screens/GroupBuyActivityDetailScreen";
-import { DrinkSelectionScreen } from "../screens/DrinkSelectionScreen";
-import { GroupProgressScreen } from "../screens/GroupProgressScreen";
-import { PaymentAuthorizationScreen } from "../screens/PaymentAuthorizationScreen";
-import { PickupInfoScreen } from "../screens/PickupInfoScreen";
-import { MerchantGroupBuyActivityCreateScreen } from "../screens/MerchantGroupBuyActivityCreateScreen";
-import { MerchantDashboardScreen } from "../screens/MerchantDashboardScreen";
-import { MerchantMenuManagementScreen } from "../screens/MerchantMenuManagementScreen";
-import { MerchantProductionListScreen } from "../screens/MerchantProductionListScreen";
-import { MerchantRefundRequestsScreen } from "../screens/MerchantRefundRequestsScreen";
-import { MerchantApplyScreen } from "../screens/MerchantApplyScreen";
-import { ProfileScreen } from "../screens/ProfileScreen";
-import { CustomerOrdersScreen } from "../screens/CustomerOrdersScreen";
-import { CartScreen } from "../screens/CartScreen";
-import { LiveMapScreen } from "../screens/LiveMapScreen";
-import { StoreMenuScreen } from "../screens/StoreMenuScreen";
-import { StoreGroupBuyActivitiesScreen } from "../screens/StoreGroupBuyActivitiesScreen";
 import { DevBusinessTimeBanner } from "../components/DevBusinessTimeBanner";
 import { useDevBusinessTime } from "../hooks/useDevBusinessTime";
-import { MilkTeaProvider } from "../theme/MilkTeaContext";
-import { LEGACY_PAGE_COLOR, MILK_TEA_ROUTES } from "../theme/milkTeaRoutes";
-import { getBusinessNow } from "../utils/businessTime";
-import { formatDeadlineLabel, formatPickupTimeRangeLabel, getMinutesUntilDeadline, isDeadlineReached } from "../utils/deadlineTime";
+import { getMinutesUntilDeadline, isDeadlineReached } from "../utils/deadlineTime";
 import { getGroupBuyActivityCapacityInfo, wouldExceedGroupBuyActivityCapacity } from "../utils/groupBuyActivityProgress";
 import { normalizeOrderItem, toLocalOrderItem } from "../utils/orderItems";
 import { buildOrderItemsChange, rollbackAuthorizedCups } from "../utils/orderState";
@@ -55,56 +32,16 @@ import {
 import { clearAuthSession, loadAuthSession } from "../utils/authSession";
 import { getRouteForUser } from "../utils/authRouting";
 import { signOutFirebaseUser } from "../utils/firebaseAuth";
-import { ScreenTransition } from "./ScreenTransition";
+import { getBusinessNow } from "../utils/businessTime";
+import { AppStateContext } from "./AppStateContext";
+import { normalizeBackendGroupBuyActivity, buildLocalOrderFromBackend, buildLocalPaymentFromBackend, mergeBackendOrderList, isSameCartItemVariant, toBackendOrderItems } from "./stateHelpers";
 
-const initialRoute = { name: "roleSelect", params: {} };
 const backendCustomerUserIds = {
   "customer-yinji": "user-customer-yinji",
   "customer-bolun": "user-customer-bolun",
   "customer-lixuan": "user-customer-lixuan",
   "customer-jingwei": "user-customer-jingwei"
 };
-const localCustomerIdsByBackendId = Object.fromEntries(
-  Object.entries(backendCustomerUserIds).map(([localId, backendId]) => [backendId, localId])
-);
-
-function toBackendOrderItems(orderItems) {
-  return orderItems.map((item) => ({
-    menuItemId: item.drinkId,
-    itemName: item.itemName,
-    quantity: item.quantity,
-    unitPrice: item.unitPrice,
-    subtotal: item.subtotal,
-    customizationOptionIds: item.customizationOptionIds,
-    size: item.size,
-    sweetness: item.sweetness,
-    ice: item.ice,
-    toppings: item.toppings
-  }));
-}
-
-function isSameCartItemVariant(a, b) {
-  return a.drinkId === b.drinkId
-    && a.groupBuyActivityId === b.groupBuyActivityId
-    && a.customerId === b.customerId
-    && a.targetOrderId === b.targetOrderId
-    && a.size === b.size
-    && a.sweetness === b.sweetness
-    && a.ice === b.ice
-    // A unitPrice mismatch (e.g. the menu price changed between two adds in the same
-    // session) means these aren't really "identical" any more -- stacking them onto one
-    // line would silently apply whichever price happened to be on the existing line to
-    // the whole combined quantity, over- or under-charging for the newer half.
-    && a.unitPrice === b.unitPrice
-    && sameToppingSet(a.toppings, b.toppings);
-}
-
-function sameToppingSet(a = [], b = []) {
-  if (a.length !== b.length) return false;
-  const sortedA = [...a].sort();
-  const sortedB = [...b].sort();
-  return sortedA.every((label, index) => label === sortedB[index]);
-}
 
 function getStoredArray(storedState, key, legacyKey, fallback) {
   if (Array.isArray(storedState[key])) return storedState[key];
@@ -112,82 +49,6 @@ function getStoredArray(storedState, key, legacyKey, fallback) {
   return fallback;
 }
 
-function normalizeBackendSettlement(settlement) {
-  if (!settlement) return null;
-  return {
-    id: settlement.id,
-    activityId: settlement.activityId,
-    outcome: settlement.outcome,
-    authorizedCups: Number(settlement.authorizedCups ?? 0),
-    appliedTierId: settlement.appliedTierId ?? null,
-    totalDiscountAmount: Number(settlement.totalDiscountAmount ?? 0),
-    discountPercent: settlement.discountPercent == null ? null : Number(settlement.discountPercent),
-    discountFunder: settlement.discountFunder ?? "merchant",
-    calculationVersion: settlement.calculationVersion ?? null,
-    settledAt: settlement.settledAt ?? null,
-    reason: settlement.reason ?? null
-  };
-}
-
-function normalizeBackendGroupBuyActivity(activity, existingActivity = {}) {
-  const tiers = (activity?.tiers ?? existingActivity.tiers ?? []).map((tier) => ({
-    id: tier.id ?? null,
-    cups: Number(tier.targetCups ?? tier.cups),
-    targetCups: Number(tier.targetCups ?? tier.cups),
-    discountPercent: Number(tier.discountPercent),
-    sortOrder: tier.sortOrder
-  }));
-  const currentCups = Number(
-    activity?.authorizedCups ?? activity?.currentCups ?? existingActivity.currentCups ?? 0
-  );
-  const deadlineAt = activity?.deadlineAt ?? existingActivity.deadlineAt;
-  const minutesUntilDeadline = getMinutesUntilDeadline({ deadlineAt });
-  const status = activity?.status ?? existingActivity.status ?? "recruiting";
-  const pickupStartAt = activity?.pickupStartAt ?? existingActivity.pickupStartAt;
-  const pickupEndAt = activity?.pickupEndAt ?? existingActivity.pickupEndAt;
-
-  return {
-    ...existingActivity,
-    id: activity?.id ?? existingActivity.id,
-    storeId: activity?.storeId ?? existingActivity.storeId,
-    store: activity?.store ?? existingActivity.store,
-    storeName: activity?.store?.name ?? existingActivity.storeName,
-    title: activity?.title ?? existingActivity.title,
-    status,
-    rawStatus: activity?.rawStatus ?? existingActivity.rawStatus ?? status,
-    startTime: activity?.startAt ?? existingActivity.startTime,
-    deadlineAt,
-    endTime: deadlineAt ? formatDeadlineLabel(deadlineAt) : existingActivity.endTime,
-    pickupStartAt,
-    pickupEndAt,
-    pickupTime: pickupStartAt && pickupEndAt
-      ? formatPickupTimeRangeLabel(pickupStartAt, pickupEndAt)
-      : existingActivity.pickupTime,
-    maximumCups: activity?.maximumCups ?? existingActivity.maximumCups ?? tiers[tiers.length - 1]?.targetCups ?? 0,
-    targetCups: activity?.targetCups ?? existingActivity.targetCups ?? tiers[0]?.targetCups ?? 0,
-    currentCups,
-    authorizedCups: currentCups,
-    participantCount: Number(activity?.participantCount ?? existingActivity.participantCount ?? 0),
-    currentTierId: activity?.currentTierId ?? null,
-    currentTierTargetCups: activity?.currentTierTargetCups ?? null,
-    currentTierDiscountPercent: Number(activity?.currentTierDiscountPercent ?? 0),
-    nextTierTargetCups: activity?.nextTierTargetCups ?? null,
-    cupsToNextTier: Number(activity?.cupsToNextTier ?? 0),
-    discountSummaryAuthorizedCups: currentCups,
-    settlement: normalizeBackendSettlement(activity?.settlement),
-    withdrawalLockMinutes: activity?.withdrawalLockMinutes ?? existingActivity.withdrawalLockMinutes ?? 30,
-    cancellationReason: activity?.cancellationReason ?? existingActivity.cancellationReason ?? null,
-    minutesUntilDeadline,
-    remainingTimeText: minutesUntilDeadline == null
-      ? existingActivity.remainingTimeText
-      : minutesUntilDeadline <= 0 ? "已截止" : `剩 ${minutesUntilDeadline} 分鐘`,
-    canJoin: ["recruiting", "confirmed"].includes(status)
-      && (minutesUntilDeadline == null || minutesUntilDeadline > 0)
-      && !activity?.cancellationReason,
-    tiers,
-    notices: activity?.notices ?? existingActivity.notices ?? []
-  };
-}
 function normalizeStoredOrder(order) {
   if (!order || typeof order !== "object") return order;
   return {
@@ -204,171 +65,22 @@ function normalizeStoredCartItem(item) {
   };
 }
 
-function buildLocalOrderFromBackend({
-  backendOrder,
-  existingOrder,
-  selectedCustomerId,
-  authorizedAmount,
-  pendingRevision,
-  pendingRevisionItems
-}) {
-  const localItems = backendOrder.items?.map(toLocalOrderItem) ?? existingOrder?.items ?? [];
-  const firstItem = localItems[0] ?? {};
-
-  return {
-    ...existingOrder,
-    id: backendOrder.id,
-    customerId: existingOrder?.customerId ?? selectedCustomerId,
-    customerDisplayName: backendOrder.customerDisplayName ?? existingOrder?.customerDisplayName,
-    submittedAt: backendOrder.submittedAt ?? existingOrder?.submittedAt,
-    groupBuyActivityId: backendOrder.activityId,
-    status: backendOrder.status,
-    itemName: localItems.length > 1 ? `${firstItem.itemName || "飲料"} 等 ${localItems.length} 項` : firstItem.itemName || existingOrder?.itemName || "飲料訂單",
-    items: localItems,
-    quantity: backendOrder.totalCups,
-    sweetness: firstItem.sweetness ?? existingOrder?.sweetness ?? "",
-    ice: firstItem.ice ?? existingOrder?.ice ?? "",
-    toppings: firstItem.toppings ?? existingOrder?.toppings ?? [],
-    subtotal: backendOrder.originalAmount,
-    originalAmount: backendOrder.originalAmount,
-    authorizedAmount,
-    finalAmount: backendOrder.finalAmount,
-    manualRepayment: backendOrder.manualRepayment,
-    paymentStatus: backendOrder.paymentStatus,
-    authorizationStatus: backendOrder.authorizationStatus,
-    merchantAcceptanceStatus: backendOrder.merchantAcceptanceStatus,
-    pickupStatus: backendOrder.pickupStatus,
-    fallbackPurchasePreference: backendOrder.fallbackPurchasePreference ?? existingOrder?.fallbackPurchasePreference,
-    pendingRevisionId: pendingRevision?.id ?? null,
-    pendingRevisionAmount: pendingRevision?.originalAmount ?? null,
-    pendingRevisionItems,
-    pendingRevisionTotalCups: pendingRevision?.totalCups ?? null,
-    reauthorizationReason: pendingRevision ? "order_amount_changed" : null
-  };
-}
-
-function buildLocalPaymentFromBackend({
-  backendOrder,
-  existingPayment,
-  backendActivity,
-  authorization,
-  capture,
-  authorizedAmount,
-  pendingRevision,
-  pendingRevisionItems
-}) {
-  return {
-    ...existingPayment,
-    id: existingPayment?.id ?? `payment-${backendOrder.id}`,
-    orderId: backendOrder.id,
-    status: pendingRevision ? "pending" : backendOrder.paymentStatus,
-    paymentStatus: pendingRevision ? "pending" : backendOrder.paymentStatus,
-    authorizationStatus: pendingRevision ? "pending" : backendOrder.authorizationStatus,
-    originalAmount: pendingRevision?.originalAmount ?? backendOrder.originalAmount,
-    authorizedAmount: pendingRevision ? 0 : authorizedAmount,
-    finalAmount: backendOrder.finalAmount,
-    captureAmount: capture?.captureAmount ?? existingPayment?.captureAmount ?? null,
-    releasedAmount: capture?.releasedAmount ?? existingPayment?.releasedAmount ?? null,
-    provider: authorization?.provider ?? existingPayment?.provider ?? "line_pay",
-    providerReference: authorization?.providerAuthorizationId ?? existingPayment?.providerReference ?? null,
-    recipientName: existingPayment?.recipientName ?? backendActivity?.storeName ?? "LINE Pay",
-    pendingRevisionId: pendingRevision?.id ?? null,
-    revisionAmount: pendingRevision?.originalAmount ?? null,
-    revisionItems: pendingRevisionItems,
-    note: "Synced from backend order state."
-  };
-}
-
-function mergeBackendOrderList(
-  backendOrders,
-  customerId,
-  setOrders,
-  setPayments,
-  setActivities,
-  replaceOrderIds = new Set()
-) {
-  const mappedOrders = backendOrders.map((order) => ({
-    ...buildLocalOrderFromBackend({
-      backendOrder: order,
-      selectedCustomerId: customerId
-        || localCustomerIdsByBackendId[order.customerUserId]
-        || order.customerUserId,
-      authorizedAmount: order.latestLinePayAuthorization?.authorizedAmount ?? order.originalAmount,
-      pendingRevision: order.pendingRevision,
-      pendingRevisionItems: order.pendingRevision?.items?.map(toLocalOrderItem) ?? null
-    }),
-    lifecycleBucket: order.lifecycleBucket,
-    availableActions: order.availableActions,
-    backendStore: order.store,
-    pickupCredential: order.pickupCredential
-  }));
-  const orderIds = new Set(mappedOrders.map((order) => order.id));
-  setOrders((current) => [...current.filter((order) => (
-    !orderIds.has(order.id) && !replaceOrderIds.has(order.id)
-  )), ...mappedOrders]);
-  const mappedPayments = backendOrders.map((order) => buildLocalPaymentFromBackend({
-    backendOrder: order,
-    backendActivity: order.activity,
-    authorization: order.latestLinePayAuthorization,
-    capture: order.latestPaymentCapture,
-    authorizedAmount: order.latestLinePayAuthorization?.authorizedAmount ?? order.originalAmount,
-    pendingRevision: order.pendingRevision,
-    pendingRevisionItems: order.pendingRevision?.items?.map(toLocalOrderItem) ?? null
-  }));
-  const paymentOrderIds = new Set(mappedPayments.map((payment) => payment.orderId));
-  setPayments((current) => [...current.filter((payment) => (
-    !paymentOrderIds.has(payment.orderId) && !replaceOrderIds.has(payment.orderId)
-  )), ...mappedPayments]);
-  setActivities((current) => {
-    const next = [...current];
-    for (const order of backendOrders) {
-      const activity = { ...order.activity, storeId: order.store.id };
-      const index = next.findIndex((item) => item.id === activity.id);
-      if (index >= 0) next[index] = { ...next[index], ...activity };
-      else next.push(activity);
-    }
-    return next;
-  });
-}
-
-function parseLinePayResultDeepLink(rawUrl) {
-  if (!rawUrl || typeof rawUrl !== "string") return null;
-
-  let parsedUrl;
-  try {
-    parsedUrl = new URL(rawUrl);
-  } catch {
-    return null;
-  }
-
-  const scheme = parsedUrl.protocol.replace(":", "");
-  const host = parsedUrl.hostname;
-  const path = parsedUrl.pathname.replace(/^\/+/, "");
-  const isPaymentResult = scheme === "drinkgroupbuy"
-    && (
-      (host === "payment" && path === "result")
-      || path === "payment/result"
-    );
-  if (!isPaymentResult) return null;
-
-  const orderId = parsedUrl.searchParams.get("orderId");
-  if (!orderId) return null;
-
-  return {
-    orderId,
-    status: parsedUrl.searchParams.get("status"),
-    paymentFlow: parsedUrl.searchParams.get("paymentFlow"),
-    transactionId: parsedUrl.searchParams.get("transactionId"),
-    error: parsedUrl.searchParams.get("error"),
-    source: parsedUrl.searchParams.get("source")
-  };
-}
-
-export function AppNavigator({ onMilkTeaChange }) {
+// All of the app's shared business state (group-buy activities, orders, payment authorizations, cart),
+// the role/session, and the actions that mutate them -- lifted out of the old AppNavigator.js verbatim
+// (only the navigation-stack pieces were removed; every action's own logic is unchanged). RootNavigator
+// reads currentRole/showingRoleSelect to pick which root screen to render, which replaces the old
+// `navigation.selectRole`/`navigation.logout`'s direct reset of the old hand-rolled `stack` -- a plain
+// `navigationRef.reset()` doesn't work here since react-navigation's root Stack.Navigator only ever
+// registers ONE of the role-select/CustomerTabs/MerchantTabs branches at a time, so a reset() call can
+// only ever target a route that belongs to whichever branch happens to already be mounted.
+export function AppStateProvider({ children }) {
   const businessTime = useDevBusinessTime();
-  const [stack, setStack] = useState([initialRoute]);
   const [sessionRestoreStatus, setSessionRestoreStatus] = useState("checking");
   const [currentRole, setCurrentRole] = useState(null);
+  // The member-icon "back to role select" shortcut (goToRoleSelect) needs to show the role-select
+  // screen WITHOUT clearing currentRole/session state (unlike logout) -- RootNavigator renders the
+  // role-select branch whenever this is true, regardless of currentRole.
+  const [showingRoleSelect, setShowingRoleSelect] = useState(false);
   const [currentUserProfile, setCurrentUserProfile] = useState(null);
   const [selectedCustomerId, setSelectedCustomerId] = useState("customer-yinji");
   const [selectedAuthUserId, setSelectedAuthUserId] = useState(null);
@@ -382,14 +94,6 @@ export function AppNavigator({ onMilkTeaChange }) {
   // Prototype only, not final API contract. Cart contents are saved locally when available.
   const [cartItems, setCartItems] = useState([]);
   const [storageLoaded, setStorageLoaded] = useState(false);
-  const handledDeepLinkRef = useRef(null);
-  const current = stack[stack.length - 1];
-  // One decision per route: migrated routes get MilkTeaContext (shared components switch to the new
-  // look) and App paints the new page colour behind the status bar and system navigation bar.
-  const milkTea = MILK_TEA_ROUTES.has(current.name);
-  useLayoutEffect(() => {
-    onMilkTeaChange?.(milkTea);
-  }, [milkTea, onMilkTeaChange]);
 
   useEffect(() => {
     // Updates.isEnabled is false on web and in dev/Expo Go builds -- nothing to check there.
@@ -507,75 +211,55 @@ export function AppNavigator({ onMilkTeaChange }) {
     return () => clearInterval(intervalId);
   }, [businessTime.snapshot.version, groupBuyActivities, storageLoaded]);
 
-  const navigation = useMemo(() => ({
-    selectRole(role, routeName, params = {}, userProfile = null) {
-      setCurrentRole(role);
-      setCurrentUserProfile(userProfile);
-      setSelectedAuthUserId(params.authUserId || null);
-      if (role === "merchant" && params.storeId) {
-        setSelectedMerchantStoreId(params.storeId);
-      }
-      if (role === "customer" && params.userId) {
-        setSelectedCustomerId(params.userId);
-      }
-      if (role === "customer") {
-        // Fires the OS location prompt right at login instead of waiting for the customer to
-        // open 即時地圖 -- a no-op if already granted/denied from a prior request (only the very
-        // first call after install actually shows the system dialog). LiveMapScreen still does
-        // its own permission check/position fetch on mount; this just moves the prompt earlier.
-        Location.requestForegroundPermissionsAsync().catch(() => {});
-      }
-      setStack([{ name: routeName, params: {} }]);
-    },
-    go(name, params = {}) {
-      setStack((items) => [...items, { name, params }]);
-    },
-    replace(name, params = {}) {
-      setStack([{ name, params }]);
-    },
-    back() {
-      setStack((items) => (items.length > 1 ? items.slice(0, -1) : items));
-    },
-    logout() {
-      setAuthToken(null);
-      clearAuthSession().catch(() => {});
-      signOutFirebaseUser().catch(() => {});
-      setCurrentRole(null);
-      setCurrentUserProfile(null);
-      setSelectedAuthUserId(null);
-      setSelectedCustomerId("customer-yinji");
-      setSelectedMerchantStoreId("store-001");
-      // Cart/orders/payment records are cached locally under a small hardcoded customerId
-      // bucket (see backendCustomerToPrototypeCustomer in ../utils/authRouting.js), so a second
-      // real account logging in on the same device after this one logs out would otherwise land
-      // in the same bucket and see this account's cart and order history.
-      setOrders(initialOrders);
-      setCartItems([]);
-      setPaymentAuthorizations(initialPaymentAuthorizations);
-      setStack([initialRoute]);
+  // Sets which root screen RootNavigator renders, the same way the old `setStack([{ name, params: {} }])`
+  // reset the old hand-rolled stack -- the 4th positional `params` arg is NOT the new route's own
+  // `route.params` (matches the old behavior: it only feeds selectedCustomerId/selectedMerchantStoreId/
+  // selectedAuthUserId below, screens read those from context instead of from their own route params).
+  function selectRole(role, routeName, params = {}, userProfile = null) {
+    setCurrentRole(role);
+    setShowingRoleSelect(false);
+    setCurrentUserProfile(userProfile);
+    setSelectedAuthUserId(params.authUserId || null);
+    if (role === "merchant" && params.storeId) {
+      setSelectedMerchantStoreId(params.storeId);
     }
-  }), []);
+    if (role === "customer" && params.userId) {
+      setSelectedCustomerId(params.userId);
+    }
+    if (role === "customer") {
+      // Fires the OS location prompt right at login instead of waiting for the customer to
+      // open 即時地圖 -- a no-op if already granted/denied from a prior request (only the very
+      // first call after install actually shows the system dialog). LiveMapScreen still does
+      // its own permission check/position fetch on mount; this just moves the prompt earlier.
+      Location.requestForegroundPermissionsAsync().catch(() => {});
+    }
+  }
 
-  useEffect(() => {
-    // Without this, Android's hardware back button falls through to its OS default (exit the
-    // Activity) since this app has its own in-memory navigation stack, not React Navigation
-    // (which wires this up itself).
-    const subscription = BackHandler.addEventListener("hardwareBackPress", () => {
-      if (stack.length > 1) {
-        navigation.back();
-        return true;
-      }
-      // At a tab root there's nothing of ours left to unwind via back(). Per-role, jump to the
-      // bottom nav's home tab instead of falling through to the OS default (exit) -- except when
-      // already on that home tab, or before a role is picked (login screen), where exiting is
-      // the expected behavior.
-      const homeRoute = currentRole === "merchant" ? "merchantDashboard" : currentRole === "customer" ? "nearby" : null;
-      if (!homeRoute || stack[0]?.name === homeRoute) return false;
-      navigation.replace(homeRoute);
-      return true;
-    });
-    return () => subscription.remove();
-  }, [stack, navigation, currentRole]);
+  function logout() {
+    setAuthToken(null);
+    clearAuthSession().catch(() => {});
+    signOutFirebaseUser().catch(() => {});
+    setCurrentRole(null);
+    setShowingRoleSelect(false);
+    setCurrentUserProfile(null);
+    setSelectedAuthUserId(null);
+    setSelectedCustomerId("customer-yinji");
+    setSelectedMerchantStoreId("store-001");
+    // Cart/orders/payment records are cached locally under a small hardcoded customerId
+    // bucket (see backendCustomerToPrototypeCustomer in ../utils/authRouting.js), so a second
+    // real account logging in on the same device after this one logs out would otherwise land
+    // in the same bucket and see this account's cart and order history.
+    setOrders(initialOrders);
+    setCartItems([]);
+    setPaymentAuthorizations(initialPaymentAuthorizations);
+  }
+
+  // The member-icon shortcut every screen's header offers: back to the role-select screen, but --
+  // unlike logout() -- WITHOUT clearing currentRole/session/cart state. Reproduces the old
+  // `navigation.replace("roleSelect")` used for this exact purpose.
+  function goToRoleSelect() {
+    setShowingRoleSelect(true);
+  }
 
   useEffect(() => {
     let active = true;
@@ -593,7 +277,7 @@ export function AppNavigator({ onMilkTeaChange }) {
         const { user } = await verifyAuthSession();
         if (!active) return;
         const route = getRouteForUser(user);
-        navigation.selectRole(route.role, route.routeName, route.params, user);
+        selectRole(route.role, route.routeName, route.params, user);
       } catch (error) {
         setAuthToken(null);
         if (error?.status === 401) {
@@ -608,7 +292,8 @@ export function AppNavigator({ onMilkTeaChange }) {
     return () => {
       active = false;
     };
-  }, [navigation]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- selectRole/logout are stable (defined once per render but only read state via closures re-created every render; matches the old navigation useMemo([]) which also only ran this effect once).
+  }, []);
 
   const actions = useMemo(() => ({
     async syncStores() {
@@ -1319,47 +1004,6 @@ export function AppNavigator({ onMilkTeaChange }) {
     return () => subscription.remove();
   }, [currentRole, selectedCustomerId, selectedMerchantStoreId, storageLoaded]);
 
-  useEffect(() => {
-    function handleIncomingUrl(rawUrl) {
-      const deepLink = parseLinePayResultDeepLink(rawUrl);
-      if (!deepLink) return;
-      if (handledDeepLinkRef.current === rawUrl) return;
-      handledDeepLinkRef.current = rawUrl;
-
-      const mode = deepLink.paymentFlow === "direct_repayment" ? "manualRepayment" : undefined;
-      navigation.replace("paymentAuthorization", {
-        orderId: deepLink.orderId,
-        mode,
-        linePayResultStatus: deepLink.status,
-        linePayPaymentFlow: deepLink.paymentFlow,
-        linePayTransactionId: deepLink.transactionId,
-        linePayError: deepLink.error,
-        paymentResultSource: deepLink.source
-      });
-      actions.syncOrderFromBackend(deepLink.orderId).catch(() => {
-        // PaymentAuthorizationScreen still allows manual refresh when auth/session state is not ready.
-      });
-    }
-
-    Linking.getInitialURL()
-      .then(handleIncomingUrl)
-      .catch(() => {});
-
-    const subscription = Linking.addEventListener("url", (event) => {
-      handleIncomingUrl(event.url);
-    });
-
-    return () => subscription?.remove?.();
-  }, [actions, navigation]);
-
-  if (sessionRestoreStatus === "checking") {
-    return (
-      <View style={[styles.container, styles.sessionCheckContainer]}>
-        <ActivityIndicator size="large" color="#1f6feb" />
-      </View>
-    );
-  }
-
   const appState = {
     groupBuyActivities,
     groupBuyActivitySyncStatus,
@@ -1369,65 +1013,29 @@ export function AppNavigator({ onMilkTeaChange }) {
     stores,
     storeSyncStatus
   };
-  const screenProps = {
-    navigation,
-    route: current,
-    appState,
-    actions,
+
+  const value = {
+    sessionRestoreStatus,
     currentRole,
+    showingRoleSelect,
     currentUserProfile,
     selectedCustomerId,
     selectedAuthUserId,
     selectedMerchantStoreId,
-    memberAction: current.name !== "roleSelect" ? () => navigation.replace("roleSelect") : undefined
-  };
-
-  // The screen of one route entry. ScreenTransition also asks for the screen that is sliding out during a
-  // tab switch, so each screen gets its own route entry and the MilkTeaContext value of ITS route.
-  const renderScreen = (entry) => {
-    const props = { ...screenProps, route: entry };
-    return (
-      <MilkTeaProvider value={MILK_TEA_ROUTES.has(entry.name)}>
-        {entry.name === "roleSelect" && <RoleSelectScreen {...props} />}
-        {entry.name === "merchantApply" && <MerchantApplyScreen {...props} />}
-        {entry.name === "nearby" && <NearbyGroupBuyActivitiesScreen {...props} />}
-        {entry.name === "liveMap" && <LiveMapScreen {...props} />}
-        {entry.name === "storeMenu" && <StoreMenuScreen {...props} />}
-        {entry.name === "groupBuyActivityDetail" && <GroupBuyActivityDetailScreen {...props} />}
-        {entry.name === "drinkSelection" && <DrinkSelectionScreen {...props} />}
-        {entry.name === "cart" && <CartScreen {...props} />}
-        {entry.name === "groupProgress" && <GroupProgressScreen {...props} />}
-        {entry.name === "storeGroupBuyActivities" && <StoreGroupBuyActivitiesScreen {...props} />}
-        {entry.name === "paymentAuthorization" && <PaymentAuthorizationScreen {...props} />}
-        {entry.name === "pickupInfo" && <PickupInfoScreen {...props} />}
-        {entry.name === "merchantCreate" && <MerchantGroupBuyActivityCreateScreen {...props} />}
-        {entry.name === "merchantDashboard" && <MerchantDashboardScreen {...props} />}
-        {entry.name === "merchantMenu" && <MerchantMenuManagementScreen {...props} />}
-        {entry.name === "merchantProductionList" && <MerchantProductionListScreen {...props} />}
-        {entry.name === "merchantRefundRequests" && <MerchantRefundRequestsScreen {...props} />}
-        {entry.name === "customerOrders" && <CustomerOrdersScreen {...props} />}
-        {entry.name === "profile" && <ProfileScreen {...props} />}
-      </MilkTeaProvider>
-    );
+    appState,
+    actions,
+    selectRole,
+    logout,
+    goToRoleSelect
   };
 
   return (
-    <MilkTeaProvider value={milkTea}>
+    <AppStateContext.Provider value={value}>
       <View style={styles.container}>
         <DevBusinessTimeBanner businessTime={businessTime} />
-        <View style={styles.screen}>
-          <ScreenTransition current={current} renderScreen={renderScreen} />
-        </View>
-        {current.name !== "roleSelect" && current.name !== "merchantApply" ? (
-          <BottomNav
-            current={current.name}
-            currentParams={current.params}
-            currentRole={currentRole}
-            navigation={navigation}
-          />
-        ) : null}
+        <View style={styles.content}>{children}</View>
       </View>
-    </MilkTeaProvider>
+    </AppStateContext.Provider>
   );
 }
 
@@ -1435,12 +1043,7 @@ const styles = StyleSheet.create({
   container: {
     flex: 1
   },
-  screen: {
+  content: {
     flex: 1
-  },
-  sessionCheckContainer: {
-    alignItems: "center",
-    justifyContent: "center",
-    backgroundColor: LEGACY_PAGE_COLOR
   }
 });

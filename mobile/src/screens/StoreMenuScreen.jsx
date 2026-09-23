@@ -53,7 +53,7 @@ export function StoreMenuScreen({ navigation, route, memberAction }) {
 
   if (loading) {
     return (
-      <MobileScreen title="店家菜單" onBack={() => navigation.back()} onMemberPress={memberAction}>
+      <MobileScreen title="店家菜單" onBack={() => navigation.goBack()} onMemberPress={memberAction}>
         <Section title="正在載入"><EmptyPanel>正在讀取店家最新菜單…</EmptyPanel></Section>
       </MobileScreen>
     );
@@ -63,12 +63,12 @@ export function StoreMenuScreen({ navigation, route, memberAction }) {
     return (
       <MobileScreen
         title="店家菜單"
-        onBack={() => navigation.back()}
+        onBack={() => navigation.goBack()}
         onMemberPress={memberAction}
       >
         <Section title="找不到店家">
           <Notice tone="danger" accessibilityRole="alert" message={error || "後端找不到這間店家。"} />
-          <PrimaryButton label="返回地圖" variant="secondary" onPress={() => navigation.replace("liveMap")} />
+          <PrimaryButton label="返回地圖" variant="secondary" onPress={() => navigation.goBack()} />
         </Section>
       </MobileScreen>
     );
@@ -78,7 +78,7 @@ export function StoreMenuScreen({ navigation, route, memberAction }) {
     <MobileScreen
       title="店家菜單"
       subtitle="目前沒有進行中的團購，可先查看店家飲品。"
-      onBack={() => navigation.back()}
+      onBack={() => navigation.goBack()}
       onMemberPress={memberAction}
     >
       <Section title="店家資訊">

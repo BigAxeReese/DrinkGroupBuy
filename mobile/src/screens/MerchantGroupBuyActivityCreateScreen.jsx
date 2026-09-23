@@ -19,21 +19,50 @@ const MAX_ACTIVITY_DEADLINE_MS = 24 * 60 * 60 * 1000;
 const MIN_PICKUP_AFTER_DEADLINE_MS = 30 * 60 * 1000;
 const DEFAULT_PICKUP_AFTER_DEADLINE_MS = 30 * 60 * 1000;
 
+const DEFAULT_TITLE = "離峰優惠團購";
+const DEFAULT_NOTICES = "截止前可修改或退出";
+const buildDefaultTiers = () => [{ id: "tier-draft-1", cups: "20", dealFactor: "9" }];
+
 export function MerchantGroupBuyActivityCreateScreen({ navigation, actions, memberAction, selectedMerchantStoreId }) {
   const initialDeadlineDate = new Date(createDeadlineIsoFromInput(getDefaultDeadlineInput()));
-  const [title, setTitle] = useState("離峰優惠團購");
-  const [tiers, setTiers] = useState([
-    { id: "tier-draft-1", cups: "20", dealFactor: "9" }
-  ]);
+  const [title, setTitle] = useState(DEFAULT_TITLE);
+  const [tiers, setTiers] = useState(buildDefaultTiers);
   const [deadlineDate, setDeadlineDate] = useState(initialDeadlineDate);
   const [pickupStartDate, setPickupStartDate] = useState(() => getDefaultPickupStartDate(initialDeadlineDate));
-  const [notices, setNotices] = useState("截止前可修改或退出");
-  const [created, setCreated] = useState(false);
+  const [notices, setNotices] = useState(DEFAULT_NOTICES);
   const [submitMessage, setSubmitMessage] = useState("");
   const [submitMessageKind, setSubmitMessageKind] = useState("success");
   const [submitting, setSubmitting] = useState(false);
   const [tierErrors, setTierErrors] = useState({});
   const deadlineLimit = getDeadlineLimit();
+
+  // This screen is registered both as a push target from the dashboard AND as the MerchantCreateTab's
+  // own root (tapped directly from the tab bar). Pushed from the dashboard there is a route below
+  // this one to pop back to; as the tab root there is not, and the dashboard lives in the other tab.
+  const goToDashboard = () => {
+    if (navigation.getState().routes.length > 1) {
+      navigation.goBack();
+      return;
+    }
+    navigation.navigate("MerchantTabs", {
+      screen: "MerchantDashboardTab",
+      params: { screen: "merchantDashboard" }
+    });
+  };
+
+  // The tab keeps this screen mounted after leaving it, so a finished form has to be cleared or the
+  // next visit shows the old values and a second submit would create a duplicate activity.
+  const resetForm = () => {
+    const nextDeadlineDate = new Date(createDeadlineIsoFromInput(getDefaultDeadlineInput()));
+    setTitle(DEFAULT_TITLE);
+    setTiers(buildDefaultTiers());
+    setDeadlineDate(nextDeadlineDate);
+    setPickupStartDate(getDefaultPickupStartDate(nextDeadlineDate));
+    setNotices(DEFAULT_NOTICES);
+    setSubmitMessage("");
+    setSubmitMessageKind("success");
+    setTierErrors({});
+  };
 
   const handleDeadlineChange = (nextDate) => {
     setDeadlineDate(nextDate);
@@ -118,8 +147,6 @@ export function MerchantGroupBuyActivityCreateScreen({ navigation, actions, memb
     const startTime = startDate.toISOString();
     const deadlineAt = deadlineDate.toISOString();
     const pickupStartAt = pickupStartDate.toISOString();
-    let groupBuyActivityId;
-
     try {
       const activity = await createGroupBuyActivity({
         storeId: selectedMerchantStoreId,
@@ -133,7 +160,7 @@ export function MerchantGroupBuyActivityCreateScreen({ navigation, actions, memb
         })),
         notice: notices
       });
-      groupBuyActivityId = actions.addMerchantGroupBuyActivityFromApi(activity);
+      actions.addMerchantGroupBuyActivityFromApi(activity);
       setSubmitMessageKind("success");
       setSubmitMessage("活動已建立。");
     } catch (error) {
@@ -155,14 +182,14 @@ export function MerchantGroupBuyActivityCreateScreen({ navigation, actions, memb
       setSubmitting(false);
     }
 
-    setCreated(true);
-    navigation.replace("merchantDashboard", { createdGroupBuyActivityId: groupBuyActivityId });
+    resetForm();
+    goToDashboard();
   }
 
   return (
     <MobileScreen
       title="建立活動"
-      onBack={() => navigation.replace("merchantDashboard")}
+      onBack={goToDashboard}
       onMemberPress={memberAction}
     >
       <Section title="活動資料">
@@ -243,13 +270,13 @@ export function MerchantGroupBuyActivityCreateScreen({ navigation, actions, memb
         label={submitting ? "建立中..." : "建立活動"}
         onPress={handleCreateGroupBuyActivity}
       />
-      {created || submitMessage ? (
+      {submitMessage ? (
         <Text style={[
           styles.submitMessage,
           submitMessageKind === "error" && styles.errorMessage,
           submitMessageKind === "warning" && styles.warningMessage
         ]}>
-          {submitMessage || "活動已建立"}
+          {submitMessage}
         </Text>
       ) : null}
     </MobileScreen>

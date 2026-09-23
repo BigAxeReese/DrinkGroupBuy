@@ -1,8 +1,9 @@
 import { StatusBar } from "expo-status-bar";
 import { useState } from "react";
 import { Platform, StyleSheet, View } from "react-native";
+import { GestureHandlerRootView } from "react-native-gesture-handler";
 import { SafeAreaProvider, SafeAreaView } from "react-native-safe-area-context";
-import { AppNavigator } from "./src/navigation/AppNavigator";
+import { AppNavigator } from "./src/navigation/RootNavigator";
 import { LEGACY_PAGE_COLOR } from "./src/theme/milkTeaRoutes";
 import { colors } from "./src/theme/tokens";
 
@@ -13,12 +14,16 @@ export default function App() {
   const pageColor = milkTea ? colors.page : LEGACY_PAGE_COLOR;
 
   const app = (
-    <SafeAreaProvider>
-      <SafeAreaView style={[styles.safeArea, { backgroundColor: pageColor }]} edges={["top", "bottom", "left", "right"]}>
-        <StatusBar style="dark" backgroundColor={pageColor} translucent={false} />
-        <AppNavigator onMilkTeaChange={setMilkTea} />
-      </SafeAreaView>
-    </SafeAreaProvider>
+    // react-navigation's native-stack/bottom-tabs use react-native-gesture-handler (swipe-back, tab
+    // press feedback) internally; it requires this root wrapper somewhere above the whole app.
+    <GestureHandlerRootView style={styles.safeArea}>
+      <SafeAreaProvider>
+        <SafeAreaView style={[styles.safeArea, { backgroundColor: pageColor }]} edges={["top", "bottom", "left", "right"]}>
+          <StatusBar style="dark" backgroundColor={pageColor} translucent={false} />
+          <AppNavigator onMilkTeaChange={setMilkTea} />
+        </SafeAreaView>
+      </SafeAreaProvider>
+    </GestureHandlerRootView>
   );
 
   if (Platform.OS === "web") {

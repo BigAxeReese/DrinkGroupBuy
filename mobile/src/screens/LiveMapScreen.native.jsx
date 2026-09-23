@@ -1,4 +1,5 @@
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useFocusEffect } from "@react-navigation/native";
 import * as Location from "expo-location";
 import { Linking, Pressable, StyleSheet, Text, View } from "react-native";
 import MapView, { Marker, PROVIDER_GOOGLE } from "react-native-maps";
@@ -75,7 +76,13 @@ export function LiveMapScreen({ navigation, appState, selectedAuthUserId }) {
     }
   }, [visibleStoreIds, selectedStoreId, mapStores]);
 
-  useEffect(() => {
+  // useFocusEffect (not useEffect): with react-navigation keeping every tab mounted, a plain
+  // useEffect would leave GPS watching running forever once started, even while this tab is in
+  // the background -- a battery drain that didn't exist under the old navigator, which unmounted
+  // screens on tab switch. This re-runs the same setup on focus and tears the subscription down
+  // (not just on unmount, but on every blur) so watching only happens while the map is on screen.
+  useFocusEffect(
+    useCallback(() => {
     let active = true;
     let locationSubscription = null;
     const fallbackPosition = {
@@ -139,14 +146,15 @@ export function LiveMapScreen({ navigation, appState, selectedAuthUserId }) {
       active = false;
       locationSubscription?.remove();
     };
-  }, [
-    config.fixedLocation.latitude,
-    config.fixedLocation.longitude,
-    config.version,
-    devControlEnabled,
-    effectiveLocationMode,
-    selectedAuthUserId
-  ]);
+    }, [
+      config.fixedLocation.latitude,
+      config.fixedLocation.longitude,
+      config.version,
+      devControlEnabled,
+      effectiveLocationMode,
+      selectedAuthUserId
+    ])
+  );
 
   const recenterOnUser = () => {
     mapRef.current?.animateCamera({ center: userPosition, zoom }, { duration: 350 });
@@ -185,7 +193,7 @@ export function LiveMapScreen({ navigation, appState, selectedAuthUserId }) {
   const openSelectedStore = () => {
     if (!selectedStore) return;
     const destination = getStoreMapDestination(selectedStore);
-    navigation.go(destination.name, destination.params);
+    navigation.push(destination.name, destination.params);
   };
 
   return (

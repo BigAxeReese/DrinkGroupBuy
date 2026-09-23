@@ -1,4 +1,5 @@
-import { useEffect, useMemo, useState } from "react";
+import { useCallback, useMemo, useState } from "react";
+import { useFocusEffect } from "@react-navigation/native";
 import { Platform, Pressable, StyleSheet, Text, View } from "react-native";
 import { ActivitySyncNotice } from "../components/ActivitySyncNotice";
 import { DistanceRadiusFilter } from "../components/DistanceRadiusFilter";
@@ -21,7 +22,9 @@ export function NearbyGroupBuyActivitiesScreen({ navigation, appState, actions, 
   const { config: locationConfig } = useDevLocationConfig(selectedAuthUserId);
   const [userPosition, setUserPosition] = useState(locationConfig.fixedLocation);
 
-  useEffect(() => {
+  // useFocusEffect (not useEffect): tabs stay mounted, so a plain effect would keep GPS watching
+  // after this tab loses focus. Watching starts on focus and is torn down on every blur.
+  useFocusEffect(useCallback(() => {
     const fallbackPosition = locationConfig.fixedLocation;
     setUserPosition(fallbackPosition);
     if (locationConfig.locationMode !== "live") return undefined;
@@ -58,7 +61,7 @@ export function NearbyGroupBuyActivitiesScreen({ navigation, appState, actions, 
       active = false;
       locationSubscription?.remove();
     };
-  }, [locationConfig.locationMode, locationConfig.fixedLocation.latitude, locationConfig.fixedLocation.longitude]);
+  }, [locationConfig.locationMode, locationConfig.fixedLocation.latitude, locationConfig.fixedLocation.longitude]));
 
   const referencePosition = userPosition;
   const recruitingGroupBuyActivitiesWithDistance = useMemo(() => {
@@ -112,7 +115,7 @@ export function NearbyGroupBuyActivitiesScreen({ navigation, appState, actions, 
           {activeGroupBuyActivity ? (
             <Pressable
               accessibilityRole="button"
-              onPress={() => navigation.go("groupProgress", { groupBuyActivityId: activeGroupBuyActivity.id })}
+              onPress={() => navigation.push("groupProgress", { groupBuyActivityId: activeGroupBuyActivity.id })}
               style={styles.manageLink}
             >
               <Text style={styles.manageLinkText}>管理 &gt;</Text>
@@ -123,7 +126,7 @@ export function NearbyGroupBuyActivitiesScreen({ navigation, appState, actions, 
         {activeGroupBuyActivity && activeProgress ? (
           <Pressable
             accessibilityRole="button"
-            onPress={() => navigation.go("groupBuyActivityDetail", { groupBuyActivityId: activeGroupBuyActivity.id })}
+            onPress={() => navigation.push("groupBuyActivityDetail", { groupBuyActivityId: activeGroupBuyActivity.id })}
             style={({ pressed }) => [styles.card, pressed && styles.pressed]}
           >
             <View style={styles.pillRow}>
@@ -164,7 +167,7 @@ export function NearbyGroupBuyActivitiesScreen({ navigation, appState, actions, 
               <Pressable
                 accessibilityRole="button"
                 key={groupBuyActivity.id}
-                onPress={() => navigation.go("groupBuyActivityDetail", { groupBuyActivityId: groupBuyActivity.id })}
+                onPress={() => navigation.push("groupBuyActivityDetail", { groupBuyActivityId: groupBuyActivity.id })}
                 style={({ pressed }) => [styles.recommendRow, pressed && styles.pressed]}
               >
                 <View style={styles.flex}>

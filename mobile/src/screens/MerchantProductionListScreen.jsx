@@ -21,7 +21,7 @@ export function MerchantProductionListScreen({ navigation, route, appState, sele
     <MobileScreen
       title="總製作清單"
       subtitle={groupBuyActivity ? `${groupBuyActivity.title} · ${store?.name ?? ""}` : "找不到這筆團購活動"}
-      onBack={() => navigation.back()}
+      onBack={() => navigation.goBack()}
     >
       {!groupBuyActivity ? (
         <Text style={styles.emptyText}>找不到這筆團購活動。</Text>

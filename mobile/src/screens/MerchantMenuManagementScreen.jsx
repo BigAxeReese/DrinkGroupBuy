@@ -205,7 +205,7 @@ export function MerchantMenuManagementScreen({ navigation, memberAction, selecte
     <MobileScreen
       title="菜單管理"
       subtitle={menu?.store?.name || selectedMerchantStoreId}
-      onBack={() => navigation.back()}
+      onBack={() => navigation.goBack()}
       onMemberPress={memberAction}
       headerRight={(
         <Pressable

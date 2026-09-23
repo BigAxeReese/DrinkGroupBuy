@@ -2,38 +2,53 @@ import { Pressable, StyleSheet, Text, View } from "react-native";
 import { useMilkTea } from "../theme/MilkTeaContext";
 import { colors, maxFontSizeMultiplier, sizes, spacing, typeScale } from "../theme/tokens";
 
-const navItems = [
-  { id: "home", route: "nearby", icon: "⌂", label: "首頁", roles: ["customer"] },
-  { id: "liveMap", route: "liveMap", icon: "⌖", label: "即時地圖", roles: ["customer"] },
-  { id: "orders", route: "customerOrders", icon: "＄", label: "我的訂單", roles: ["customer"] },
-  { id: "profile", route: "profile", icon: "⌔", label: "個人中心", roles: ["customer"] },
-  { id: "merchantDashboard", route: "merchantDashboard", icon: "⌂", label: "首頁", roles: ["merchant"] },
-  { id: "merchantCreate", route: "merchantCreate", icon: "＋", label: "開團", roles: ["merchant"] }
-];
+// Label + glyph for every tab a bottom-tab navigator can show (keyed by the TAB's own route name, e.g.
+// "HomeTab" -- not the screen name inside its nested stack, e.g. "nearby", which stays distinct on
+// purpose so react-navigation never has to guess whether a `navigate("nearby")` call means "switch
+// tab" or "push this screen in whichever stack is currently active"). CustomerTabs and MerchantTabs
+// each register only their own tabs, so `state.routes` below never mixes customer and merchant items --
+// no role filtering needed here any more.
+const TAB_INFO = {
+  HomeTab: { icon: "⌂", label: "首頁" },
+  LiveMapTab: { icon: "⌖", label: "即時地圖" },
+  OrdersTab: { icon: "＄", label: "我的訂單" },
+  ProfileTab: { icon: "⌔", label: "個人中心" },
+  MerchantDashboardTab: { icon: "⌂", label: "首頁" },
+  MerchantCreateTab: { icon: "＋", label: "開團" }
+};
 
+// react-navigation's own tabBar prop shape ({ state, descriptors, navigation }); passed as
+// tabBar={(props) => <BottomNav {...props} />} to CustomerTabs' / MerchantTabs' Tab.Navigator.
 // Migrated routes get the new style (a dot and a label, docs/ui-style-guide.md, see
 // theme/MilkTeaContext.js). The old glyph bar below stays until the last route has migrated.
-export function BottomNav({ current, currentParams, currentRole, navigation }) {
+export function BottomNav({ state, navigation }) {
   const milkTea = useMilkTea();
-  const visibleItems = navItems.filter((item) => !currentRole || item.roles.includes(currentRole));
-  const isActive = (item) => current === item.route && (!item.params?.type || item.params.type === currentParams?.type);
+
+  // Emitting tabPress lets the tab's own native-stack pop back to its root when the already-active tab
+  // is tapped again (native-stack listens for it); tapping a different tab just switches to it and
+  // keeps that tab's history.
+  const handleTabPress = (route, active) => {
+    const event = navigation.emit({ type: "tabPress", target: route.key, canPreventDefault: true });
+    if (!active && !event.defaultPrevented) navigation.navigate(route.name);
+  };
 
   if (milkTea) {
     return (
       <View style={milkTeaStyles.nav}>
-        {visibleItems.map((item) => {
-          const active = isActive(item);
+        {state.routes.map((route, index) => {
+          const info = TAB_INFO[route.name];
+          const active = state.index === index;
           return (
             <Pressable
               accessibilityRole="button"
               accessibilityState={{ selected: active }}
-              key={item.id}
-              onPress={() => navigation.replace(item.route, item.params)}
+              key={route.key}
+              onPress={() => handleTabPress(route, active)}
               style={milkTeaStyles.item}
             >
               <View style={[milkTeaStyles.dot, active && milkTeaStyles.dotActive]} />
               <Text maxFontSizeMultiplier={maxFontSizeMultiplier} style={[milkTeaStyles.label, active && milkTeaStyles.labelActive]}>
-                {item.label}
+                {info.label}
               </Text>
             </Pressable>
           );
@@ -44,17 +59,18 @@ export function BottomNav({ current, currentParams, currentRole, navigation }) {
 
   return (
     <View style={styles.nav}>
-      {visibleItems.map((item) => {
-        const active = isActive(item);
+      {state.routes.map((route, index) => {
+        const info = TAB_INFO[route.name];
+        const active = state.index === index;
         return (
           <Pressable
             accessibilityRole="button"
-            key={item.id}
-            onPress={() => navigation.replace(item.route, item.params)}
+            key={route.key}
+            onPress={() => handleTabPress(route, active)}
             style={styles.item}
           >
-            <Text style={[styles.icon, active && styles.activeIcon]}>{item.icon}</Text>
-            <Text style={[styles.label, active && styles.activeLabel]}>{item.label}</Text>
+            <Text style={[styles.icon, active && styles.activeIcon]}>{info.icon}</Text>
+            <Text style={[styles.label, active && styles.activeLabel]}>{info.label}</Text>
           </Pressable>
         );
       })}

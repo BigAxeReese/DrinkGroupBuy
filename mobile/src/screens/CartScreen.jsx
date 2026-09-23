@@ -12,6 +12,7 @@ import { formatCurrency, getGroupBuyActivityById, isWithdrawalLocked } from "../
 import { isDeadlineReached } from "../utils/deadlineTime";
 import { getGroupBuyActivityCapacityInfo } from "../utils/groupBuyActivityProgress";
 import { formatOrderItemCustomizations } from "../utils/orderItems";
+import { goToCustomerHome } from "../navigation/goToCustomerHome";
 
 export function CartScreen({ navigation, route, appState, actions, memberAction, selectedCustomerId }) {
   const [acceptOriginalPrice, setAcceptOriginalPrice] = useState(true);
@@ -22,12 +23,12 @@ export function CartScreen({ navigation, route, appState, actions, memberAction,
     return (
       <MobileScreen
         title="購物車"
-        onBack={() => navigation.back()}
+        onBack={() => navigation.goBack()}
         onMemberPress={memberAction}
       >
         <Section title="目前沒有團購資料">
           <EmptyPanel>團購已清空，購物車暫時不能送出。</EmptyPanel>
-          <PrimaryButton label="返回首頁" variant="secondary" onPress={() => navigation.replace("nearby")} />
+          <PrimaryButton label="返回首頁" variant="secondary" onPress={() => goToCustomerHome(navigation)} />
         </Section>
       </MobileScreen>
     );
@@ -75,7 +76,7 @@ export function CartScreen({ navigation, route, appState, actions, memberAction,
     <MobileScreen
       title="購物車"
       subtitle={groupBuyActivity.title}
-      onBack={() => navigation.back()}
+      onBack={() => navigation.goBack()}
       onMemberPress={memberAction}
     >
       {/* MobileScreen puts 24px between its direct children, so the notices and the continue button
@@ -146,7 +147,7 @@ export function CartScreen({ navigation, route, appState, actions, memberAction,
         <PrimaryButton
           label="繼續選購飲料"
           variant="secondary"
-          onPress={() => !groupBuyActivityClosed && navigation.go("drinkSelection", { groupBuyActivityId: groupBuyActivity.id })}
+          onPress={() => !groupBuyActivityClosed && navigation.push("drinkSelection", { groupBuyActivityId: groupBuyActivity.id })}
         />
       </Section>
 
@@ -187,11 +188,11 @@ export function CartScreen({ navigation, route, appState, actions, memberAction,
           setSubmitError("");
           if (groupBuyActivityClosed) return;
           if (cartItems.length === 0) {
-            if (existingOrder) navigation.go("paymentAuthorization", { groupBuyActivityId: groupBuyActivity.id, orderId: existingOrder.id });
+            if (existingOrder) navigation.push("paymentAuthorization", { groupBuyActivityId: groupBuyActivity.id, orderId: existingOrder.id });
             return;
           }
           if (blocksOrderUpdate) {
-            navigation.go("paymentAuthorization", { groupBuyActivityId: groupBuyActivity.id, orderId: existingOrder.id });
+            navigation.push("paymentAuthorization", { groupBuyActivityId: groupBuyActivity.id, orderId: existingOrder.id });
             return;
           }
           if (exceedsCapacity) {
@@ -210,7 +211,7 @@ export function CartScreen({ navigation, route, appState, actions, memberAction,
             const orderRevisionId = typeof submitResult === "object" ? submitResult.orderRevisionId : null;
             const revisionAmount = typeof submitResult === "object" ? submitResult.revisionAmount : null;
             const revisionItems = typeof submitResult === "object" ? submitResult.revisionItems : null;
-            if (orderId) navigation.go("paymentAuthorization", { groupBuyActivityId: groupBuyActivity.id, orderId, orderRevisionId, revisionAmount, revisionItems });
+            if (orderId) navigation.push("paymentAuthorization", { groupBuyActivityId: groupBuyActivity.id, orderId, orderRevisionId, revisionAmount, revisionItems });
           } finally {
             setIsSubmitting(false);
           }

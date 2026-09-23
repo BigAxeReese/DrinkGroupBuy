@@ -20,7 +20,7 @@ export function StoreGroupBuyActivitiesScreen({ navigation, route, appState, act
     <MobileScreen
       title={store?.name ?? "店家活動"}
       subtitle="選擇要查看的進行中團購"
-      onBack={() => navigation.back()}
+      onBack={() => navigation.goBack()}
     >
       <ActivitySyncNotice
         status={appState.groupBuyActivitySyncStatus ?? "idle"}
@@ -38,7 +38,7 @@ export function StoreGroupBuyActivitiesScreen({ navigation, route, appState, act
             <Card
               compact
               key={activity.id}
-              onPress={() => navigation.go("groupBuyActivityDetail", { groupBuyActivityId: activity.id })}
+              onPress={() => navigation.push("groupBuyActivityDetail", { groupBuyActivityId: activity.id })}
               style={styles.activityRow}
             >
               <View style={styles.activityContent}>

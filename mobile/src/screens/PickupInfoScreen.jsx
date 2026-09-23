@@ -25,7 +25,7 @@ export function PickupInfoScreen({ navigation, route, appState, actions, memberA
     return (
       <MobileScreen
         title="取貨資訊"
-        onBack={() => navigation.back()}
+        onBack={() => navigation.goBack()}
         onMemberPress={memberAction}
       >
         <View style={styles.card}>
@@ -39,7 +39,7 @@ export function PickupInfoScreen({ navigation, route, appState, actions, memberA
   return (
     <MobileScreen
       title="取貨資訊"
-      onBack={() => navigation.back()}
+      onBack={() => navigation.goBack()}
       onMemberPress={memberAction}
       headerRight={<StatusBadge owner="pickup" value={order.pickupStatus} />}
     >

@@ -1174,3 +1174,48 @@
 若要處理，建議另開一個小改動、走一次獨立的 `/code-review`，不要跟這次的外觀換皮綁在一起。
 
 **驗證限制**：`npm test` 174/174、`check:sql-safety`、Android 目標 Babel 編譯（45 個檔案）全過；驗證都是網頁模擬環境（react-native-web）截圖比對，**沒有在 Android 真機或模擬器上操作過**，TalkBack、系統字體放大、真實手勢與觸控回饋都還沒有實機確認。`preview-clear-activities.js` 只在本機資料庫測試過，沒有對 Azure 執行。
+
+---
+
+## 2026-09-23 — 導覽架構改用 react-navigation（含 selectRole/logout/goToRoleSelect session 邏輯重寫）
+
+**範圍**：Mobile 導覽系統整個架構遷移，從手刻的 `stack` 陣列導覽器改用 `@react-navigation/native` + `bottom-tabs` + `native-stack` + `react-native-screens` + `react-native-gesture-handler`。刪除 `mobile/src/navigation/AppNavigator.js`／`ScreenTransition.jsx`／`slideTransition.js`；新增 `mobile/src/navigation/`（`RootNavigator.jsx`、`CustomerTabs.jsx`、`MerchantTabs.jsx`、`linking.js`、`screens.js`、`stackOptions.js`、`withAppState.jsx`、`tabSlideInterpolator.js`、`stacks/` 六個 stack 定義）與 `mobile/src/state/`（`AppStateContext.js`、`AppStateProvider.jsx`、`stateHelpers.js`，把原本 `AppNavigator.js` 裡的全部業務邏輯──`actions`、8 個輔助函式、3 個主要 effect──逐字搬過去）；全站 19 個路由、約 54 個導覽呼叫點逐一改用 `push`／`navigate`／`goBack`。另外把 `mobile/src/screens/CustomerOrdersScreen.jsx`、`MerchantDashboardScreen.jsx` 的訂單明細從畫面內部 local state 改成真正的 stack entry（同路由 `push` 第二次＋`orderId` 參數），並在 `LiveMapScreen.native.jsx`／`.web.jsx` 加上 `useFocusEffect` 讓地圖分頁失焦時暫停 GPS 定位。
+**觸發原因**：這次改動碰到 auth 相關的 session／角色切換邏輯（`selectRole`／`logout`／`goToRoleSelect` 整個重寫），以及全部金流相關畫面（`PaymentAuthorizationScreen.jsx`、`CartScreen.jsx`、`CustomerOrdersScreen.jsx`、訂單修改）的導覽呼叫點，依規則主動觸發，不等使用者提醒。
+
+### 方法
+
+- 先用一個 Explore agent 完整盤點舊系統的呼叫圖、參數形狀與既有怪癖，才開始動手（對應「重大決策先提出影響，不直接改」）。
+- 業務邏輯搬移用程式逐字比對（Node 腳本 diff 舊 `AppNavigator.js` 與新檔案，只忽略 CRLF/LF），確認 `actions` 物件、8 個輔助函式、3 個 effect 零邏輯差異。
+- 完成後自己起本機後端＋`react-native-web` 預覽，實際走過顧客（登入→四個分頁互切＋跨分頁導覽→加入團購→選飲料→購物車→LINE Pay 預授權→訂單成立→點進訂單明細再返回確認正確彈回列表）與商家（登入→建立活動的兩種入口皆可正確返回→登出）完整流程，確認主控台沒有新的導覽相關錯誤。
+- `/security-review` 用獨立 subagent 對完整 diff＋全部新檔案做一次注入／權限／機密／資料外洩掃描，並要求對照舊版 `AppNavigator.js`（`git show HEAD:...`）比對歷史行為，只抓「這次改動新引入」的問題。
+
+### 發現
+
+`/security-review` 沒有找到信心度達到門檻（8/10 以上）的漏洞。
+
+過程中我自己（不是 `/security-review` 抓到的，是實測時發現的）找到並修好一個**這次遷移本身造成的真 bug**，記錄如下因為它碰到 session／角色狀態機：
+`selectRole`／`logout`／`goToRoleSelect` 原本沿用舊行為，直接呼叫 `navigationRef.current?.reset({ routes: [{ name: ... }] })` 重置導覽狀態。但新架構的根導覽器（`RootNavigator.jsx`）是「登入前畫面組／`CustomerTabs`／`MerchantTabs`」三選一互斥的條件式渲染，`reset()` 目標路由如果不在「當下實際掛載」的那一組畫面裡就一定會失敗（主控台跳出 `The action 'RESET' ... was not handled by any navigator`）。`selectRole`／`logout` 因為同時會改變 `currentRole`（觸發條件式渲染自然切到正確畫面組），即使 `reset()` 失敗也「意外正確」；但 `goToRoleSelect()`（會員頁「重新登入」按鈕背後的邏輯）刻意不改變 `currentRole`，沒有這個意外救援機制，等於呼叫了沒有任何畫面反應——會員頁的「重新登入」按鈕點了會完全沒反應。修法：新增一個 `showingRoleSelect` 狀態旗標，改由 `RootNavigator.jsx` 的同一組條件式渲染判斷（`!currentRole || showingRoleSelect`）決定要不要顯示角色選擇畫面，`navigationRef` 的 `reset()` 呼叫全部移除（改為 render-driven，不再需要 imperative reset）。這不是新增的信任決策或權限判斷，純粹是把「哪個畫面組要掛載」的判斷從一個結構上注定會失敗的 imperative API 呼叫，改成跟其他兩個分支同一套已經在用、已驗證正確的 state-driven 判斷。已在瀏覽器預覽中重新測過 `goToRoleSelect` 的實際呼叫路徑，確認主控台不再報錯、畫面正確切換。
+
+### 沒發現問題的部分（已交叉驗證）
+
+| 面向 | 檢查結果 |
+|------|----------|
+| Session／角色狀態機 | `logout()` 仍會清 bearer token、Firebase session、本機快取的訂單／購物車／付款紀錄；`goToRoleSelect()` 刻意保留 session（沿用舊版 `navigation.replace("roleSelect")` 的既有行為，不是新引入的例外） |
+| 顧客／商家路由隔離 | `CustomerTabs.jsx`／`MerchantTabs.jsx` 註冊互斥的路由集合，`RootNavigator.jsx` 依 `currentRole` 只掛載其中一組；`showingRoleSelect` 為真時是完整卸載（條件式渲染整個替換，不是疊加），不會有商家或顧客畫面殘留在角色選擇畫面底下 |
+| 訂單明細 `route.params.orderId` 新查詢路徑 | `CustomerOrdersScreen.jsx`／`MerchantDashboardScreen.jsx` 都只在已經依 `selectedCustomerId`／商家 `storeId` 篩選過的本機陣列裡查 `orderId`，沒有放寬到可以查到別人的訂單；這個陣列本身只來自已經是使用者身分範圍內的後端呼叫 |
+| `DrinkSelectionScreen.jsx` 的 `editOrderId` 參數（取代原本的 `onSaveOrderItem` 閉包） | 只能透過內部 `navigation.push`（不是 deep link）到達，呼叫端已經是限定在目前顧客自己訂單範圍內的清單 |
+| Deep link（`linking.js`） | `parseLinePayResultDeepLink` 逐字沿用舊版；`NavigationContainer` 沒有設定 `linking` prop，所以 react-navigation 自己的 URL-to-route 機制沒有啟用，唯一能被外部 URL 觸發的仍然只有這一條手動解析的 `drinkgroupbuy://payment/result?orderId=...`，跟遷移前一樣 |
+| 機密／Log | 新增／改動檔案沒有新的 `console.log`、沒有新的 token／機密處理邏輯 |
+| 危險 API | 沒有引入 `dangerouslySetInnerHTML`／`eval`／動態 `innerHTML` |
+
+**這次沒審查到的部分**：後端完全沒有改動，這次範圍只有 Mobile 端導覽層。
+
+### 待處理（不是漏洞，此次刻意不動）
+
+實測時在 `CustomerOrdersScreen.jsx` 的訂單明細品項列發現一個**跟這次遷移無關的既有問題**：品項列本身是一個 `Pressable`（點擊進編輯），裡面又包了一個獨立的刪除按鈕 `Pressable`，在 `react-native-web` 上會渲染成 `<button>` 巢狀 `<button>`，主控台跳出 DOM 巢狀警告（`git diff` 確認這段 JSX 結構本次沒有被改到，純粹是既有寫法）。不影響功能（刪除按鈕有 `event.stopPropagation()`），只是網頁預覽的 DOM 合法性警告，原生手機不受影響。已另開背景任務追蹤，這次沒有動它。
+
+### 事後補記：同日 `/code-review`（high）後的修正
+
+`/code-review` 抓到一個跟金流路徑有關的退步，已修並記在這裡：LINE Pay 付款結果深層連結（`drinkgroupbuy://payment/result?orderId=...`）的「同一個網址只處理一次」防重複（舊版 `handledDeepLinkRef`）在遷移時被我漏掉，而處理函式又依賴每次購物車／訂單變動都會換身分的 `actions`，Android 上 `getInitialURL()` 會一直回傳啟動網址，等於每次狀態變動都可能重新導向付款畫面並重打後端。修法（`RootNavigator.jsx`）：恢復 `handledDeepLinkRef` 去重、`actions` 改從 ref 讀取且訂閱只做一次，並新增「暫存待處理連結」——導覽器尚未就緒或尚未登入成顧客時先存起來，`CustomerTabs` 掛載後才導向（原本冷啟動時會被靜默丟掉）。這不改變任何金額、權限或後端呼叫，只是讓同一個連結不會重複觸發 `syncOrderFromBackend` 與導覽。其餘修正（`OrdersStack` 補註冊 `groupProgress`、建立活動導覽與表單重置、首頁分頁 GPS 隨焦點暫停、點目前分頁回根畫面、`replace` 改 `goBack`、訂單輪詢隨焦點暫停、載入圈改用主題色）都是導覽／效能層，沒有碰付款或授權邏輯。**深層連結的冷啟動暫存路徑只做了程式碼審視，沒有在預覽裡實測**（網頁預覽的網址不是 `drinkgroupbuy://`，無法觸發）。
+
+**驗證限制**：`npm test` 170/170、Babel 目標編譯全站 99 個檔案全過；驗證是本機 `react-native-web` 預覽＋本機後端手動走過完整購買與建立活動流程，**沒有在 Android 真機或模擬器上操作過**，兩個修掉的返回鍵 bug 只驗證了 react-navigation 內部的 stack pop 機制（透過畫面內「返回」按鈕），無法在網頁預覽驗證真正的 Android 實體返回鍵行為。

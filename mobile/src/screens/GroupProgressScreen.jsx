@@ -14,6 +14,7 @@ import { getGroupBuyActivityById, formatCurrency } from "../utils/calculations";
 import { formatDealFactorLabel } from "../utils/discountPercentFormat";
 import { getFinalSettlementSnapshot, getGroupBuyActivityProgress } from "../utils/groupBuyActivityProgress";
 import { formatOrderItemCustomizations } from "../utils/orderItems";
+import { goToCustomerHome } from "../navigation/goToCustomerHome";
 
 export function GroupProgressScreen({ navigation, route, appState, actions, memberAction, selectedCustomerId }) {
   const groupBuyActivity = getGroupBuyActivityById(appState.groupBuyActivities, route.params?.groupBuyActivityId);
@@ -23,13 +24,13 @@ export function GroupProgressScreen({ navigation, route, appState, actions, memb
     return (
       <MobileScreen
         title="團購進度"
-        onBack={() => navigation.back()}
+        onBack={() => navigation.goBack()}
         onMemberPress={memberAction}
       >
         <ActivitySyncNotice status={activitySyncStatus} onRetry={retryActivitySync} />
         <Section title="目前沒有團購資料">
           <EmptyPanel>團購已清空，或目前尚未有商家建立活動。</EmptyPanel>
-          <PrimaryButton label="返回首頁" variant="secondary" onPress={() => navigation.replace("nearby")} />
+          <PrimaryButton label="返回首頁" variant="secondary" onPress={() => goToCustomerHome(navigation)} />
         </Section>
       </MobileScreen>
     );
@@ -57,7 +58,7 @@ export function GroupProgressScreen({ navigation, route, appState, actions, memb
   return (
     <MobileScreen
       title="團購進度"
-      onBack={() => navigation.back()}
+      onBack={() => navigation.goBack()}
       onMemberPress={memberAction}
     >
       <ActivitySyncNotice status={activitySyncStatus} onRetry={retryActivitySync} />
@@ -139,11 +140,11 @@ export function GroupProgressScreen({ navigation, route, appState, actions, memb
       <View style={styles.actions}>
         {order ? (
           <>
-            <PrimaryButton label="Line Pay 預授權" onPress={() => navigation.go("paymentAuthorization", { groupBuyActivityId: groupBuyActivity.id, orderId: order.id })} />
-            <PrimaryButton label="取貨資訊" variant="secondary" onPress={() => navigation.go("pickupInfo", { groupBuyActivityId: groupBuyActivity.id, orderId: order.id })} />
+            <PrimaryButton label="Line Pay 預授權" onPress={() => navigation.push("paymentAuthorization", { groupBuyActivityId: groupBuyActivity.id, orderId: order.id })} />
+            <PrimaryButton label="取貨資訊" variant="secondary" onPress={() => navigation.push("pickupInfo", { groupBuyActivityId: groupBuyActivity.id, orderId: order.id })} />
           </>
         ) : (
-          <PrimaryButton label="先選擇飲料" variant="secondary" onPress={() => navigation.go("drinkSelection", { groupBuyActivityId: groupBuyActivity.id })} />
+          <PrimaryButton label="先選擇飲料" variant="secondary" onPress={() => navigation.push("drinkSelection", { groupBuyActivityId: groupBuyActivity.id })} />
         )}
       </View>
     </MobileScreen>

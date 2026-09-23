@@ -93,7 +93,7 @@ export function MerchantRefundRequestsScreen({ navigation, memberAction, selecte
     <MobileScreen
       title="退款申請"
       subtitle="對已請款的訂單提出退款申請，將由營運審核後執行。"
-      onBack={() => navigation.back()}
+      onBack={() => navigation.goBack()}
       onMemberPress={memberAction}
     >
       {loading ? <Text style={styles.emptyText}>載入中…</Text> : null}

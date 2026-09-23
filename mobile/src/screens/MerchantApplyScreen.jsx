@@ -61,10 +61,10 @@ export function MerchantApplyScreen({ navigation }) {
 
   if (submitted) {
     return (
-      <MobileScreen title="申請成為商家" onBack={() => navigation.replace("roleSelect")}>
+      <MobileScreen title="申請成為商家" onBack={() => navigation.goBack()}>
         <Section title="申請已送出">
           <Text style={styles.successText}>申請已送出，審核結果會另行通知。</Text>
-          <PrimaryButton label="回登入頁" onPress={() => navigation.replace("roleSelect")} />
+          <PrimaryButton label="回登入頁" onPress={() => navigation.goBack()} />
         </Section>
       </MobileScreen>
     );
@@ -74,7 +74,7 @@ export function MerchantApplyScreen({ navigation }) {
     <MobileScreen
       title="申請成為商家"
       subtitle="申請將由管理員審核，審核通過後才能用這個 Google 帳號登入商家後台。"
-      onBack={() => navigation.back()}
+      onBack={() => navigation.goBack()}
     >
       {notice ? (
         <Text style={notice.type === "error" ? styles.errorText : styles.successText}>{notice.text}</Text>

@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useState } from "react";
+import { useIsFocused } from "@react-navigation/native";
 import { Pressable, ScrollView, StyleSheet, Text, View } from "react-native";
 import { Card } from "../components/Card";
 import { ChoiceChip } from "../components/ChoiceChip";
@@ -17,9 +18,14 @@ import { getGroupBuyActivityStore } from "../utils/groupBuyActivityStores";
 import { getManualRepaymentStateInfo } from "../utils/manualRepayment";
 import { formatOrderItemCustomizations, normalizeOrderItem } from "../utils/orderItems";
 
-export function CustomerOrdersScreen({ navigation, appState, actions, memberAction, selectedCustomerId }) {
+export function CustomerOrdersScreen({ navigation, route, appState, actions, memberAction, selectedCustomerId }) {
   const [tab, setTab] = useState("active");
-  const [selectedOrderId, setSelectedOrderId] = useState(null);
+  // The order-detail view used to be a local-state toggle (selectedOrderId) invisible to the
+  // hardware back button. It's now a real stack entry: this screen's own route is pushed a
+  // second time with orderId (and which tab it was opened from, since the pushed instance's own
+  // `tab` state defaults to "active" and can't be relied on to know which bucket the order is in).
+  const orderId = route.params?.orderId ?? null;
+  const historical = route.params?.historical ?? false;
   const { syncStatus, refreshOrders } = useOrderListSync(
     actions.syncCustomerOrderList,
     tab,
@@ -34,10 +40,9 @@ export function CustomerOrdersScreen({ navigation, appState, actions, memberActi
     ? order.lifecycleBucket === "history"
     : isHistoryOrder(order, appState.groupBuyActivities));
   const displayTab = tab;
-  const visibleOrders = displayTab === "history" ? historyOrders : activeOrders;
   const selectedOrder = useMemo(
-    () => visibleOrders.find((order) => order.id === selectedOrderId) ?? null,
-    [selectedOrderId, visibleOrders]
+    () => customerOrders.find((order) => order.id === orderId) ?? null,
+    [orderId, customerOrders]
   );
   const cartGroupBuyActivity = cartItems.length > 0
     ? appState.groupBuyActivities.find((groupBuyActivity) => groupBuyActivity.id === cartItems[0].groupBuyActivityId) ?? null
@@ -46,13 +51,15 @@ export function CustomerOrdersScreen({ navigation, appState, actions, memberActi
   const cartTotalAmount = cartItems.reduce((sum, item) => sum + item.subtotal, 0);
 
   useEffect(() => {
-    if (!selectedOrderId) return;
-    actions.syncOrderFromBackend(selectedOrderId).catch(() => {});
-  }, [selectedOrderId]);
+    if (!orderId) return;
+    actions.syncOrderFromBackend(orderId).catch(() => {});
+  }, [orderId]);
 
   const hasActivePickupCode = selectedOrder?.pickupCredential?.status === "active";
+  // Tabs stay mounted, so the poll must also stop while this tab is in the background.
+  const isFocused = useIsFocused();
   useEffect(() => {
-    if (!selectedOrderId || !hasActivePickupCode) return undefined;
+    if (!orderId || !hasActivePickupCode || !isFocused) return undefined;
     // A customer looking at an active pickup code is typically standing at the counter waiting
     // for the merchant to redeem it on their own device -- nothing else refreshes this screen
     // once it's open (no AppState foreground listener here, unlike PaymentAuthorizationScreen),
@@ -66,13 +73,12 @@ export function CustomerOrdersScreen({ navigation, appState, actions, memberActi
         clearInterval(intervalId);
         return;
       }
-      actions.syncOrderFromBackend(selectedOrderId).catch(() => {});
+      actions.syncOrderFromBackend(orderId).catch(() => {});
     }, 5000);
     return () => clearInterval(intervalId);
-  }, [selectedOrderId, hasActivePickupCode]);
+  }, [orderId, hasActivePickupCode, isFocused]);
 
   function handleTabChange(nextTab) {
-    setSelectedOrderId(null);
     setTab(nextTab);
   }
 
@@ -80,7 +86,7 @@ export function CustomerOrdersScreen({ navigation, appState, actions, memberActi
     return (
       <MobileScreen
         title="訂單明細"
-        onBack={() => setSelectedOrderId(null)}
+        onBack={() => navigation.goBack()}
         backLabel="返回"
         onMemberPress={memberAction}
       >
@@ -90,7 +96,7 @@ export function CustomerOrdersScreen({ navigation, appState, actions, memberActi
           payments={appState.paymentAuthorizations}
           actions={actions}
           navigation={navigation}
-          historical={displayTab === "history"}
+          historical={historical}
         />
       </MobileScreen>
     );
@@ -125,14 +131,15 @@ export function CustomerOrdersScreen({ navigation, appState, actions, memberActi
             groupBuyActivities={appState.groupBuyActivities}
             payments={appState.paymentAuthorizations}
             emptyText="目前沒有進行中的訂單。加入團購後會顯示在這裡。"
-            onSelectOrder={setSelectedOrderId}
+            onSelectOrder={(id) => navigation.push("customerOrders", { orderId: id, historical: false })}
           />
           {activeOrders.length === 0 && cartItems.length === 0 ? (
             <View style={styles.emptyActions}>
               {historyOrders.length > 0 ? (
                 <PrimaryButton label="查看歷史訂單" variant="secondary" onPress={() => handleTabChange("history")} />
               ) : null}
-              <PrimaryButton label="去逛逛" onPress={() => navigation.replace("liveMap")} />
+              {/* Cross-tab: liveMap lives in a different tab's own stack. */}
+              <PrimaryButton label="去逛逛" onPress={() => navigation.navigate("CustomerTabs", { screen: "LiveMapTab" })} />
             </View>
           ) : null}
         </>
@@ -143,7 +150,7 @@ export function CustomerOrdersScreen({ navigation, appState, actions, memberActi
           groupBuyActivities={appState.groupBuyActivities}
           payments={appState.paymentAuthorizations}
           emptyText="目前沒有歷史訂單。管理員刪除團購、流團、完成或取消的訂單會顯示在這裡。"
-          onSelectOrder={setSelectedOrderId}
+          onSelectOrder={(id) => navigation.push("customerOrders", { orderId: id, historical: true })}
           historical
         />
       )}
@@ -260,7 +267,7 @@ function OrderDetailCard({ order, groupBuyActivities, payments, actions, navigat
             ) : null}
             <Pressable
               accessibilityRole="button"
-              onPress={() => navigation.go("groupBuyActivityDetail", { groupBuyActivityId: order.groupBuyActivityId })}
+              onPress={() => navigation.push("groupBuyActivityDetail", { groupBuyActivityId: order.groupBuyActivityId })}
               style={({ pressed }) => [styles.smallDetailButton, pressed && styles.pressed]}
             >
               <Text style={styles.smallDetailText}>團購詳情</Text>
@@ -275,7 +282,7 @@ function OrderDetailCard({ order, groupBuyActivities, payments, actions, navigat
             <PrimaryButton
               label={repaymentState.disabled ? repaymentState.disabledLabel : "重新付款"}
               disabled={repaymentState.disabled}
-              onPress={() => navigation.go("paymentAuthorization", {
+              onPress={() => navigation.push("paymentAuthorization", {
                 groupBuyActivityId: order.groupBuyActivityId,
                 orderId: order.id,
                 mode: "manualRepayment"
@@ -294,16 +301,13 @@ function OrderDetailCard({ order, groupBuyActivities, payments, actions, navigat
               accessibilityRole="button"
               key={item.id}
               disabled={!canEdit || historical}
-              onPress={() => navigation.go("drinkSelection", {
+              onPress={() => navigation.push("drinkSelection", {
+                // route.params must stay JSON-serializable, so editOrderId (looked up fresh by
+                // DrinkSelectionScreen) replaces the onSaveOrderItem closure this used to pass.
                 groupBuyActivityId: order.groupBuyActivityId,
                 editMode: true,
                 editOrderItem: item,
-                onSaveOrderItem: (updatedItem) => {
-                  const nextItems = orderItems.map((current) => (
-                    current.id === updatedItem.id ? updatedItem : current
-                  ));
-                  actions.updateOrderItems(order.id, nextItems);
-                }
+                editOrderId: order.id
               })}
               style={({ pressed }) => [
                 styles.detailCard,
@@ -363,7 +367,7 @@ function OrderDetailCard({ order, groupBuyActivities, payments, actions, navigat
           label={historical ? "歷史訂單不可修改" : !canEdit ? "訂單目前不可修改" : "修改訂單"}
           variant="secondary"
           disabled={!canEdit || historical}
-          onPress={() => canEdit && !historical && navigation.go("drinkSelection", {
+          onPress={() => canEdit && !historical && navigation.push("drinkSelection", {
             groupBuyActivityId: order.groupBuyActivityId,
             editOrderId: order.id
           })}
@@ -387,7 +391,7 @@ function OrderDetailCard({ order, groupBuyActivities, payments, actions, navigat
           >
             <PrimaryButton
               label="重新預授權"
-              onPress={() => navigation.go("paymentAuthorization", { groupBuyActivityId: order.groupBuyActivityId, orderId: order.id })}
+              onPress={() => navigation.push("paymentAuthorization", { groupBuyActivityId: order.groupBuyActivityId, orderId: order.id })}
             />
           </Notice>
         ) : null}
@@ -433,7 +437,7 @@ function OrderDetailCard({ order, groupBuyActivities, payments, actions, navigat
           {order.paymentStatus === "pending" ? (
             <PrimaryButton
               label="前往付款"
-              onPress={() => navigation.go("paymentAuthorization", {
+              onPress={() => navigation.push("paymentAuthorization", {
                 groupBuyActivityId: order.groupBuyActivityId,
                 orderId: order.id
               })}
@@ -527,7 +531,7 @@ function CartDraftSection({ cartGroupBuyActivity, cartItems, cartTotalQuantity, 
         </View>
         <PrimaryButton
           label="查看購物車"
-          onPress={() => cartGroupBuyActivity && navigation.go("cart", { groupBuyActivityId: cartGroupBuyActivity.id })}
+          onPress={() => cartGroupBuyActivity && navigation.push("cart", { groupBuyActivityId: cartGroupBuyActivity.id })}
         />
       </Card>
     </Section>

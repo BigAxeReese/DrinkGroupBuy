@@ -6,19 +6,24 @@ import { DiscountSummaryCard } from "../components/DiscountSummaryCard";
 import { PrimaryButton } from "../components/PrimaryButton";
 import { ProgressSummary } from "../components/ProgressSummary";
 import { StatusBadge } from "../components/StatusBadge";
+import { useAppState } from "../state/AppStateContext";
 import { formatOrderItemCustomizations, toLocalOrderItem } from "../utils/orderItems";
 import { useOrderListSync } from "../hooks/useOrderListSync";
 import { formatCurrency, getStoreById, isWithdrawalLocked } from "../utils/calculations";
 import { formatDeadlineLabel } from "../utils/deadlineTime";
 
-export function MerchantDashboardScreen({ navigation, appState, actions, selectedMerchantStoreId }) {
+export function MerchantDashboardScreen({ navigation, route, appState, actions, selectedMerchantStoreId }) {
+  const { logout } = useAppState();
   const [pickupCode, setPickupCode] = useState("");
   const [pickupLookup, setPickupLookup] = useState(null);
   const [pickupNotice, setPickupNotice] = useState(null);
   const [pickupBusy, setPickupBusy] = useState(false);
   const [readyAction, setReadyAction] = useState(null);
   const [expandedOrderIds, setExpandedOrderIds] = useState({});
-  const [selectedHistoryOrderId, setSelectedHistoryOrderId] = useState(null);
+  // The history-order-detail view used to be a local-state toggle (selectedHistoryOrderId)
+  // invisible to the hardware back button. It's now a real stack entry: this screen's own route
+  // is pushed a second time with orderId (see MerchantDashboardStack.jsx).
+  const orderId = route.params?.orderId ?? null;
   const [cancelFormActivityId, setCancelFormActivityId] = useState(null);
   const [cancelReason, setCancelReason] = useState("");
   const [cancelAction, setCancelAction] = useState(null);
@@ -166,7 +171,7 @@ export function MerchantDashboardScreen({ navigation, appState, actions, selecte
     // Alert.alert is a no-op on react-native-web (react-native-web/src/exports/Alert is an
     // empty stub) -- window.confirm is the only way to get a blocking confirm on that platform.
     if (Platform.OS === "web") {
-      if (window.confirm("確定要登出嗎？")) navigation.logout();
+      if (window.confirm("確定要登出嗎？")) logout();
       return;
     }
 
@@ -175,19 +180,19 @@ export function MerchantDashboardScreen({ navigation, appState, actions, selecte
       "確定要登出嗎？",
       [
         { text: "取消", style: "cancel" },
-        { text: "登出", style: "destructive", onPress: () => navigation.logout() }
+        { text: "登出", style: "destructive", onPress: logout }
       ]
     );
   }
 
-  const selectedHistoryOrder = selectedHistoryOrderId
-    ? historyOrders.find((order) => order.id === selectedHistoryOrderId) ?? null
+  const selectedHistoryOrder = orderId
+    ? historyOrders.find((order) => order.id === orderId) ?? null
     : null;
 
   if (selectedHistoryOrder) {
     const orderActivity = appState.groupBuyActivities.find((item) => item.id === selectedHistoryOrder.groupBuyActivityId);
     return (
-      <MobileScreen title="訂單明細" onBack={() => setSelectedHistoryOrderId(null)}>
+      <MobileScreen title="訂單明細" onBack={() => navigation.goBack()}>
         <MerchantHistoryOrderDetail order={selectedHistoryOrder} groupBuyActivity={orderActivity} />
       </MobileScreen>
     );
@@ -228,13 +233,13 @@ export function MerchantDashboardScreen({ navigation, appState, actions, selecte
         <Text style={styles.sectionTitle}>{tab === "active" ? "進行中的團購" : "歷史訂單"}</Text>
         {tab === "active" ? (
           <View style={styles.headerActions}>
-            <Pressable accessibilityRole="button" onPress={() => navigation.go("merchantMenu")}>
+            <Pressable accessibilityRole="button" onPress={() => navigation.push("merchantMenu")}>
               <Text style={styles.createLink}>管理菜單</Text>
             </Pressable>
-            <Pressable accessibilityRole="button" onPress={() => navigation.go("merchantRefundRequests")}>
+            <Pressable accessibilityRole="button" onPress={() => navigation.push("merchantRefundRequests")}>
               <Text style={styles.createLink}>退款申請</Text>
             </Pressable>
-            <Pressable accessibilityRole="button" onPress={() => navigation.go("merchantCreate")}>
+            <Pressable accessibilityRole="button" onPress={() => navigation.push("merchantCreate")}>
               <Text style={styles.createLink}>＋ 開團</Text>
             </Pressable>
           </View>
@@ -378,7 +383,7 @@ export function MerchantDashboardScreen({ navigation, appState, actions, selecte
                     <Text style={styles.productionListTitle}>待製作明細</Text>
                     <Pressable
                       accessibilityRole="button"
-                      onPress={() => navigation.go("merchantProductionList", { groupBuyActivityId: groupBuyActivity.id })}
+                      onPress={() => navigation.push("merchantProductionList", { groupBuyActivityId: groupBuyActivity.id })}
                     >
                       <Text style={styles.productionListLink}>總製作清單 ＞</Text>
                     </Pressable>
@@ -513,7 +518,7 @@ export function MerchantDashboardScreen({ navigation, appState, actions, selecte
               <Pressable
                 key={order.id}
                 accessibilityRole="button"
-                onPress={() => setSelectedHistoryOrderId(order.id)}
+                onPress={() => navigation.push("merchantDashboard", { orderId: order.id })}
                 style={({ pressed }) => [styles.historyCard, pressed && styles.pressed]}
               >
                 <View style={styles.header}>
