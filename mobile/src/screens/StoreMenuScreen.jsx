@@ -77,7 +77,7 @@ export function StoreMenuScreen({ navigation, route, memberAction }) {
   return (
     <MobileScreen
       title="店家菜單"
-      subtitle="目前沒有進行中的團購，可先查看店家飲品與客製化選項。"
+      subtitle="目前沒有進行中的團購，可先查看店家飲品。"
       onBack={() => navigation.back()}
       onMemberPress={memberAction}
     >
@@ -114,14 +114,6 @@ export function StoreMenuScreen({ navigation, route, memberAction }) {
                 </View>
                 <Text maxFontSizeMultiplier={maxFontSizeMultiplier} style={styles.price}>{formatCurrency(drink.basePrice)}</Text>
               </View>
-              {drink.customizationGroups.map((group) => (
-                <Text key={group.optionType} style={styles.optionText}>
-                  {getGroupLabel(group.optionType)}：{group.options.length
-                    ? group.options.map((option) => `${option.label}${option.priceDelta > 0 ? ` +${formatCurrency(option.priceDelta)}` : ""}`).join("、")
-                    : "不提供"}
-                  {group.optionType === "topping" ? `（最多 ${group.maxSelections} 種）` : ""}
-                </Text>
-              ))}
             </Card>
           ))
         ) : (
@@ -130,10 +122,6 @@ export function StoreMenuScreen({ navigation, route, memberAction }) {
       </Section>
     </MobileScreen>
   );
-}
-
-function getGroupLabel(optionType) {
-  return { size: "尺寸", sweetness: "甜度", ice: "冰量", topping: "加料" }[optionType] || optionType;
 }
 
 const styles = StyleSheet.create({
@@ -176,9 +164,5 @@ const styles = StyleSheet.create({
   price: {
     ...typeScale.price,
     color: colors.text
-  },
-  optionText: {
-    ...typeScale.caption,
-    color: colors.textSecondary
   }
 });
