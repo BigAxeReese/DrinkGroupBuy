@@ -8,6 +8,7 @@ import {
   updateMerchantMenuItem
 } from "../utils/apiClient";
 import { formatCurrency } from "../utils/calculations";
+import { colors, tones } from "../theme/tokens";
 
 let nextLocalRowId = 1;
 function createLocalRowId() {
@@ -346,7 +347,7 @@ function Field({ label, ...props }) {
   return (
     <View style={styles.field}>
       <Text style={styles.label}>{label}</Text>
-      <TextInput {...props} placeholderTextColor="#94a3b8" style={[styles.input, props.multiline && styles.multiline]} />
+      <TextInput {...props} placeholderTextColor={colors.textSecondary} style={[styles.input, props.multiline && styles.multiline]} />
     </View>
   );
 }
@@ -361,14 +362,14 @@ function OptionRowsField({ optionType, rows, onAdd, onRemove, onUpdate }) {
             value={row.label}
             onChangeText={(value) => onUpdate(optionType, row.localId, "label", value)}
             placeholder="名稱"
-            placeholderTextColor="#94a3b8"
+            placeholderTextColor={colors.textSecondary}
             style={[styles.input, styles.optionRowLabelInput]}
           />
           <TextInput
             value={row.priceDeltaText}
             onChangeText={(value) => onUpdate(optionType, row.localId, "priceDeltaText", digitsOnly(value))}
             placeholder="加價"
-            placeholderTextColor="#94a3b8"
+            placeholderTextColor={colors.textSecondary}
             keyboardType="number-pad"
             style={[styles.input, styles.optionRowPriceInput]}
           />
@@ -453,23 +454,23 @@ const styles = StyleSheet.create({
     alignItems: "center",
     justifyContent: "center",
     paddingHorizontal: 14,
-    backgroundColor: "#dbeafe"
+    backgroundColor: colors.recess
   },
   addButtonText: {
-    color: "#1f6feb",
+    color: colors.accentInk,
     fontSize: 13,
     fontWeight: "900"
   },
   modalOverlay: {
     flex: 1,
     justifyContent: "flex-end",
-    backgroundColor: "rgba(15,23,42,0.45)"
+    backgroundColor: `${colors.text}73`
   },
   modalSheet: {
     maxHeight: "88%",
     borderTopLeftRadius: 24,
     borderTopRightRadius: 24,
-    backgroundColor: "#ffffff",
+    backgroundColor: colors.page,
     paddingHorizontal: 20,
     paddingTop: 18,
     paddingBottom: 10
@@ -482,7 +483,7 @@ const styles = StyleSheet.create({
   },
   modalTitle: {
     flex: 1,
-    color: "#0f172a",
+    color: colors.text,
     fontSize: 18,
     fontWeight: "900"
   },
@@ -493,7 +494,7 @@ const styles = StyleSheet.create({
     justifyContent: "center"
   },
   modalCloseIcon: {
-    color: "#64748b",
+    color: colors.textSecondary,
     fontSize: 16,
     fontWeight: "900"
   },
@@ -504,31 +505,31 @@ const styles = StyleSheet.create({
     gap: 12,
     paddingBottom: 18
   },
-  itemCard: { gap: 8, borderWidth: 1, borderColor: "#e2e8f0", borderRadius: 12, padding: 11 },
+  itemCard: { gap: 8, borderWidth: 1, borderColor: colors.lineRow, borderRadius: 12, padding: 11 },
   row: { flexDirection: "row", gap: 10, justifyContent: "space-between" },
   flex: { flex: 1 },
-  itemName: { color: "#0f172a", fontSize: 15, fontWeight: "900" },
-  meta: { color: "#64748b", fontSize: 12, lineHeight: 18 },
-  available: { color: "#047857", fontSize: 12, fontWeight: "900" },
-  unavailable: { color: "#b91c1c", fontSize: 12, fontWeight: "900" },
+  itemName: { color: colors.text, fontSize: 15, fontWeight: "900" },
+  meta: { color: colors.textSecondary, fontSize: 12, lineHeight: 18 },
+  available: { color: tones.success.fg, fontSize: 12, fontWeight: "900" },
+  unavailable: { color: tones.danger.fg, fontSize: 12, fontWeight: "900" },
   field: { gap: 5 },
-  label: { color: "#334155", fontSize: 12, fontWeight: "800" },
+  label: { color: colors.textSecondary, fontSize: 12, fontWeight: "800" },
   categoryChipRow: { flexDirection: "row", flexWrap: "wrap", gap: 6, marginTop: -2 },
-  categoryChip: { minHeight: 32, paddingHorizontal: 12, justifyContent: "center", borderRadius: 999, borderWidth: 1, borderColor: "#cbd5e1", backgroundColor: "#f8fafc" },
-  categoryChipActive: { borderColor: "#1f6feb", backgroundColor: "#dbeafe" },
-  categoryChipText: { color: "#475569", fontSize: 12, fontWeight: "700" },
-  categoryChipTextActive: { color: "#1f6feb" },
-  input: { minHeight: 46, borderWidth: 1, borderColor: "#cbd5e1", borderRadius: 10, backgroundColor: "#fff", color: "#0f172a", paddingHorizontal: 11, paddingVertical: 9 },
+  categoryChip: { minHeight: 32, paddingHorizontal: 12, justifyContent: "center", borderRadius: 999, borderWidth: 1, borderColor: colors.lineInput, backgroundColor: colors.recess },
+  categoryChipActive: { borderColor: colors.accent, backgroundColor: colors.recess },
+  categoryChipText: { color: colors.textSecondary, fontSize: 12, fontWeight: "700" },
+  categoryChipTextActive: { color: colors.accentInk },
+  input: { minHeight: 46, borderWidth: 1, borderColor: colors.lineInput, borderRadius: 10, backgroundColor: colors.page, color: colors.text, paddingHorizontal: 11, paddingVertical: 9 },
   multiline: { minHeight: 72, textAlignVertical: "top" },
   optionRow: { flexDirection: "row", gap: 6, alignItems: "center" },
   optionRowLabelInput: { flex: 2, minWidth: 0 },
   optionRowPriceInput: { flex: 1, minWidth: 0 },
-  optionRowRemoveButton: { minHeight: 46, paddingHorizontal: 10, alignItems: "center", justifyContent: "center", borderRadius: 10, backgroundColor: "#fee2e2" },
-  optionRowRemoveText: { color: "#b91c1c", fontSize: 12, fontWeight: "900" },
-  toggle: { minHeight: 44, alignItems: "center", justifyContent: "center", borderRadius: 10, backgroundColor: "#fee2e2" },
-  toggleActive: { backgroundColor: "#dcfce7" },
-  toggleText: { color: "#991b1b", fontWeight: "900" },
-  toggleTextActive: { color: "#166534" },
-  error: { color: "#b91c1c", fontSize: 12, fontWeight: "800" },
-  success: { color: "#047857", fontSize: 12, fontWeight: "800" }
+  optionRowRemoveButton: { minHeight: 46, paddingHorizontal: 10, alignItems: "center", justifyContent: "center", borderRadius: 10, backgroundColor: tones.danger.bg },
+  optionRowRemoveText: { color: tones.danger.fg, fontSize: 12, fontWeight: "900" },
+  toggle: { minHeight: 44, alignItems: "center", justifyContent: "center", borderRadius: 10, backgroundColor: tones.danger.bg },
+  toggleActive: { backgroundColor: tones.success.bg },
+  toggleText: { color: tones.danger.fg, fontWeight: "900" },
+  toggleTextActive: { color: tones.success.fg },
+  error: { color: tones.danger.fg, fontSize: 12, fontWeight: "800" },
+  success: { color: tones.success.fg, fontSize: 12, fontWeight: "800" }
 });

@@ -11,6 +11,7 @@ import { formatOrderItemCustomizations, toLocalOrderItem } from "../utils/orderI
 import { useOrderListSync } from "../hooks/useOrderListSync";
 import { formatCurrency, getStoreById, isWithdrawalLocked } from "../utils/calculations";
 import { formatDeadlineLabel } from "../utils/deadlineTime";
+import { colors, tones } from "../theme/tokens";
 
 export function MerchantDashboardScreen({ navigation, route, appState, actions, selectedMerchantStoreId }) {
   const { logout } = useAppState();
@@ -287,7 +288,7 @@ export function MerchantDashboardScreen({ navigation, route, appState, actions, 
               onChangeText={handlePickupCodeChange}
               onSubmitEditing={handlePickupLookup}
               placeholder="六位取餐碼"
-              placeholderTextColor="#94a3b8"
+              placeholderTextColor={colors.textSecondary}
               returnKeyType="done"
               style={styles.pickupInput}
               value={pickupCode}
@@ -466,7 +467,7 @@ export function MerchantDashboardScreen({ navigation, route, appState, actions, 
                       multiline
                       onChangeText={setCancelReason}
                       placeholder="例如：食材短缺、店家臨時公休"
-                      placeholderTextColor="#94a3b8"
+                      placeholderTextColor={colors.textSecondary}
                       style={styles.cancelReasonInput}
                       value={cancelReason}
                     />
@@ -646,13 +647,7 @@ function getOrderStatusLabel(status) {
 
 const styles = StyleSheet.create({
   hero: {
-    gap: 14,
-    marginHorizontal: -14,
-    marginTop: -70,
-    paddingTop: 82,
-    paddingHorizontal: 18,
-    paddingBottom: 18,
-    backgroundColor: "#2f6df6"
+    gap: 14
   },
   heroTop: {
     flexDirection: "row",
@@ -666,21 +661,21 @@ const styles = StyleSheet.create({
     alignItems: "center",
     justifyContent: "center",
     borderWidth: 2,
-    borderColor: "rgba(255,255,255,0.72)",
-    backgroundColor: "#ffffff"
+    borderColor: colors.lineDecor,
+    backgroundColor: colors.recess
   },
   storeAvatarText: {
-    color: "#1f6feb",
+    color: colors.accentInk,
     fontSize: 20,
     fontWeight: "900"
   },
   storeName: {
-    color: "#ffffff",
+    color: colors.text,
     fontSize: 19,
     fontWeight: "900"
   },
   storeSubtitle: {
-    color: "rgba(255,255,255,0.88)",
+    color: colors.textSecondary,
     fontSize: 11,
     fontWeight: "700",
     marginTop: 3
@@ -693,16 +688,16 @@ const styles = StyleSheet.create({
     flex: 1,
     gap: 3,
     borderRadius: 13,
-    backgroundColor: "rgba(255,255,255,0.18)",
+    backgroundColor: colors.recess,
     padding: 9
   },
   metricValue: {
-    color: "#ffffff",
+    color: colors.text,
     fontSize: 20,
     fontWeight: "900"
   },
   metricLabel: {
-    color: "rgba(255,255,255,0.9)",
+    color: colors.textSecondary,
     fontSize: 10,
     fontWeight: "800"
   },
@@ -712,7 +707,7 @@ const styles = StyleSheet.create({
     justifyContent: "space-between"
   },
   sectionTitle: {
-    color: "#0f172a",
+    color: colors.text,
     fontSize: 17,
     fontWeight: "900"
   },
@@ -722,7 +717,7 @@ const styles = StyleSheet.create({
     gap: 14
   },
   createLink: {
-    color: "#1f6feb",
+    color: colors.accentInk,
     fontSize: 12,
     fontWeight: "900"
   },
@@ -732,10 +727,10 @@ const styles = StyleSheet.create({
     alignItems: "center",
     justifyContent: "center",
     paddingHorizontal: 14,
-    backgroundColor: "#fee2e2"
+    backgroundColor: tones.danger.bg
   },
   logoutButtonText: {
-    color: "#b91c1c",
+    color: tones.danger.fg,
     fontSize: 13,
     fontWeight: "900"
   },
@@ -753,7 +748,7 @@ const styles = StyleSheet.create({
     justifyContent: "center"
   },
   tabText: {
-    color: "#64748b",
+    color: colors.textSecondary,
     fontSize: 13,
     fontWeight: "900",
     textAlign: "center"
@@ -761,22 +756,22 @@ const styles = StyleSheet.create({
   tabDivider: {
     width: 1,
     height: 24,
-    backgroundColor: "#cbd5e1"
+    backgroundColor: colors.lineRow
   },
   activeTabItem: {
-    backgroundColor: "#ffffff"
+    backgroundColor: colors.recess
   },
   activeTabText: {
-    color: "#1f6feb"
+    color: colors.accentInk
   },
   pickupInput: {
     width: "100%",
     minHeight: 48,
     borderWidth: 1,
-    borderColor: "#94a3b8",
+    borderColor: colors.lineInput,
     borderRadius: 8,
-    backgroundColor: "#ffffff",
-    color: "#0f172a",
+    backgroundColor: colors.page,
+    color: colors.text,
     fontSize: 22,
     fontWeight: "900",
     letterSpacing: 0,
@@ -786,18 +781,18 @@ const styles = StyleSheet.create({
   pickupLookupCard: {
     gap: 7,
     borderWidth: 1,
-    borderColor: "#cbd5e1",
+    borderColor: colors.lineRow,
     borderRadius: 8,
-    backgroundColor: "#f8fafc",
+    backgroundColor: colors.recess,
     padding: 12
   },
   lookupTitle: {
-    color: "#0f172a",
+    color: colors.text,
     fontSize: 16,
     fontWeight: "900"
   },
   lookupMeta: {
-    color: "#475569",
+    color: colors.textSecondary,
     fontSize: 12,
     lineHeight: 18
   },
@@ -805,29 +800,29 @@ const styles = StyleSheet.create({
     gap: 6,
     marginTop: 2,
     borderTopWidth: 1,
-    borderTopColor: "#e2e8f0",
+    borderTopColor: colors.lineRow,
     paddingTop: 8
   },
   pickupLookupItemRow: {
     gap: 2
   },
   pickupLookupItemName: {
-    color: "#0f172a",
+    color: colors.text,
     fontSize: 13,
     fontWeight: "800"
   },
   pickupLookupItemMeta: {
-    color: "#64748b",
+    color: colors.textSecondary,
     fontSize: 11,
     fontWeight: "700"
   },
   errorText: {
-    color: "#b91c1c",
+    color: tones.danger.fg,
     fontSize: 12,
     fontWeight: "800"
   },
   successText: {
-    color: "#047857",
+    color: tones.success.fg,
     fontSize: 12,
     fontWeight: "800"
   },
@@ -835,8 +830,8 @@ const styles = StyleSheet.create({
     gap: 10,
     borderRadius: 16,
     borderWidth: 1,
-    borderColor: "#e2e8f0",
-    backgroundColor: "#ffffff",
+    borderColor: colors.lineRow,
+    backgroundColor: colors.page,
     padding: 12
   },
   pressed: {
@@ -851,12 +846,12 @@ const styles = StyleSheet.create({
     flex: 1
   },
   title: {
-    color: "#0f172a",
+    color: colors.text,
     fontSize: 15,
     fontWeight: "900"
   },
   meta: {
-    color: "#64748b",
+    color: colors.textSecondary,
     fontSize: 11,
     marginTop: 3
   },
@@ -866,22 +861,22 @@ const styles = StyleSheet.create({
     gap: 10
   },
   summary: {
-    color: "#334155",
+    color: colors.textSecondary,
     fontSize: 12,
     fontWeight: "800"
   },
   settledText: {
-    color: "#047857",
+    color: tones.success.fg,
     fontSize: 12,
     fontWeight: "900"
   },
   warningText: {
-    color: "#92400e",
+    color: tones.warning.fg,
     fontSize: 12,
     fontWeight: "900"
   },
   readyText: {
-    color: "#1f6feb",
+    color: colors.accentInk,
     fontSize: 12,
     fontWeight: "900"
   },
@@ -889,8 +884,8 @@ const styles = StyleSheet.create({
     gap: 6,
     borderRadius: 12,
     borderWidth: 1,
-    borderColor: "#e2e8f0",
-    backgroundColor: "#f8fafc",
+    borderColor: colors.lineRow,
+    backgroundColor: colors.recess,
     padding: 10
   },
   productionListHeader: {
@@ -899,20 +894,20 @@ const styles = StyleSheet.create({
     justifyContent: "space-between"
   },
   productionListTitle: {
-    color: "#0f172a",
+    color: colors.text,
     fontSize: 12,
     fontWeight: "900"
   },
   productionListLink: {
-    color: "#1f6feb",
+    color: colors.accentInk,
     fontSize: 12,
     fontWeight: "900"
   },
   productionOrderRow: {
     borderWidth: 1,
-    borderColor: "#e2e8f0",
+    borderColor: colors.lineRow,
     borderRadius: 12,
-    backgroundColor: "#ffffff",
+    backgroundColor: colors.page,
     overflow: "hidden"
   },
   productionOrderHeader: {
@@ -933,25 +928,25 @@ const styles = StyleSheet.create({
     gap: 10,
     paddingVertical: 10,
     borderTopWidth: 1,
-    borderTopColor: "#eef2f7"
+    borderTopColor: colors.lineRow
   },
   productionCustomer: {
-    color: "#334155",
+    color: colors.textSecondary,
     fontSize: 12,
     fontWeight: "800"
   },
   productionItems: {
-    color: "#475569",
+    color: colors.textSecondary,
     fontSize: 12,
     lineHeight: 17
   },
   emptyText: {
-    color: "#64748b",
+    color: colors.textSecondary,
     fontSize: 13,
     lineHeight: 19
   },
   syncText: {
-    color: "#64748b",
+    color: colors.textSecondary,
     fontSize: 12,
     paddingHorizontal: 16
   },
@@ -960,25 +955,25 @@ const styles = StyleSheet.create({
     marginHorizontal: 16,
     borderRadius: 12,
     borderWidth: 1,
-    borderColor: "#fecaca",
-    backgroundColor: "#fef2f2",
+    borderColor: tones.danger.bg,
+    backgroundColor: tones.danger.bg,
     padding: 12
   },
   historyCard: {
     gap: 10,
     borderRadius: 16,
     borderWidth: 1,
-    borderColor: "#e2e8f0",
-    backgroundColor: "#f8fafc",
+    borderColor: colors.lineRow,
+    backgroundColor: colors.recess,
     padding: 12
   },
   historyAmount: {
-    color: "#2563eb",
+    color: colors.accentInk,
     fontSize: 18,
     fontWeight: "900"
   },
   openHint: {
-    color: "#94a3b8",
+    color: colors.textSecondary,
     fontSize: 11,
     fontWeight: "700",
     textAlign: "right"
@@ -990,13 +985,13 @@ const styles = StyleSheet.create({
     gap: 10
   },
   detailLabel: {
-    color: "#64748b",
+    color: colors.textSecondary,
     fontSize: 13,
     fontWeight: "700"
   },
   detailValue: {
     flexShrink: 1,
-    color: "#0f172a",
+    color: colors.text,
     fontSize: 13,
     fontWeight: "900",
     textAlign: "right"
@@ -1010,23 +1005,23 @@ const styles = StyleSheet.create({
     gap: 10,
     paddingVertical: 8,
     borderBottomWidth: 1,
-    borderBottomColor: "#eef2f7"
+    borderBottomColor: colors.lineRow
   },
   cancelForm: {
     gap: 8
   },
   fieldLabel: {
-    color: "#334155",
+    color: colors.textSecondary,
     fontSize: 12,
     fontWeight: "800"
   },
   cancelReasonInput: {
     minHeight: 72,
     borderWidth: 1,
-    borderColor: "#cbd5e1",
+    borderColor: colors.lineInput,
     borderRadius: 10,
-    backgroundColor: "#ffffff",
-    color: "#0f172a",
+    backgroundColor: colors.page,
+    color: colors.text,
     fontSize: 14,
     paddingHorizontal: 12,
     paddingVertical: 8,

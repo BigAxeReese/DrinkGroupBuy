@@ -1,6 +1,7 @@
 import { StyleSheet, Text, View } from "react-native";
 import { MobileScreen, Section } from "../components/MobileScreen";
 import { getStoreById } from "../utils/calculations";
+import { colors, tones } from "../theme/tokens";
 
 export function MerchantProductionListScreen({ navigation, route, appState, selectedMerchantStoreId }) {
   const groupBuyActivityId = route.params?.groupBuyActivityId;
@@ -101,7 +102,7 @@ function formatVariantDetail(row) {
 const styles = StyleSheet.create({
   flex: { flex: 1 },
   emptyText: {
-    color: "#64748b",
+    color: colors.textSecondary,
     fontSize: 13,
     lineHeight: 19
   },
@@ -110,37 +111,37 @@ const styles = StyleSheet.create({
     alignItems: "center",
     gap: 10,
     borderBottomWidth: 1,
-    borderBottomColor: "#eef2f7",
+    borderBottomColor: colors.lineRow,
     paddingVertical: 9
   },
   itemName: {
-    color: "#0f172a",
+    color: colors.text,
     fontSize: 15,
     fontWeight: "900"
   },
   itemDetail: {
-    color: "#64748b",
+    color: colors.textSecondary,
     fontSize: 12,
     marginTop: 2
   },
   quantity: {
-    color: "#1f6feb",
+    color: colors.accentInk,
     fontSize: 20,
     fontWeight: "900"
   },
   orderRow: {
     gap: 3,
     borderBottomWidth: 1,
-    borderBottomColor: "#eef2f7",
+    borderBottomColor: colors.lineRow,
     paddingVertical: 8
   },
   orderCustomer: {
-    color: "#334155",
+    color: colors.textSecondary,
     fontSize: 13,
     fontWeight: "900"
   },
   orderItem: {
-    color: "#475569",
+    color: colors.textSecondary,
     fontSize: 12,
     lineHeight: 17
   }

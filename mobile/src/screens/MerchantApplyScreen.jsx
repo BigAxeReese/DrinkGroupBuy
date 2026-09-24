@@ -4,6 +4,7 @@ import { MobileScreen, Section } from "../components/MobileScreen";
 import { PrimaryButton } from "../components/PrimaryButton";
 import { useFirebaseGoogleLogin } from "../utils/firebaseAuth";
 import { submitMerchantApplication } from "../utils/apiClient";
+import { colors, tones } from "../theme/tokens";
 
 // Always uses real Firebase Google Sign-In (not gated by AUTH_DEV_MODE) -- the applicant's
 // identity here is who gets promoted to a merchant account if an admin later approves this,
@@ -143,25 +144,25 @@ function getMerchantApplyErrorMessage(error) {
 
 const styles = StyleSheet.create({
   helperText: {
-    color: "#64748b",
+    color: colors.textSecondary,
     fontSize: 13,
     lineHeight: 19,
     marginBottom: 10
   },
   errorText: {
-    color: "#b91c1c",
+    color: tones.danger.fg,
     fontSize: 12,
     fontWeight: "800",
     marginBottom: 8
   },
   successText: {
-    color: "#047857",
+    color: tones.success.fg,
     fontSize: 13,
     fontWeight: "700",
     marginBottom: 12
   },
   fieldLabel: {
-    color: "#334155",
+    color: colors.textSecondary,
     fontSize: 12,
     fontWeight: "800",
     marginTop: 8,
@@ -170,10 +171,10 @@ const styles = StyleSheet.create({
   input: {
     minHeight: 44,
     borderWidth: 1,
-    borderColor: "#cbd5e1",
+    borderColor: colors.lineInput,
     borderRadius: 10,
-    backgroundColor: "#ffffff",
-    color: "#0f172a",
+    backgroundColor: colors.page,
+    color: colors.text,
     fontSize: 14,
     paddingHorizontal: 12,
     paddingVertical: 8,

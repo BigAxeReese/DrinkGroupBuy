@@ -15,7 +15,13 @@ export const MILK_TEA_ROUTES = new Set([
   "groupProgress",
   "paymentAuthorization",
   "customerOrders",
-  "profile"
+  "profile",
+  "merchantApply",
+  "merchantDashboard",
+  "merchantCreate",
+  "merchantMenu",
+  "merchantProductionList",
+  "merchantRefundRequests"
 ]);
 
 // Page tint of every route that has not migrated yet.

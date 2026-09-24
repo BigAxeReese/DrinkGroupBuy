@@ -10,6 +10,7 @@ import {
   validateGroupBuyActivityTierDrafts
 } from "../utils/groupBuyActivityErrors";
 import { parseDealFactorToDiscountPercent } from "../utils/discountPercentFormat";
+import { colors, tones } from "../theme/tokens";
 
 const NativeDateTimePicker = Platform.OS === "web"
   ? null
@@ -287,7 +288,7 @@ function MobileInput({ label, ...props }) {
   return (
     <View style={styles.inputGroup}>
       <Text style={styles.label}>{label}</Text>
-      <TextInput style={styles.input} placeholderTextColor="#94a3b8" {...props} />
+      <TextInput style={styles.input} placeholderTextColor={colors.textSecondary} {...props} />
     </View>
   );
 }
@@ -477,7 +478,7 @@ function getPickupValidationError(deadlineDate, pickupStartDate) {
 
 const styles = StyleSheet.create({
   helperText: {
-    color: "#64748b",
+    color: colors.textSecondary,
     fontSize: 12,
     lineHeight: 18
   },
@@ -485,8 +486,8 @@ const styles = StyleSheet.create({
     gap: 10,
     borderRadius: 14,
     borderWidth: 1,
-    borderColor: "#bfdbfe",
-    backgroundColor: "#f8fbff",
+    borderColor: colors.lineDecor,
+    backgroundColor: colors.recess,
     padding: 12
   },
   tierHeader: {
@@ -496,7 +497,7 @@ const styles = StyleSheet.create({
     gap: 10
   },
   tierTitle: {
-    color: "#0f172a",
+    color: colors.text,
     fontSize: 14,
     fontWeight: "900"
   },
@@ -508,12 +509,12 @@ const styles = StyleSheet.create({
     flex: 1
   },
   tierSummary: {
-    color: "#1d4ed8",
+    color: colors.accentInk,
     fontSize: 12,
     fontWeight: "800"
   },
   tierError: {
-    color: "#b91c1c",
+    color: tones.danger.fg,
     fontSize: 12,
     fontWeight: "800",
     lineHeight: 18
@@ -522,13 +523,13 @@ const styles = StyleSheet.create({
     minHeight: 44,
     borderRadius: 13,
     borderWidth: 1,
-    borderColor: "#93c5fd",
+    borderColor: colors.accent,
     alignItems: "center",
     justifyContent: "center",
-    backgroundColor: "#eff6ff"
+    backgroundColor: colors.recess
   },
   addTierButtonText: {
-    color: "#1d4ed8",
+    color: colors.accentInk,
     fontSize: 13,
     fontWeight: "900"
   },
@@ -537,11 +538,11 @@ const styles = StyleSheet.create({
     borderRadius: 999,
     alignItems: "center",
     justifyContent: "center",
-    backgroundColor: "#fee2e2",
+    backgroundColor: tones.danger.bg,
     paddingHorizontal: 12
   },
   removeButtonText: {
-    color: "#b91c1c",
+    color: tones.danger.fg,
     fontSize: 12,
     fontWeight: "900"
   },
@@ -552,7 +553,7 @@ const styles = StyleSheet.create({
     gap: 6
   },
   label: {
-    color: "#334155",
+    color: colors.textSecondary,
     fontSize: 13,
     fontWeight: "800"
   },
@@ -560,9 +561,9 @@ const styles = StyleSheet.create({
     minHeight: 52,
     borderRadius: 16,
     borderWidth: 1,
-    borderColor: "#cbd5e1",
-    backgroundColor: "#ffffff",
-    color: "#0f172a",
+    borderColor: colors.lineInput,
+    backgroundColor: colors.page,
+    color: colors.text,
     fontSize: 16,
     paddingHorizontal: 14
   },
@@ -570,19 +571,19 @@ const styles = StyleSheet.create({
     minHeight: 56,
     borderRadius: 16,
     borderWidth: 1,
-    borderColor: "#cbd5e1",
-    backgroundColor: "#ffffff",
+    borderColor: colors.lineInput,
+    backgroundColor: colors.page,
     justifyContent: "center",
     paddingHorizontal: 14,
     paddingVertical: 9
   },
   datePickerText: {
-    color: "#0f172a",
+    color: colors.text,
     fontSize: 16,
     fontWeight: "700"
   },
   datePickerHint: {
-    color: "#2563eb",
+    color: colors.accentInk,
     fontSize: 12,
     fontWeight: "800",
     marginTop: 4
@@ -597,9 +598,9 @@ const styles = StyleSheet.create({
     borderRadius: 16,
     borderWidth: 1,
     borderStyle: "solid",
-    borderColor: "#cbd5e1",
-    backgroundColor: "#ffffff",
-    color: "#0f172a",
+    borderColor: colors.lineInput,
+    backgroundColor: colors.page,
+    color: colors.text,
     fontSize: 16,
     paddingLeft: 14,
     paddingRight: 14
@@ -610,23 +611,23 @@ const styles = StyleSheet.create({
     borderRadius: 16,
     borderWidth: 1,
     borderStyle: "solid",
-    borderColor: "#cbd5e1",
-    backgroundColor: "#ffffff",
-    color: "#0f172a",
+    borderColor: colors.lineInput,
+    backgroundColor: colors.page,
+    color: colors.text,
     fontSize: 16,
     paddingLeft: 14,
     paddingRight: 14
   },
   submitMessage: {
-    color: "#047857",
+    color: tones.success.fg,
     fontSize: 14,
     fontWeight: "800",
     textAlign: "center"
   },
   errorMessage: {
-    color: "#dc2626"
+    color: tones.danger.fg
   },
   warningMessage: {
-    color: "#b45309"
+    color: tones.warning.fg
   }
 });

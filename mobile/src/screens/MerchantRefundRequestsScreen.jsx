@@ -9,6 +9,7 @@ import {
   listMerchantStoreOrders
 } from "../utils/apiClient";
 import { formatCurrency } from "../utils/calculations";
+import { colors, tones } from "../theme/tokens";
 
 export function MerchantRefundRequestsScreen({ navigation, memberAction, selectedMerchantStoreId }) {
   const [capturedOrders, setCapturedOrders] = useState([]);
@@ -148,7 +149,7 @@ export function MerchantRefundRequestsScreen({ navigation, memberAction, selecte
                       multiline
                       onChangeText={setFormReason}
                       placeholder="例如：飲品製作錯誤、顧客申訴"
-                      placeholderTextColor="#94a3b8"
+                      placeholderTextColor={colors.textSecondary}
                       style={[styles.input, styles.reasonInput]}
                       value={formReason}
                     />
@@ -219,17 +220,17 @@ function getRefundRequestErrorMessage(error) {
 
 const styles = StyleSheet.create({
   emptyText: {
-    color: "#64748b",
+    color: colors.textSecondary,
     fontSize: 13,
     lineHeight: 19
   },
   errorText: {
-    color: "#b91c1c",
+    color: tones.danger.fg,
     fontSize: 12,
     fontWeight: "800"
   },
   successText: {
-    color: "#047857",
+    color: tones.success.fg,
     fontSize: 12,
     fontWeight: "800"
   },
@@ -237,24 +238,24 @@ const styles = StyleSheet.create({
     gap: 8,
     borderRadius: 12,
     borderWidth: 1,
-    borderColor: "#fecaca",
-    backgroundColor: "#fef2f2",
+    borderColor: tones.danger.bg,
+    backgroundColor: tones.danger.bg,
     padding: 12
   },
   orderCard: {
     gap: 10,
     borderRadius: 14,
     borderWidth: 1,
-    borderColor: "#e2e8f0",
-    backgroundColor: "#f8fafc",
+    borderColor: colors.lineRow,
+    backgroundColor: colors.recess,
     padding: 12
   },
   requestCard: {
     gap: 6,
     borderRadius: 14,
     borderWidth: 1,
-    borderColor: "#e2e8f0",
-    backgroundColor: "#ffffff",
+    borderColor: colors.lineRow,
+    backgroundColor: colors.page,
     padding: 12
   },
   orderHeader: {
@@ -266,18 +267,18 @@ const styles = StyleSheet.create({
     flex: 1
   },
   orderTitle: {
-    color: "#0f172a",
+    color: colors.text,
     fontSize: 14,
     fontWeight: "900"
   },
   meta: {
-    color: "#64748b",
+    color: colors.textSecondary,
     fontSize: 11,
     fontWeight: "700",
     marginTop: 3
   },
   amount: {
-    color: "#2563eb",
+    color: colors.accentInk,
     fontSize: 16,
     fontWeight: "900"
   },
@@ -290,17 +291,17 @@ const styles = StyleSheet.create({
     gap: 8
   },
   fieldLabel: {
-    color: "#334155",
+    color: colors.textSecondary,
     fontSize: 12,
     fontWeight: "800"
   },
   input: {
     minHeight: 44,
     borderWidth: 1,
-    borderColor: "#cbd5e1",
+    borderColor: colors.lineInput,
     borderRadius: 10,
-    backgroundColor: "#ffffff",
-    color: "#0f172a",
+    backgroundColor: colors.page,
+    color: colors.text,
     fontSize: 14,
     paddingHorizontal: 12,
     paddingVertical: 8
@@ -317,7 +318,7 @@ const styles = StyleSheet.create({
     flex: 1
   },
   reasonText: {
-    color: "#334155",
+    color: colors.textSecondary,
     fontSize: 12,
     fontWeight: "700",
     marginTop: 3
