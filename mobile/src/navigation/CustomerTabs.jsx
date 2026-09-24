@@ -5,7 +5,7 @@ import { HomeStack } from "./stacks/HomeStack";
 import { LiveMapStack } from "./stacks/LiveMapStack";
 import { OrdersStack } from "./stacks/OrdersStack";
 import { ProfileStack } from "./stacks/ProfileStack";
-import { tabSlideInterpolator } from "./tabSlideInterpolator";
+import { tabSlideOptions } from "./tabSlideInterpolator";
 
 const Tab = createBottomTabNavigator();
 
@@ -21,7 +21,7 @@ export function CustomerTabs() {
     <Tab.Navigator
       backBehavior="initialRoute"
       tabBar={(props) => <BottomNav {...props} />}
-      screenOptions={{ headerShown: false, sceneStyleInterpolator: reduceMotion ? undefined : tabSlideInterpolator }}
+      screenOptions={{ headerShown: false, ...(reduceMotion ? null : tabSlideOptions) }}
     >
       <Tab.Screen name="HomeTab" component={HomeStack} />
       <Tab.Screen name="LiveMapTab" component={LiveMapStack} />

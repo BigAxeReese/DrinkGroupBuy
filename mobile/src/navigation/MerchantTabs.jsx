@@ -3,7 +3,7 @@ import { BottomNav } from "../components/BottomNav";
 import { useReduceMotion } from "../hooks/useReduceMotion";
 import { MerchantCreateStack } from "./stacks/MerchantCreateStack";
 import { MerchantDashboardStack } from "./stacks/MerchantDashboardStack";
-import { tabSlideInterpolator } from "./tabSlideInterpolator";
+import { tabSlideOptions } from "./tabSlideInterpolator";
 
 const Tab = createBottomTabNavigator();
 
@@ -15,7 +15,7 @@ export function MerchantTabs() {
     <Tab.Navigator
       backBehavior="initialRoute"
       tabBar={(props) => <BottomNav {...props} />}
-      screenOptions={{ headerShown: false, sceneStyleInterpolator: reduceMotion ? undefined : tabSlideInterpolator }}
+      screenOptions={{ headerShown: false, ...(reduceMotion ? null : tabSlideOptions) }}
     >
       <Tab.Screen name="MerchantDashboardTab" component={MerchantDashboardStack} />
       <Tab.Screen name="MerchantCreateTab" component={MerchantCreateStack} />
