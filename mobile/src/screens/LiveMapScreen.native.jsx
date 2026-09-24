@@ -32,6 +32,10 @@ const PIN_COLORS = {
 export function LiveMapScreen({ navigation, appState, selectedAuthUserId }) {
   const mapRef = useRef(null);
   const lastReportSignatureRef = useRef("");
+  // True once a real GPS fix has been received. This effect re-runs on every re-focus of the tab, and
+  // while the next fix is pending the last known position is kept instead of jumping back to the
+  // fixed fallback location.
+  const hasRealFixRef = useRef(false);
   const zoom = mapDefaults.zoom;
   // Store-name labels are rendered as plain absolutely-positioned Views on top of the map, not as
   // Marker children -- react-native-maps' custom-marker-content path is known to be unreliable on
@@ -103,18 +107,23 @@ export function LiveMapScreen({ navigation, appState, selectedAuthUserId }) {
     };
 
     async function applyLocationConfig() {
-      setUserPosition(fallbackPosition);
+      if (effectiveLocationMode !== "live" || !hasRealFixRef.current) {
+        hasRealFixRef.current = false;
+        setUserPosition(fallbackPosition);
+      }
       if (effectiveLocationMode !== "live") {
         setLocationPermission("not_required");
         reportApplied("not_required");
         return;
       }
 
-      setLocationPermission("requesting");
+      setLocationPermission((current) => (current === "granted" ? current : "requesting"));
       try {
         const permission = await Location.requestForegroundPermissionsAsync();
         if (!active) return;
         if (permission.status !== "granted") {
+          hasRealFixRef.current = false;
+          setUserPosition(fallbackPosition);
           setLocationPermission("denied");
           reportApplied("denied");
           return;
@@ -123,6 +132,7 @@ export function LiveMapScreen({ navigation, appState, selectedAuthUserId }) {
         const currentPosition = await Location.getCurrentPositionAsync({ accuracy: Location.Accuracy.Balanced });
         if (!active) return;
         setUserPosition({ latitude: currentPosition.coords.latitude, longitude: currentPosition.coords.longitude });
+        hasRealFixRef.current = true;
         setLocationPermission("granted");
         reportApplied("granted");
 

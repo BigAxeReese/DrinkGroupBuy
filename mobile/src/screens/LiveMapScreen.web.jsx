@@ -26,6 +26,10 @@ const MARKER_SIZE = spacing.s32 + spacing.s4;
 export function LiveMapScreen({ navigation, appState, selectedAuthUserId }) {
   const mapElementRef = useRef(null);
   const lastReportSignatureRef = useRef("");
+  // True once a real GPS fix has been received. This effect re-runs on every re-focus of the tab, and
+  // while the next fix is pending the last known position is kept instead of jumping back to the
+  // fixed fallback location.
+  const hasRealFixRef = useRef(false);
   const mapInstanceRef = useRef(null);
   const googleMapsRef = useRef(null);
   const markersRef = useRef([]);
@@ -96,7 +100,10 @@ export function LiveMapScreen({ navigation, appState, selectedAuthUserId }) {
       }).catch(() => {});
     };
 
-    setUserPosition(fallbackPosition);
+    if (config.locationMode !== "live" || !hasRealFixRef.current) {
+      hasRealFixRef.current = false;
+      setUserPosition(fallbackPosition);
+    }
     if (config.locationMode !== "live") {
       setLocationPermission("not_required");
       reportApplied("not_required");
@@ -108,15 +115,17 @@ export function LiveMapScreen({ navigation, appState, selectedAuthUserId }) {
       return undefined;
     }
 
-    setLocationPermission("requesting");
+    setLocationPermission((current) => (current === "granted" ? current : "requesting"));
     watchId = navigator.geolocation.watchPosition(
       (position) => {
         setUserPosition({ latitude: position.coords.latitude, longitude: position.coords.longitude });
+        hasRealFixRef.current = true;
         setLocationPermission("granted");
         reportApplied("granted");
       },
       (error) => {
         const permission = error.code === 1 ? "denied" : "error";
+        hasRealFixRef.current = false;
         setUserPosition(fallbackPosition);
         setLocationPermission(permission);
         reportApplied(permission);

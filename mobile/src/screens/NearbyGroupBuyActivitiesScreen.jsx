@@ -26,11 +26,19 @@ export function NearbyGroupBuyActivitiesScreen({ navigation, appState, actions, 
   // after this tab loses focus. Watching starts on focus and is torn down on every blur.
   useFocusEffect(useCallback(() => {
     const fallbackPosition = locationConfig.fixedLocation;
-    setUserPosition(fallbackPosition);
-    if (locationConfig.locationMode !== "live") return undefined;
+    // In live mode the previous position is kept while waiting for a new fix (this effect re-runs on
+    // every re-focus of the tab); only the cases that will never produce a fix fall back to the fixed
+    // location, so returning to this screen doesn't briefly jump to the default position.
+    if (locationConfig.locationMode !== "live") {
+      setUserPosition(fallbackPosition);
+      return undefined;
+    }
 
     if (Platform.OS === "web") {
-      if (!navigator.geolocation) return undefined;
+      if (!navigator.geolocation) {
+        setUserPosition(fallbackPosition);
+        return undefined;
+      }
       const watchId = navigator.geolocation.watchPosition(
         (position) => setUserPosition({ latitude: position.coords.latitude, longitude: position.coords.longitude }),
         () => setUserPosition(fallbackPosition),
@@ -44,7 +52,11 @@ export function NearbyGroupBuyActivitiesScreen({ navigation, appState, actions, 
     (async () => {
       const Location = await import("expo-location");
       const permission = await Location.requestForegroundPermissionsAsync();
-      if (!active || permission.status !== "granted") return;
+      if (!active) return;
+      if (permission.status !== "granted") {
+        setUserPosition(fallbackPosition);
+        return;
+      }
       const currentPosition = await Location.getCurrentPositionAsync({ accuracy: Location.Accuracy.Balanced });
       if (!active) return;
       setUserPosition({ latitude: currentPosition.coords.latitude, longitude: currentPosition.coords.longitude });
