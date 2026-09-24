@@ -21,7 +21,8 @@ import { buildStoreMapStores, getStoreMapDestination, getStoreMarkerLabel } from
 // value, not read from `tones` (whose entries ARE status colours, e.g. tones.success also means
 // "已成團/已付款"): borrowing a status colour just for its hue would risk a future status-colour
 // tweak silently changing this pin too. `colors.*` has no hue this different from accent/text
-// (this app's palette is a warm, no-blue family), so there is no existing token to point at instead.
+// (slate reads as a blue pin and deep purple as a violet one, since only the hue survives), so
+// there is no existing token to point at instead: green keeps the user pin clearly apart from both.
 const USER_PIN_HUE = "#2F5A14";
 const PIN_COLORS = {
   user: USER_PIN_HUE,

@@ -3,6 +3,7 @@
 // paints the new page colour behind the screen; every other route keeps the old look until it is
 // migrated. Delete this file when the last route is done.
 export const MILK_TEA_ROUTES = new Set([
+  "roleSelect",
   "nearby",
   "pickupInfo",
   "liveMap",

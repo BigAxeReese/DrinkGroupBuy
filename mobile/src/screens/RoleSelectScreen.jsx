@@ -9,6 +9,7 @@ import {
 import { signOutFirebaseUser, useFirebaseEmailLogin, useFirebaseGoogleLogin } from "../utils/firebaseAuth";
 import { getRouteForUser } from "../utils/authRouting";
 import { useAppState } from "../state/AppStateContext";
+import { colors, tones } from "../theme/tokens";
 
 export function RoleSelectScreen(props) {
   const isDevAuthMode = getAuthMode() === "dev";
@@ -211,7 +212,7 @@ function RoleSelectContent({ navigation, isDevAuthMode, googleLogin = null, emai
               keyboardType="email-address"
               onChangeText={setEmail}
               placeholder="信箱"
-              placeholderTextColor="#9ca3af"
+              placeholderTextColor={colors.textSecondary}
               style={styles.emailInput}
               value={email}
             />
@@ -220,7 +221,7 @@ function RoleSelectContent({ navigation, isDevAuthMode, googleLogin = null, emai
               autoCapitalize="none"
               onChangeText={setPassword}
               placeholder="密碼"
-              placeholderTextColor="#9ca3af"
+              placeholderTextColor={colors.textSecondary}
               secureTextEntry
               style={styles.emailInput}
               value={password}
@@ -464,7 +465,7 @@ function getDevUserMeta(user) {
 const styles = StyleSheet.create({
   screen: {
     flex: 1,
-    backgroundColor: "#ffffff"
+    backgroundColor: colors.page
   },
   content: {
     flexGrow: 1,
@@ -492,8 +493,8 @@ const styles = StyleSheet.create({
     justifyContent: "center",
     borderRadius: 14,
     borderWidth: 1,
-    borderColor: "#c9c9c9",
-    backgroundColor: "#ffffff",
+    borderColor: colors.accent,
+    backgroundColor: colors.page,
     paddingHorizontal: 18
   },
   compactLoginButton: {
@@ -516,10 +517,10 @@ const styles = StyleSheet.create({
     fontSize: 17
   },
   googleIcon: {
-    color: "#4285f4"
+    color: colors.accentInk
   },
   loginButtonLabel: {
-    color: "#3a3a3f",
+    color: colors.text,
     fontSize: 18,
     fontWeight: "900",
     textAlign: "center"
@@ -531,7 +532,7 @@ const styles = StyleSheet.create({
     gap: 8
   },
   emailStatus: {
-    color: "#334155",
+    color: colors.textSecondary,
     fontSize: 12,
     fontWeight: "700",
     lineHeight: 17
@@ -539,10 +540,10 @@ const styles = StyleSheet.create({
   emailInput: {
     minHeight: 46,
     borderWidth: 1.3,
-    borderColor: "#c7c7c7",
+    borderColor: colors.lineInput,
     borderRadius: 5,
-    backgroundColor: "#ffffff",
-    color: "#2f2f33",
+    backgroundColor: colors.page,
+    color: colors.text,
     fontSize: 14,
     paddingHorizontal: 12
   },
@@ -553,8 +554,8 @@ const styles = StyleSheet.create({
     gap: 12,
     borderRadius: 8,
     borderWidth: 1,
-    borderColor: "#d8d8d8",
-    backgroundColor: "#f8fafc",
+    borderColor: colors.lineDecor,
+    backgroundColor: colors.recess,
     paddingHorizontal: 14,
     paddingVertical: 10
   },
@@ -564,10 +565,10 @@ const styles = StyleSheet.create({
     borderRadius: 21,
     alignItems: "center",
     justifyContent: "center",
-    backgroundColor: "#14b8a6"
+    backgroundColor: colors.accent
   },
   userAvatarText: {
-    color: "#ffffff",
+    color: colors.onAccent,
     fontSize: 18,
     fontWeight: "900"
   },
@@ -576,17 +577,17 @@ const styles = StyleSheet.create({
     gap: 3
   },
   userLabel: {
-    color: "#6b7280",
+    color: colors.textSecondary,
     fontSize: 12,
     fontWeight: "900"
   },
   userName: {
-    color: "#26262b",
+    color: colors.text,
     fontSize: 16,
     fontWeight: "900"
   },
   userMeta: {
-    color: "#6b7280",
+    color: colors.textSecondary,
     fontSize: 12,
     fontWeight: "700"
   },
@@ -596,17 +597,17 @@ const styles = StyleSheet.create({
     justifyContent: "center"
   },
   textButtonLabel: {
-    color: "#0f766e",
+    color: colors.accentInk,
     fontSize: 14,
     fontWeight: "900"
   },
   errorText: {
-    color: "#b91c1c",
+    color: tones.danger.fg,
     fontSize: 13,
     fontWeight: "900",
     lineHeight: 19,
     borderRadius: 6,
-    backgroundColor: "#fee2e2",
+    backgroundColor: tones.danger.bg,
     paddingHorizontal: 12,
     paddingVertical: 10
   },
@@ -615,8 +616,8 @@ const styles = StyleSheet.create({
     marginTop: 2,
     borderRadius: 8,
     borderWidth: 1,
-    borderColor: "#d8d8d8",
-    backgroundColor: "#fbfbfb",
+    borderColor: colors.lineDecor,
+    backgroundColor: colors.page,
     padding: 10
   },
   devHeader: {
@@ -626,15 +627,15 @@ const styles = StyleSheet.create({
     gap: 10
   },
   devTitle: {
-    color: "#2f2f33",
+    color: colors.text,
     fontSize: 16,
     fontWeight: "900"
   },
   devBadge: {
     overflow: "hidden",
     borderRadius: 999,
-    backgroundColor: "#ccfbf1",
-    color: "#0f766e",
+    backgroundColor: tones.info.bg,
+    color: tones.info.fg,
     fontSize: 11,
     fontWeight: "900",
     paddingHorizontal: 8,
@@ -650,8 +651,8 @@ const styles = StyleSheet.create({
     justifyContent: "space-between",
     borderRadius: 5,
     borderWidth: 1.3,
-    borderColor: "#c7c7c7",
-    backgroundColor: "#ffffff",
+    borderColor: colors.lineInput,
+    backgroundColor: colors.page,
     paddingHorizontal: 12,
     paddingVertical: 6
   },
@@ -661,17 +662,17 @@ const styles = StyleSheet.create({
     paddingRight: 10
   },
   dropdownLabel: {
-    color: "#6b7280",
+    color: colors.textSecondary,
     fontSize: 11,
     fontWeight: "900"
   },
   dropdownValue: {
-    color: "#2f2f33",
+    color: colors.text,
     fontSize: 14,
     fontWeight: "900"
   },
   dropdownIcon: {
-    color: "#0f766e",
+    color: colors.accentInk,
     fontSize: 14,
     fontWeight: "900"
   },
@@ -679,46 +680,46 @@ const styles = StyleSheet.create({
     overflow: "hidden",
     borderRadius: 5,
     borderWidth: 1,
-    borderColor: "#d8d8d8",
-    backgroundColor: "#ffffff"
+    borderColor: colors.lineDecor,
+    backgroundColor: colors.page
   },
   option: {
     gap: 4,
     minHeight: 52,
     justifyContent: "center",
     borderBottomWidth: 1,
-    borderBottomColor: "#e5e7eb",
+    borderBottomColor: colors.lineRow,
     paddingHorizontal: 12,
     paddingVertical: 9
   },
   selectedOption: {
-    backgroundColor: "#ecfdf5"
+    backgroundColor: colors.recess
   },
   optionText: {
-    color: "#2f2f33",
+    color: colors.text,
     fontSize: 14,
     fontWeight: "900"
   },
   optionMeta: {
-    color: "#6b7280",
+    color: colors.textSecondary,
     fontSize: 11,
     fontWeight: "700"
   },
   terms: {
     marginTop: 26,
-    color: "#6b7280",
+    color: colors.textSecondary,
     fontSize: 15,
     fontWeight: "700",
     lineHeight: 22,
     textAlign: "center"
   },
   termsLink: {
-    color: "#0f9f8f",
+    color: colors.accentInk,
     fontWeight: "900"
   },
   version: {
     marginTop: 20,
-    color: "#8a8a8f",
+    color: colors.textSecondary,
     fontSize: 15,
     fontWeight: "700",
     textAlign: "center"

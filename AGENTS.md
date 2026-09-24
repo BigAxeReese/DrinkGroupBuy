@@ -17,7 +17,7 @@ DrinkGroupBuy 是仍在開發中的 Android-first 手搖飲團購系統：`mobil
 | 任務類型 | 額外載入 |
 | --- | --- |
 | 小修、UI 文案、局部 Bug | 直接相關 source、鄰近測試；通常不讀專案總覽 |
-| 畫面外觀（顏色、字級、圓角、狀態標籤、新畫面） | `docs/ui-style-guide.md` 與 `mobile/src/theme/`；顏色與字級引用設定值、不新增寫死色碼，App 內不使用藍色 |
+| 畫面外觀（顏色、字級、圓角、狀態標籤、新畫面） | `docs/ui-style-guide.md` 與 `mobile/src/theme/`；顏色與字級引用設定值、不新增寫死色碼 |
 | 既有功能修改 | 相關 UI → API/service → database 真實路徑；需要判斷進度時才讀 `PROGRESS.md` |
 | 新產品功能或流程 | `docs/project-direction.md`、`PROGRESS.md`、`docs/final-product-user-flow.md`、`docs/open-questions.md` 與相關 implementation |
 | Architecture、navigation、data flow、外部整合 | `docs/AI-architecture.md`、`PROGRESS.md` 與受影響 source；再按領域讀下面的權威文件 |
