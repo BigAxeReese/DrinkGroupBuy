@@ -229,10 +229,13 @@ function isOngoingJoinedGroupBuyActivity(groupBuyActivity) {
 }
 
 const styles = StyleSheet.create({
+  // This screen has no title row, so without the extra top padding the avatar sat 8px from the top
+  // edge (MobileScreen's own top padding); the merchant home has a header row above its store row.
   memberRow: {
     flexDirection: "row",
     alignItems: "center",
-    gap: spacing.s12
+    gap: spacing.s12,
+    paddingTop: spacing.s32
   },
   avatar: {
     width: sizes.tap,
