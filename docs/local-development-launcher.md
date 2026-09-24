@@ -27,7 +27,7 @@ Windows 組員完成一次性環境設定後，可以在專案根目錄依需求
 
 `01-start-server.cmd` 會：
 
-1. 使用 VS Code 開啟目前專案；若 `code` 指令不在 PATH，只略過這一步。
+1. 不會開啟 VS Code（啟動檔已加上 `-SkipCode`；若想恢復自動開啟，從 `01-start-server.cmd` 移除這個參數即可）。
 2. 缺少 Backend `node_modules` 時，使用 lockfile 執行 `npm ci`。
 3. 確認本機 PostgreSQL（Backend 主要資料庫）在 5432 port 可連線；還沒有的話，用 Docker 啟動 `database/docker-compose.postgres.yml`（未安裝 Docker 且沒有其他方式已啟動 PostgreSQL 時會停止並提示），接著套用尚未套用的 migration。
 4. 依 `backend/.env` 的 `PORT` 啟動 Backend。
