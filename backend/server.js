@@ -190,6 +190,12 @@ const {
   createAdminStatisticsRepository
 } = require("./database/repositories/adminStatisticsRepository");
 const {
+  createCustomerSavingsRepository
+} = require("./database/repositories/customerSavingsRepository");
+const {
+  createMerchantStatisticsRepository
+} = require("./database/repositories/merchantStatisticsRepository");
+const {
   createOrderRevisionRepository
 } = require("./database/repositories/orderRevisionRepository");
 const {
@@ -326,6 +332,10 @@ const customerRegistrationRepository = createCustomerRegistrationRepository({});
 const adminAccountRoleRepository = createAdminAccountRoleRepository({});
 // Postgres-only: read-only reporting, no reason to maintain a SQLite fallback for it.
 const adminStatisticsRepository = createAdminStatisticsRepository({});
+// Postgres-only: read-only per-customer summary, same reasoning as the admin statistics above.
+const customerSavingsRepository = createCustomerSavingsRepository({});
+// Postgres-only: read-only per-store figures for the merchant statistics screen.
+const merchantStatisticsRepository = createMerchantStatisticsRepository({});
 const orderRevisionRepository = createOrderRevisionRepository({
   sqliteGateway: {
     createRevision: (value) => createOrderRevision(value),
@@ -1087,6 +1097,18 @@ const server = http.createServer(async (request, response) => {
       return;
     }
 
+    // The customer id always comes from the verified token, never from the URL or query string,
+    // so a customer can only ever read their own totals.
+    if (request.method === "GET" && url.pathname === "/api/customers/me/savings") {
+      const authUser = await getAuthenticatedUser(request);
+      if (!authUser) return sendJson(response, 401, { error: "Authentication required" });
+      if (!authUser.roles.includes("customer")) return sendJson(response, 403, { error: "Customer role required" });
+      sendJson(response, 200, {
+        savings: await customerSavingsRepository.getSavingsSummary(authUser.id)
+      });
+      return;
+    }
+
     const merchantOrdersMatch = url.pathname.match(/^\/api\/merchant\/stores\/([^/]+)\/orders$/);
     if (request.method === "GET" && merchantOrdersMatch) {
       const authUser = await getAuthenticatedUser(request);
@@ -1102,6 +1124,21 @@ const server = http.createServer(async (request, response) => {
           { ...readOrderListQuery(url), now: businessClock.nowIso() }
         )
       );
+      return;
+    }
+
+    // Same guard as the store orders route above: the store in the URL must be one the verified
+    // token's merchant account manages, so a merchant can only read their own store's figures.
+    const merchantStatisticsMatch = url.pathname.match(/^\/api\/merchant\/stores\/([^/]+)\/statistics$/);
+    if (request.method === "GET" && merchantStatisticsMatch) {
+      const authUser = await getAuthenticatedUser(request);
+      if (!authUser) return sendJson(response, 401, { error: "Authentication required" });
+      if (!authUser.roles.includes("merchant") || !canManageStore(authUser, merchantStatisticsMatch[1])) {
+        return sendJson(response, 403, { error: "Store access denied" });
+      }
+      sendJson(response, 200, {
+        statistics: await merchantStatisticsRepository.getStoreStatistics(merchantStatisticsMatch[1])
+      });
       return;
     }
 
@@ -3654,7 +3691,7 @@ function renderAdminMenuImportBody({ storeId, allStores, existingItemCount, csrf
     <div class="notice warning">
       <p>這間店目前已經有 ${existingItemCount} 項菜單品項。匯入後，這些現有品項會被下架（不會刪除，避免影響已經下單過的歷史訂單），顧客之後只看得到你這次貼上的新清單。</p>
       <label style="display:flex; align-items:center; gap:8px; font-weight:400;">
-        <input type="checkbox" name="confirmReplace" />
+        <input type="checkbox" name="confirmReplace" form="menu-import-form" />
         我了解，繼續匯入並取代目前的菜單
       </label>
     </div>` : "";
@@ -3672,7 +3709,7 @@ function renderAdminMenuImportBody({ storeId, allStores, existingItemCount, csrf
       甜度／冰量／尺寸只要有列出來，顧客就必須從裡面選一個；加料則是可選 0 個到全部都選。<br />
       從 Excel／Google 試算表整段選取複製，直接貼進下面對應的欄位即可（欄位用逗號或 Tab 都可以）。
     </p>
-    <form method="POST" action="/admin/stores/${encodeURIComponent(storeId)}/import-menu">
+    <form id="menu-import-form" method="POST" action="/admin/stores/${encodeURIComponent(storeId)}/import-menu">
       <input type="hidden" name="csrfToken" value="${escapeHtml(csrfToken)}" />
       <label>表一：菜單品項</label>
       <textarea name="menuItemsCsv" rows="10" style="width:100%; font-family:monospace;">${escapeHtml(prefill.menuItemsCsv)}</textarea>

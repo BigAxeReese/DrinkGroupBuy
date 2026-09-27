@@ -1,15 +1,16 @@
 import { useState } from "react";
-import { StyleSheet, Text, TextInput, View } from "react-native";
+import { StyleSheet, Text, TextInput } from "react-native";
 import { MobileScreen, Section } from "../components/MobileScreen";
 import { PrimaryButton } from "../components/PrimaryButton";
 import { useFirebaseGoogleLogin } from "../utils/firebaseAuth";
 import { submitMerchantApplication } from "../utils/apiClient";
-import { colors, tones } from "../theme/tokens";
+import { useThemedStyles } from "../theme/ThemeContext";
 
 // Always uses real Firebase Google Sign-In (not gated by AUTH_DEV_MODE) -- the applicant's
 // identity here is who gets promoted to a merchant account if an admin later approves this,
 // so it can't be satisfied by the dev-only identity switcher.
 export function MerchantApplyScreen({ navigation }) {
+  const styles = useThemedStyles(makeStyles);
   const { signInWithGoogle } = useFirebaseGoogleLogin();
   const [firebaseIdToken, setFirebaseIdToken] = useState(null);
   const [verifiedEmail, setVerifiedEmail] = useState(null);
@@ -142,7 +143,7 @@ function getMerchantApplyErrorMessage(error) {
   return messages[errorCode] || error?.message || "申請送出失敗，請稍後再試。";
 }
 
-const styles = StyleSheet.create({
+const makeStyles = (colors, tones) => StyleSheet.create({
   helperText: {
     color: colors.textSecondary,
     fontSize: 13,

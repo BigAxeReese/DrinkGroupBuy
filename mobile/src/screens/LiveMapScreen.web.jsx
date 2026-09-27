@@ -9,21 +9,29 @@ import { PrimaryButton } from "../components/PrimaryButton";
 import { useActivityMapFilters } from "../hooks/useActivityMapFilters";
 import { useDevLocationConfig } from "../hooks/useDevLocationConfig";
 import { mapCenter, mapDefaults } from "../mock/mapConfig";
-import { colors, maxFontSizeMultiplier, radii, sizes, spacing, typeScale } from "../theme/tokens";
+import { maxFontSizeMultiplier, radii, sizes, spacing, typeScale } from "../theme/tokens";
 import { reportAppliedDevLocation } from "../utils/devLocationControl";
 import { buildStoreMapStores, getStoreMapDestination, getStoreMarkerLabel } from "../utils/groupBuyActivityStores";
+import { useTheme, useThemedStyles } from "../theme/ThemeContext";
+import { DARK_MAP_STYLE, LIGHT_MAP_STYLE } from "../theme/mapStyles";
 
 // The markers are raw DOM nodes and cannot read the StyleSheet, so their looks are spelled out here.
-// Solid brown = the store has a group to join, white with a brown outline = it has none, dark = the
-// customer's own position. Fill versus outline keeps the difference from depending on colour alone.
-const MARKER_LOOKS = {
-  user: { fill: colors.text, border: colors.page, ink: colors.onDark },
-  recruiting: { fill: colors.accent, border: colors.page, ink: colors.onAccent },
-  idle: { fill: colors.page, border: colors.accent, ink: colors.accentInk }
-};
+// Solid accent = the store has a group to join, page colour with an accent outline = it has none, text
+// colour = the customer's own position. Fill versus outline keeps the difference from depending on colour
+// alone. Built from the active theme's colours, so the markers are redrawn when the theme changes.
+function getMarkerLooks(colors) {
+  return {
+    user: { fill: colors.text, border: colors.page, ink: colors.onDark },
+    recruiting: { fill: colors.accent, border: colors.page, ink: colors.onAccent },
+    idle: { fill: colors.page, border: colors.accent, ink: colors.accentInk }
+  };
+}
 const MARKER_SIZE = spacing.s32 + spacing.s4;
 
 export function LiveMapScreen({ navigation, appState, selectedAuthUserId }) {
+  const styles = useThemedStyles(makeStyles);
+  const { colors, isDark } = useTheme();
+  const markerLooks = useMemo(() => getMarkerLooks(colors), [colors]);
   const mapElementRef = useRef(null);
   const lastReportSignatureRef = useRef("");
   // True once a real GPS fix has been received. This effect re-runs on every re-focus of the tab, and
@@ -201,6 +209,12 @@ export function LiveMapScreen({ navigation, appState, selectedAuthUserId }) {
     };
   }, [apiKey]);
 
+  // The night style follows the app theme, also while the map is already on screen.
+  useEffect(() => {
+    if (!mapReady || !mapInstanceRef.current) return;
+    mapInstanceRef.current.setOptions({ styles: isDark ? DARK_MAP_STYLE : LIGHT_MAP_STYLE });
+  }, [mapReady, isDark]);
+
   const recenterOnUser = () => {
     mapInstanceRef.current?.panTo(userMapCenter);
   };
@@ -220,11 +234,12 @@ export function LiveMapScreen({ navigation, appState, selectedAuthUserId }) {
     const nextMarkers = [];
 
     const userMarker = createStoreOverlayMarker({
+      colors,
       googleMaps,
       map,
       position: userMapCenter,
       title: locationName,
-      look: MARKER_LOOKS.user,
+      look: markerLooks.user,
       markerText: "我",
       labelText: locationName
     });
@@ -232,11 +247,12 @@ export function LiveMapScreen({ navigation, appState, selectedAuthUserId }) {
 
     visibleMapStores.forEach((store) => {
       const marker = createStoreOverlayMarker({
+        colors,
         googleMaps,
         map,
         position: { lat: store.latitude, lng: store.longitude },
         title: store.name,
-        look: store.hasRecruitingGroupBuyActivity ? MARKER_LOOKS.recruiting : MARKER_LOOKS.idle,
+        look: store.hasRecruitingGroupBuyActivity ? markerLooks.recruiting : markerLooks.idle,
         markerText: "店",
         labelText: getStoreMarkerLabel(store),
         onPress: () => focusStore(store)
@@ -254,7 +270,7 @@ export function LiveMapScreen({ navigation, appState, selectedAuthUserId }) {
         markersByStoreIdRef.current.clear();
       }
     };
-  }, [locationName, mapReady, visibleMapStores, userMapCenter]);
+  }, [locationName, mapReady, visibleMapStores, userMapCenter, markerLooks, colors]);
 
   useEffect(() => {
     const mapElement = mapElementRef.current;
@@ -368,6 +384,7 @@ export function LiveMapScreen({ navigation, appState, selectedAuthUserId }) {
 
 // The "my location" crosshair, drawn with views instead of a font glyph.
 function RecenterIcon() {
+  const styles = useThemedStyles(makeStyles);
   return (
     <View style={styles.crosshair}>
       <View style={styles.crosshairRing} />
@@ -429,7 +446,7 @@ function loadGoogleMaps(apiKey) {
   return window.__drinkGroupBuyGoogleMapsPromise;
 }
 
-function createStoreOverlayMarker({ googleMaps, map, position, title, look, markerText, labelText, onPress }) {
+function createStoreOverlayMarker({ colors, googleMaps, map, position, title, look, markerText, labelText, onPress }) {
   class StoreOverlayMarker extends googleMaps.OverlayView {
     constructor() {
       super();
@@ -546,7 +563,7 @@ const ICON_SIZE = spacing.s24;
 const CROSSHAIR_RING = spacing.s16 - sizes.stroke;
 const CROSSHAIR_TICK = spacing.s8 - sizes.stroke;
 
-const styles = StyleSheet.create({
+const makeStyles = (colors) => StyleSheet.create({
   screen: {
     flex: 1,
     overflow: "hidden",

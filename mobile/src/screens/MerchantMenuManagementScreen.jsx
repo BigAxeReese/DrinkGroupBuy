@@ -8,7 +8,7 @@ import {
   updateMerchantMenuItem
 } from "../utils/apiClient";
 import { formatCurrency } from "../utils/calculations";
-import { colors, tones } from "../theme/tokens";
+import { useTheme, useThemedStyles } from "../theme/ThemeContext";
 
 let nextLocalRowId = 1;
 function createLocalRowId() {
@@ -46,7 +46,8 @@ const OPTION_TYPE_LABELS = {
   topping: "加料選項"
 };
 
-export function MerchantMenuManagementScreen({ navigation, memberAction, selectedMerchantStoreId }) {
+export function MerchantMenuManagementScreen({ navigation, selectedMerchantStoreId }) {
+  const styles = useThemedStyles(makeStyles);
   const [menu, setMenu] = useState(null);
   const [loading, setLoading] = useState(true);
   const [listNotice, setListNotice] = useState(null);
@@ -207,7 +208,6 @@ export function MerchantMenuManagementScreen({ navigation, memberAction, selecte
       title="菜單管理"
       subtitle={menu?.store?.name || selectedMerchantStoreId}
       onBack={() => navigation.goBack()}
-      onMemberPress={memberAction}
       headerRight={(
         <Pressable
           accessibilityRole="button"
@@ -305,6 +305,7 @@ export function MerchantMenuManagementScreen({ navigation, memberAction, selecte
 }
 
 function MenuItemFormModal({ visible, title, onClose, children }) {
+  const styles = useThemedStyles(makeStyles);
   if (!visible) return null;
 
   const content = (
@@ -344,6 +345,8 @@ function MenuItemFormModal({ visible, title, onClose, children }) {
 }
 
 function Field({ label, ...props }) {
+  const styles = useThemedStyles(makeStyles);
+  const { colors } = useTheme();
   return (
     <View style={styles.field}>
       <Text style={styles.label}>{label}</Text>
@@ -353,6 +356,8 @@ function Field({ label, ...props }) {
 }
 
 function OptionRowsField({ optionType, rows, onAdd, onRemove, onUpdate }) {
+  const styles = useThemedStyles(makeStyles);
+  const { colors } = useTheme();
   return (
     <View style={styles.field}>
       <Text style={styles.label}>{OPTION_TYPE_LABELS[optionType]}</Text>
@@ -446,7 +451,7 @@ function digitsOnly(value) {
   return String(value).replace(/[^0-9]/g, "");
 }
 
-const styles = StyleSheet.create({
+const makeStyles = (colors, tones) => StyleSheet.create({
   pressed: { opacity: 0.75 },
   addButton: {
     minHeight: 32,

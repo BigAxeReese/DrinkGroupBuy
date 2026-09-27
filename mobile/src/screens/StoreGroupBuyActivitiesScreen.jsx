@@ -5,11 +5,13 @@ import { EmptyPanel } from "../components/EmptyPanel";
 import { MobileScreen, Section } from "../components/MobileScreen";
 import { Notice } from "../components/Notice";
 import { PearlStrip } from "../components/PearlStrip";
-import { colors, maxFontSizeMultiplier, spacing, typeScale } from "../theme/tokens";
+import { maxFontSizeMultiplier, spacing, typeScale } from "../theme/tokens";
 import { isJoinableGroupBuyActivity } from "../utils/groupBuyActivityStores";
 import { getGroupBuyActivityProgress } from "../utils/groupBuyActivityProgress";
+import { useThemedStyles } from "../theme/ThemeContext";
 
 export function StoreGroupBuyActivitiesScreen({ navigation, route, appState, actions }) {
+  const styles = useThemedStyles(makeStyles);
   const storeId = route.params?.storeId;
   const store = (appState.stores ?? []).find((item) => item.id === storeId) ?? null;
   const activities = (appState.groupBuyActivities ?? [])
@@ -62,7 +64,7 @@ export function StoreGroupBuyActivitiesScreen({ navigation, route, appState, act
   );
 }
 
-const styles = StyleSheet.create({
+const makeStyles = (colors) => StyleSheet.create({
   // Card is a column by default; this puts the title block and the progress block side by side.
   activityRow: {
     flexDirection: "row",

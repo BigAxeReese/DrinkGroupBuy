@@ -6,17 +6,19 @@ import { DiscountSummaryCard } from "../components/DiscountSummaryCard";
 import { EmptyPanel } from "../components/EmptyPanel";
 import { Notice } from "../components/Notice";
 import { PrimaryButton } from "../components/PrimaryButton";
-import { ProgressSummary } from "../components/ProgressSummary";
+import { PearlTray } from "../components/PearlTray";
 import { StatusBadge } from "../components/StatusBadge";
 import { ValueRow } from "../components/ValueRow";
-import { colors, maxFontSizeMultiplier, spacing, typeScale } from "../theme/tokens";
+import { maxFontSizeMultiplier, spacing, typeScale } from "../theme/tokens";
 import { getGroupBuyActivityById, formatCurrency } from "../utils/calculations";
 import { formatDealFactorLabel } from "../utils/discountPercentFormat";
 import { getFinalSettlementSnapshot, getGroupBuyActivityProgress } from "../utils/groupBuyActivityProgress";
 import { formatOrderItemCustomizations } from "../utils/orderItems";
 import { goToCustomerHome } from "../navigation/goToCustomerHome";
+import { useThemedStyles } from "../theme/ThemeContext";
 
-export function GroupProgressScreen({ navigation, route, appState, actions, memberAction, selectedCustomerId }) {
+export function GroupProgressScreen({ navigation, route, appState, actions, selectedCustomerId }) {
+  const styles = useThemedStyles(makeStyles);
   const groupBuyActivity = getGroupBuyActivityById(appState.groupBuyActivities, route.params?.groupBuyActivityId);
   const activitySyncStatus = appState.groupBuyActivitySyncStatus ?? "idle";
   const retryActivitySync = () => actions.syncGroupBuyActivities().catch(() => {});
@@ -25,7 +27,6 @@ export function GroupProgressScreen({ navigation, route, appState, actions, memb
       <MobileScreen
         title="團購進度"
         onBack={() => navigation.goBack()}
-        onMemberPress={memberAction}
       >
         <ActivitySyncNotice status={activitySyncStatus} onRetry={retryActivitySync} />
         <Section title="目前沒有團購資料">
@@ -59,12 +60,11 @@ export function GroupProgressScreen({ navigation, route, appState, actions, memb
     <MobileScreen
       title="團購進度"
       onBack={() => navigation.goBack()}
-      onMemberPress={memberAction}
     >
       <ActivitySyncNotice status={activitySyncStatus} onRetry={retryActivitySync} />
       <Section title="狀態">
         <StatusBadge value={groupBuyActivity.status} />
-        <ProgressSummary
+        <PearlTray
           currentCups={authorizedCups}
           targetCups={targetCups}
           participantCount={groupBuyActivity.participantCount}
@@ -151,7 +151,7 @@ export function GroupProgressScreen({ navigation, route, appState, actions, memb
   );
 }
 
-const styles = StyleSheet.create({
+const makeStyles = (colors) => StyleSheet.create({
   meta: {
     ...typeScale.bodyDense,
     color: colors.textSecondary

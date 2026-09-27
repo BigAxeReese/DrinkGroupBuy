@@ -1,9 +1,11 @@
 import { StyleSheet, Text, View } from "react-native";
-import { colors, radii, spacing, typeScale } from "../theme/tokens";
+import { radii, spacing, typeScale } from "../theme/tokens";
+import { useThemedStyles } from "../theme/ThemeContext";
 
 // A quiet milk-tea panel for "nothing here yet", loading and hint messages. `children` is the
 // message: a string, or your own elements.
 export function EmptyPanel({ title, children }) {
+  const styles = useThemedStyles(makeStyles);
   return (
     <View style={styles.panel}>
       {title ? <Text style={styles.title}>{title}</Text> : null}
@@ -12,7 +14,7 @@ export function EmptyPanel({ title, children }) {
   );
 }
 
-const styles = StyleSheet.create({
+const makeStyles = (colors) => StyleSheet.create({
   panel: {
     gap: spacing.s4,
     padding: spacing.s16,

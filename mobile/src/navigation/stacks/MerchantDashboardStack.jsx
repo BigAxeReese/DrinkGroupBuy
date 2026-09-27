@@ -16,6 +16,7 @@ export function MerchantDashboardStack() {
       <Stack.Screen name="merchantMenu" component={screens.merchantMenu} />
       <Stack.Screen name="merchantProductionList" component={screens.merchantProductionList} />
       <Stack.Screen name="merchantRefundRequests" component={screens.merchantRefundRequests} />
+      <Stack.Screen name="merchantStatistics" component={screens.merchantStatistics} />
     </Stack.Navigator>
   );
 }

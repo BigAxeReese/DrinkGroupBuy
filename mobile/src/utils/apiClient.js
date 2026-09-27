@@ -212,6 +212,20 @@ export async function listCustomerOrders(input = {}) {
   return getOrderListRequest("/api/customers/me/orders", input);
 }
 
+export async function getCustomerSavings() {
+  const response = await fetch(`${backendBaseUrl}/api/customers/me/savings`, {
+    headers: withAuthHeaders()
+  });
+  const payload = await response.json();
+  if (!response.ok) {
+    const error = new Error(payload.error ?? "Get customer savings failed");
+    error.status = response.status;
+    error.payload = payload;
+    throw error;
+  }
+  return payload.savings;
+}
+
 export async function listMerchantStoreOrders(storeId, input = {}) {
   return getOrderListRequest(`/api/merchant/stores/${encodeURIComponent(storeId)}/orders`, input);
 }
@@ -231,6 +245,20 @@ async function getOrderListRequest(path, input) {
     throw error;
   }
   return payload;
+}
+
+export async function getMerchantStoreStatistics(storeId) {
+  const response = await fetch(`${backendBaseUrl}/api/merchant/stores/${encodeURIComponent(storeId)}/statistics`, {
+    headers: withAuthHeaders()
+  });
+  const payload = await response.json();
+  if (!response.ok) {
+    const error = new Error(payload.error ?? "Get merchant statistics failed");
+    error.status = response.status;
+    error.payload = payload;
+    throw error;
+  }
+  return payload.statistics;
 }
 
 export async function getMerchantStoreMenu(storeId) {

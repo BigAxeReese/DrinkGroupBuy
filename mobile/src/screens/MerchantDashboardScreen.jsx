@@ -4,16 +4,18 @@ import { ActivitySyncNotice } from "../components/ActivitySyncNotice";
 import { MobileScreen, Section } from "../components/MobileScreen";
 import { DiscountSummaryCard } from "../components/DiscountSummaryCard";
 import { PrimaryButton } from "../components/PrimaryButton";
-import { ProgressSummary } from "../components/ProgressSummary";
+import { PearlTray } from "../components/PearlTray";
 import { StatusBadge } from "../components/StatusBadge";
 import { useAppState } from "../state/AppStateContext";
 import { formatOrderItemCustomizations, toLocalOrderItem } from "../utils/orderItems";
 import { useOrderListSync } from "../hooks/useOrderListSync";
 import { formatCurrency, getStoreById, isWithdrawalLocked } from "../utils/calculations";
 import { formatDeadlineLabel } from "../utils/deadlineTime";
-import { colors, tones } from "../theme/tokens";
+import { useTheme, useThemedStyles } from "../theme/ThemeContext";
 
 export function MerchantDashboardScreen({ navigation, route, appState, actions, selectedMerchantStoreId }) {
+  const styles = useThemedStyles(makeStyles);
+  const { colors } = useTheme();
   const { logout } = useAppState();
   const [pickupCode, setPickupCode] = useState("");
   const [pickupLookup, setPickupLookup] = useState(null);
@@ -202,7 +204,6 @@ export function MerchantDashboardScreen({ navigation, route, appState, actions, 
   return (
     <MobileScreen
       title=""
-      compactHeader
       headerRight={(
         <Pressable
           accessibilityRole="button"
@@ -234,6 +235,9 @@ export function MerchantDashboardScreen({ navigation, route, appState, actions, 
         <Text style={styles.sectionTitle}>{tab === "active" ? "進行中的團購" : "歷史訂單"}</Text>
         {tab === "active" ? (
           <View style={styles.headerActions}>
+            <Pressable accessibilityRole="button" onPress={() => navigation.push("merchantStatistics")}>
+              <Text style={styles.createLink}>營運統計</Text>
+            </Pressable>
             <Pressable accessibilityRole="button" onPress={() => navigation.push("merchantMenu")}>
               <Text style={styles.createLink}>管理菜單</Text>
             </Pressable>
@@ -363,7 +367,7 @@ export function MerchantDashboardScreen({ navigation, route, appState, actions, 
                 </View>
                 <StatusBadge value={groupBuyActivity.status} />
               </View>
-              <ProgressSummary
+              <PearlTray
                 currentCups={groupBuyActivity.currentCups}
                 targetCups={groupBuyActivity.targetCups}
                 participantCount={groupBuyActivity.participantCount}
@@ -572,14 +576,8 @@ function getCancelErrorMessage(error) {
   return messages[errorCode] || "取消團購失敗，請稍後再試。";
 }
 
-function formatOrderItemsSummary(items = []) {
-  return items.map((item) => {
-    const details = [item.sweetness, item.ice, ...(item.toppings || [])].filter(Boolean).join("、");
-    return `${item.itemName || "飲料"} x${item.quantity}${details ? `（${details}）` : ""}`;
-  }).join("、");
-}
-
 function MerchantHistoryOrderDetail({ order, groupBuyActivity }) {
+  const styles = useThemedStyles(makeStyles);
   const items = order.items || [];
   const finalAmount = order.captureAmount ?? order.finalAmount ?? order.originalAmount ?? 0;
   const discount = Math.max(0, (order.originalAmount ?? 0) - finalAmount);
@@ -625,6 +623,7 @@ function MerchantHistoryOrderDetail({ order, groupBuyActivity }) {
 }
 
 function DetailRow({ label, value, valueStyle }) {
+  const styles = useThemedStyles(makeStyles);
   return (
     <View style={styles.detailRow}>
       <Text style={styles.detailLabel}>{label}</Text>
@@ -645,7 +644,7 @@ function getOrderStatusLabel(status) {
   return labels[status] ?? status;
 }
 
-const styles = StyleSheet.create({
+const makeStyles = (colors, tones) => StyleSheet.create({
   hero: {
     gap: 14
   },
@@ -1037,6 +1036,7 @@ const styles = StyleSheet.create({
 });
 
 function MetricCard({ label, value }) {
+  const styles = useThemedStyles(makeStyles);
   return (
     <View style={styles.metricCard}>
       <Text style={styles.metricValue}>{value}</Text>

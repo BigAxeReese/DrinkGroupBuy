@@ -1,5 +1,5 @@
 // Shared by RoleSelectScreen (fresh login) and AppNavigator (restoring a persisted session) --
-// both need to turn a backend user record into the same {role, routeName, params} landing spot.
+// both need to turn a backend user record into the same {role, params} landing spot.
 const backendCustomerToPrototypeCustomer = {
   "user-customer-yinji": "customer-yinji",
   "user-customer-bolun": "customer-bolun",
@@ -11,7 +11,6 @@ export function getRouteForUser(user) {
   if (user.roles.includes("merchant")) {
     return {
       role: "merchant",
-      routeName: "merchantDashboard",
       params: {
         storeId: user.merchantStores?.[0]?.id ?? "store-001",
         authUserId: user.id
@@ -21,7 +20,6 @@ export function getRouteForUser(user) {
   if (user.roles.includes("customer")) {
     return {
       role: "customer",
-      routeName: "nearby",
       params: {
         userId: backendCustomerToPrototypeCustomer[user.id] ?? "customer-yinji",
         authUserId: user.id

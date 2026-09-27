@@ -4,11 +4,13 @@ import { MobileScreen } from "../components/MobileScreen";
 import { PickupPass } from "../components/PickupPass";
 import { PlaceholderBox } from "../components/PlaceholderBox";
 import { StatusBadge } from "../components/StatusBadge";
-import { colors, radii, sizes, spacing, typeScale } from "../theme/tokens";
+import { radii, sizes, spacing, typeScale } from "../theme/tokens";
 import { formatCurrency, getGroupBuyActivityById } from "../utils/calculations";
 import { getGroupBuyActivityStore } from "../utils/groupBuyActivityStores";
+import { useThemedStyles } from "../theme/ThemeContext";
 
-export function PickupInfoScreen({ navigation, route, appState, actions, memberAction, selectedCustomerId }) {
+export function PickupInfoScreen({ navigation, route, appState, actions, selectedCustomerId }) {
+  const styles = useThemedStyles(makeStyles);
   const order = appState.orders.find((item) => item.id === route.params?.orderId && item.customerId === selectedCustomerId)
     ?? appState.orders.find((item) => item.customerId === selectedCustomerId);
   const groupBuyActivity = order ? getGroupBuyActivityById(appState.groupBuyActivities, route.params?.groupBuyActivityId ?? order.groupBuyActivityId) : null;
@@ -26,7 +28,6 @@ export function PickupInfoScreen({ navigation, route, appState, actions, memberA
       <MobileScreen
         title="取貨資訊"
         onBack={() => navigation.goBack()}
-        onMemberPress={memberAction}
       >
         <View style={styles.card}>
           <Text style={styles.cardTitle}>目前沒有取貨資料</Text>
@@ -40,7 +41,6 @@ export function PickupInfoScreen({ navigation, route, appState, actions, memberA
     <MobileScreen
       title="取貨資訊"
       onBack={() => navigation.goBack()}
-      onMemberPress={memberAction}
       headerRight={<StatusBadge owner="pickup" value={order.pickupStatus} />}
     >
       {pickupCode ? (
@@ -64,7 +64,7 @@ export function PickupInfoScreen({ navigation, route, appState, actions, memberA
   );
 }
 
-const styles = StyleSheet.create({
+const makeStyles = (colors) => StyleSheet.create({
   card: {
     gap: spacing.s8,
     padding: spacing.s20,

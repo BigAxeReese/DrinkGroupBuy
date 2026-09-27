@@ -8,7 +8,7 @@ async function loadModule(relativePath) {
   return import(`data:text/javascript;base64,${Buffer.from(source).toString("base64")}`);
 }
 
-const { colors, tones, typeScale } = await loadModule("../src/theme/tokens.js");
+const { colors, tones, darkColors, darkTones, typeScale } = await loadModule("../src/theme/tokens.js");
 const { getStatusTone, statusToneByKey } = await loadModule("../src/theme/statusTones.js");
 const labels = await loadModule("../src/types/prototypeTypes.js");
 
@@ -45,50 +45,73 @@ function colorDistance(a, b) {
   return Math.hypot(l1 - l2, a1 - a2, b1 - b2);
 }
 
-const TEXT_PAIRS = [
-  ["text on page", colors.text, colors.page],
-  ["text on recess", colors.text, colors.recess],
-  ["secondary text on page", colors.textSecondary, colors.page],
-  ["secondary text on recess", colors.textSecondary, colors.recess],
-  ["accent ink on page", colors.accentInk, colors.page],
-  ["accent ink on recess", colors.accentInk, colors.recess],
-  ["label on accent fill", colors.onAccent, colors.accent],
-  ["pickup code on its panel", colors.onDark, colors.text],
-  ...Object.entries(tones).map(([name, tone]) => [`${name} tone text`, tone.fg, tone.bg])
+const PALETTES = [
+  ["light", colors, tones],
+  ["dark", darkColors, darkTones]
 ];
 
-const OUTLINE_PAIRS = [
-  ["accent outline on page", colors.accent, colors.page],
-  ["accent outline on recess", colors.accent, colors.recess],
-  ["input outline on page", colors.lineInput, colors.page]
-];
+function textPairs(c, t) {
+  return [
+    ["text on page", c.text, c.page],
+    ["text on recess", c.text, c.recess],
+    ["secondary text on page", c.textSecondary, c.page],
+    ["secondary text on recess", c.textSecondary, c.recess],
+    ["accent ink on page", c.accentInk, c.page],
+    ["accent ink on recess", c.accentInk, c.recess],
+    ["label on accent fill", c.onAccent, c.accent],
+    ["pickup code on its panel", c.onDark, c.text],
+    ...Object.entries(t).map(([name, tone]) => [`${name} tone text`, tone.fg, tone.bg])
+  ];
+}
 
-test("every text colour pair meets WCAG AA (4.5:1)", () => {
-  for (const [name, foreground, background] of TEXT_PAIRS) {
-    const ratio = contrast(foreground, background);
-    assert.ok(ratio >= 4.5, `${name}: ${ratio.toFixed(2)}:1`);
+function outlinePairs(c) {
+  return [
+    ["accent outline on page", c.accent, c.page],
+    ["accent outline on recess", c.accent, c.recess],
+    ["input outline on page", c.lineInput, c.page]
+  ];
+}
+
+test("dark palette has exactly the same keys as the light one", () => {
+  assert.deepEqual(Object.keys(darkColors).sort(), Object.keys(colors).sort());
+  assert.deepEqual(Object.keys(darkTones).sort(), Object.keys(tones).sort());
+  for (const [name, tone] of Object.entries(darkTones)) {
+    assert.equal(tone.mark, tones[name].mark, `${name} keeps the same mark in both themes`);
   }
 });
 
-test("outlines that carry meaning reach 3:1 against the surface they sit on", () => {
-  for (const [name, line, surface] of OUTLINE_PAIRS) {
-    const ratio = contrast(line, surface);
-    assert.ok(ratio >= 3, `${name}: ${ratio.toFixed(2)}:1`);
+test("every text colour pair meets WCAG AA (4.5:1) in both themes", () => {
+  for (const [theme, c, t] of PALETTES) {
+    for (const [name, foreground, background] of textPairs(c, t)) {
+      const ratio = contrast(foreground, background);
+      assert.ok(ratio >= 4.5, `${theme}: ${name}: ${ratio.toFixed(2)}:1`);
+    }
   }
 });
 
-test("status tone backgrounds look clearly different from each other", () => {
-  const names = Object.keys(tones);
-  for (let i = 0; i < names.length; i += 1) {
-    for (let j = i + 1; j < names.length; j += 1) {
-      const distance = colorDistance(tones[names[i]].bg, tones[names[j]].bg);
-      assert.ok(distance >= 8, `${names[i]} ~ ${names[j]}: ${distance.toFixed(1)}`);
+test("outlines that carry meaning reach 3:1 against the surface they sit on, in both themes", () => {
+  for (const [theme, c] of PALETTES) {
+    for (const [name, line, surface] of outlinePairs(c)) {
+      const ratio = contrast(line, surface);
+      assert.ok(ratio >= 3, `${theme}: ${name}: ${ratio.toFixed(2)}:1`);
+    }
+  }
+});
+
+test("status tone backgrounds look clearly different from each other, in both themes", () => {
+  for (const [theme, , t] of PALETTES) {
+    const names = Object.keys(t);
+    for (let i = 0; i < names.length; i += 1) {
+      for (let j = i + 1; j < names.length; j += 1) {
+        const distance = colorDistance(t[names[i]].bg, t[names[j]].bg);
+        assert.ok(distance >= 8, `${theme}: ${names[i]} ~ ${names[j]}: ${distance.toFixed(1)}`);
+      }
     }
   }
 });
 
 test("all colours are 6-digit hex (the contrast helpers above rely on it)", () => {
-  const values = [...Object.values(colors), ...Object.values(tones).flatMap((tone) => [tone.bg, tone.fg])];
+  const values = PALETTES.flatMap(([, c, t]) => [...Object.values(c), ...Object.values(t).flatMap((tone) => [tone.bg, tone.fg])]);
   for (const value of values) {
     assert.match(value, /^#[0-9A-F]{6}$/);
   }

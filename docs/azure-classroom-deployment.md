@@ -125,6 +125,40 @@ PICKUP_EXPIRATION_SCHEDULER_ENABLED=false
 - 改 Mobile JavaScript／畫面／圖片：EAS Update 已完成設定並實機驗證成功，`eas update --branch preview` 發布後，已安裝的 APK 重開後會跳出更新提示，不用重打 APK。**前提**：APK 必須是透過 `eas build` 或有明確在 `app.config.js` 設定 `updates.requestHeaders["expo-channel-name"]` 的方式打包出來的——本機純用 `expo run:android`／`gradlew assembleRelease` 打包會跳過 `eas build` 自動注入頻道設定的步驟，即使 `expo.modules.updates.ENABLED=true`、更新網址正確，仍會因為不知道自己屬於哪個頻道而永遠收不到更新（2026-09-12 已實際遇到並修好這個問題，見 `PROGRESS.md`）。
 - 改原生套件、Android 權限、Expo SDK 或其他 native 設定：即使已有 EAS Update，仍要重新打包 APK。
 
+## 展示用假資料（歷史團購與統計）
+
+課堂展示時要有可看的統計與個人中心「省錢統計」，可以用 `scripts/seed-demo-data.js` 一次產生約 30 場歷史團購、約 200 筆訂單、24 位假顧客（產生邏輯在 `scripts/helpers/demoDataBuilder.js`，金額用正式的折扣函式計算，跟真的結算結果一致）。
+
+**它做什麼、不做什麼**
+
+- 只寫入已結束的歷史資料（完成／失敗／取消），日期散佈在過去 60 天；不會產生進行中的團購，所以現場要展示「開團、下單」請當場操作。
+- 付款一律是 `mock_line_pay` 假付款，不會碰真的 LINE Pay。所有資料的 ID 都以 `demo-seed-` 開頭，可以整批移除。
+- 假顧客沒有 Firebase 綁定也沒有密碼，無法登入；他們只是讓統計有分母（每位顧客在同一場團購只能下一張單，只靠既有的顧客 A～D 湊不到 10～30 杯的優惠門檻）。既有的顧客 A～D（migration 002 寫入）若存在，會自動一起參加大部分團購，他們的個人中心也會有數字。
+- 自動排程不會碰這些資料：結算排程只處理招募中／已成團的活動，取貨逾期排程只處理進行中的活動，付款對帳排程只處理真實 LINE Pay 的待處理授權，假資料都不在這三類。
+
+**在 Azure 上執行的順序（順序錯了會讓展示壞掉）**
+
+1. 先把要展示的真實 Google 帳號用手機登入一次（會自動建立顧客帳號）。假資料要掛在這個帳號底下，個人中心才會有省錢數字。
+2. 清空 Azure 上現有的團購活動：`DELETE FROM group_buy_activities;`（migration 008 要求相關資料表是空的，否則會擋下）。
+3. **同時**部署新版 Backend（`git push` 到 `main` 觸發 CI/CD）並套用 migration 008（見上面「建立與部署順序」第 3 步）。舊版 Backend 讀不到新欄位，新版 Backend 讀不到舊欄位，兩件事要連續做完，中間短暫不可用。
+4. 在本機暫時設定指向 Azure 的 `DATABASE_URL`、`DATABASE_SSL=true`、`DATABASE_SSL_REJECT_UNAUTHORIZED=true`，並確認 Azure 防火牆已允許這台電腦。先預覽（不會寫入）：
+
+   ```bash
+   npm run demo-data -- --allow-remote --focus-email 你的Google信箱@gmail.com
+   ```
+
+5. 預覽的目標主機名稱與內容確認無誤後，加上 `--apply` 才會真的寫入：
+
+   ```bash
+   npm run demo-data -- --allow-remote --focus-email 你的Google信箱@gmail.com --apply
+   ```
+
+6. 展示完要移除：`npm run demo-data -- --allow-remote --cleanup --apply`。
+
+腳本內建的保護：沒有 `--apply` 不寫入；目標不是本機資料庫時沒有 `--allow-remote` 會拒絕；資料庫還沒套用 migration 008 會拒絕；已經有示範資料時不會重複寫入；整批寫入是單一交易，失敗時資料庫維持原狀。可用參數見 `node scripts/seed-demo-data.js --help`。
+
+已知限制：假顧客會出現在後台的帳號管理清單；在本機開發模式下也會出現在「測試身份」切換選單；假的團購掛在真實店家底下，所以會算進那些店家的統計與營收排行（這是展示用途的預期行為，移除示範資料後就會恢復）。
+
 ## 暫停與清理
 
 - 不展示時可停止 App Service；PostgreSQL 是否能停止及免費額度規則以 Azure 當下畫面為準。

@@ -215,7 +215,7 @@ export function AppStateProvider({ children }) {
   // reset the old hand-rolled stack -- the 4th positional `params` arg is NOT the new route's own
   // `route.params` (matches the old behavior: it only feeds selectedCustomerId/selectedMerchantStoreId/
   // selectedAuthUserId below, screens read those from context instead of from their own route params).
-  function selectRole(role, routeName, params = {}, userProfile = null) {
+  function selectRole(role, params = {}, userProfile = null) {
     setCurrentRole(role);
     setShowingRoleSelect(false);
     setCurrentUserProfile(userProfile);
@@ -277,7 +277,7 @@ export function AppStateProvider({ children }) {
         const { user } = await verifyAuthSession();
         if (!active) return;
         const route = getRouteForUser(user);
-        selectRole(route.role, route.routeName, route.params, user);
+        selectRole(route.role, route.params, user);
       } catch (error) {
         setAuthToken(null);
         if (error?.status === 401) {

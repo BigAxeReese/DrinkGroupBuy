@@ -9,7 +9,7 @@ import {
 import { signOutFirebaseUser, useFirebaseEmailLogin, useFirebaseGoogleLogin } from "../utils/firebaseAuth";
 import { getRouteForUser } from "../utils/authRouting";
 import { useAppState } from "../state/AppStateContext";
-import { colors, tones } from "../theme/tokens";
+import { useTheme, useThemedStyles } from "../theme/ThemeContext";
 
 export function RoleSelectScreen(props) {
   const isDevAuthMode = getAuthMode() === "dev";
@@ -28,6 +28,8 @@ function FirebaseRoleSelectScreen(props) {
 }
 
 function RoleSelectContent({ navigation, isDevAuthMode, googleLogin = null, emailLogin = null }) {
+  const styles = useThemedStyles(makeStyles);
+  const { colors } = useTheme();
   const { selectRole } = useAppState();
   const { signInWithGoogle } = googleLogin || {};
   const { signInWithEmail, signUpWithEmail, resetPassword } = emailLogin || {};
@@ -88,7 +90,7 @@ function RoleSelectContent({ navigation, isDevAuthMode, googleLogin = null, emai
     });
 
     const route = getRouteForUser(backendResult.user);
-    selectRole(route.role, route.routeName, route.params, backendResult.user);
+    selectRole(route.role, route.params, backendResult.user);
   };
 
   const login = async () => {
@@ -169,7 +171,7 @@ function RoleSelectContent({ navigation, isDevAuthMode, googleLogin = null, emai
       });
 
       const route = getRouteForUser(backendResult.user);
-      selectRole(route.role, route.routeName, route.params, backendResult.user);
+      selectRole(route.role, route.params, backendResult.user);
     } catch (error) {
       setLoginError(getDevLoginErrorMessage(error));
     } finally {
@@ -336,10 +338,17 @@ function RoleSelectContent({ navigation, isDevAuthMode, googleLogin = null, emai
   );
 }
 
+// Transparent-background line art, recoloured to the palette (slate on light, aqua on dark); the
+// original opaque login-hero.png (cobalt on off-white) is no longer used by the app.
+const HERO_LIGHT = require("../../assets/login-hero-light.png");
+const HERO_DARK = require("../../assets/login-hero-dark.png");
+
 function LoginHeroIllustration() {
+  const styles = useThemedStyles(makeStyles);
+  const { isDark } = useTheme();
   return (
     <Image
-      source={require("../../assets/login-hero.png")}
+      source={isDark ? HERO_DARK : HERO_LIGHT}
       style={styles.illustration}
       resizeMode="contain"
       accessibilityLabel="飲料團購插圖"
@@ -348,6 +357,7 @@ function LoginHeroIllustration() {
 }
 
 function LoginOptionButton({ icon, iconStyle, label, onPress, disabled = false, compact = false }) {
+  const styles = useThemedStyles(makeStyles);
   return (
     <Pressable
       accessibilityRole="button"
@@ -411,6 +421,7 @@ function getDevLoginErrorMessage(error) {
 }
 
 function DevIdentityDropdown({ users, selectedUserId, isOpen, onToggle, onSelect }) {
+  const styles = useThemedStyles(makeStyles);
   const selectedUser = users.find((user) => user.id === selectedUserId);
 
   return (
@@ -462,7 +473,7 @@ function getDevUserMeta(user) {
   return `${user.id} / ${user.roles.join(", ")}`;
 }
 
-const styles = StyleSheet.create({
+const makeStyles = (colors, tones) => StyleSheet.create({
   screen: {
     flex: 1,
     backgroundColor: colors.page

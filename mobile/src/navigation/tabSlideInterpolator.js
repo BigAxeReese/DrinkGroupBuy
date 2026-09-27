@@ -9,7 +9,7 @@ import { Dimensions, Easing } from "react-native";
 // bottom-tabs only runs sceneStyleInterpolator when the tab options also carry an `animation` or a
 // `transitionSpec` (with neither, the default spec is a 0ms "none" and the interpolator is ignored), so
 // the two always travel together. 220ms ease-out matches the slide this replaced.
-export function tabSlideInterpolator({ current: { progress } }) {
+function tabSlideInterpolator({ current: { progress } }) {
   const width = Dimensions.get("window").width;
   return {
     sceneStyle: {

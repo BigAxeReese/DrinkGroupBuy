@@ -1,9 +1,10 @@
 import { StyleSheet, Text, View } from "react-native";
 import { MobileScreen, Section } from "../components/MobileScreen";
 import { getStoreById } from "../utils/calculations";
-import { colors, tones } from "../theme/tokens";
+import { useThemedStyles } from "../theme/ThemeContext";
 
 export function MerchantProductionListScreen({ navigation, route, appState, selectedMerchantStoreId }) {
+  const styles = useThemedStyles(makeStyles);
   const groupBuyActivityId = route.params?.groupBuyActivityId;
   const groupBuyActivity = appState.groupBuyActivities.find((item) => item.id === groupBuyActivityId);
   const store = getStoreById(appState.stores ?? [], groupBuyActivity?.storeId ?? selectedMerchantStoreId);
@@ -99,7 +100,7 @@ function formatVariantDetail(row) {
   return [row.size, row.sweetness, row.ice, ...(row.toppings || [])].filter(Boolean).join("、") || "無客製化";
 }
 
-const styles = StyleSheet.create({
+const makeStyles = (colors) => StyleSheet.create({
   flex: { flex: 1 },
   emptyText: {
     color: colors.textSecondary,

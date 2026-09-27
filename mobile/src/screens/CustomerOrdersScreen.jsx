@@ -10,15 +10,17 @@ import { PickupPass } from "../components/PickupPass";
 import { PrimaryButton } from "../components/PrimaryButton";
 import { StatusBadge } from "../components/StatusBadge";
 import { useOrderListSync } from "../hooks/useOrderListSync";
-import { colors, maxFontSizeMultiplier, radii, sizes, spacing, tones, typeScale } from "../theme/tokens";
+import { maxFontSizeMultiplier, radii, sizes, spacing, typeScale } from "../theme/tokens";
 import { formatCurrency, isWithdrawalLocked } from "../utils/calculations";
 import { getBusinessNow } from "../utils/businessTime";
 import { getGroupBuyActivityProgress } from "../utils/groupBuyActivityProgress";
 import { getGroupBuyActivityStore } from "../utils/groupBuyActivityStores";
 import { getManualRepaymentStateInfo } from "../utils/manualRepayment";
 import { formatOrderItemCustomizations, normalizeOrderItem } from "../utils/orderItems";
+import { useThemedStyles } from "../theme/ThemeContext";
 
-export function CustomerOrdersScreen({ navigation, route, appState, actions, memberAction, selectedCustomerId }) {
+export function CustomerOrdersScreen({ navigation, route, appState, actions, selectedCustomerId }) {
+  const styles = useThemedStyles(makeStyles);
   const [tab, setTab] = useState("active");
   // The order-detail view used to be a local-state toggle (selectedOrderId) invisible to the
   // hardware back button. It's now a real stack entry: this screen's own route is pushed a
@@ -88,7 +90,6 @@ export function CustomerOrdersScreen({ navigation, route, appState, actions, mem
         title="訂單明細"
         onBack={() => navigation.goBack()}
         backLabel="返回"
-        onMemberPress={memberAction}
       >
         <OrderDetailCard
           order={selectedOrder}
@@ -103,16 +104,16 @@ export function CustomerOrdersScreen({ navigation, route, appState, actions, mem
   }
 
   return (
-    <MobileScreen title="我的訂單" onMemberPress={memberAction}>
+    <MobileScreen title="我的訂單">
       {syncStatus === "loading" ? <Text style={styles.loadingText}>正在更新後端訂單…</Text> : null}
       {syncStatus === "error" ? (
         <Notice accessibilityRole="alert" message="訂單同步失敗，目前顯示上次成功載入的資料。" tone="danger">
           <PrimaryButton label="重新整理" variant="secondary" onPress={refreshOrders} style={styles.noticeButton} />
         </Notice>
       ) : null}
-      {(customerOrders.length > 0 || cartItems.length > 0) ? (
-        <OrderTabs tab={displayTab} setTab={handleTabChange} />
-      ) : null}
+      {/* Always shown: history orders are only fetched once the history tab is opened, so hiding the
+          tabs while the local list is empty made a customer with only past orders unable to reach them. */}
+      <OrderTabs tab={displayTab} setTab={handleTabChange} />
 
       {displayTab === "active" ? (
         <>
@@ -159,6 +160,7 @@ export function CustomerOrdersScreen({ navigation, route, appState, actions, mem
 }
 
 function OrderListSection({ title, orders, groupBuyActivities, payments, emptyText, onSelectOrder, historical = false }) {
+  const styles = useThemedStyles(makeStyles);
   return (
     <Section title={title}>
       {orders.length === 0 ? (
@@ -182,6 +184,7 @@ function OrderListSection({ title, orders, groupBuyActivities, payments, emptyTe
 }
 
 function OrderListCard({ order, groupBuyActivities, payments, historical, onPress }) {
+  const styles = useThemedStyles(makeStyles);
   const groupBuyActivity = groupBuyActivities.find((item) => item.id === order.groupBuyActivityId) ?? null;
   const store = order.backendStore
     ?? getGroupBuyActivityStore(groupBuyActivity);
@@ -216,6 +219,7 @@ function OrderListCard({ order, groupBuyActivities, payments, historical, onPres
 }
 
 function OrderDetailCard({ order, groupBuyActivities, payments, actions, navigation, historical }) {
+  const styles = useThemedStyles(makeStyles);
   const [cancelNotice, setCancelNotice] = useState(null);
   const [cancelBusy, setCancelBusy] = useState(false);
   const groupBuyActivity = groupBuyActivities.find((item) => item.id === order.groupBuyActivityId) ?? null;
@@ -488,6 +492,7 @@ function getPickupPendingContent(order) {
 }
 
 function OrderTabs({ tab, setTab }) {
+  const styles = useThemedStyles(makeStyles);
   return (
     <View accessibilityRole="tablist" style={styles.tabRow}>
       <ChoiceChip
@@ -509,6 +514,7 @@ function OrderTabs({ tab, setTab }) {
 }
 
 function CartDraftSection({ cartGroupBuyActivity, cartItems, cartTotalQuantity, cartTotalAmount, navigation }) {
+  const styles = useThemedStyles(makeStyles);
   return (
     <Section title={`購物車草稿，共 ${cartTotalQuantity} 杯`}>
       <Card style={styles.cartDraftCard}>
@@ -563,7 +569,7 @@ function getHistoryReason(order, groupBuyActivity) {
   return "此訂單已歸入歷史訂單。";
 }
 
-const styles = StyleSheet.create({
+const makeStyles = (colors, tones) => StyleSheet.create({
   loadingText: {
     ...typeScale.caption,
     color: colors.textSecondary

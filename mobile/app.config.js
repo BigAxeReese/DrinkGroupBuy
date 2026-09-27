@@ -34,7 +34,9 @@ module.exports = {
   newArchEnabled: true,
   scheme: appScheme,
   orientation: "portrait",
-  userInterfaceStyle: "light",
+  // "automatic" lets the app see the phone's dark setting (Appearance / the theme's first-launch choice); it
+  // is a native setting, so it only takes effect in the next native build.
+  userInterfaceStyle: "automatic",
   splash: {
     backgroundColor: "#f6f8fb"
   },

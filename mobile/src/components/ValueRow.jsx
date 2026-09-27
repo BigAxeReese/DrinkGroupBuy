@@ -1,9 +1,11 @@
 import { StyleSheet, Text, View } from "react-native";
-import { colors, radii, sizes, spacing, typeScale } from "../theme/tokens";
+import { radii, sizes, spacing, typeScale } from "../theme/tokens";
+import { useThemedStyles } from "../theme/ThemeContext";
 
 // One "label ........ value" line on a milk-tea fill (amounts, dates, counts). A long label wraps
 // instead of pushing the value out. `emphasis` is the line that matters most (the total to pay).
 export function ValueRow({ label, value, emphasis = false }) {
+  const styles = useThemedStyles(makeStyles);
   return (
     <View style={styles.row}>
       <Text style={[styles.label, emphasis && styles.emphasisLabel]}>{label}</Text>
@@ -12,7 +14,7 @@ export function ValueRow({ label, value, emphasis = false }) {
   );
 }
 
-const styles = StyleSheet.create({
+const makeStyles = (colors) => StyleSheet.create({
   row: {
     minHeight: sizes.tap,
     flexDirection: "row",

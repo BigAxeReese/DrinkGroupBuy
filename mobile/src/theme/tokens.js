@@ -28,6 +28,51 @@ export const tones = {
   estimate: { bg: "#E4D6F6", fg: "#4B2A7A", mark: "dots" } // a discount that can still change
 };
 
+// Dark theme (2026-09-25). Same keys and roles as `colors` / `tones` above, so a screen never has to know
+// which theme is active: page is a near-black purple, text a light lavender, accent (buttons and drawn
+// lines) flips to the aqua with dark text on it, and the pickup-code panel becomes a light panel with dark
+// digits (`onDark` is the digit colour on the `text`-filled panel).
+export const darkColors = {
+  page: "#15101D",
+  recess: "#1D3A3C",
+  text: "#F1EAF7",
+  textSecondary: "#A9BFCF",
+  accent: "#65DCD5",
+  accentInk: "#D9FFF4",
+  onAccent: "#15101D",
+  onDark: "#321E48",
+  lineDecor: "#2A6A68",
+  lineRow: "#2C3A45",
+  lineInput: "#7893A8"
+};
+
+export const darkTones = {
+  info: { bg: "#1F5A57", fg: "#D9FFF4", mark: "dots" },
+  success: { bg: "#25421B", fg: "#D2EFB8", mark: "check" },
+  warning: { bg: "#4D3B0C", fg: "#FFEBB0", mark: "bang" },
+  danger: { bg: "#552030", fg: "#FBD5DE", mark: "cross" },
+  neutral: { bg: "#2D323C", fg: "#E4E8EE", mark: "dash" },
+  estimate: { bg: "#37275E", fg: "#E4D6F6", mark: "dots" }
+};
+
+// Shades the dark Google Maps style needs that are not UI colours (land, roads, water...). They live here so
+// the whole dark palette is in one file; theme/mapStyles.js turns them into the style array.
+export const darkMapColors = {
+  land: "#1D1A26",
+  labelText: darkColors.textSecondary,
+  labelStroke: darkColors.page,
+  boundary: "#3B3350",
+  locality: darkColors.accentInk,
+  park: "#17332F",
+  parkText: "#6B9B96",
+  road: "#2C2638",
+  highway: "#3B3350",
+  highwayText: "#D9D0E6",
+  transit: "#2F2A3D",
+  water: "#0F2A33",
+  waterText: "#4E7A86"
+};
+
 export const radii = { xs: 8, sm: 14, md: 20, lg: 28, pill: 999 };
 
 // Multiples of 4.

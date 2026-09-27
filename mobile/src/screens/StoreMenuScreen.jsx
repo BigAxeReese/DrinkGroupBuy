@@ -6,9 +6,10 @@ import { MobileScreen, Section } from "../components/MobileScreen";
 import { Notice } from "../components/Notice";
 import { PrimaryButton } from "../components/PrimaryButton";
 import { TonePill } from "../components/TonePill";
-import { colors, maxFontSizeMultiplier, spacing, typeScale } from "../theme/tokens";
+import { maxFontSizeMultiplier, spacing, typeScale } from "../theme/tokens";
 import { getStoreMenu } from "../utils/apiClient";
 import { formatCurrency } from "../utils/calculations";
+import { useThemedStyles } from "../theme/ThemeContext";
 
 const businessStatusLabels = {
   open: "營業中",
@@ -23,7 +24,8 @@ const businessStatusTones = {
   temporarily_closed: "warning"
 };
 
-export function StoreMenuScreen({ navigation, route, memberAction }) {
+export function StoreMenuScreen({ navigation, route }) {
+  const styles = useThemedStyles(makeStyles);
   const storeId = route.params?.storeId;
   const [menu, setMenu] = useState(null);
   const [loading, setLoading] = useState(true);
@@ -53,7 +55,7 @@ export function StoreMenuScreen({ navigation, route, memberAction }) {
 
   if (loading) {
     return (
-      <MobileScreen title="店家菜單" onBack={() => navigation.goBack()} onMemberPress={memberAction}>
+      <MobileScreen title="店家菜單" onBack={() => navigation.goBack()}>
         <Section title="正在載入"><EmptyPanel>正在讀取店家最新菜單…</EmptyPanel></Section>
       </MobileScreen>
     );
@@ -64,7 +66,6 @@ export function StoreMenuScreen({ navigation, route, memberAction }) {
       <MobileScreen
         title="店家菜單"
         onBack={() => navigation.goBack()}
-        onMemberPress={memberAction}
       >
         <Section title="找不到店家">
           <Notice tone="danger" accessibilityRole="alert" message={error || "後端找不到這間店家。"} />
@@ -79,7 +80,6 @@ export function StoreMenuScreen({ navigation, route, memberAction }) {
       title="店家菜單"
       subtitle="目前沒有進行中的團購，可先查看店家飲品。"
       onBack={() => navigation.goBack()}
-      onMemberPress={memberAction}
     >
       <Section title="店家資訊">
         <Card style={styles.storeCard}>
@@ -124,7 +124,7 @@ export function StoreMenuScreen({ navigation, route, memberAction }) {
   );
 }
 
-const styles = StyleSheet.create({
+const makeStyles = (colors) => StyleSheet.create({
   flex: {
     flex: 1
   },

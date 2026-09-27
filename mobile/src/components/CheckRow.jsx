@@ -1,11 +1,13 @@
 import { Pressable, StyleSheet, Text, View } from "react-native";
-import { colors, radii, sizes, spacing, typeScale } from "../theme/tokens";
+import { radii, sizes, spacing, typeScale } from "../theme/tokens";
+import { useThemedStyles } from "../theme/ThemeContext";
 
 const BOX = 24;
 
 // A tappable row with a checkbox drawn from views. The whole row is the 44px target. `children` is
 // the label: a string, or your own elements when the label needs more than one style.
 export function CheckRow({ checked, onToggle, disabled = false, children }) {
+  const styles = useThemedStyles(makeStyles);
   return (
     <Pressable
       accessibilityRole="checkbox"
@@ -20,7 +22,7 @@ export function CheckRow({ checked, onToggle, disabled = false, children }) {
   );
 }
 
-const styles = StyleSheet.create({
+const makeStyles = (colors) => StyleSheet.create({
   row: {
     minHeight: sizes.tap,
     flexDirection: "row",

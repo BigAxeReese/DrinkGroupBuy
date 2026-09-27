@@ -1,10 +1,12 @@
 import { Pressable, StyleSheet, View } from "react-native";
-import { colors, radii, sizes, spacing } from "../theme/tokens";
+import { radii, sizes, spacing } from "../theme/tokens";
+import { useThemedStyles } from "../theme/ThemeContext";
 
 // The customer card: white with a 2px decorative outline (docs/ui-style-guide.md). `compact` is the
 // smaller list-row size; `tone="recess"` is a filled panel with no visible outline. Pass `onPress` to
 // make the whole card one button. Extra props (accessibilityLabel, testID, ...) go to the root view.
 export function Card({ children, onPress, compact = false, tone = "plain", style, ...rest }) {
+  const styles = useThemedStyles(makeStyles);
   const cardStyle = [styles.card, compact && styles.compact, tone === "recess" && styles.recess, style];
 
   if (!onPress) {
@@ -27,7 +29,7 @@ export function Card({ children, onPress, compact = false, tone = "plain", style
   );
 }
 
-const styles = StyleSheet.create({
+const makeStyles = (colors) => StyleSheet.create({
   card: {
     gap: spacing.s8,
     padding: spacing.s20,

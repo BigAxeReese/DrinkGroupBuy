@@ -1,7 +1,7 @@
 import { useEffect, useState } from "react";
 import { Modal, Platform, Pressable, ScrollView, StyleSheet, Switch, Text, View } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
-import { colors, radii, sizes, spacing, typeScale } from "../theme/tokens";
+import { radii, sizes, spacing, typeScale } from "../theme/tokens";
 import {
   DEFAULT_MAP_FILTERS,
   MIN_CUPS_OPTIONS,
@@ -10,6 +10,7 @@ import {
 } from "../utils/groupBuyActivityMapFilters";
 import { ChoiceChip } from "./ChoiceChip";
 import { PrimaryButton } from "./PrimaryButton";
+import { useTheme, useThemedStyles } from "../theme/ThemeContext";
 
 export function ActivityFilterPanel({
   visible,
@@ -19,6 +20,8 @@ export function ActivityFilterPanel({
   hasLocation = true,
   onOpenLocationSettings = null
 }) {
+  const styles = useThemedStyles(makeStyles);
+  const { colors } = useTheme();
   const [draft, setDraft] = useState({ ...DEFAULT_MAP_FILTERS, ...filters });
   // RN's Modal portals to a native overlay outside App.jsx's root SafeAreaView, so its content
   // doesn't inherit that safe-area padding -- without this, the sheet's bottom (and the apply
@@ -157,7 +160,7 @@ function SegmentButton({ label, active, onPress, disabled = false }) {
 
 const ICON_SIZE = spacing.s24;
 
-const styles = StyleSheet.create({
+const makeStyles = (colors) => StyleSheet.create({
   overlay: {
     flex: 1,
     justifyContent: "flex-end"

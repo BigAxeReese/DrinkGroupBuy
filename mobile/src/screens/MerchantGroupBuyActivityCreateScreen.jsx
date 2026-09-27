@@ -10,7 +10,7 @@ import {
   validateGroupBuyActivityTierDrafts
 } from "../utils/groupBuyActivityErrors";
 import { parseDealFactorToDiscountPercent } from "../utils/discountPercentFormat";
-import { colors, tones } from "../theme/tokens";
+import { useTheme, useThemedStyles } from "../theme/ThemeContext";
 
 const NativeDateTimePicker = Platform.OS === "web"
   ? null
@@ -24,7 +24,8 @@ const DEFAULT_TITLE = "離峰優惠團購";
 const DEFAULT_NOTICES = "截止前可修改或退出";
 const buildDefaultTiers = () => [{ id: "tier-draft-1", cups: "20", dealFactor: "9" }];
 
-export function MerchantGroupBuyActivityCreateScreen({ navigation, actions, memberAction, selectedMerchantStoreId }) {
+export function MerchantGroupBuyActivityCreateScreen({ navigation, actions, selectedMerchantStoreId }) {
+  const styles = useThemedStyles(makeStyles);
   const initialDeadlineDate = new Date(createDeadlineIsoFromInput(getDefaultDeadlineInput()));
   const [title, setTitle] = useState(DEFAULT_TITLE);
   const [tiers, setTiers] = useState(buildDefaultTiers);
@@ -191,7 +192,6 @@ export function MerchantGroupBuyActivityCreateScreen({ navigation, actions, memb
     <MobileScreen
       title="建立活動"
       onBack={goToDashboard}
-      onMemberPress={memberAction}
     >
       <Section title="活動資料">
         <MobileInput label="活動名稱" value={title} onChangeText={setTitle} />
@@ -285,6 +285,8 @@ export function MerchantGroupBuyActivityCreateScreen({ navigation, actions, memb
 }
 
 function MobileInput({ label, ...props }) {
+  const styles = useThemedStyles(makeStyles);
+  const { colors } = useTheme();
   return (
     <View style={styles.inputGroup}>
       <Text style={styles.label}>{label}</Text>
@@ -294,6 +296,7 @@ function MobileInput({ label, ...props }) {
 }
 
 function DateTimeInput({ label, value, onChange, maximumDate }) {
+  const styles = useThemedStyles(makeStyles);
   const [showPicker, setShowPicker] = useState(false);
   const [pickerMode, setPickerMode] = useState("date");
 
@@ -476,7 +479,7 @@ function getPickupValidationError(deadlineDate, pickupStartDate) {
   return "";
 }
 
-const styles = StyleSheet.create({
+const makeStyles = (colors, tones) => StyleSheet.create({
   helperText: {
     color: colors.textSecondary,
     fontSize: 12,

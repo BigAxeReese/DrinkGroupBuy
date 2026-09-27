@@ -1219,3 +1219,108 @@
 `/code-review` 抓到一個跟金流路徑有關的退步，已修並記在這裡：LINE Pay 付款結果深層連結（`drinkgroupbuy://payment/result?orderId=...`）的「同一個網址只處理一次」防重複（舊版 `handledDeepLinkRef`）在遷移時被我漏掉，而處理函式又依賴每次購物車／訂單變動都會換身分的 `actions`，Android 上 `getInitialURL()` 會一直回傳啟動網址，等於每次狀態變動都可能重新導向付款畫面並重打後端。修法（`RootNavigator.jsx`）：恢復 `handledDeepLinkRef` 去重、`actions` 改從 ref 讀取且訂閱只做一次，並新增「暫存待處理連結」——導覽器尚未就緒或尚未登入成顧客時先存起來，`CustomerTabs` 掛載後才導向（原本冷啟動時會被靜默丟掉）。這不改變任何金額、權限或後端呼叫，只是讓同一個連結不會重複觸發 `syncOrderFromBackend` 與導覽。其餘修正（`OrdersStack` 補註冊 `groupProgress`、建立活動導覽與表單重置、首頁分頁 GPS 隨焦點暫停、點目前分頁回根畫面、`replace` 改 `goBack`、訂單輪詢隨焦點暫停、載入圈改用主題色）都是導覽／效能層，沒有碰付款或授權邏輯。**深層連結的冷啟動暫存路徑只做了程式碼審視，沒有在預覽裡實測**（網頁預覽的網址不是 `drinkgroupbuy://`，無法觸發）。
 
 **驗證限制**：`npm test` 170/170、Babel 目標編譯全站 99 個檔案全過；驗證是本機 `react-native-web` 預覽＋本機後端手動走過完整購買與建立活動流程，**沒有在 Android 真機或模擬器上操作過**，兩個修掉的返回鍵 bug 只驗證了 react-navigation 內部的 stack pop 機制（透過畫面內「返回」按鈕），無法在網頁預覽驗證真正的 Android 實體返回鍵行為。
+
+---
+
+## 2026-09-25 — 顧客個人中心「省錢統計」新 API（`GET /api/customers/me/savings`）
+
+**範圍**：`backend/database/repositories/customerSavingsRepository.js`（新）、`backend/server.js` 的新路由與 repository 建立（只看這幾段，同一檔案的 `/admin/statistics` 是另一條工作線的既有改動，不在範圍）、`mobile/src/utils/apiClient.js` 的 `getCustomerSavings`、`mobile/src/utils/customerSavings.js`、`mobile/src/screens/ProfileScreen.jsx` 的省錢統計區塊、`scripts/customer-savings-postgres-smoke.js`
+**觸發原因**：CLAUDE.md 規則自動觸發——新增一支讀取金流衍生資料（訂單原價／請款金額）的已驗證 API。這次沒有改動任何付款、請款、退款、結算的寫入邏輯，也沒有資料庫結構變更
+**方法**：兩層。(1) 內建 `/security-review` 流程：一個唯讀子任務只看上述檔案，追過完整呼叫路徑（含 `getAuthenticatedUser` → `verifyAuthToken` → `authProfileReadRepository.getById`，並與旁邊的 `GET /api/customers/me/orders` 逐行對照）；因為工作目錄還有另一條工作線的大量無關畫面改動，所以刻意限縮範圍，沒有把整個工作目錄的 diff 丟進去審。(2) 5 個角度的獨立審查（金額語意、安全與授權、手機端、測試與規範、整合與啟動），每個發現由 3 位審查員各自嘗試推翻，至少 2 位認為成立才保留
+
+### 發現
+
+`/security-review` 沒有找到信心度達到門檻（8/10 以上）的漏洞。5 角度審查裡的安全與授權角度同樣沒有發現。
+
+5 角度審查另外留下 4 個**非資安**的低嚴重度問題，已全部修正並重跑驗證，記在這裡因為第 1 項牽涉「金額算得對不對」：
+
+| 嚴重度 | 位置 | 問題 | 修法 | 狀態 |
+|--------|------|------|------|------|
+| 低 | `customerSavingsRepository.js` 的 SQL | 沒看團購活動狀態：管理員取消已結算的活動時，取消流程會刻意略過已請款訂單（`merchantGroupBuyActivityCancelRepository.js`），這類訂單永遠停在 `captured` 卻再也領不到飲料，仍被算進省下金額 | SQL 加 `JOIN group_buy_activities` 並要求 `activity.status <> 'cancelled'`；smoke 新增這種情境 | 已修 |
+| 低 | `ProfileScreen.jsx` 說明文字 | 寫「已退款不列入」，但只有全額退款不計、部分退款仍計入 | 改成「已全額退款、逾期未取或團購被取消的不列入」 | 已修 |
+| 低 | `ProfileScreen.jsx` | 內文與說明文字套用了 `maxFontSizeMultiplier`，違反 `docs/ui-style-guide.md` 第 6 條（只限取餐碼、珍珠數字、標籤） | 只保留在標籤與金額數字 | 已修 |
+| 低 | `customerSavingsRepository.test.js` | `status <> 'cancelled'` 斷言沒有錨定，`pickup_status <> 'cancelled'` 也會通過 | 每條斷言都加上 `AND orders.` 前綴；改壞任一條件都會讓測試失敗（已做過兩種故意弄壞的反向驗證） | 已修 |
+
+### 沒發現問題的部分（已交叉驗證）
+
+| 面向 | 檢查結果 |
+|------|----------|
+| 身分與授權 | 路由不讀路徑參數、query、body 來決定顧客身分，唯一傳進查詢的是 `authUser.id`（來自驗證過的 bearer token）。`verifyAuthToken` 先用 HMAC 簽章（`timingSafeEqual`）驗證再解析，並檢查過期；使用者與角色每次請求都從資料庫重新讀取（`users.status = 'active'`、有效的 `user_roles`），不信任 token 內的角色宣告，停用帳號或撤銷角色會立即失效 |
+| 越權讀取他人資料 | 實測：顧客 A 的 token 帶 `?customerUserId=`／`?customer_user_id=` 指向顧客 B，回傳的仍是 A 自己的數字；smoke 也驗證「A 的訂單變動不影響 B 的總額」 |
+| 角色邊界 | 實測：沒 token 401、亂填 token 401、商家 token 403、POST 回 404；跟 `GET /api/customers/me/orders` 的守門順序逐行相同 |
+| SQL 注入 | 唯一變數 `customerUserId` 用 `$1` 綁定，其餘全是常數；單元測試用含注入字串的 id 驗證沒有被插進 SQL |
+| 資料外洩 | 回應只有三個整數（總省下金額、訂單數、杯數），沒有訂單 ID、店家、其他使用者資料；沒有新增任何 log |
+| 路由遮蔽 | 前面沒有任何路由或前置處理會先攔到這個路徑；`isSqliteOrderDependentRoute` 不會匹配 |
+| 手機端 | 固定網址無使用者輸入；token 走 `Authorization` 標頭；數值以 `<Text>` 子節點顯示，沒有 HTML sink；`normalizeCustomerSavings` 只接受非負整數，其餘一律當作載入失敗；登出時整個顧客畫面樹會卸載，同一台裝置換下一位登入看不到前一位的數字 |
+| smoke 腳本 | 只新增與刪除自己帶 UUID 後綴的資料列，全部參數綁定 |
+
+**這次沒審查到／沒驗證到的部分**：Android 實機沒有操作過，只用本機後端搭配 `react-native-web` 網頁預覽看過有數字、空狀態、錯誤與重試四種畫面。深色模式沒有另外截圖。
+
+### 過程中的事（不是漏洞，記錄以免重犯）
+
+用來實機驗證的本機後端沒有關掉自動結算排程，把驗證用的假活動（截止時間在過去）結算掉，導致假資料一度清不掉。只影響自己塞的假資料（本機資料庫原本的 4 場活動在 9/23、9/24 就已結算，今天沒有被動到），已徹底清除。之後：驗證用的後端一律先關排程；`scripts/customer-savings-postgres-smoke.js` 的假活動截止時間改在未來，排程掃不到。
+
+---
+
+## 2026-09-25 — 展示用假資料產生器（`scripts/seed-demo-data.js`）
+
+**範圍**：`scripts/seed-demo-data.js`、`scripts/helpers/demoDataBuilder.js`（新）。這是開發者手動執行的指令列工具，不屬於伺服器程式，沒有改動任何付款、請款、退款、結算的邏輯；但它會把假的付款、請款、退款紀錄與假帳號寫進資料庫，而且可以指向共用的 Azure 展示資料庫，所以照金流相關規則審查
+**觸發原因**：CLAUDE.md 規則（會寫入付款資料表、會建立帳號、具備遠端寫入能力）
+**方法**：一個獨立的唯讀子任務只看這兩支檔案，並追進它們碰到的後端程式（登入、註冊、三種排程的挑選條件、退款供應商解析）；另外我自己實測了各種保護機制。這次沒有用內建 `/security-review` 指令整包審查，因為工作目錄還混著另一條工作線大量無關的未提交畫面修改，整包審查會被那些改動淹沒
+
+### 發現
+
+沒有找到信心度達到門檻（8/10 以上）的漏洞。審查員提出兩項低風險觀察：
+
+| 嚴重度 | 位置 | 問題 | 處理 | 狀態 |
+|--------|------|------|------|------|
+| 低 | `seed-demo-data.js` 的 `describeTarget` | 連線網址若帶 `?host=` 或 `?hostaddr=`，pg 會改連那個主機，「是不是本機」的判斷會被繞過 | 帶有這兩個參數的網址一律視為遠端（需要 `--allow-remote`）；已實測 | 已修 |
+| 低（資料完整性，非資安） | 假團購掛在真實店家底下 | 會算進真實店家的統計與營收排行 | 展示用途的預期行為，已寫進 `docs/azure-classroom-deployment.md` 的已知限制；移除示範資料即恢復 | 評估後不修（預期行為） |
+
+### 沒發現問題的部分（已交叉驗證）
+
+| 面向 | 檢查結果 |
+|------|----------|
+| SQL 注入與識別字組裝 | 所有串進 SQL 的資料表與欄位名稱都來自常數清單（`TABLES`）或先過 `/^[a-z_]+$/` 檢查；所有值都是參數綁定（`$n`）。指令列輸入（`--focus-email`、`--focus-user-id`）只會以參數形式進入資料庫，數字選項必須是整數 |
+| 清除範圍 | 只依 `demo-seed-` 前綴（不含萬用字元）刪除，逆著外鍵順序、單一交易；真實使用者與訂單的 ID 是 `user-<uuid>`／`order-<uuid>`，不可能符合；重點顧客（真實帳號）本身的帳號、角色、個人資料不會被動到，只會移除他名下帶前綴的示範訂單。實測：清除前後原有的 4 場活動、2 筆訂單、12 個帳號完全不變 |
+| 假帳號能否被拿來登入 | `firebase_uid`、`login_name`、`password_hash` 都是空的；正式登入只認驗證過的 Firebase 憑證對應的 `firebase_uid`，對不上；信箱網域 `@example.test` 是保留網域，真實 Google 帳號不可能註冊；若真有人用相同信箱註冊，會被唯一鍵擋下（`email_already_registered`，不會合併或接管）；只有 `AUTH_DEV_MODE` 開啟時的開發登入端點能以這些帳號登入，那個開關開著時本來就能扮演任何使用者，沒有新增能力，關閉時完全不可達 |
+| 商家權限 | 假商家帳號有 merchant 角色但沒有 `merchant_users` 資料列，商家權限只由後者決定，所以沒有任何真實門市的存取權 |
+| 真實付款程式會不會處理這些假紀錄 | 結算排程只挑招募中／已成團／進行中的活動，假活動都是已完成／失敗／取消；取貨逾期排程只挑進行中／可取貨的活動，同樣不會選到；付款對帳排程只挑「真實 LINE Pay、狀態待處理」的授權，假紀錄是 `mock_line_pay` 且已請款／已作廢；腳本不寫入任何排程工作紀錄；`mock_line_pay` 的退款只在非 production 環境被接受，而且不會呼叫外部 API，不會有真的錢移動 |
+| 遠端寫入保護 | 用 `new URL().hostname` 解析，帳號密碼段（`user@host`）會被去掉、主機名稱轉小寫、IPv6 正確辨識；`localhost.`（結尾多一個點）與空主機（unix socket 網址）都被當成遠端而擋下（失敗方向是安全的）；判斷與實際連線用同一個 `DATABASE_URL` 字串；已實測：遠端網址不加 `--allow-remote` 會在連線前就拒絕 |
+| 機密外洩 | 只印主機名稱、資料庫名稱與「本機／遠端」；網址格式錯誤時只丟出 `Invalid URL`，不會把密碼印出來 |
+| 資料寫入的原子性與重複執行 | 整批寫入是單一交易，失敗即整批復原；先檢查 migration 008 已套用；已有示範資料時拒絕重複寫入；不加 `--apply` 一律只預覽 |
+
+**這次沒審查到／沒驗證到的部分**：實際寫進 Azure 資料庫沒有做（由使用者自己執行）；產生器裡的取貨碼用可預測的偽隨機數，但它們只屬於已核銷或已過期的示範憑證，沒有利用價值。
+
+---
+
+## 2026-09-26 — 商家營運統計 API（`GET /api/merchant/stores/:storeId/statistics`）
+
+**範圍**：`backend/database/repositories/merchantStatisticsRepository.js`（新）、`backend/server.js` 的新路由與 repository 建立（只看這幾段）、`mobile/src/utils/apiClient.js` 的 `getMerchantStoreStatistics`、`mobile/src/utils/merchantStatistics.js`、`mobile/src/screens/MerchantStatisticsScreen.jsx` 與導覽註冊、`scripts/merchant-statistics-postgres-smoke.js`
+**觸發原因**：CLAUDE.md 規則自動觸發——新增一支讀取營收、請款、退款金額的已驗證 API，而且有「一家店不能看到別家店」的租戶邊界。這次沒有改動任何付款、請款、退款、結算的寫入邏輯，也沒有資料庫結構變更
+**方法**：兩層。(1) 一個獨立的唯讀子任務，重點查租戶隔離與授權、金額算法（含資料列重複相乘、多筆退款、各種結算結果）、手機端、測試品質，並追進 `getUserFromToken`、`authProfileReadRepository`、`canManageStore`、退款與結算寫入程式；這次沒有用內建 `/security-review` 指令整包審查，因為工作目錄還混著另一條工作線大量無關的未提交畫面修改。(2) 我自己的實測：真實 HTTP 授權測試，以及用另一套算法從原始資料重算 store-001 的數字，與 API 逐項核對
+
+### 發現
+
+沒有找到信心度達到門檻（7/10 以上）的漏洞，也沒有找到在真實資料下會算錯的數字。審查員提出四項低風險觀察：
+
+| 嚴重度 | 位置 | 問題 | 處理 | 狀態 |
+|--------|------|------|------|------|
+| 低 | smoke 腳本 | 沒有涵蓋「一筆訂單有多筆退款」（彙總時可能重複計算）、「待處理或失敗的退款不能被扣」；有人拿掉子查詢的 `GROUP BY` 或 `status = 'refunded'` 條件，測試不會失敗 | 新增一筆有四筆退款（兩筆完成、一筆待處理、一筆失敗）的訂單，並重新做故意弄壞驗證，兩種弄壞都會讓測試失敗 | 已修 |
+| 低 | `merchantStatisticsRepository.js` 成團率查詢 | 「已結算、事後被管理員取消」的團購仍算進成團率，但同一批訂單的營收不計，兩個數字的活動範圍不一致 | 成團率也排除被取消的團購；smoke 新增這種情境並驗證 | 已修 |
+| 低 | `merchantStatistics.js` | 若資料異常導致退款大於實收，手機端會顯示錯誤畫面而不是負數 | 這是刻意的「寧可失敗也不顯示錯數字」 | 評估後不修（預期行為） |
+| 低 | `MerchantStatisticsScreen.jsx` | 若畫面掛著時店家編號改變，新資料載入前會暫時顯示上一家的數字 | 目前一個商家登入只對應一家店，畫面掛著時編號不會改變；而且每次請求後端都會重新授權，顯示的也是同一位使用者自己的另一家店，不是別人的資料 | 評估後不修（目前不會發生） |
+
+### 沒發現問題的部分（已交叉驗證）
+
+| 面向 | 檢查結果 |
+|------|----------|
+| 租戶隔離 | 三條查詢全部以 `activity.store_id = $1` 過濾（`order_items`、退款子查詢、結算查詢都是經由已過濾店家的訂單或活動連到的），店家編號一律是綁定參數；網址片段全程不解碼，「授權檢查用的值」與「送進 SQL 的值」是同一個字串，不存在檢查與使用不一致；`%xx` 編碼、大小寫不同、前後空白的編號都過不了授權 |
+| 授權 | `merchantStores` 只來自狀態為 active 的 `merchant_users` 列，角色只來自 active 的 `user_roles`，而且每次請求都從資料庫重新讀取，不信任 token 內的內容，停用或撤銷會立即失效。實測：沒 token 401、亂填 token 401、顧客 token 403、管理員 token 403（跟同層的訂單列表路由一致，只給商家）、商家看別家店 403、不存在的店 403、店家編號帶注入字串 403、POST 404、看自己的店 200 |
+| 金額算法 | 退款子查詢先 `GROUP BY order_id` 並只取 `status = 'refunded'`，所以一筆訂單有多筆退款也不會讓訂單被重複計算（smoke 有實例驗證），待處理與失敗的退款不會被扣；全額退款的訂單狀態會變成 `refunded` 而被排除，部分退款則從實收扣除，沒有重複扣；訂單彙總查詢沒有連到品項表，所以筆數與金額不會被放大；結算 `outcome = 'cancelled'` 不會被計入成團或未成團；沒有結算紀錄的活動，其已請款訂單仍計入營收（營收不依賴結算）。真實資料交叉驗證：store-001 的 API 結果與獨立重算完全一致 |
+| 資料外洩 | 回應只有七個彙總欄位，熱賣飲品只有品名與杯數，沒有顧客或訂單識別資訊；沒有新增任何 log |
+| 路由遮蔽 | 前面沒有任何路由或前置處理會攔到這個路徑，`isSqliteOrderDependentRoute` 不會匹配 |
+| 手機端 | 所有 hook 都在提早 return 之前執行；用 `active` 旗標避免舊回應蓋掉新狀態；店家編號來自 `selectedMerchantStoreId`，後端仍會用 token 重新驗證；`normalizeMerchantStatistics` 會擋下非整數、負數、成團數大於已結算數、比例超出 0～1、品名為空、杯數非正數；沒有寫死的顏色；數值以 `<Text>` 子節點顯示，沒有 HTML sink |
+| smoke 腳本 | 建立三家暫時店家（狀態為 `closed`，不會出現在任何 App 畫面），只新增與刪除自己帶 UUID 後綴的資料列，全部參數綁定；假活動截止時間在未來，排程不會碰；清除後殘留 0 列。八種故意弄壞驗證（拿掉活動取消、訂單取消、店家過濾、退款扣除、多筆退款彙總、退款狀態過濾等條件）全部會讓測試失敗 |
+
+**這次沒審查到／沒驗證到的部分**：Android 實機沒有操作過，只用本機後端搭配 `react-native-web` 網頁預覽看過有數字、錯誤與重試畫面；深色模式沒有另外截圖。

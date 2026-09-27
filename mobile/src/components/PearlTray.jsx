@@ -1,16 +1,19 @@
 import { StyleSheet, Text, View } from "react-native";
-import { colors, maxFontSizeMultiplier, radii, sizes, spacing, typeScale } from "../theme/tokens";
+import { maxFontSizeMultiplier, radii, sizes, spacing, typeScale } from "../theme/tokens";
 import { getPearlTray } from "../utils/pearlProgress";
+import { useThemedStyles } from "../theme/ThemeContext";
 
-const MAX_PEARLS = 10;
-const PEARLS_PER_ROW = 5;
-const PEARL_SIZE = 28;
+const MAX_PEARLS = 30;
+const PEARLS_PER_ROW = 10;
+const PEARL_SIZE = 16;
+const PEARL_GAP = spacing.s8 - 2;
 
 // The big pearl tray (docs/ui-style-guide.md): a solid pearl is a filled slot on the way to the next
-// discount tier, a 2px ring is a slot still open. A goal of ten cups or less is one pearl per cup;
+// discount tier, a 2px ring is a slot still open. A goal of thirty cups or less is one pearl per cup;
 // a larger goal puts several cups in each pearl, and says so. The exact numbers are always text, so
 // the pearls are only the picture and are hidden from screen readers.
 export function PearlTray({ currentCups, targetCups, participantCount, remainingTimeText }) {
+  const styles = useThemedStyles(makeStyles);
   const { count, cupsPerPearl, filled } = getPearlTray(currentCups, targetCups, MAX_PEARLS);
   const rows = getPearlRows(count);
   const hasParticipants = participantCount != null;
@@ -49,7 +52,7 @@ export function PearlTray({ currentCups, targetCups, participantCount, remaining
   );
 }
 
-// Splits `count` pearls into evenly filled rows of at most five (6 -> 3 + 3, 7 -> 4 + 3, 9 -> 5 + 4).
+// Splits `count` pearls into evenly filled rows of at most ten (12 -> 6 + 6, 15 -> 8 + 7, 20 -> 10 + 10).
 function getPearlRows(count) {
   if (count < 1) return [];
   const rowCount = Math.ceil(count / PEARLS_PER_ROW);
@@ -60,7 +63,7 @@ function getPearlRows(count) {
   });
 }
 
-const styles = StyleSheet.create({
+const makeStyles = (colors) => StyleSheet.create({
   tray: {
     gap: spacing.s16,
     padding: spacing.s20,
@@ -81,11 +84,11 @@ const styles = StyleSheet.create({
     color: colors.textSecondary
   },
   pearls: {
-    gap: spacing.s12
+    gap: PEARL_GAP
   },
   pearlRow: {
     flexDirection: "row",
-    gap: spacing.s12
+    gap: PEARL_GAP
   },
   pearl: {
     width: PEARL_SIZE,

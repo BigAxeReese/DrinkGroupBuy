@@ -1,33 +1,12 @@
 import { Pressable, StyleSheet, Text } from "react-native";
-import { useMilkTea } from "../theme/MilkTeaContext";
-import { colors, sizes, spacing, typeScale } from "../theme/tokens";
+import { sizes, spacing, typeScale } from "../theme/tokens";
+import { useThemedStyles } from "../theme/ThemeContext";
 
-// Migrated routes get the new look (docs/ui-style-guide.md, see theme/MilkTeaContext.js): a solid
-// brown-sugar button, or a white one with a 2px outline for the secondary action. Everything below
-// the early return is the old look, untouched, because merchant screens still use it.
+// A solid accent button, or a page-coloured one with a 2px outline for the secondary action
+// (docs/ui-style-guide.md).
 export function PrimaryButton({ label, onPress, variant = "primary", style, disabled = false }) {
-  const milkTea = useMilkTea();
+  const styles = useThemedStyles(makeStyles);
   const secondary = variant === "secondary";
-
-  if (milkTea) {
-    return (
-      <Pressable
-        accessibilityRole="button"
-        accessibilityState={{ disabled }}
-        disabled={disabled}
-        onPress={onPress}
-        style={({ pressed }) => [
-          milkTeaStyles.button,
-          secondary && milkTeaStyles.secondary,
-          disabled && (secondary ? milkTeaStyles.secondaryDisabled : milkTeaStyles.disabled),
-          style,
-          pressed && !disabled && milkTeaStyles.pressed
-        ]}
-      >
-        <Text style={[milkTeaStyles.label, secondary && milkTeaStyles.secondaryLabel, disabled && milkTeaStyles.disabledLabel]}>{label}</Text>
-      </Pressable>
-    );
-  }
 
   return (
     <Pressable
@@ -38,7 +17,7 @@ export function PrimaryButton({ label, onPress, variant = "primary", style, disa
       style={({ pressed }) => [
         styles.button,
         secondary && styles.secondary,
-        disabled && styles.disabled,
+        disabled && (secondary ? styles.secondaryDisabled : styles.disabled),
         style,
         pressed && !disabled && styles.pressed
       ]}
@@ -48,40 +27,8 @@ export function PrimaryButton({ label, onPress, variant = "primary", style, disa
   );
 }
 
-const styles = StyleSheet.create({
-  button: {
-    minHeight: 44,
-    borderRadius: 13,
-    alignItems: "center",
-    justifyContent: "center",
-    backgroundColor: "#1f6feb",
-    paddingHorizontal: 14
-  },
-  secondary: {
-    backgroundColor: "#e2e8f0"
-  },
-  pressed: {
-    opacity: 0.78
-  },
-  disabled: {
-    backgroundColor: "#cbd5e1",
-    opacity: 0.72
-  },
-  label: {
-    color: "#ffffff",
-    fontSize: 14,
-    fontWeight: "800"
-  },
-  secondaryLabel: {
-    color: "#0f172a"
-  },
-  disabledLabel: {
-    color: "#64748b"
-  }
-});
-
 // Primary and secondary share the same 2px border so both are exactly the same size.
-const milkTeaStyles = StyleSheet.create({
+const makeStyles = (colors) => StyleSheet.create({
   button: {
     minHeight: sizes.buttonHeight,
     borderRadius: sizes.buttonRadius,

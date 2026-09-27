@@ -9,9 +9,11 @@ import { PrimaryButton } from "../components/PrimaryButton";
 import { useActivityMapFilters } from "../hooks/useActivityMapFilters";
 import { useDevLocationConfig } from "../hooks/useDevLocationConfig";
 import { mapCenter, mapDefaults } from "../mock/mapConfig";
-import { colors, maxFontSizeMultiplier, radii, sizes, spacing, typeScale } from "../theme/tokens";
+import { maxFontSizeMultiplier, radii, sizes, spacing, typeScale } from "../theme/tokens";
 import { reportAppliedDevLocation } from "../utils/devLocationControl";
 import { buildStoreMapStores, getStoreMapDestination, getStoreMarkerLabel } from "../utils/groupBuyActivityStores";
+import { useTheme, useThemedStyles } from "../theme/ThemeContext";
+import { DARK_MAP_STYLE, LIGHT_MAP_STYLE } from "../theme/mapStyles";
 
 // Android turns pinColor into a hue only (react-native-maps: Color.colorToHSV -> defaultMarker(hue)),
 // so these tokens choose the hue of the default pin, not its exact colour. The recruiting / no
@@ -24,13 +26,11 @@ import { buildStoreMapStores, getStoreMapDestination, getStoreMarkerLabel } from
 // (slate reads as a blue pin and deep purple as a violet one, since only the hue survives), so
 // there is no existing token to point at instead: green keeps the user pin clearly apart from both.
 const USER_PIN_HUE = "#2F5A14";
-const PIN_COLORS = {
-  user: USER_PIN_HUE,
-  recruiting: colors.accent,
-  idle: colors.text
-};
 
 export function LiveMapScreen({ navigation, appState, selectedAuthUserId }) {
+  const styles = useThemedStyles(makeStyles);
+  const { colors, isDark } = useTheme();
+  const pinColors = useMemo(() => ({ user: USER_PIN_HUE, recruiting: colors.accent, idle: colors.text }), [colors]);
   const mapRef = useRef(null);
   const lastReportSignatureRef = useRef("");
   // True once a real GPS fix has been received. This effect re-runs on every re-focus of the tab, and
@@ -225,6 +225,7 @@ export function LiveMapScreen({ navigation, appState, selectedAuthUserId }) {
         toolbarEnabled={false}
         mapType="standard"
         showsPointsOfInterest={false}
+        customMapStyle={isDark ? DARK_MAP_STYLE : LIGHT_MAP_STYLE}
         onMapReady={recomputeMarkerLabelPositions}
         onRegionChangeComplete={recomputeMarkerLabelPositions}
       >
@@ -232,7 +233,7 @@ export function LiveMapScreen({ navigation, appState, selectedAuthUserId }) {
           coordinate={userPosition}
           title={locationName}
           description={effectiveLocationMode === "live" ? "顧客即時 GPS；失敗時使用固定備援位置" : "控制台指定的顧客固定位置"}
-          pinColor={PIN_COLORS.user}
+          pinColor={pinColors.user}
         />
         {visibleMapStores.map((store) => {
           const hasRecruitingGroupBuyActivity = store.hasRecruitingGroupBuyActivity;
@@ -246,7 +247,7 @@ export function LiveMapScreen({ navigation, appState, selectedAuthUserId }) {
                 setFilteredOutStoreName(null);
                 setSelectedStoreId(store.id);
               }}
-              pinColor={hasRecruitingGroupBuyActivity ? PIN_COLORS.recruiting : PIN_COLORS.idle}
+              pinColor={hasRecruitingGroupBuyActivity ? pinColors.recruiting : pinColors.idle}
             />
           );
         })}
@@ -346,6 +347,7 @@ export function LiveMapScreen({ navigation, appState, selectedAuthUserId }) {
 
 // The "my location" crosshair, drawn with views instead of a font glyph.
 function RecenterIcon() {
+  const styles = useThemedStyles(makeStyles);
   return (
     <View style={styles.crosshair}>
       <View style={styles.crosshairRing} />
@@ -362,7 +364,7 @@ const ICON_SIZE = spacing.s24;
 const CROSSHAIR_RING = spacing.s16 - sizes.stroke;
 const CROSSHAIR_TICK = spacing.s8 - sizes.stroke;
 
-const styles = StyleSheet.create({
+const makeStyles = (colors) => StyleSheet.create({
   screen: {
     flex: 1,
     overflow: "hidden",

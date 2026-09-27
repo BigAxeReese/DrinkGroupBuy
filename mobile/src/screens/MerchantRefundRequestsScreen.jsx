@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import { Pressable, StyleSheet, Text, TextInput, View } from "react-native";
+import { StyleSheet, Text, TextInput, View } from "react-native";
 import { MobileScreen, Section } from "../components/MobileScreen";
 import { PrimaryButton } from "../components/PrimaryButton";
 import { StatusBadge } from "../components/StatusBadge";
@@ -9,9 +9,11 @@ import {
   listMerchantStoreOrders
 } from "../utils/apiClient";
 import { formatCurrency } from "../utils/calculations";
-import { colors, tones } from "../theme/tokens";
+import { useTheme, useThemedStyles } from "../theme/ThemeContext";
 
-export function MerchantRefundRequestsScreen({ navigation, memberAction, selectedMerchantStoreId }) {
+export function MerchantRefundRequestsScreen({ navigation, selectedMerchantStoreId }) {
+  const styles = useThemedStyles(makeStyles);
+  const { colors } = useTheme();
   const [capturedOrders, setCapturedOrders] = useState([]);
   const [refundRequests, setRefundRequests] = useState([]);
   const [loading, setLoading] = useState(true);
@@ -95,7 +97,6 @@ export function MerchantRefundRequestsScreen({ navigation, memberAction, selecte
       title="退款申請"
       subtitle="對已請款的訂單提出退款申請，將由營運審核後執行。"
       onBack={() => navigation.goBack()}
-      onMemberPress={memberAction}
     >
       {loading ? <Text style={styles.emptyText}>載入中…</Text> : null}
       {loadError ? (
@@ -218,7 +219,7 @@ function getRefundRequestErrorMessage(error) {
   return messages[errorCode] || error?.message || "退款申請送出失敗，請稍後再試。";
 }
 
-const styles = StyleSheet.create({
+const makeStyles = (colors, tones) => StyleSheet.create({
   emptyText: {
     color: colors.textSecondary,
     fontSize: 13,

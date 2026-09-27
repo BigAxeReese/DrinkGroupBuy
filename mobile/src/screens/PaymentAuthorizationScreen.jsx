@@ -8,7 +8,7 @@ import { Notice } from "../components/Notice";
 import { PrimaryButton } from "../components/PrimaryButton";
 import { StatusBadge } from "../components/StatusBadge";
 import { ValueRow } from "../components/ValueRow";
-import { colors, maxFontSizeMultiplier, radii, sizes, spacing, tones, typeScale } from "../theme/tokens";
+import { maxFontSizeMultiplier, radii, sizes, spacing, typeScale } from "../theme/tokens";
 import { formatCurrency } from "../utils/calculations";
 import { getManualRepaymentStateInfo } from "../utils/manualRepayment";
 import {
@@ -17,6 +17,7 @@ import {
   requestLinePayAuthorization,
   requestLinePayRepayment
 } from "../utils/apiClient";
+import { useThemedStyles } from "../theme/ThemeContext";
 
 const LINE_PAY_SYNC_POLL_INTERVAL_MS = 3000;
 const LINE_PAY_SYNC_POLL_TIMEOUT_MS = 90000;
@@ -28,7 +29,8 @@ const PAYMENT_SYNC_FINISHED_STATUSES = new Set([
   "refunded"
 ]);
 
-export function PaymentAuthorizationScreen({ navigation, route, appState, actions, memberAction, selectedCustomerId }) {
+export function PaymentAuthorizationScreen({ navigation, route, appState, actions, selectedCustomerId }) {
+  const styles = useThemedStyles(makeStyles);
   const isDevAuthMode = getAuthMode() === "dev";
   const [linePayStatus, setLinePayStatus] = useState("idle");
   const [linePayMessage, setLinePayMessage] = useState("");
@@ -127,7 +129,6 @@ export function PaymentAuthorizationScreen({ navigation, route, appState, action
       <MobileScreen
         title="付款預授權"
         onBack={() => navigation.goBack()}
-        onMemberPress={memberAction}
       >
         <Section title="目前沒有付款資料">
           <EmptyPanel>訂單已清空，送出購物車後才會建立 LINE Pay 預授權。</EmptyPanel>
@@ -150,7 +151,6 @@ export function PaymentAuthorizationScreen({ navigation, route, appState, action
     <MobileScreen
       title={isManualRepayment ? "重新付款" : "付款預授權"}
       onBack={() => navigation.goBack()}
-      onMemberPress={memberAction}
     >
       <Section title={isManualRepayment ? "付款狀態" : "預授權狀態"}>
         <Card>
@@ -706,7 +706,7 @@ function MessageNotice({ isError, message }) {
   );
 }
 
-const styles = StyleSheet.create({
+const makeStyles = (colors, tones) => StyleSheet.create({
   amount: {
     ...typeScale.amount,
     color: colors.text

@@ -41,7 +41,7 @@ function sameToppingSet(a = [], b = []) {
   return sortedA.every((label, index) => label === sortedB[index]);
 }
 
-export function normalizeBackendSettlement(settlement) {
+function normalizeBackendSettlement(settlement) {
   if (!settlement) return null;
   return {
     id: settlement.id,

@@ -1,9 +1,11 @@
 import { StyleSheet, Text, View } from "react-native";
-import { maxFontSizeMultiplier, radii, spacing, tones, typeScale } from "../theme/tokens";
+import { maxFontSizeMultiplier, radii, spacing, typeScale } from "../theme/tokens";
+import { useTheme } from "../theme/ThemeContext";
 import { StatusMark } from "./StatusMark";
 
 // A status-style pill: tone colours from theme/tokens.js, a drawn mark, and always the label text.
 export function TonePill({ tone = "neutral", label }) {
+  const { tones } = useTheme();
   const { bg, fg, mark } = tones[tone] ?? tones.neutral;
 
   return (

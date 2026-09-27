@@ -37,17 +37,6 @@ export function savePrototypeState(state) {
   }
 }
 
-export function clearPrototypeState() {
-  const storage = getLocalStorage();
-  if (!storage) return;
-
-  try {
-    storage.removeItem(STORAGE_KEY);
-  } catch {
-    // Prototype cleanup should never break the app screen flow.
-  }
-}
-
 export function clearPrototypeStateOnce(resetKey) {
   const storage = getLocalStorage();
   if (!storage) return;

@@ -7,14 +7,16 @@ import { MobileScreen, Section } from "../components/MobileScreen";
 import { Notice } from "../components/Notice";
 import { PrimaryButton } from "../components/PrimaryButton";
 import { QuantityStepper } from "../components/QuantityStepper";
-import { colors, maxFontSizeMultiplier, sizes, spacing, tones, typeScale } from "../theme/tokens";
+import { maxFontSizeMultiplier, sizes, spacing, typeScale } from "../theme/tokens";
 import { formatCurrency, getGroupBuyActivityById, isWithdrawalLocked } from "../utils/calculations";
 import { isDeadlineReached } from "../utils/deadlineTime";
 import { getGroupBuyActivityCapacityInfo } from "../utils/groupBuyActivityProgress";
 import { formatOrderItemCustomizations } from "../utils/orderItems";
 import { goToCustomerHome } from "../navigation/goToCustomerHome";
+import { useThemedStyles } from "../theme/ThemeContext";
 
-export function CartScreen({ navigation, route, appState, actions, memberAction, selectedCustomerId }) {
+export function CartScreen({ navigation, route, appState, actions, selectedCustomerId }) {
+  const styles = useThemedStyles(makeStyles);
   const [acceptOriginalPrice, setAcceptOriginalPrice] = useState(true);
   const [submitError, setSubmitError] = useState("");
   const [isSubmitting, setIsSubmitting] = useState(false);
@@ -24,7 +26,6 @@ export function CartScreen({ navigation, route, appState, actions, memberAction,
       <MobileScreen
         title="購物車"
         onBack={() => navigation.goBack()}
-        onMemberPress={memberAction}
       >
         <Section title="目前沒有團購資料">
           <EmptyPanel>團購已清空，購物車暫時不能送出。</EmptyPanel>
@@ -77,7 +78,6 @@ export function CartScreen({ navigation, route, appState, actions, memberAction,
       title="購物車"
       subtitle={groupBuyActivity.title}
       onBack={() => navigation.goBack()}
-      onMemberPress={memberAction}
     >
       {/* MobileScreen puts 24px between its direct children, so the notices and the continue button
           stay inside this Section (12px rhythm) and appearing / disappearing notices don't move it. */}
@@ -221,7 +221,7 @@ export function CartScreen({ navigation, route, appState, actions, memberAction,
   );
 }
 
-const styles = StyleSheet.create({
+const makeStyles = (colors, tones) => StyleSheet.create({
   itemCard: {
     gap: spacing.s12
   },

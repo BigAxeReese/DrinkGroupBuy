@@ -6,17 +6,19 @@ import { MobileScreen, Section } from "../components/MobileScreen";
 import { DiscountSummaryCard } from "../components/DiscountSummaryCard";
 import { Notice } from "../components/Notice";
 import { PrimaryButton } from "../components/PrimaryButton";
-import { ProgressSummary } from "../components/ProgressSummary";
+import { PearlTray } from "../components/PearlTray";
 import { StatusBadge } from "../components/StatusBadge";
-import { colors, radii, sizes, spacing, typeScale } from "../theme/tokens";
+import { radii, sizes, spacing, typeScale } from "../theme/tokens";
 import { getGroupBuyActivityById, isWithdrawalLocked } from "../utils/calculations";
 import { formatDealFactorLabel } from "../utils/discountPercentFormat";
 import { getGroupBuyActivityStore } from "../utils/groupBuyActivityStores";
 import { getGroupBuyActivityJoinAction } from "../utils/groupBuyActivityJoinState";
 import { getGroupBuyActivityProgress } from "../utils/groupBuyActivityProgress";
 import { goToCustomerHome } from "../navigation/goToCustomerHome";
+import { useThemedStyles } from "../theme/ThemeContext";
 
-export function GroupBuyActivityDetailScreen({ navigation, route, appState, actions, memberAction, selectedCustomerId }) {
+export function GroupBuyActivityDetailScreen({ navigation, route, appState, actions, selectedCustomerId }) {
+  const styles = useThemedStyles(makeStyles);
   const groupBuyActivity = getGroupBuyActivityById(appState.groupBuyActivities, route.params?.groupBuyActivityId);
   const existingOrder = groupBuyActivity
     ? appState.orders.find((order) => (
@@ -32,7 +34,6 @@ export function GroupBuyActivityDetailScreen({ navigation, route, appState, acti
       <MobileScreen
         title="團購詳情"
         onBack={() => navigation.goBack()}
-        onMemberPress={memberAction}
       >
         <ActivitySyncNotice status={activitySyncStatus} onRetry={retryActivitySync} />
         <Section title="目前沒有團購資料">
@@ -59,7 +60,6 @@ export function GroupBuyActivityDetailScreen({ navigation, route, appState, acti
     <MobileScreen
       title="團購詳情"
       onBack={() => navigation.goBack()}
-      onMemberPress={memberAction}
     >
       <ActivitySyncNotice status={activitySyncStatus} onRetry={retryActivitySync} />
       <Section title="店家資訊">
@@ -75,7 +75,7 @@ export function GroupBuyActivityDetailScreen({ navigation, route, appState, acti
 
       <Section title="目前進度">
         <Text style={styles.title}>{groupBuyActivity.title}</Text>
-        <ProgressSummary
+        <PearlTray
           currentCups={progress.currentCups}
           targetCups={progress.nextTarget}
           participantCount={groupBuyActivity.participantCount}
@@ -129,7 +129,7 @@ export function GroupBuyActivityDetailScreen({ navigation, route, appState, acti
   );
 }
 
-const styles = StyleSheet.create({
+const makeStyles = (colors) => StyleSheet.create({
   rowBetween: {
     flexDirection: "row",
     justifyContent: "space-between",

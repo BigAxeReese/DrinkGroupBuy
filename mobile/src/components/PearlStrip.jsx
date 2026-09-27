@@ -1,6 +1,7 @@
 import { StyleSheet, View } from "react-native";
-import { colors, radii, sizes, spacing } from "../theme/tokens";
+import { radii, sizes, spacing } from "../theme/tokens";
 import { getFilledPearls } from "../utils/pearlProgress";
+import { useThemedStyles } from "../theme/ThemeContext";
 
 const PEARL_COUNT = 5;
 
@@ -9,6 +10,7 @@ const PEARL_COUNT = 5;
 // from screen readers (which read that text instead of announcing the same progress twice).
 // `capsule` puts the pearls on a tan pill (used on the home card); without it they stand alone.
 export function PearlStrip({ current, target, capsule = false }) {
+  const styles = useThemedStyles(makeStyles);
   const filled = getFilledPearls(current, target, PEARL_COUNT);
 
   return (
@@ -24,7 +26,7 @@ export function PearlStrip({ current, target, capsule = false }) {
   );
 }
 
-const styles = StyleSheet.create({
+const makeStyles = (colors) => StyleSheet.create({
   strip: {
     flexDirection: "row",
     alignItems: "center",

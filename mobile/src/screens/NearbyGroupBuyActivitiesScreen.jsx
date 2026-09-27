@@ -9,13 +9,15 @@ import { PearlStrip } from "../components/PearlStrip";
 import { StatusBadge } from "../components/StatusBadge";
 import { TonePill } from "../components/TonePill";
 import { useDevLocationConfig } from "../hooks/useDevLocationConfig";
-import { colors, maxFontSizeMultiplier, radii, sizes, spacing, typeScale } from "../theme/tokens";
+import { maxFontSizeMultiplier, radii, sizes, spacing, typeScale } from "../theme/tokens";
 import { formatDealFactorLabel } from "../utils/discountPercentFormat";
 import { calculateDistanceKm, formatDistanceKm } from "../utils/distance";
 import { getGroupBuyActivityStore } from "../utils/groupBuyActivityStores";
 import { getGroupBuyActivityProgress } from "../utils/groupBuyActivityProgress";
+import { useThemedStyles } from "../theme/ThemeContext";
 
 export function NearbyGroupBuyActivitiesScreen({ navigation, appState, actions, currentUserProfile, selectedCustomerId, selectedAuthUserId }) {
+  const styles = useThemedStyles(makeStyles);
   const { groupBuyActivities, orders } = appState;
   const activitySyncStatus = appState.groupBuyActivitySyncStatus ?? "idle";
   const [radiusKm, setRadiusKm] = useState(null);
@@ -228,7 +230,7 @@ function isOngoingJoinedGroupBuyActivity(groupBuyActivity) {
     && !groupBuyActivity.cancellationReason;
 }
 
-const styles = StyleSheet.create({
+const makeStyles = (colors) => StyleSheet.create({
   // This screen has no title row, so without the extra top padding the avatar sat 8px from the top
   // edge (MobileScreen's own top padding); the merchant home has a header row above its store row.
   memberRow: {

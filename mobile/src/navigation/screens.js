@@ -17,6 +17,7 @@ import { MerchantGroupBuyActivityCreateScreen } from "../screens/MerchantGroupBu
 import { MerchantMenuManagementScreen } from "../screens/MerchantMenuManagementScreen";
 import { MerchantProductionListScreen } from "../screens/MerchantProductionListScreen";
 import { MerchantRefundRequestsScreen } from "../screens/MerchantRefundRequestsScreen";
+import { MerchantStatisticsScreen } from "../screens/MerchantStatisticsScreen";
 import { withAppState } from "./withAppState";
 
 // One withAppState()-wrapped component per route, shared by every stack that needs it (several routes
@@ -42,5 +43,6 @@ export const screens = {
   merchantCreate: withAppState(MerchantGroupBuyActivityCreateScreen),
   merchantMenu: withAppState(MerchantMenuManagementScreen),
   merchantProductionList: withAppState(MerchantProductionListScreen),
-  merchantRefundRequests: withAppState(MerchantRefundRequestsScreen)
+  merchantRefundRequests: withAppState(MerchantRefundRequestsScreen),
+  merchantStatistics: withAppState(MerchantStatisticsScreen)
 };

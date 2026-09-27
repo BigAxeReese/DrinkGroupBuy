@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useState } from "react";
 import { Pressable, StyleSheet, Text, View } from "react-native";
 import { Card } from "../components/Card";
 import { ChoiceChip } from "../components/ChoiceChip";
@@ -7,12 +7,13 @@ import { MobileScreen, Section } from "../components/MobileScreen";
 import { Notice } from "../components/Notice";
 import { PrimaryButton } from "../components/PrimaryButton";
 import { QuantityStepper } from "../components/QuantityStepper";
-import { colors, maxFontSizeMultiplier, radii, sizes, spacing, typeScale } from "../theme/tokens";
+import { maxFontSizeMultiplier, radii, sizes, spacing, typeScale } from "../theme/tokens";
 import { getStoreMenu } from "../utils/apiClient";
 import { formatCurrency, getGroupBuyActivityById } from "../utils/calculations";
 import { goToCustomerHome } from "../navigation/goToCustomerHome";
+import { useThemedStyles } from "../theme/ThemeContext";
 
-export function DrinkSelectionScreen({ navigation, route, appState, actions, memberAction, selectedCustomerId }) {
+export function DrinkSelectionScreen({ navigation, route, appState, actions, selectedCustomerId }) {
   const groupBuyActivity = getGroupBuyActivityById(appState.groupBuyActivities, route.params?.groupBuyActivityId);
   const [menu, setMenu] = useState(null);
   const [loading, setLoading] = useState(Boolean(groupBuyActivity));
@@ -43,7 +44,6 @@ export function DrinkSelectionScreen({ navigation, route, appState, actions, mem
       <MobileScreen
         title="選擇飲料"
         onBack={() => navigation.goBack()}
-        onMemberPress={memberAction}
       >
         <Section title="目前沒有可加入的團購">
           <EmptyPanel>團購已清空，或目前尚未有商家建立活動。</EmptyPanel>
@@ -54,14 +54,14 @@ export function DrinkSelectionScreen({ navigation, route, appState, actions, mem
   }
   if (loading) {
     return (
-      <MobileScreen title="選擇飲料" onBack={() => navigation.goBack()} onMemberPress={memberAction}>
+      <MobileScreen title="選擇飲料" onBack={() => navigation.goBack()}>
         <Section title="正在載入"><EmptyPanel>正在讀取店家最新菜單與價格…</EmptyPanel></Section>
       </MobileScreen>
     );
   }
   if (error || !menu || menu.menuItems.length === 0) {
     return (
-      <MobileScreen title="選擇飲料" onBack={() => navigation.goBack()} onMemberPress={memberAction}>
+      <MobileScreen title="選擇飲料" onBack={() => navigation.goBack()}>
         <Section title="目前沒有可用菜單">
           {error ? (
             <Notice accessibilityRole="alert" message={error} tone="danger" />
@@ -79,7 +79,6 @@ export function DrinkSelectionScreen({ navigation, route, appState, actions, mem
       route={route}
       appState={appState}
       actions={actions}
-      memberAction={memberAction}
       selectedCustomerId={selectedCustomerId}
       groupBuyActivity={groupBuyActivity}
       menu={menu}
@@ -87,7 +86,8 @@ export function DrinkSelectionScreen({ navigation, route, appState, actions, mem
   );
 }
 
-function DrinkMenuContent({ navigation, route, appState, actions, memberAction, selectedCustomerId, groupBuyActivity, menu }) {
+function DrinkMenuContent({ navigation, route, appState, actions, selectedCustomerId, groupBuyActivity, menu }) {
+  const styles = useThemedStyles(makeStyles);
   const store = menu.store;
   const storeDrinks = menu.menuItems;
 
@@ -125,7 +125,6 @@ function DrinkMenuContent({ navigation, route, appState, actions, memberAction, 
         title={editOrderItem ? "修改飲料" : "選擇飲料"}
         subtitle={`${store?.name} · ${groupBuyActivity.title}`}
         onBack={() => navigation.goBack()}
-        onMemberPress={memberAction}
       >
       <View style={styles.menuHeader}>
         <View style={styles.menuHero}>
@@ -355,7 +354,7 @@ function OptionButton({ active, label, onPress }) {
   return <ChoiceChip label={label} onPress={onPress} selected={active} />;
 }
 
-const styles = StyleSheet.create({
+const makeStyles = (colors) => StyleSheet.create({
   screenWrap: {
     flex: 1
   },

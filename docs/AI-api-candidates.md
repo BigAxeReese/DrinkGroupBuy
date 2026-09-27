@@ -290,6 +290,7 @@ API JSON 使用 `camelCase`。已實作 routes 只對目前開發 prototype 具�
 | --------------------------------------------------- | -------------------------------- | ----------------------------------------------------------------- |
 | `POST /api/group-buy-activities/:activityId/orders` | 訂單建立的替代 nested route      | 目前已實作 route 是 `POST /api/orders`；最終 route shape 尚未決定 |
 | `GET /api/customers/me/orders`                      | 顧客進行中與歷史訂單             | 已實作 bearer ownership、scope、cursor、limit、lifecycleBucket 與 availableActions |
+| `GET /api/customers/me/savings`                     | 顧客累計省下金額（個人中心）     | 已實作，回 `{ savings: { totalSavedAmount, savedOrderCount, savedCupCount } }`；顧客身分只取自 bearer token；只計 `payment_status = 'captured'`、訂單未取消、未逾期未取（`pickup_status` 為 `not_ready`／`ready`／`picked_up`）、所屬團購活動未被取消（管理員取消流程會略過已請款訂單，這類訂單仍是 `captured` 但永遠領不到飲料）且 `original_amount > final_amount` 的訂單，省下金額 = `original_amount - final_amount`，部分退款不扣、全額退款與逾期未取不計 |
 | `GET /api/orders/:orderId/history`                  | 訂單與付款狀態歷史               | Owner/merchant visibility；dev/admin 補救權限另定                 |
 | `PATCH /api/orders/:orderId/items`                  | 若未來需要，更細的品項修改 route | 目前已有 `POST /api/orders/:orderId/revisions` 作為已授權修改入口 |
 | `POST /api/orders/:orderId/cancel`                  | 鎖定前退出團購                   | 已實作第一版；idempotency、pending 授權失效、authorized 先 void、revision 取消與 audit |
@@ -324,6 +325,7 @@ API JSON 使用 `camelCase`。已實作 routes 只對目前開發 prototype 具�
 | Method / path candidate                                             | 用途                         | 主要不確定點                     |
 | ------------------------------------------------------------------- | ---------------------------- | -------------------------------- |
 | `GET /api/merchant/stores/:storeId/orders?activityId=`              | 商家訂單佇列與歷史           | 已實作門市權限、活動篩選、匿名顧客及履約摘要 |
+| `GET /api/merchant/stores/:storeId/statistics`                      | 商家自己門市的營運統計       | 已實作，沿用訂單列表的守門方式（需 merchant 角色且 `canManageStore`，否則 403），回 `{ statistics: { totalRevenue, orderCount, discountGivenTotal, settledActivityCount, qualifiedActivityCount, qualifiedRate, topDrinks: [{ name, cups }] } }`；所有查詢都以該門市 ID 綁定參數過濾。計入範圍：門市活動下 `payment_status = 'captured'`、訂單與團購都未取消的訂單（逾期未取仍計入；全額退款不計；狀態為 `refunded` 的部分退款從實收扣除，`pending`／`failed` 不扣）。`discountGivenTotal` = `original_amount - final_amount`；`qualifiedRate` = 已結算且未被取消的團購中 `qualified` 的比例，尚無已結算團購時為 `null`；`topDrinks` 依 `item_name_snapshot` 加總杯數取前 3。目前為累計值，沒有日期區間 |
 | `POST /api/merchant/group-buy-activities/:activityId/ready-for-pickup` | 整批標記活動下所有可製作訂單為可取餐並建立取貨憑證 | 已實作，需 merchant-store permission |
 | `POST /api/merchant/group-buy-activities/:activityId/orders/:orderId/ready-for-pickup` | 單筆標記某一訂單為可取餐並建立取貨憑證（同一支路由多帶 `orders/:orderId` 區段，2026-09-14 新增） | 已實作，需 merchant-store permission；與整批版本共用同一組 SQLite／Postgres 邏輯 |
 | `GET /api/orders/:orderId/pickup-credential`                       | 顧客查詢自己的取貨憑證       | 已實作 ownership 檢查及顯示條件 |

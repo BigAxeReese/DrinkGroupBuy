@@ -11,5 +11,3 @@ export const mapCenter = {
 export const mapDefaults = {
   zoom: 16
 };
-
-export const googleMapsEmbedUrl = `https://www.google.com/maps?q=${mapCenter.latitude},${mapCenter.longitude}&z=${mapDefaults.zoom}&output=embed`;

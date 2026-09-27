@@ -53,7 +53,7 @@ export async function reportAppliedDevLocation({ userId, config, locationPermiss
   return payload.appReport;
 }
 
-export function getDevConsoleBaseUrl() {
+function getDevConsoleBaseUrl() {
   // EXPO_PUBLIC_DEV_CONSOLE_URL (and its app.config.js extra.devConsoleBaseUrl mirror) is a
   // single, non-platform-scoped override -- same class of issue as apiClient.js's
   // backendBaseUrl: a value set for the Android emulator (10.0.2.2) would otherwise silently

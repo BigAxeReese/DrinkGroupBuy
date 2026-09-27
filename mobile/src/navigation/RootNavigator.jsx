@@ -1,12 +1,10 @@
-import { useEffect, useRef, useState } from "react";
-import { NavigationContainer, useNavigationContainerRef } from "@react-navigation/native";
+import { useEffect, useMemo, useRef } from "react";
+import { DefaultTheme, NavigationContainer, useNavigationContainerRef } from "@react-navigation/native";
 import { createNativeStackNavigator } from "@react-navigation/native-stack";
 import { ActivityIndicator, Linking, StyleSheet, View } from "react-native";
 import { AppStateProvider } from "../state/AppStateProvider";
 import { useAppState } from "../state/AppStateContext";
-import { MilkTeaProvider } from "../theme/MilkTeaContext";
-import { colors } from "../theme/tokens";
-import { LEGACY_PAGE_COLOR, MILK_TEA_ROUTES } from "../theme/milkTeaRoutes";
+import { useTheme } from "../theme/ThemeContext";
 import { CustomerTabs } from "./CustomerTabs";
 import { MerchantTabs } from "./MerchantTabs";
 import { parseLinePayResultDeepLink } from "./linking";
@@ -17,26 +15,35 @@ const Stack = createNativeStackNavigator();
 
 // Replaces the old AppNavigator.js. All the app's shared state/actions moved to AppStateProvider; this
 // file is only the navigation shell: which root screen shows (pre-role stack, customer tabs, or
-// merchant tabs), the LINE Pay deep link, and reporting the current route's milk-tea look to App.jsx
-// (for the status-bar/safe-area colour) and to every screen and BottomNav (via MilkTeaContext), exactly
-// like the old flat `stack`-based AppNavigator's single `milkTea` value did.
-export function AppNavigator({ onMilkTeaChange }) {
+// merchant tabs) and the LINE Pay deep link.
+export function AppNavigator() {
   const navigationRef = useNavigationContainerRef();
 
   return (
     <AppStateProvider>
-      <RootNavigatorInner navigationRef={navigationRef} onMilkTeaChange={onMilkTeaChange} />
+      <RootNavigatorInner navigationRef={navigationRef} />
     </AppStateProvider>
   );
 }
 
-function RootNavigatorInner({ navigationRef, onMilkTeaChange }) {
+function RootNavigatorInner({ navigationRef }) {
   const { sessionRestoreStatus, currentRole, showingRoleSelect, actions } = useAppState();
-  const [milkTea, setMilkTea] = useState(false);
-
-  useEffect(() => {
-    onMilkTeaChange?.(milkTea);
-  }, [milkTea, onMilkTeaChange]);
+  const { colors, isDark } = useTheme();
+  // react-navigation paints its own light-grey background behind screens and during stack / tab
+  // transitions; it has to follow the theme or dark mode shows light gaps.
+  const navigationTheme = useMemo(() => ({
+    ...DefaultTheme,
+    dark: isDark,
+    colors: {
+      ...DefaultTheme.colors,
+      primary: colors.accent,
+      background: colors.page,
+      card: colors.page,
+      text: colors.text,
+      border: colors.lineDecor,
+      notification: colors.accent
+    }
+  }), [colors, isDark]);
 
   // A LINE Pay result link can arrive before the customer navigator exists (cold start while the
   // session is still being restored, or before any role is chosen), so it is parked in
@@ -112,41 +119,29 @@ function RootNavigatorInner({ navigationRef, onMilkTeaChange }) {
     flushPendingDeepLink();
   }, [sessionRestoreStatus, currentRole, showingRoleSelect]);
 
-  function handleNavigationReady() {
-    reportCurrentRoute();
-    flushPendingDeepLink();
-  }
-
-  function reportCurrentRoute() {
-    const name = navigationRef.current?.getCurrentRoute()?.name;
-    setMilkTea(MILK_TEA_ROUTES.has(name));
-  }
-
   if (sessionRestoreStatus === "checking") {
     return (
-      <View style={[styles.container, styles.sessionCheckContainer]}>
+      <View style={[styles.container, styles.sessionCheckContainer, { backgroundColor: colors.page }]}>
         <ActivityIndicator size="large" color={colors.accent} />
       </View>
     );
   }
 
   return (
-    <MilkTeaProvider value={milkTea}>
-      <NavigationContainer ref={navigationRef} onReady={handleNavigationReady} onStateChange={reportCurrentRoute}>
-        <Stack.Navigator screenOptions={stackScreenOptions}>
-          {!currentRole || showingRoleSelect ? (
-            <Stack.Group>
-              <Stack.Screen name="roleSelect" component={screens.roleSelect} />
-              <Stack.Screen name="merchantApply" component={screens.merchantApply} />
-            </Stack.Group>
-          ) : currentRole === "merchant" ? (
-            <Stack.Screen name="MerchantTabs" component={MerchantTabs} />
-          ) : (
-            <Stack.Screen name="CustomerTabs" component={CustomerTabs} />
-          )}
-        </Stack.Navigator>
-      </NavigationContainer>
-    </MilkTeaProvider>
+    <NavigationContainer ref={navigationRef} theme={navigationTheme} onReady={flushPendingDeepLink}>
+      <Stack.Navigator screenOptions={stackScreenOptions}>
+        {!currentRole || showingRoleSelect ? (
+          <Stack.Group>
+            <Stack.Screen name="roleSelect" component={screens.roleSelect} />
+            <Stack.Screen name="merchantApply" component={screens.merchantApply} />
+          </Stack.Group>
+        ) : currentRole === "merchant" ? (
+          <Stack.Screen name="MerchantTabs" component={MerchantTabs} />
+        ) : (
+          <Stack.Screen name="CustomerTabs" component={CustomerTabs} />
+        )}
+      </Stack.Navigator>
+    </NavigationContainer>
   );
 }
 
@@ -156,7 +151,6 @@ const styles = StyleSheet.create({
   },
   sessionCheckContainer: {
     alignItems: "center",
-    justifyContent: "center",
-    backgroundColor: LEGACY_PAGE_COLOR
+    justifyContent: "center"
   }
 });

@@ -1,17 +1,22 @@
 import { StatusBar } from "expo-status-bar";
-import { useState } from "react";
 import { Platform, StyleSheet, View } from "react-native";
 import { GestureHandlerRootView } from "react-native-gesture-handler";
 import { SafeAreaProvider, SafeAreaView } from "react-native-safe-area-context";
 import { AppNavigator } from "./src/navigation/RootNavigator";
-import { LEGACY_PAGE_COLOR } from "./src/theme/milkTeaRoutes";
-import { colors } from "./src/theme/tokens";
+import { ThemeProvider, useTheme } from "./src/theme/ThemeContext";
 
 export default function App() {
-  // AppNavigator reports whether the current route is a migrated one, so the area behind the status
-  // bar and the system navigation bar (the safe-area insets) always matches the screen's own colour.
-  const [milkTea, setMilkTea] = useState(false);
-  const pageColor = milkTea ? colors.page : LEGACY_PAGE_COLOR;
+  return (
+    <ThemeProvider>
+      <AppShell />
+    </ThemeProvider>
+  );
+}
+
+function AppShell() {
+  const { colors, isDark } = useTheme();
+  // The area behind the status bar and the system navigation bar (the safe-area insets) is the page colour.
+  const pageColor = colors.page;
 
   const app = (
     // react-navigation's native-stack/bottom-tabs use react-native-gesture-handler (swipe-back, tab
@@ -19,8 +24,8 @@ export default function App() {
     <GestureHandlerRootView style={styles.safeArea}>
       <SafeAreaProvider>
         <SafeAreaView style={[styles.safeArea, { backgroundColor: pageColor }]} edges={["top", "bottom", "left", "right"]}>
-          <StatusBar style="dark" backgroundColor={pageColor} translucent={false} />
-          <AppNavigator onMilkTeaChange={setMilkTea} />
+          <StatusBar style={isDark ? "light" : "dark"} backgroundColor={pageColor} translucent={false} />
+          <AppNavigator />
         </SafeAreaView>
       </SafeAreaProvider>
     </GestureHandlerRootView>

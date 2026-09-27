@@ -1,91 +1,38 @@
 import { Pressable, ScrollView, StyleSheet, Text, View } from "react-native";
-import { useMilkTea } from "../theme/MilkTeaContext";
-import { colors, maxFontSizeMultiplier, sizes, spacing, typeScale } from "../theme/tokens";
+import { maxFontSizeMultiplier, sizes, spacing, typeScale } from "../theme/tokens";
+import { useThemedStyles } from "../theme/ThemeContext";
 
-// Migrated routes get the new style (docs/ui-style-guide.md, see theme/MilkTeaContext.js).
-// Everything below the early return is the old look, untouched, until the last screen has migrated.
-export function MobileScreen({ title, subtitle, children, onBack, backLabel = "返回", compactHeader = false, headerRight = null }) {
-  const milkTea = useMilkTea();
-  if (milkTea) {
-    return (
-      <MilkTeaScreen title={title} subtitle={subtitle} onBack={onBack} backLabel={backLabel} headerRight={headerRight}>
-        {children}
-      </MilkTeaScreen>
-    );
-  }
-
-  return (
-    <ScrollView contentContainerStyle={styles.content}>
-      <View style={[styles.header, compactHeader && styles.compactHeader]}>
-        <View style={styles.topRow}>
-          {onBack ? (
-            <Pressable
-              accessibilityRole="button"
-              onPress={onBack}
-              style={({ pressed }) => [styles.backButton, pressed && styles.backButtonPressed]}
-            >
-              <Text style={styles.backText}>← {backLabel}</Text>
-            </Pressable>
-          ) : <View style={styles.topSpacer} />}
-          {headerRight}
-        </View>
-        {title ? <Text style={styles.title}>{title}</Text> : null}
-        {subtitle ? <Text style={styles.subtitle}>{subtitle}</Text> : null}
-      </View>
-      {children}
-    </ScrollView>
-  );
-}
-
-export function Section({ title, children }) {
-  const milkTea = useMilkTea();
-  if (milkTea) {
-    return (
-      <View style={milkTeaStyles.section}>
-        <Text accessibilityRole="header" style={milkTeaStyles.sectionTitle}>
-          {title}
-        </Text>
-        {children}
-      </View>
-    );
-  }
-
-  return (
-    <View style={styles.section}>
-      <Text style={styles.sectionTitle}>{title}</Text>
-      {children}
-    </View>
-  );
-}
-
-function MilkTeaScreen({ title, subtitle, children, onBack, backLabel, headerRight }) {
+// The page every screen sits in: an optional header row (back arrow, title, something on the right) above
+// scrolling content (docs/ui-style-guide.md).
+export function MobileScreen({ title, subtitle, children, onBack, backLabel = "返回", headerRight = null }) {
+  const styles = useThemedStyles(makeStyles);
   const hasHeader = Boolean(onBack || title || subtitle || headerRight);
 
   return (
-    <ScrollView style={milkTeaStyles.screen} contentContainerStyle={milkTeaStyles.content}>
+    <ScrollView style={styles.screen} contentContainerStyle={styles.content}>
       {hasHeader ? (
-        <View style={milkTeaStyles.header}>
-          <View style={milkTeaStyles.titleRow}>
+        <View style={styles.header}>
+          <View style={styles.titleRow}>
             {onBack ? (
               <Pressable
                 accessibilityLabel={backLabel}
                 accessibilityRole="button"
                 onPress={onBack}
-                style={({ pressed }) => [milkTeaStyles.back, pressed && milkTeaStyles.pressed]}
+                style={({ pressed }) => [styles.back, pressed && styles.pressed]}
               >
-                <View style={milkTeaStyles.arrow} />
+                <View style={styles.arrow} />
               </Pressable>
             ) : null}
-            <View style={milkTeaStyles.titleWrap}>
+            <View style={styles.titleWrap}>
               {title ? (
-                <Text accessibilityRole="header" maxFontSizeMultiplier={maxFontSizeMultiplier} style={milkTeaStyles.title}>
+                <Text accessibilityRole="header" maxFontSizeMultiplier={maxFontSizeMultiplier} style={styles.title}>
                   {title}
                 </Text>
               ) : null}
             </View>
-            {headerRight ? <View style={milkTeaStyles.headerRight}>{headerRight}</View> : null}
+            {headerRight ? <View style={styles.headerRight}>{headerRight}</View> : null}
           </View>
-          {subtitle ? <Text style={milkTeaStyles.subtitle}>{subtitle}</Text> : null}
+          {subtitle ? <Text style={styles.subtitle}>{subtitle}</Text> : null}
         </View>
       ) : null}
       {children}
@@ -93,75 +40,19 @@ function MilkTeaScreen({ title, subtitle, children, onBack, backLabel, headerRig
   );
 }
 
-const styles = StyleSheet.create({
-  content: {
-    gap: 11,
-    paddingHorizontal: 14,
-    paddingTop: 18,
-    paddingBottom: 22
-  },
-  header: {
-    gap: 6,
-    zIndex: 2
-  },
-  compactHeader: {
-    marginBottom: -10
-  },
-  topRow: {
-    minHeight: 38,
-    flexDirection: "row",
-    alignItems: "center",
-    justifyContent: "space-between",
-    gap: 10
-  },
-  topSpacer: {
-    minHeight: 38,
-    minWidth: 66
-  },
-  backButton: {
-    alignSelf: "flex-start",
-    minHeight: 38,
-    minWidth: 66,
-    borderRadius: 999,
-    alignItems: "center",
-    justifyContent: "center",
-    backgroundColor: "#e2e8f0",
-    paddingHorizontal: 12
-  },
-  backButtonPressed: {
-    opacity: 0.75
-  },
-  backText: {
-    color: "#0f172a",
-    fontSize: 13,
-    fontWeight: "900"
-  },
-  title: {
-    color: "#0f172a",
-    fontSize: 24,
-    fontWeight: "900"
-  },
-  subtitle: {
-    color: "#475569",
-    fontSize: 13,
-    lineHeight: 19
-  },
-  section: {
-    gap: 8,
-    padding: 12,
-    borderRadius: 16,
-    backgroundColor: "#ffffff",
-    borderWidth: 1,
-    borderColor: "#e2e8f0"
-  },
-  sectionTitle: {
-    color: "#0f172a",
-    fontSize: 16,
-    fontWeight: "800"
-  }
-});
+export function Section({ title, children }) {
+  const styles = useThemedStyles(makeStyles);
+  return (
+    <View style={styles.section}>
+      <Text accessibilityRole="header" style={styles.sectionTitle}>
+        {title}
+      </Text>
+      {children}
+    </View>
+  );
+}
 
-const milkTeaStyles = StyleSheet.create({
+const makeStyles = (colors) => StyleSheet.create({
   screen: {
     backgroundColor: colors.page
   },

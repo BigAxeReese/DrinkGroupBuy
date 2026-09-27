@@ -1,7 +1,9 @@
 import { StyleSheet, Text, View } from "react-native";
-import { colors, radii, spacing, typeScale } from "../theme/tokens";
+import { radii, spacing, typeScale } from "../theme/tokens";
+import { useThemedStyles } from "../theme/ThemeContext";
 
 export function PlaceholderBox({ title, description }) {
+  const styles = useThemedStyles(makeStyles);
   return (
     <View style={styles.box}>
       <Text style={styles.title}>{title}</Text>
@@ -10,7 +12,7 @@ export function PlaceholderBox({ title, description }) {
   );
 }
 
-const styles = StyleSheet.create({
+const makeStyles = (colors) => StyleSheet.create({
   box: {
     minHeight: 96,
     borderRadius: radii.md,

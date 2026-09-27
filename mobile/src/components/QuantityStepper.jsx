@@ -1,5 +1,6 @@
 import { Pressable, StyleSheet, Text, View } from "react-native";
-import { colors, maxFontSizeMultiplier, radii, sizes, spacing, typeScale } from "../theme/tokens";
+import { maxFontSizeMultiplier, radii, sizes, spacing, typeScale } from "../theme/tokens";
+import { useTheme, useThemedStyles } from "../theme/ThemeContext";
 
 const GLYPH = 14;
 const GLYPH_OFFSET = (GLYPH - sizes.stroke) / 2;
@@ -15,6 +16,7 @@ export function QuantityStepper({
   decreaseDisabled = false,
   increaseDisabled = false
 }) {
+  const styles = useThemedStyles(makeStyles);
   return (
     <View style={styles.row}>
       <StepButton kind="minus" label={decreaseLabel} onPress={onDecrease} disabled={decreaseDisabled} />
@@ -27,6 +29,8 @@ export function QuantityStepper({
 }
 
 function StepButton({ kind, label, onPress, disabled }) {
+  const styles = useThemedStyles(makeStyles);
+  const { colors } = useTheme();
   const color = disabled ? colors.lineInput : colors.accent;
 
   return (
@@ -46,7 +50,7 @@ function StepButton({ kind, label, onPress, disabled }) {
   );
 }
 
-const styles = StyleSheet.create({
+const makeStyles = (colors) => StyleSheet.create({
   row: {
     flexDirection: "row",
     alignItems: "center",

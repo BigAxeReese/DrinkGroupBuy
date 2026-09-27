@@ -1,5 +1,6 @@
 import { StyleSheet, Text, View } from "react-native";
-import { radii, spacing, tones, typeScale } from "../theme/tokens";
+import { radii, spacing, typeScale } from "../theme/tokens";
+import { useTheme } from "../theme/ThemeContext";
 import { StatusMark } from "./StatusMark";
 
 const MARK_SIZE = 14;
@@ -9,6 +10,7 @@ const MARK_SIZE = 14;
 // elements below them (a retry button, for example). Extra props (accessibilityRole="alert",
 // accessibilityLiveRegion, ...) go to the root view.
 export function Notice({ tone = "info", title, message, children, ...rest }) {
+  const { tones } = useTheme();
   const { bg, fg, mark } = tones[tone] ?? tones.info;
 
   return (
