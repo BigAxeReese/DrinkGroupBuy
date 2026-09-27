@@ -1324,3 +1324,32 @@
 | smoke 腳本 | 建立三家暫時店家（狀態為 `closed`，不會出現在任何 App 畫面），只新增與刪除自己帶 UUID 後綴的資料列，全部參數綁定；假活動截止時間在未來，排程不會碰；清除後殘留 0 列。八種故意弄壞驗證（拿掉活動取消、訂單取消、店家過濾、退款扣除、多筆退款彙總、退款狀態過濾等條件）全部會讓測試失敗 |
 
 **這次沒審查到／沒驗證到的部分**：Android 實機沒有操作過，只用本機後端搭配 `react-native-web` 網頁預覽看過有數字、錯誤與重試畫面；深色模式沒有另外截圖。
+
+---
+
+## 2026-09-27 — 推送前最終複查（省錢統計／商家統計／匯入確認框修正／示範資料產生器）
+
+**範圍**：`backend/database/repositories/customerSavingsRepository.js`、`merchantStatisticsRepository.js`、`backend/server.js` 的 `GET /api/customers/me/savings`、`GET /api/merchant/stores/:storeId/statistics` 兩條路由、管理員匯入菜單頁面的確認框修正（`renderAdminMenuImportBody`）、`scripts/seed-demo-data.js`／`scripts/helpers/demoDataBuilder.js`
+**觸發原因**：CLAUDE.md 規則——這批改動要 commit 並 push，其中省錢統計、商家統計、示範資料產生器都屬於金流相關工作。省錢統計與示範資料產生器呼應 2026-09-25 那兩筆記錄、商家統計呼應 2026-09-26 那筆記錄，這三塊程式碼自上次記錄後沒有再變動，這次是確認沒有回歸，不是重新發現問題；唯一真正新的變動是匯入菜單頁面的確認框修正
+**方法**：一個獨立的唯讀子任務重新檢查上述範圍（含比對 `canManageStore` 授權模式是否跟既有的 `/orders`、`/refund-requests` 路由一致），這次工作目錄裡混著另一條「深色模式換色系」工作線的大量 UI 改動，子任務已被明確告知排除，只看後端與這幾支腳本
+
+### 發現
+
+沒有找到信心度達到門檻（8/10 以上）的漏洞。
+
+| 嚴重度 | 位置 | 問題 | 建議修法 | 狀態 |
+|--------|------|------|----------|------|
+| — | — | 這次沒有新發現 | — | — |
+
+### 沒發現問題的部分（呼應先前記錄，確認未回歸）
+
+| 面向 | 檢查結果 |
+|------|----------|
+| `customerSavingsRepository.js` | 單一參數化查詢（`$1` 綁 `customerUserId`），沒有字串拼接；狀態篩選條件都是寫死字面值，不受使用者輸入影響。與 2026-09-25 記錄一致 |
+| `merchantStatisticsRepository.js` | 三條查詢全部參數化，`storeId` 只以綁定參數傳入，`SALES_ORDER_FILTER` 是不含使用者輸入的靜態片段。與 2026-09-26 記錄一致 |
+| `GET /api/customers/me/savings` | 顧客編號完全來自已驗證 token（`authUser.id`），不接受 URL／query 覆寫，不存在 IDOR |
+| `GET /api/merchant/stores/:storeId/statistics` | 驗證身份、要求 `merchant` 角色、呼叫 `canManageStore` 後才查詢，寫法與既有的 `/api/merchant/stores/:storeId/orders`、`/refund-requests` 路由完全一致，沒有偏離既有授權模式 |
+| 匯入菜單確認框修正（`form="menu-import-form"`） | 純 UX 修正：讓原本沒有隨表單送出的勾選框改為透過 `form` 屬性關聯，使其能正確送出。這個勾選框本身不是身份驗證或授權關卡，只是「確認要取代現有菜單」的提示；CSRF token 仍在 `<form>` 內、POST handler 一開始仍會呼叫 `readCsrfVerifiedAdminFormBody` 驗證，不受這個修正影響 |
+| `scripts/seed-demo-data.js`／`demoDataBuilder.js` | 遠端資料庫保護（含 `?host=`／`?hostaddr=` 的已知繞過）、`--allow-remote`／`--apply` 雙重開關、示範資料清除範圍、假帳號無法登入等，與 2026-09-25 記錄一致，程式碼自上次審查後未變動 |
+
+**這次沒審查到／沒驗證到的部分**：跟上兩筆一樣，沒有在 Azure 上實測；這次也沒有另外審查深色模式那條工作線（UI 顯示邏輯，不屬於本次金流／授權範圍）。
