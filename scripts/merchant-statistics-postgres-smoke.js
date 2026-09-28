@@ -18,6 +18,19 @@ const merchantId = `merchant-stats-proof-${proofId}`;
 const storeId = (name) => `store-stats-proof-${name}-${proofId}`;
 const STORES = { target: storeId("target"), other: storeId("other"), empty: storeId("empty") };
 
+// Every fixture order below shares the same submitted_at (iso(-90), see insertOrders), so they all
+// land in one calendar week -- this is that week's Monday in Asia/Taipei time, matching what
+// getStoreWeeklyTrend buckets by (date_trunc('week', ... AT TIME ZONE 'Asia/Taipei')). Built from
+// Date.UTC/getUTCDay only, independent of this machine's own local timezone.
+function currentTaipeiWeekStart() {
+  const taipeiNow = new Date(Date.now() + 8 * 60 * 60 * 1000);
+  const dateOnly = new Date(Date.UTC(taipeiNow.getUTCFullYear(), taipeiNow.getUTCMonth(), taipeiNow.getUTCDate()));
+  const isoDayOfWeek = dateOnly.getUTCDay() === 0 ? 7 : dateOnly.getUTCDay(); // 1=Mon .. 7=Sun
+  dateOnly.setUTCDate(dateOnly.getUTCDate() - (isoDayOfWeek - 1));
+  return dateOnly.toISOString().slice(0, 10);
+}
+const targetWeekStart = currentTaipeiWeekStart();
+
 // One activity per order (unique index: one non-cancelled order per activity and customer).
 // items: [name, quantity, unit price]. `refunds` are payment_refunds rows recorded against the order.
 const orders = [
@@ -84,6 +97,18 @@ async function main() {
       await repository.getStoreStatistics(`store-that-does-not-exist-${proofId}`),
       expectedEmpty,
     );
+
+    // Weekly trend is not refund-adjusted (see getStoreWeeklyTrendPostgres's own comment), so target's
+    // revenue here (421) differs from expectedTarget.totalRevenue (376, which subtracts the 45 in
+    // refunds); the order count and discount total are the same set of orders either way.
+    assert.deepEqual(await repository.getStoreWeeklyTrend(STORES.target), [
+      { weekStart: targetWeekStart, orderCount: 5, revenue: 421, discountAmount: 114 },
+    ]);
+    assert.deepEqual(await repository.getStoreWeeklyTrend(STORES.other), [
+      { weekStart: targetWeekStart, orderCount: 1, revenue: 2500, discountAmount: 500 },
+    ]);
+    assert.deepEqual(await repository.getStoreWeeklyTrend(STORES.empty), []);
+
     console.log("PostgreSQL merchant statistics proof passed.");
   } finally {
     await cleanup(database);

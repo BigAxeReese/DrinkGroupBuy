@@ -3,6 +3,7 @@
 const { createRuntimeDatabaseAdapter } = require("..");
 
 const TOP_DRINKS_LIMIT = 3;
+const WEEKLY_TREND_WEEKS = 8;
 
 // The orders that count as this store's sales -- one definition shared by every figure below so the
 // revenue, discount and top-drinks numbers always describe the same set of orders:
@@ -85,12 +86,42 @@ async function getStoreStatisticsPostgres(database, storeId) {
   };
 }
 
+// One row per calendar week (Monday start, Asia/Taipei) over the trailing WEEKLY_TREND_WEEKS
+// weeks, for just this store -- same SALES_ORDER_FILTER as the figures above, so "which orders
+// count" never drifts between the store's headline numbers and its trend. Like the platform-wide
+// admin trend, revenue/discount here are not refund-adjusted (a per-week refund allocation is
+// ambiguous -- a refund can land in a different week than the original order); only the
+// point-in-time getStoreStatistics total subtracts refunds.
+async function getStoreWeeklyTrendPostgres(database, storeId) {
+  const result = await database.query(`
+    SELECT
+      to_char(date_trunc('week', orders.submitted_at AT TIME ZONE 'Asia/Taipei'), 'YYYY-MM-DD') AS week_start,
+      COUNT(*) AS order_count,
+      COALESCE(SUM(orders.final_amount), 0) AS revenue,
+      COALESCE(SUM(orders.original_amount - orders.final_amount), 0) AS discount_amount
+    FROM orders
+    JOIN group_buy_activities activity ON activity.id = orders.activity_id
+    WHERE ${SALES_ORDER_FILTER}
+      AND orders.submitted_at >= now() - make_interval(weeks => $2::int)
+    GROUP BY 1
+    ORDER BY 1
+  `, [storeId, WEEKLY_TREND_WEEKS]);
+
+  return result.rows.map((row) => ({
+    weekStart: row.week_start,
+    orderCount: Number(row.order_count),
+    revenue: Number(row.revenue),
+    discountAmount: Number(row.discount_amount),
+  }));
+}
+
 function createMerchantStatisticsRepository(input = {}) {
   const ownsDatabase = !input.database;
   const database = input.database || createRuntimeDatabaseAdapter({ ...input, runtime: "postgres" });
   return {
     kind: "postgres",
     getStoreStatistics: (storeId) => getStoreStatisticsPostgres(database, storeId),
+    getStoreWeeklyTrend: (storeId) => getStoreWeeklyTrendPostgres(database, storeId),
     close: async () => {
       if (ownsDatabase) await database.close();
     },

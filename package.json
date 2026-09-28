@@ -49,6 +49,7 @@
     "customer-order-read:smoke": "node scripts/customer-order-read-repository-smoke.js",
     "customer-savings-postgres:smoke": "node scripts/customer-savings-postgres-smoke.js",
     "merchant-statistics-postgres:smoke": "node scripts/merchant-statistics-postgres-smoke.js",
+    "admin-statistics-postgres:smoke": "node scripts/admin-statistics-postgres-smoke.js",
     "demo-data": "node scripts/seed-demo-data.js",
     "payment-authorization-request:smoke": "node scripts/payment-authorization-request-repository-smoke.js",
     "payment-authorization-confirm:smoke": "node scripts/payment-authorization-confirm-repository-smoke.js",

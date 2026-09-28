@@ -1353,3 +1353,59 @@
 | `scripts/seed-demo-data.js`／`demoDataBuilder.js` | 遠端資料庫保護（含 `?host=`／`?hostaddr=` 的已知繞過）、`--allow-remote`／`--apply` 雙重開關、示範資料清除範圍、假帳號無法登入等，與 2026-09-25 記錄一致，程式碼自上次審查後未變動 |
 
 **這次沒審查到／沒驗證到的部分**：跟上兩筆一樣，沒有在 Azure 上實測；這次也沒有另外審查深色模式那條工作線（UI 顯示邏輯，不屬於本次金流／授權範圍）。
+
+---
+
+## 2026-09-28 — 後台數據統計：訂單/營收趨勢與顧客活躍時段分析
+
+**範圍**：`backend/database/repositories/adminStatisticsRepository.js` 新增的 `getWeeklyTrend()`／`getPeakHours()` 兩個唯讀查詢，`backend/server.js` 的 `/admin/statistics` 路由（呼叫這兩個新函式）與新增的 `renderBarChart()` 輔助函式、`renderAdminStatisticsBody` 新增的兩個區塊（長條圖／表格）
+**觸發原因**：CLAUDE.md 規則自動觸發——新增會顯示營收、折扣金額的後台頁面內容，屬於金流相關的資料呈現（雖然是唯讀、沒有寫入邏輯）
+**方法**：一個獨立的唯讀子任務，重點查（1）這兩個新查詢有沒有任何使用者輸入路徑（追到路由層確認呼叫時完全不帶參數）、（2）新的 HTML 區塊有沒有漏掉 `escapeHtml`、長條圖高度用的百分比數值有沒有可能跳脫 `style` 屬性、（3）`/admin/statistics` 路由是否還在既有的 `requireAdminWebUser` 之後才執行。這次沒有用內建 `/security-review` 整包審查，因為工作目錄裡還有這次任務本身以外、我這輪沒有處理的其他未提交檔案
+
+### 發現
+
+沒有找到信心度達到門檻（8/10 以上）的漏洞。
+
+| 嚴重度 | 位置 | 問題 | 建議修法 | 狀態 |
+|--------|------|------|----------|------|
+| — | — | 這次沒有新發現 | — | — |
+
+### 沒發現問題的部分
+
+| 面向 | 檢查結果 |
+|------|----------|
+| SQL 注入 | `getWeeklyTrend` 只綁定一個寫死常數（`WEEKLY_TREND_WEEKS = 8`）到 `$1::int`，`getPeakHours`完全不帶參數；兩者都沒有字串拼接 |
+| 使用者輸入路徑 | 追到路由層確認這兩個函式呼叫時完全不帶任何來自 `request`／`url`（query string、body、header、session）的引數，攻擊面等於零 |
+| 授權 | `/admin/statistics` 路由沿用既有的 `requireAdminWebUser` 檢查，跟檔案裡其他約 15 條 `/admin/*` 路由寫法一致，沒有新增繞過這個關卡的路徑 |
+| XSS／HTML 跳脫 | `renderBarChart()` 的 `valueLabel`／`label` 都有 `escapeHtml`；`style="height:N%"` 的 `N` 是 `Math.round((item.value / maxValue) * 100)`，`item.value` 追到底只會是 Postgres `COUNT(*)` 轉出來的非負整數（`Number(row.order_count)`），不可能是 NaN／Infinity／字串，`Math.max(1, ...)` 保證分母不為 0，數學上不可能跳脫屬性；週別標籤 `formatAdminWeekLabel` 只對 SQL `to_char(..., 'YYYY-MM-DD')` 產出的固定格式字串做 `.slice()`，本身不可能含 HTML 特殊字元；金額欄位沿用既有的 `formatAdminCurrency`，跟原本的熱門店家表格同一套 |
+| 資料外洩 | 兩個新區塊都是全站彙總（不分店家、不分顧客），沒有比既有的 `getBasicStatistics`／`topStores` 多揭露任何邊界內的資料 |
+
+---
+
+## 2026-09-28 — 後台：單一店家詳細統計頁面（`GET /admin/stores/:storeId/statistics`）
+
+**範圍**：`backend/database/repositories/storeDirectoryReadRepository.js` 新增的 `getStoreById()`、`backend/database/repositories/merchantStatisticsRepository.js` 新增的 `getStoreWeeklyTrend()`、`backend/server.js` 新路由與 `renderAdminStoreStatisticsBody`，以及「熱門店家排行」表格把店名改成連到這個新頁面的連結
+**觸發原因**：CLAUDE.md 規則自動觸發——新增一支會把單一店家的營收、折扣、趨勢資料顯示給管理員看的頁面，屬於金流相關的資料呈現
+**方法**：一個獨立的唯讀子任務，重點查（1）`getStoreById`／`getStoreWeeklyTrend` 有沒有字串拼接、（2）新路由是否還在既有的 `requireAdminWebUser` 之後才執行、404 分支有沒有在查詢前就先擋掉、（3）店家 ID 在 URL 與連結之間的編碼/解碼有沒有不一致、（4）新 HTML 有沒有漏掉 `escapeHtml`（含 `href` 屬性裡只用 `encodeURIComponent` 沒有額外跳脫的情況）、（5）「管理員能看到任何一間店的營收」是不是跟既有後台頁面一致的預期行為，不是這次新引入的揭露範圍
+
+### 發現
+
+沒有找到信心度達到門檻（8/10 以上）的漏洞。
+
+| 嚴重度 | 位置 | 問題 | 建議修法 | 狀態 |
+|--------|------|------|----------|------|
+| — | — | 這次沒有新發現 | — | — |
+
+### 沒發現問題的部分
+
+| 面向 | 檢查結果 |
+|------|----------|
+| SQL 注入 | `getStoreById` 單一 `WHERE id = $1`；`getStoreWeeklyTrend` 的 `storeId` 綁 `$1`、`WEEKLY_TREND_WEEKS`（寫死常數）綁 `$2`，`SALES_ORDER_FILTER` 沿用既有 `getStoreStatistics` 已經在用的靜態字串，沒有新的拼接 |
+| 授權 | 新路由跟檔案裡其他約 15 條 `/admin/*` 路由一樣，一開頭就呼叫 `requireAdminWebUser`；404 分支（店家不存在）在任何統計查詢之前就直接回傳，且 404 頁面是完全不回顯 `storeId` 的固定字串 |
+| 路徑處理 | 新路由的 `:storeId` 擷取方式（`[^/]+`，不額外 decode）跟既有的 `/admin/stores/:storeId/import-menu` 完全一致；連結產生時用 `encodeURIComponent(store.id)`，跟檔案裡其他既有連結（退款申請 `request.id`、商家申請 `resultingStoreId`）同一套寫法，不是這次新引入的不一致 |
+| XSS／HTML 跳脫 | `renderAdminStoreStatisticsBody` 裡的 `store.id`、狀態標籤、統計數字、熱賣飲品名稱全部有 `escapeHtml`；頁面標題經過 `renderAdminPage` 既有的跳脫處理。店名連結的 `href` 只用 `encodeURIComponent` 沒有另外 `escapeHtml`，但店家 ID 是伺服器自己產生的 slug（不是使用者輸入）、`href` 本身是固定格式路徑、`encodeURIComponent` 本身就會跳脫雙引號，三個條件疊加起來不構成漏洞，且是檔案裡既有的寫法，不是這次新增的風險 |
+| 資料外洩 | 這個頁面讓管理員看到「任何一間店」的營收／折扣／趨勢，沒有依店家限制——但後台本來就沒有「只能管理特定店家」的管理員角色（`ADMIN_WEB_PASSWORDS` 是共用密碼），`renderAdminDashboardBody`、既有的「熱門店家排行」本來就已經是全店彙總視角，這只是把同一份既有可見資料做成可以點進去看細節，不是新的揭露範圍 |
+
+**這次沒審查到／沒驗證到的部分**：沒有在 Azure 上實測。
+
+**這次沒審查到／沒驗證到的部分**：沒有在 Azure 上實測（這次改動沒有牽涉 migration，之後推上去部署即可生效，不需要額外資料庫操作）。

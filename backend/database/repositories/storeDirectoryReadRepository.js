@@ -32,10 +32,24 @@ function createStoreDirectoryReadRepository(input = {}) {
     kind: "postgres",
     listPublicStores: () => listPostgresPublicStores(database),
     listAllStoresForAdmin: () => listPostgresAllStoresForAdmin(database),
+    getStoreById: (storeId) => getPostgresStoreById(database, storeId),
     close: async () => {
       if (ownsDatabase) await database.close();
     },
   };
+}
+
+// Regardless of business_status, same reasoning as listAllStoresForAdmin -- an admin needs to
+// reach a temporarily-closed store's own page too, not just the ones customers can currently see.
+async function getPostgresStoreById(database, storeId) {
+  const result = await database.query(`
+    SELECT id, name, business_status
+    FROM stores
+    WHERE id = $1
+  `, [storeId]);
+  const row = result.rows[0];
+  if (!row) return null;
+  return { id: row.id, name: row.name, businessStatus: row.business_status };
 }
 
 // Unlike listPublicStores, includes every store regardless of business_status -- an admin

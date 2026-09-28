@@ -8,6 +8,11 @@ const { createRuntimeDatabaseAdapter } = require("..");
 const SUCCESSFUL_ACTIVITY_STATUSES = ["confirmed", "ordering", "ready_for_pickup", "completed"];
 const UNSUCCESSFUL_ACTIVITY_STATUSES = ["failed", "cancelled"];
 const TOP_STORES_LIMIT = 10;
+const WEEKLY_TREND_WEEKS = 8;
+
+// Every "which week" / "which hour" bucket below is computed in Asia/Taipei wall-clock time, not
+// the database server's own timezone (Azure's managed Postgres defaults to UTC) -- an admin reading
+// "顧客活躍時段" only cares what hour it was for the actual customers and stores, all in Taiwan.
 
 function createAdminStatisticsRepository(input = {}) {
   const ownsDatabase = !input.database;
@@ -15,6 +20,8 @@ function createAdminStatisticsRepository(input = {}) {
   return {
     kind: "postgres",
     getBasicStatistics: () => getBasicStatisticsPostgres(database),
+    getWeeklyTrend: () => getWeeklyTrendPostgres(database),
+    getPeakHours: () => getPeakHoursPostgres(database),
     close: async () => {
       if (ownsDatabase) await database.close();
     },
@@ -83,6 +90,47 @@ async function getBasicStatisticsPostgres(database) {
       revenue: Number(row.revenue),
     })),
   };
+}
+
+// One row per calendar week (Monday start, Asia/Taipei) over the trailing WEEKLY_TREND_WEEKS
+// weeks. revenue/discountAmount only count captured orders, matching getBasicStatistics's existing
+// convention; discountAmount is original minus final for those same orders.
+async function getWeeklyTrendPostgres(database) {
+  const result = await database.query(`
+    SELECT
+      to_char(date_trunc('week', submitted_at AT TIME ZONE 'Asia/Taipei'), 'YYYY-MM-DD') AS week_start,
+      COUNT(*) FILTER (WHERE payment_status = 'captured') AS order_count,
+      COALESCE(SUM(final_amount) FILTER (WHERE payment_status = 'captured'), 0) AS revenue,
+      COALESCE(SUM(original_amount - final_amount) FILTER (WHERE payment_status = 'captured'), 0) AS discount_amount
+    FROM orders
+    WHERE submitted_at >= now() - make_interval(weeks => $1::int)
+    GROUP BY 1
+    ORDER BY 1
+  `, [WEEKLY_TREND_WEEKS]);
+
+  return result.rows.map((row) => ({
+    weekStart: row.week_start,
+    orderCount: Number(row.order_count),
+    revenue: Number(row.revenue),
+    discountAmount: Number(row.discount_amount),
+  }));
+}
+
+// Every hour of the day, 0-23, filled in even where no order was ever submitted. Counts every
+// order regardless of outcome (captured, cancelled, ...) -- unlike revenue, "when are customers
+// actively placing orders" is a behavioural signal that a later cancellation doesn't erase.
+async function getPeakHoursPostgres(database) {
+  const result = await database.query(`
+    SELECT
+      EXTRACT(HOUR FROM submitted_at AT TIME ZONE 'Asia/Taipei')::int AS hour_of_day,
+      COUNT(*) AS order_count
+    FROM orders
+    GROUP BY 1
+    ORDER BY 1
+  `);
+
+  const countByHour = new Map(result.rows.map((row) => [Number(row.hour_of_day), Number(row.order_count)]));
+  return Array.from({ length: 24 }, (_, hour) => ({ hour, orderCount: countByHour.get(hour) ?? 0 }));
 }
 
 module.exports = {

@@ -2274,9 +2274,37 @@ const server = http.createServer(async (request, response) => {
       const adminUser = await requireAdminWebUser(request, response);
       if (!adminUser) return;
 
-      const statistics = await adminStatisticsRepository.getBasicStatistics();
-      const bodyHtml = renderAdminStatisticsBody(statistics);
+      const [statistics, weeklyTrend, peakHours] = await Promise.all([
+        adminStatisticsRepository.getBasicStatistics(),
+        adminStatisticsRepository.getWeeklyTrend(),
+        adminStatisticsRepository.getPeakHours(),
+      ]);
+      const bodyHtml = renderAdminStatisticsBody({ ...statistics, weeklyTrend, peakHours });
       sendHtml(response, 200, renderAdminPage({ title: "數據統計", bodyHtml, activeNav: "statistics" }));
+      return;
+    }
+
+    const adminStoreStatisticsMatch = url.pathname.match(/^\/admin\/stores\/([^/]+)\/statistics$/);
+    if (request.method === "GET" && adminStoreStatisticsMatch) {
+      const adminUser = await requireAdminWebUser(request, response);
+      if (!adminUser) return;
+
+      const storeId = adminStoreStatisticsMatch[1];
+      const store = await storeDirectoryReadRepository.getStoreById(storeId);
+      if (!store) {
+        sendHtml(response, 404, renderAdminPage({
+          title: "店家不存在",
+          bodyHtml: `<section class="empty">找不到這間店家。<a href="/admin/statistics">返回數據統計</a></section>`,
+          activeNav: "statistics"
+        }));
+        return;
+      }
+      const [statistics, weeklyTrend] = await Promise.all([
+        merchantStatisticsRepository.getStoreStatistics(storeId),
+        merchantStatisticsRepository.getStoreWeeklyTrend(storeId),
+      ]);
+      const bodyHtml = renderAdminStoreStatisticsBody({ store, statistics, weeklyTrend });
+      sendHtml(response, 200, renderAdminPage({ title: `${store.name} 數據統計`, bodyHtml, activeNav: "statistics" }));
       return;
     }
 
@@ -2966,6 +2994,12 @@ function formatAdminCurrency(amount) {
   return `NT$${(Number(amount) || 0).toLocaleString("zh-TW")}`;
 }
 
+// weekStart is already a plain "YYYY-MM-DD" string (see getWeeklyTrendPostgres) -- sliced, not
+// parsed through Date, so this never risks a timezone-driven off-by-one day.
+function formatAdminWeekLabel(weekStart) {
+  return weekStart.slice(5).replace("-", "/");
+}
+
 function renderAdminNotice(notice) {
   if (!notice) return "";
   const noticeClass = ["success", "error", "warning"].includes(notice.type) ? notice.type : "success";
@@ -3070,46 +3104,77 @@ const ADMIN_THEME_VARIABLES = `
     --success: #8ef0b0;
     --warning: #ffd479;
     --error: #ff8c8c;
+    --radius: 12px;
+    --radius-sm: 8px;
     font-family: "Microsoft JhengHei", "Noto Sans TC", Arial, sans-serif;
   }
 `;
 
+// Monoline inline SVG icons for the admin sidebar -- no icon font or external request, matching
+// these pages' existing zero-dependency approach. All 20x20, currentColor, so they inherit the
+// surrounding link's text color (including the active/hover states) with no extra styling.
+const ADMIN_SIDEBAR_ICON_ATTRS = 'width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"';
+const ADMIN_ICON_DASHBOARD = `<svg ${ADMIN_SIDEBAR_ICON_ATTRS}><rect x="3" y="3" width="7" height="7"></rect><rect x="14" y="3" width="7" height="7"></rect><rect x="3" y="14" width="7" height="7"></rect><rect x="14" y="14" width="7" height="7"></rect></svg>`;
+const ADMIN_ICON_CHART = `<svg ${ADMIN_SIDEBAR_ICON_ATTRS}><rect x="3" y="10" width="4" height="10"></rect><rect x="10" y="4" width="4" height="16"></rect><rect x="17" y="13" width="4" height="7"></rect></svg>`;
+const ADMIN_ICON_REFUND = `<svg ${ADMIN_SIDEBAR_ICON_ATTRS}><polyline points="9 14 4 9 9 4"></polyline><path d="M4 9h9a6 6 0 0 1 0 12h-1"></path></svg>`;
+const ADMIN_ICON_STORE = `<svg ${ADMIN_SIDEBAR_ICON_ATTRS}><path d="M3 9l1-5h16l1 5"></path><path d="M4 9v10h16V9"></path><path d="M9 19v-6h6v6"></path></svg>`;
+const ADMIN_ICON_ACCOUNTS = `<svg ${ADMIN_SIDEBAR_ICON_ATTRS}><circle cx="12" cy="8" r="4"></circle><path d="M4 20c0-4.4 3.6-8 8-8s8 3.6 8 8"></path></svg>`;
+const ADMIN_ICON_CONSOLE = `<svg ${ADMIN_SIDEBAR_ICON_ATTRS}><rect x="3" y="4" width="18" height="16" rx="2"></rect><polyline points="7 9 11 12 7 15"></polyline><line x1="13" y1="15" x2="17" y2="15"></line></svg>`;
+const ADMIN_ICON_LOGOUT = `<svg ${ADMIN_SIDEBAR_ICON_ATTRS}><path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4"></path><polyline points="16 17 21 12 16 7"></polyline><line x1="21" y1="12" x2="9" y2="12"></line></svg>`;
+
 function renderAdminPage({ title, bodyHtml, activeNav }) {
-  const navLinkClass = (key) => (key === activeNav ? "nav-link active" : "nav-link");
+  const sidebarLinkClass = (key) => (key === activeNav ? "sidebar-link active" : "sidebar-link");
+  const sidebarLinks = [
+    { key: "dashboard", href: "/admin", label: "全平台團購", icon: ADMIN_ICON_DASHBOARD },
+    { key: "statistics", href: "/admin/statistics", label: "數據統計", icon: ADMIN_ICON_CHART },
+    { key: "refunds", href: "/admin/refund-requests", label: "退款審核", icon: ADMIN_ICON_REFUND },
+    { key: "merchantApplications", href: "/admin/merchant-applications", label: "商家申請審核", icon: ADMIN_ICON_STORE },
+    { key: "accounts", href: "/admin/accounts", label: "帳號角色", icon: ADMIN_ICON_ACCOUNTS },
+  ].map((link) => `
+    <a class="${sidebarLinkClass(link.key)}" href="${link.href}">${link.icon}<span>${link.label}</span></a>`).join("\n");
+
   return `<!DOCTYPE html>
 <html lang="zh-Hant">
 <head>
 <meta charset="utf-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1" />
-<title>${escapeHtml(title)} · DrinkGroupBuy 管理後台</title>
+<title>${escapeHtml(title)} · 飲料團購 管理後台</title>
 <style>
 ${ADMIN_THEME_VARIABLES}
   * { box-sizing: border-box; }
   body { margin: 0; background: var(--background); color: var(--text); }
-  header { background: var(--surface); border-bottom: 1px solid var(--line); padding: 14px 20px; display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: 10px; }
-  header h1 { font-size: 16px; margin: 0; letter-spacing: -0.01em; }
-  nav { display: flex; gap: 16px; align-items: center; }
-  nav a.nav-link { color: var(--muted); text-decoration: none; font-size: 13px; font-weight: 700; }
-  nav a.nav-link.active, nav a.nav-link:hover { color: var(--text); }
-  form.logout { margin: 0; }
-  form.logout button { background: none; border: none; color: var(--muted); font-size: 13px; font-weight: 700; cursor: pointer; padding: 0; }
-  form.logout button:hover { color: var(--text); }
-  main { max-width: 960px; margin: 0 auto; padding: 20px; }
-  .notice { border: 1px solid; background: transparent; padding: 10px 14px; margin-bottom: 16px; font-size: 13px; font-weight: 700; }
+  .admin-shell { display: flex; height: 100vh; }
+  .admin-sidebar { width: 240px; flex-shrink: 0; background: var(--surface); border-right: 1px solid var(--line); display: flex; flex-direction: column; padding: 18px 12px; overflow-y: auto; }
+  .sidebar-brand { padding: 4px 8px 18px; }
+  .brand-title { font-size: 14px; font-weight: 700; line-height: 1.3; }
+  .brand-subtitle { font-size: 11px; color: var(--muted); }
+  .sidebar-nav { display: flex; flex-direction: column; gap: 2px; }
+  .sidebar-link, .sidebar-footer button { display: flex; align-items: center; gap: 12px; padding: 10px 10px; border-radius: var(--radius-sm); color: var(--muted); text-decoration: none; font-size: 13px; font-weight: 700; width: 100%; border: none; background: none; cursor: pointer; text-align: left; font-family: inherit; }
+  .sidebar-link:hover, .sidebar-footer button:hover { background: var(--surface-strong); color: var(--text); }
+  .sidebar-link.active { background: var(--surface-strong); color: var(--text); }
+  .sidebar-link svg, .sidebar-footer svg { flex-shrink: 0; }
+  .sidebar-footer { margin-top: auto; display: flex; flex-direction: column; gap: 2px; padding-top: 10px; border-top: 1px solid var(--line); }
+  .sidebar-footer form { margin: 0; }
+  .admin-main { flex: 1; min-width: 0; overflow-y: auto; }
+  .admin-content { max-width: 1100px; margin: 0 auto; padding: 28px 32px; }
+  .page-title { font-size: 24px; margin: 0 0 20px; letter-spacing: -0.01em; }
+  .notice { border: 1px solid; background: transparent; border-radius: var(--radius); padding: 10px 14px; margin-bottom: 16px; font-size: 13px; font-weight: 700; }
   .notice.success { border-color: var(--success); color: var(--success); }
   .notice.error { border-color: var(--error); color: var(--error); }
   .notice.warning { border-color: var(--warning); color: var(--warning); }
-  .card { background: var(--surface); border: 1px solid var(--line); padding: 14px 16px; margin-bottom: 12px; }
+  .card { background: var(--surface); border: 1px solid var(--line); border-radius: var(--radius); padding: 14px 16px; margin-bottom: 12px; }
   .card h2 { margin: 0 0 6px; font-size: 15px; }
   .meta { color: var(--muted); font-size: 12px; margin: 2px 0; }
-  .badge { display: inline-block; border: 1px solid var(--text); border-radius: 2px; padding: 2px 8px; font-size: 11px; font-weight: 700; vertical-align: middle; }
+  .meta a { color: var(--muted); }
+  .meta a:hover { color: var(--text); }
+  .badge { display: inline-block; border: 1px solid var(--text); border-radius: 999px; padding: 2px 10px; font-size: 11px; font-weight: 700; vertical-align: middle; }
   .row { display: flex; gap: 8px; flex-wrap: wrap; margin-top: 10px; align-items: center; }
-  button, .btn { border: 1px solid var(--text); border-radius: 0; padding: 8px 14px; font-size: 13px; font-weight: 700; cursor: pointer; background: transparent; color: var(--text); }
+  button, .btn { border: 1px solid var(--text); border-radius: 999px; padding: 8px 16px; font-size: 13px; font-weight: 700; cursor: pointer; background: transparent; color: var(--text); }
   button:hover:not(:disabled), .btn:hover { filter: invert(1); }
   .btn-danger { border-color: var(--error); color: var(--error); }
   .btn-primary { background: var(--text); color: var(--background); }
   .btn-secondary { background: transparent; color: var(--text); }
-  input[type="text"], input[type="search"] { border: 1px solid #666666; border-radius: 0; background: var(--background); color: var(--text); padding: 8px 10px; font-size: 13px; font-family: inherit; }
+  input[type="text"], input[type="search"] { border: 1px solid #666666; border-radius: var(--radius-sm); background: var(--background); color: var(--text); padding: 8px 10px; font-size: 13px; font-family: inherit; }
   input[type="text"]:focus, input[type="search"]:focus { outline: none; border-color: var(--line-strong); box-shadow: 0 0 0 1px var(--line-strong); }
   button:disabled { opacity: 0.45; cursor: not-allowed; }
   section.empty { color: var(--muted); font-size: 13px; padding: 10px 0; }
@@ -3118,36 +3183,65 @@ ${ADMIN_THEME_VARIABLES}
   .dashboard-columns h3.section-title { margin-top: 0; }
   @media (max-width: 720px) { .dashboard-columns { grid-template-columns: 1fr; } }
   .stat-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); gap: 12px; margin-bottom: 24px; }
-  .stat-card { background: var(--surface); border: 1px solid var(--line); padding: 14px 16px; }
+  .stat-card { background: var(--surface); border: 1px solid var(--line); border-radius: var(--radius); padding: 14px 16px; }
   .stat-card .stat-value { font-size: 24px; font-weight: 700; }
   .stat-card .stat-label { font-size: 12px; color: var(--muted); margin-top: 4px; }
   table.stats-table { width: 100%; border-collapse: collapse; }
   table.stats-table th, table.stats-table td { text-align: left; padding: 8px 10px; border-bottom: 1px solid var(--line); font-size: 13px; }
-  table.stats-table th { color: var(--muted); font-weight: 700; }
-  .tabs { display: flex; gap: 6px; flex-wrap: wrap; margin-bottom: 14px; }
-  .tab { border: 1px solid var(--line); border-radius: 999px; padding: 6px 14px; font-size: 12px; font-weight: 700; color: var(--muted); text-decoration: none; }
-  .tab:hover { color: var(--text); border-color: var(--line-strong); }
-  .tab.active { background: var(--text); color: var(--background); border-color: var(--text); }
+  table.stats-table th { color: var(--muted); font-weight: 700; position: sticky; top: 0; background: var(--background); z-index: 1; }
+  table.stats-table td a { color: var(--text); font-weight: 700; text-decoration: none; }
+  table.stats-table td a:hover { text-decoration: underline; }
+  table.stats-table tbody tr:nth-child(even) { background: var(--surface); }
+  table.stats-table tbody tr:hover { background: var(--surface-strong); }
+  .bar-chart { display: flex; align-items: flex-end; gap: 4px; height: 140px; margin: 10px 0 20px; }
+  .bar-chart .bar-col { flex: 1; min-width: 0; height: 100%; display: flex; flex-direction: column; justify-content: flex-end; align-items: center; }
+  .bar-chart .bar { width: 100%; background: var(--text); min-height: 1px; border-radius: 3px 3px 0 0; }
+  .bar-chart .bar-value { font-size: 10px; color: var(--muted); margin-bottom: 3px; }
+  .bar-chart .bar-label { font-size: 10px; color: var(--muted); margin-top: 4px; white-space: nowrap; }
+  .line-chart { position: relative; height: 140px; }
+  .line-chart svg { width: 100%; height: 100%; display: block; }
+  .line-chart-dot { position: absolute; width: 6px; height: 6px; border-radius: 999px; background: var(--text); transform: translate(-50%, -50%); }
+  .line-chart-row { display: flex; }
+  .line-chart-row > div { flex: 1; min-width: 0; text-align: center; font-size: 10px; color: var(--muted); white-space: nowrap; }
+  .line-chart-row:first-of-type { margin-bottom: 4px; }
+  .line-chart-row:last-of-type { margin-top: 20px; }
+  .tabs { display: flex; gap: 18px; flex-wrap: wrap; margin-bottom: 14px; border-bottom: 1px solid var(--line); }
+  .tab { border: none; border-bottom: 2px solid transparent; border-radius: 0; padding: 6px 2px 10px; font-size: 13px; font-weight: 700; color: var(--muted); text-decoration: none; background: none; }
+  .tab:hover { color: var(--text); }
+  .tab.active { background: none; color: var(--text); border-bottom-color: var(--text); }
+  @media (max-width: 720px) {
+    .admin-sidebar { width: 64px; padding: 18px 8px; }
+    .sidebar-brand { display: none; }
+    .sidebar-link span, .sidebar-footer span { display: none; }
+    .sidebar-link, .sidebar-footer button { justify-content: center; }
+    .admin-content { padding: 20px 16px; }
+  }
 </style>
 </head>
 <body>
-<header>
-  <h1>DrinkGroupBuy 管理後台</h1>
-  <nav>
-    <a class="${navLinkClass("dashboard")}" href="/admin">全平台團購</a>
-    <a class="${navLinkClass("statistics")}" href="/admin/statistics">數據統計</a>
-    <a class="${navLinkClass("refunds")}" href="/admin/refund-requests">退款審核</a>
-    <a class="${navLinkClass("merchantApplications")}" href="/admin/merchant-applications">商家申請審核</a>
-    <a class="${navLinkClass("accounts")}" href="/admin/accounts">帳號角色</a>
-    ${isDevAuthModeEnabled() ? '<a class="nav-link" href="/dev-console">本機測試控制台</a>' : ""}
-    <form class="logout" method="POST" action="/admin/logout">
-      <button type="submit">登出</button>
-    </form>
-  </nav>
-</header>
-<main>
-${bodyHtml}
-</main>
+<div class="admin-shell">
+  <aside class="admin-sidebar">
+    <div class="sidebar-brand">
+      <div class="brand-title">飲料團購</div>
+      <div class="brand-subtitle">管理後台</div>
+    </div>
+    <nav class="sidebar-nav">
+      ${sidebarLinks}
+    </nav>
+    <div class="sidebar-footer">
+      ${isDevAuthModeEnabled() ? `<a class="sidebar-link" href="/dev-console">${ADMIN_ICON_CONSOLE}<span>本機測試控制台</span></a>` : ""}
+      <form method="POST" action="/admin/logout">
+        <button type="submit">${ADMIN_ICON_LOGOUT}<span>登出</span></button>
+      </form>
+    </div>
+  </aside>
+  <main class="admin-main">
+    <div class="admin-content">
+      <h1 class="page-title">${escapeHtml(title)}</h1>
+      ${bodyHtml}
+    </div>
+  </main>
+</div>
 </body>
 </html>`;
 }
@@ -3175,17 +3269,17 @@ function renderAdminLoginPage({ error, showLocalDevAutoLogin = false } = {}) {
 <head>
 <meta charset="utf-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1" />
-<title>管理後台登入 · DrinkGroupBuy</title>
+<title>管理後台登入 · 飲料團購</title>
 <style>
 ${ADMIN_THEME_VARIABLES}
   * { box-sizing: border-box; }
   body { margin: 0; min-height: 100vh; display: flex; align-items: center; justify-content: center; background: var(--background); }
-  .loginCard { background: var(--surface); border: 1px solid var(--line); padding: 28px 26px; width: 300px; }
+  .loginCard { background: var(--surface); border: 1px solid var(--line); border-radius: var(--radius); padding: 28px 26px; width: 300px; }
   h1 { font-size: 16px; margin: 0 0 18px; color: var(--text); }
   h2 { font-size: 13px; margin: 0 0 10px; color: var(--muted); font-weight: 700; }
-  input { width: 100%; border: 1px solid #666666; border-radius: 0; background: var(--background); color: var(--text); padding: 10px 12px; font-size: 14px; margin-bottom: 12px; box-sizing: border-box; }
+  input { width: 100%; border: 1px solid #666666; border-radius: var(--radius-sm); background: var(--background); color: var(--text); padding: 10px 12px; font-size: 14px; margin-bottom: 12px; box-sizing: border-box; }
   input:focus { outline: none; border-color: var(--line-strong); box-shadow: 0 0 0 1px var(--line-strong); }
-  button { width: 100%; border: 1px solid var(--text); border-radius: 0; padding: 10px; font-size: 14px; font-weight: 700; background: var(--text); color: var(--background); cursor: pointer; }
+  button { width: 100%; border: 1px solid var(--text); border-radius: 999px; padding: 10px; font-size: 14px; font-weight: 700; background: var(--text); color: var(--background); cursor: pointer; }
   button:hover { filter: invert(1); }
   button:disabled { opacity: 0.5; cursor: not-allowed; }
   p.error { color: var(--error); font-size: 12px; font-weight: 700; margin: 0 0 12px; }
@@ -3198,7 +3292,7 @@ ${ADMIN_THEME_VARIABLES}
 </head>
 <body>
 <div class="loginCard">
-  <h1>DrinkGroupBuy 管理後台</h1>
+  <h1>飲料團購 管理後台</h1>
   <form method="POST" action="/admin/login">
     ${error ? `<p class="error">${escapeHtml(error)}</p>` : ""}
     <input type="password" name="password" placeholder="密碼" ${firebaseWebConfig ? "" : "autofocus"} required />
@@ -3383,7 +3477,51 @@ function renderAdminDashboardBody({ activities, notice, csrfToken }) {
   </div>`;
 }
 
-function renderAdminStatisticsBody({ activities, orders, topStores }) {
+// Shared by every admin-statistics bar chart below: `items` is [{ value, valueLabel, label }],
+// bar heights are relative to the largest value in the set (not a fixed scale) so each chart uses
+// its own full height regardless of the numbers involved.
+function renderBarChart(items) {
+  const maxValue = Math.max(1, ...items.map((item) => item.value));
+  const barsHtml = items.map((item) => `
+      <div class="bar-col">
+        <div class="bar-value">${escapeHtml(item.valueLabel ?? String(item.value))}</div>
+        <div class="bar" style="height:${Math.round((item.value / maxValue) * 100)}%"></div>
+        <div class="bar-label">${escapeHtml(item.label)}</div>
+      </div>`).join("\n");
+  return `<div class="bar-chart">${barsHtml}\n    </div>`;
+}
+
+// Same `items` shape as renderBarChart, for trends where a connected line reads better than bars.
+// The line itself is one SVG polyline over a 0-100 viewBox stretched to fill the container (a
+// little non-uniform stroke distortion from that stretch is fine for a thin line) -- but the point
+// markers are separate absolutely-positioned HTML dots, not SVG circles, because a circle drawn in
+// those same stretched viewBox units would render as an ellipse. Value/label rows use the same
+// N-column flex layout as the dots' left% math (index+0.5)/n so text lines up under each point.
+function renderLineChart(items) {
+  const maxValue = Math.max(1, ...items.map((item) => item.value));
+  const count = items.length;
+  const pointFor = (item, index) => ({
+    xPercent: ((index + 0.5) / count) * 100,
+    yPercent: 10 + (1 - item.value / maxValue) * 80,
+  });
+  const points = items.map(pointFor);
+  const polylinePoints = points.map((point) => `${point.xPercent},${point.yPercent}`).join(" ");
+  const dotsHtml = points.map((point) => `
+      <div class="line-chart-dot" style="left:${point.xPercent}%; top:${point.yPercent}%"></div>`).join("\n");
+  const valuesHtml = items.map((item) => `<div>${escapeHtml(item.valueLabel ?? String(item.value))}</div>`).join("\n");
+  const labelsHtml = items.map((item) => `<div>${escapeHtml(item.label)}</div>`).join("\n");
+  return `
+    <div class="line-chart-row">${valuesHtml}</div>
+    <div class="line-chart">
+      <svg viewBox="0 0 100 100" preserveAspectRatio="none">
+        <polyline points="${polylinePoints}" fill="none" stroke="var(--text)" stroke-width="1.5" vector-effect="non-scaling-stroke"></polyline>
+      </svg>
+      ${dotsHtml}
+    </div>
+    <div class="line-chart-row">${labelsHtml}</div>`;
+}
+
+function renderAdminStatisticsBody({ activities, orders, topStores, weeklyTrend, peakHours }) {
   const successRateText = activities.successRate == null
     ? "尚無資料"
     : `${Math.round(activities.successRate * 100)}%`;
@@ -3416,7 +3554,7 @@ function renderAdminStatisticsBody({ activities, orders, topStores }) {
       <tbody>
         ${topStores.map((store) => `
         <tr>
-          <td>${escapeHtml(store.name)}</td>
+          <td><a href="/admin/stores/${encodeURIComponent(store.id)}/statistics">${escapeHtml(store.name)}</a></td>
           <td>${store.activityCount}</td>
           <td>${store.capturedOrderCount}</td>
           <td>${formatAdminCurrency(store.revenue)}</td>
@@ -3424,10 +3562,136 @@ function renderAdminStatisticsBody({ activities, orders, topStores }) {
       </tbody>
     </table>`;
 
+  const weeklyTrendHtml = weeklyTrend.length === 0
+    ? `<section class="empty">近期沒有訂單資料。</section>`
+    : `
+    ${renderLineChart(weeklyTrend.map((week) => ({
+      value: week.orderCount,
+      valueLabel: String(week.orderCount),
+      label: formatAdminWeekLabel(week.weekStart),
+    })))}
+    <table class="stats-table">
+      <thead>
+        <tr>
+          <th>週別（一為週首）</th>
+          <th>已請款訂單數</th>
+          <th>營收</th>
+          <th>折扣金額</th>
+          <th>折扣佔原價比例</th>
+        </tr>
+      </thead>
+      <tbody>
+        ${weeklyTrend.map((week) => {
+          const originalTotal = week.revenue + week.discountAmount;
+          const discountRateText = originalTotal > 0
+            ? `${Math.round((week.discountAmount / originalTotal) * 100)}%`
+            : "—";
+          return `
+        <tr>
+          <td>${formatAdminWeekLabel(week.weekStart)}</td>
+          <td>${week.orderCount}</td>
+          <td>${formatAdminCurrency(week.revenue)}</td>
+          <td>${formatAdminCurrency(week.discountAmount)}</td>
+          <td>${discountRateText}</td>
+        </tr>`;
+        }).join("\n")}
+      </tbody>
+    </table>`;
+
+  const peakHoursHtml = peakHours.every((hour) => hour.orderCount === 0)
+    ? `<section class="empty">目前沒有訂單資料。</section>`
+    : renderBarChart(peakHours.map((hour) => ({
+      value: hour.orderCount,
+      valueLabel: String(hour.orderCount),
+      label: String(hour.hour).padStart(2, "0"),
+    })));
+
   return `
     <div class="stat-grid">${statCardsHtml}</div>
     <h3 class="section-title">熱門店家排行（依營收排序，最多 10 間）</h3>
-    ${topStoresHtml}`;
+    ${topStoresHtml}
+    <h3 class="section-title">訂單與營收趨勢（近 8 週，已請款訂單）</h3>
+    ${weeklyTrendHtml}
+    <h3 class="section-title">顧客下單活躍時段（依小時統計，全部歷史訂單，台灣時間）</h3>
+    ${peakHoursHtml}`;
+}
+
+// The single-store drill-down reached by clicking a row in renderAdminStatisticsBody's top-stores
+// table. Reuses merchantStatisticsRepository's getStoreStatistics/getStoreWeeklyTrend -- the same
+// figures and "which orders count" definition the merchant's own MerchantStatisticsScreen shows,
+// so an admin looking at a store here and the store's own merchant looking at their dashboard never
+// see different numbers for the same thing.
+function renderAdminStoreStatisticsBody({ store, statistics, weeklyTrend }) {
+  const qualifiedRateText = statistics.qualifiedRate == null
+    ? "尚無資料"
+    : `${Math.round(statistics.qualifiedRate * 100)}%`;
+
+  const statCardsHtml = [
+    { label: "已請款訂單數", value: statistics.orderCount },
+    { label: "總營收（已扣退款）", value: formatAdminCurrency(statistics.totalRevenue) },
+    { label: "折扣金額", value: formatAdminCurrency(statistics.discountGivenTotal) },
+    { label: "已結算團購中，成團比例", value: qualifiedRateText },
+  ].map((card) => `
+    <div class="stat-card">
+      <div class="stat-value">${escapeHtml(String(card.value))}</div>
+      <div class="stat-label">${escapeHtml(card.label)}</div>
+    </div>`).join("\n");
+
+  const weeklyTrendHtml = weeklyTrend.length === 0
+    ? `<section class="empty">近期沒有訂單資料。</section>`
+    : `
+    ${renderLineChart(weeklyTrend.map((week) => ({
+      value: week.orderCount,
+      valueLabel: String(week.orderCount),
+      label: formatAdminWeekLabel(week.weekStart),
+    })))}
+    <table class="stats-table">
+      <thead>
+        <tr>
+          <th>週別（一為週首）</th>
+          <th>訂單數</th>
+          <th>營收</th>
+          <th>折扣金額</th>
+        </tr>
+      </thead>
+      <tbody>
+        ${weeklyTrend.map((week) => `
+        <tr>
+          <td>${formatAdminWeekLabel(week.weekStart)}</td>
+          <td>${week.orderCount}</td>
+          <td>${formatAdminCurrency(week.revenue)}</td>
+          <td>${formatAdminCurrency(week.discountAmount)}</td>
+        </tr>`).join("\n")}
+      </tbody>
+    </table>`;
+
+  const topDrinksHtml = statistics.topDrinks.length === 0
+    ? `<section class="empty">目前沒有飲品銷售資料。</section>`
+    : `
+    <table class="stats-table">
+      <thead>
+        <tr>
+          <th>飲品</th>
+          <th>銷售杯數</th>
+        </tr>
+      </thead>
+      <tbody>
+        ${statistics.topDrinks.map((drink) => `
+        <tr>
+          <td>${escapeHtml(drink.name)}</td>
+          <td>${drink.cups}</td>
+        </tr>`).join("\n")}
+      </tbody>
+    </table>`;
+
+  return `
+    <p class="meta"><a href="/admin/statistics">← 返回數據統計總覽</a></p>
+    <p class="meta">店家 ID：${escapeHtml(store.id)}・${escapeHtml(ADMIN_STORE_STATUS_LABELS[store.businessStatus] || store.businessStatus)}</p>
+    <div class="stat-grid">${statCardsHtml}</div>
+    <h3 class="section-title">訂單與營收趨勢（近 8 週）</h3>
+    ${weeklyTrendHtml}
+    <h3 class="section-title">熱賣飲品（累計銷售杯數前 3 名）</h3>
+    ${topDrinksHtml}`;
 }
 
 function renderAdminRefundRequestsBody({ pendingRequests, reviewedRequests, notice, csrfToken }) {
