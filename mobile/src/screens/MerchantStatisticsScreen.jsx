@@ -41,11 +41,11 @@ function useMerchantStatistics(storeId) {
   return { ...state, retry };
 }
 
-export function MerchantStatisticsScreen({ navigation, selectedMerchantStoreId }) {
+export function MerchantStatisticsScreen({ selectedMerchantStoreId }) {
   const { status, statistics, retry } = useMerchantStatistics(selectedMerchantStoreId);
 
   return (
-    <MobileScreen title="營運統計" onBack={() => navigation.goBack()} backLabel="返回">
+    <MobileScreen title="分析">
       {!selectedMerchantStoreId ? (
         <EmptyPanel>找不到目前的店家資料，請重新登入。</EmptyPanel>
       ) : (
@@ -93,6 +93,11 @@ function StatisticsBody({ status, statistics, onRetry }) {
         </View>
       </Section>
 
+      <WeeklyTrendSection
+        weeklyTrend={statistics.weeklyTrend}
+        weeklyTrendUnavailable={statistics.weeklyTrendUnavailable}
+      />
+
       <Section title="熱賣飲品 前三名">
         {statistics.topDrinks.length === 0 ? (
           <EmptyPanel>還沒有已成交的飲品。</EmptyPanel>
@@ -126,6 +131,76 @@ function StatCard({ label, value, hint }) {
       {hint ? <Text style={styles.cardHint}>{hint}</Text> : null}
     </View>
   );
+}
+
+const CHART_BAR_HEIGHT = 100;
+// The window is long enough now (near 3 months, ~13 bars) that a "MM/DD" label under every single
+// bar collides with its neighbours on a real phone's width. Thinning to roughly this many evenly
+// spaced labels keeps the x-axis readable without hiding any bar itself -- every week still gets a
+// bar and its own value number, just not every week gets a date underneath it.
+const MAX_VISIBLE_WEEK_LABELS = 7;
+
+// A plain-View bar chart (no SVG/chart library in this project -- adding one would need a new
+// native module and a fresh APK build, see docs/azure-classroom-deployment.md's update rules).
+// Bar height is `value / maxValue` of CHART_BAR_HEIGHT, same ratio math the admin web trend charts
+// use (backend/server.js's renderLineChart/renderBarChart), just expressed with RN View height
+// instead of an SVG/CSS percentage. `valueKey`/`formatValue` let the same chart plot either
+// orderCount or revenue off the same weeklyTrend rows (see WeeklyTrendSection below).
+function WeeklyTrendChart({ weeklyTrend, valueKey, formatValue }) {
+  const styles = useThemedStyles(makeStyles);
+  const maxValue = Math.max(1, ...weeklyTrend.map((week) => week[valueKey]));
+  const labelStride = Math.max(1, Math.ceil(weeklyTrend.length / MAX_VISIBLE_WEEK_LABELS));
+
+  return (
+    <View style={styles.chart}>
+      {weeklyTrend.map((week, index) => (
+        <View key={week.weekStart} style={styles.chartCol}>
+          <Text
+            maxFontSizeMultiplier={maxFontSizeMultiplier}
+            style={styles.chartValue}
+            numberOfLines={1}
+          >
+            {formatValue(week[valueKey])}
+          </Text>
+          <View
+            style={[styles.chartBar, { height: (week[valueKey] / maxValue) * CHART_BAR_HEIGHT }]}
+          />
+          <Text maxFontSizeMultiplier={maxFontSizeMultiplier} style={styles.chartLabel}>
+            {index % labelStride === 0 ? formatWeekLabel(week.weekStart) : ""}
+          </Text>
+        </View>
+      ))}
+    </View>
+  );
+}
+
+// Order count and revenue plot off the same weeklyTrend rows, so they share one unavailable/empty
+// guard and one fetch -- rendering two separate guarded sections (one per metric) would show the
+// same "暫時無法載入" notice twice for what is really one failed request.
+function WeeklyTrendSection({ weeklyTrend, weeklyTrendUnavailable }) {
+  const styles = useThemedStyles(makeStyles);
+  return (
+    <Section title="近期訂單與營收趨勢（近 3 個月）">
+      {weeklyTrendUnavailable ? (
+        <Notice tone="danger" message="暫時無法載入近期趨勢，請稍後再試。" />
+      ) : weeklyTrend.length === 0 ? (
+        <EmptyPanel>近期沒有訂單資料。</EmptyPanel>
+      ) : (
+        <>
+          <Text maxFontSizeMultiplier={maxFontSizeMultiplier} style={styles.chartSubLabel}>訂單數</Text>
+          <WeeklyTrendChart weeklyTrend={weeklyTrend} valueKey="orderCount" formatValue={String} />
+          <Text maxFontSizeMultiplier={maxFontSizeMultiplier} style={styles.chartSubLabel}>營收</Text>
+          <WeeklyTrendChart weeklyTrend={weeklyTrend} valueKey="revenue" formatValue={formatCurrency} />
+        </>
+      )}
+    </Section>
+  );
+}
+
+// "2026-09-07" -> "09/07"; weekStart is always that exact shape (see getStoreWeeklyTrendPostgres),
+// never parsed through Date, so this can't be thrown off by timezone.
+function formatWeekLabel(weekStart) {
+  return weekStart.slice(5).replace("-", "/");
 }
 
 const makeStyles = (colors) => StyleSheet.create({
@@ -178,6 +253,38 @@ const makeStyles = (colors) => StyleSheet.create({
   drinkCups: {
     ...typeScale.price,
     color: colors.text
+  },
+  chart: {
+    flexDirection: "row",
+    alignItems: "flex-end",
+    gap: spacing.s4,
+    height: CHART_BAR_HEIGHT + 44
+  },
+  chartCol: {
+    flex: 1,
+    alignItems: "center",
+    justifyContent: "flex-end",
+    height: "100%"
+  },
+  chartBar: {
+    width: "100%",
+    minHeight: 2,
+    borderRadius: radii.xs,
+    backgroundColor: colors.accent
+  },
+  chartValue: {
+    ...typeScale.caption,
+    color: colors.textSecondary,
+    marginBottom: spacing.s4
+  },
+  chartLabel: {
+    ...typeScale.caption,
+    color: colors.textSecondary,
+    marginTop: spacing.s4
+  },
+  chartSubLabel: {
+    ...typeScale.caption,
+    color: colors.textSecondary
   },
   note: {
     ...typeScale.caption,

@@ -16,18 +16,38 @@ const valid = () => ({
   qualifiedActivityCount: 2,
   qualifiedRate: 2 / 3,
   topDrinks: [{ name: "烏龍拿鐵", cups: 5 }, { name: "紅茶", cups: 3 }],
+  weeklyTrend: [{ weekStart: "2026-09-07", orderCount: 4, revenue: 351, discountAmount: 104 }],
 });
 
 test("normalizeMerchantStatistics keeps a valid summary and drops unknown fields", () => {
-  assert.deepEqual(normalizeMerchantStatistics({ ...valid(), extra: "x" }), valid());
+  assert.deepEqual(normalizeMerchantStatistics({ ...valid(), extra: "x" }), { ...valid(), weeklyTrendUnavailable: false });
 });
 
 test("normalizeMerchantStatistics accepts a store with no data yet", () => {
   const empty = {
     totalRevenue: 0, orderCount: 0, discountGivenTotal: 0, settledActivityCount: 0,
-    qualifiedActivityCount: 0, qualifiedRate: null, topDrinks: [],
+    qualifiedActivityCount: 0, qualifiedRate: null, topDrinks: [], weeklyTrend: [],
   };
-  assert.deepEqual(normalizeMerchantStatistics(empty), empty);
+  assert.deepEqual(normalizeMerchantStatistics(empty), { ...empty, weeklyTrendUnavailable: false });
+});
+
+test("normalizeMerchantStatistics treats a missing weeklyTrend as no trend data yet, not a failed load", () => {
+  // An older backend response (before this field existed) has no weeklyTrend key at all -- this
+  // must not blank out the otherwise-valid revenue/order/discount/qualified-rate figures; it should
+  // just show no chart, the same as a genuinely empty weeklyTrend: [] would.
+  const { weeklyTrend, ...withoutWeeklyTrend } = valid();
+  assert.deepEqual(normalizeMerchantStatistics(withoutWeeklyTrend), { ...valid(), weeklyTrend: [], weeklyTrendUnavailable: false });
+});
+
+test("normalizeMerchantStatistics treats weeklyTrend: null as the backend's trend query having failed, not as an empty store", () => {
+  // getStoreWeeklyTrend's SQL now always zero-fills every week on success, so an empty result can
+  // only mean the query threw (server.js's `.catch(() => null)`). This must still surface the rest
+  // of the store's figures -- only the trend chart itself should show as unavailable.
+  assert.deepEqual(normalizeMerchantStatistics({ ...valid(), weeklyTrend: null }), {
+    ...valid(),
+    weeklyTrend: [],
+    weeklyTrendUnavailable: true,
+  });
 });
 
 test("normalizeMerchantStatistics rejects anything that would render as NaN, negative or nonsense", () => {
@@ -52,6 +72,12 @@ test("normalizeMerchantStatistics rejects anything that would render as NaN, neg
   assert.equal(broken({ topDrinks: [{ name: "紅茶", cups: 0 }] }), null);
   assert.equal(broken({ topDrinks: [{ name: "紅茶", cups: "2" }] }), null);
   assert.equal(broken({ topDrinks: [null] }), null);
+
+  assert.equal(broken({ weeklyTrend: "x" }), null);
+  assert.equal(broken({ weeklyTrend: [{ weekStart: "", orderCount: 1, revenue: 1, discountAmount: 0 }] }), null);
+  assert.equal(broken({ weeklyTrend: [{ orderCount: 1, revenue: 1, discountAmount: 0 }] }), null);
+  assert.equal(broken({ weeklyTrend: [{ weekStart: "2026-09-07", orderCount: -1, revenue: 1, discountAmount: 0 }] }), null);
+  assert.equal(broken({ weeklyTrend: [{ weekStart: "2026-09-07", orderCount: 1, revenue: "1", discountAmount: 0 }] }), null);
 });
 
 test("formatQualifiedRate rounds to a whole percent and explains a missing rate", () => {

@@ -1,17 +1,9 @@
-:root {
-  color-scheme: dark;
-  --background: #050505;
-  --surface: #0b0b0b;
-  --surface-strong: #111111;
-  --text: #f5f5f5;
-  --muted: #a6a6a6;
-  --line: #3a3a3a;
-  --line-strong: #eeeeee;
-  --success: #8ef0b0;
-  --warning: #ffd479;
-  --error: #ff8c8c;
-  font-family: "Microsoft JhengHei", "Noto Sans TC", Arial, sans-serif;
-}
+/* No :root block here on purpose: this stylesheet is only ever loaded by /admin/dev-console (the
+   bare /dev-console URL is just a redirect into it now, not a second page that renders this CSS on
+   its own), and that route always loads backend/server.js's ADMIN_THEME_VARIABLES first, which
+   already defines every custom property (--background, --text, etc.) and the font-family this file
+   uses. Redefining the same :root here would be two copies of the same values with nothing keeping
+   them in sync -- there's now exactly one place these colors are set. */
 
 * {
   box-sizing: border-box;
@@ -24,13 +16,18 @@ body {
   color: var(--text);
 }
 
-button,
-input,
-select {
+/* Scoped to .shell (not bare element selectors) because this page's content can also be embedded
+   inside the admin backend's own sidebar shell (server.js's renderAdminPage, wrapped in its own
+   .shell div for exactly this reason) -- a bare `button, input, select` or `a` rule here would
+   otherwise also restyle the admin shell's OWN elements outside this page's content, such as the
+   sidebar's logout button, purely because this stylesheet happens to be loaded on that page too. */
+.shell button,
+.shell input,
+.shell select {
   font: inherit;
 }
 
-a {
+.shell a {
   color: var(--text);
   text-decoration: underline;
   text-underline-offset: 3px;
@@ -78,7 +75,7 @@ a {
   color: var(--warning);
 }
 
-h1 {
+.shell h1 {
   margin: 18px 0 10px;
   font-size: clamp(30px, 5vw, 44px);
   line-height: 1.1;
@@ -186,7 +183,7 @@ h1 {
   font-size: 12px;
 }
 
-h2 {
+.shell h2 {
   margin: 0;
   font-size: 24px;
   letter-spacing: -0.02em;

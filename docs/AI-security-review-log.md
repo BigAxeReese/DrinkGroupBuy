@@ -1408,4 +1408,31 @@
 
 **這次沒審查到／沒驗證到的部分**：沒有在 Azure 上實測。
 
+---
+
+## 2026-09-28 — 顧客回購／留存分析（後台）＋商家端補上趨勢長條圖
+
+**範圍**：`backend/database/repositories/adminStatisticsRepository.js` 新增的 `getCustomerRetention()`（後台，全平台彙總）；`backend/server.js` 的 `/admin/statistics` 路由（呼叫這個新函式）與 `renderAdminStatisticsBody` 新增的回購率卡片／每週回頭客佔比折線圖；`GET /api/merchant/stores/:storeId/statistics` 路由改成同時回傳既有的 `merchantStatisticsRepository.getStoreWeeklyTrend()`（這個函式先前已存在、只是這次才第一次透過商家端路由曝露出去）；`mobile/src/utils/merchantStatistics.js` 的 `normalizeWeeklyTrend` 驗證與 `mobile/src/screens/MerchantStatisticsScreen.jsx` 的長條圖畫面
+**觸發原因**：CLAUDE.md 規則自動觸發——顧客回購分析會彙總全平台顧客的下單行為，商家端趨勢圖會把既有的店家營收資料多曝露一個管道（雖然函式本身不是新的）
+**方法**：一個獨立的唯讀子任務，重點查（1）兩條回購率查詢有沒有拼接、（2）`/admin/statistics` 是否還在 `requireAdminWebUser` 之後才執行、商家路由的 `canManageStore` 檢查是否還在新加的第二個查詢之前、（3）回購率查詢有沒有不小心把個別顧客 ID／Email／姓名帶進回傳結果（這是這次最重要的檢查項目，因為主題是「顧客資料彙總」）、（4）`getStoreWeeklyTrend` 透過商家路由曝露時，店家範圍限制是否跟同檔案其他查詢一致、（5）新的 HTML 區塊有沒有漏掉既有的跳脫慣例
+
+### 發現
+
+沒有找到信心度達到門檻（8/10 以上）的漏洞。
+
+| 嚴重度 | 位置 | 問題 | 建議修法 | 狀態 |
+|--------|------|------|----------|------|
+| — | — | 這次沒有新發現 | — | — |
+
+### 沒發現問題的部分
+
+| 面向 | 檢查結果 |
+|------|----------|
+| SQL 注入 | 兩條回購率查詢都沒有字串拼接——總體回購率那條完全不帶參數，每週回頭客那條只綁寫死常數 `WEEKLY_TREND_WEEKS`（值為 8）到 `$1::int` |
+| 授權 | `/admin/statistics` 呼叫 `getCustomerRetention()` 前一樣先經過 `requireAdminWebUser`；商家統計路由的 `canManageStore` 檢查在呼叫（新增的）`Promise.all` 之前就先執行完，新加的第二個查詢沒有被誤放到授權檢查前面 |
+| 資料外洩（本次審查重點） | 逐行讀過兩條回購率 SQL 與對應的 JS 組裝程式碼：`customer_user_id` 全程只用在 `GROUP BY`／`JOIN` 當 key，最終的 `SELECT` 清單跟回傳給前端的物件都只有 `COUNT(*)` 彙總出來的數字（總顧客數、回購顧客數、每週活躍/回頭客數與比例），完全沒有任何一個顧客的 ID、Email 或姓名離開資料庫查詢的範圍 |
+| `getStoreWeeklyTrend` 透過商家路由曝露的範圍 | 這個函式沿用既有的 `SALES_ORDER_FILTER`（跟同檔案的 `getStoreStatistics` 共用同一個店家範圍界線），`storeId` 一樣是綁定參數，路由端傳進去的值就是已經通過 `canManageStore` 驗證過的那個店家 ID，沒有新的洩漏 |
+| XSS／HTML 跳脫 | 回購率卡片的 label／value 走既有 `.map(...escapeHtml...)` 那條既有管線；每週回頭客折線圖只餵進 `Math.round()` 算出來的數字百分比跟既有的 `formatAdminWeekLabel`，跟上面已經審查過的「訂單與營收趨勢」折線圖同一套寫法，沒有新的未跳脫字串 |
+| 手機端（次要） | `WeeklyTrendChart` 用 React Native `View`／`Text` 渲染，不是 HTML，沒有注入面；`normalizeWeeklyTrend` 會在資料格式不對時整包拒絕 |
+
 **這次沒審查到／沒驗證到的部分**：沒有在 Azure 上實測（這次改動沒有牽涉 migration，之後推上去部署即可生效，不需要額外資料庫操作）。

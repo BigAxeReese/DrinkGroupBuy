@@ -1,7 +1,7 @@
 [CmdletBinding()]
 param(
   [string]$RunService = "",
-  [ValidateSet("Server", "App", "Web", "Console")]
+  [ValidateSet("Server", "App", "Web")]
   [string]$LaunchTarget = "App",
   [int]$ServiceBackendPort = 3000,
   [switch]$SkipCode,
@@ -11,15 +11,8 @@ param(
 )
 
 $ErrorActionPreference = "Stop"
-$projectRoot = Split-Path -Parent $PSScriptRoot
-$mobileRoot = Join-Path $projectRoot "mobile"
-$backendEnvPath = Join-Path $projectRoot "backend\.env"
-$mobileEnvPath = Join-Path $mobileRoot ".env"
-$postgresComposeFile = Join-Path $projectRoot "database\docker-compose.postgres.yml"
+. (Join-Path $PSScriptRoot "dev-common.ps1")
 $appPackage = "com.drinkgroupbuy.prototype"
-$metroPort = 8081
-$webPort = 8083
-$postgresPort = 5432
 
 function Write-Step {
   param([string]$Message)
@@ -105,46 +98,6 @@ function Resolve-AndroidTool {
   return $null
 }
 
-function Get-EnvValue {
-  param(
-    [string]$Path,
-    [string]$Name,
-    [string]$DefaultValue
-  )
-
-  if (-not (Test-Path -LiteralPath $Path)) {
-    return $DefaultValue
-  }
-
-  $prefix = "$Name="
-  $line = Get-Content -LiteralPath $Path | Where-Object {
-    $_.TrimStart().StartsWith($prefix, [System.StringComparison]::OrdinalIgnoreCase)
-  } | Select-Object -Last 1
-  if (-not $line) {
-    return $DefaultValue
-  }
-
-  return $line.Substring($line.IndexOf("=") + 1).Trim().Trim('"').Trim("'")
-}
-
-function Test-TcpPort {
-  param([int]$Port)
-
-  $client = New-Object System.Net.Sockets.TcpClient
-  try {
-    $connect = $client.BeginConnect("127.0.0.1", $Port, $null, $null)
-    if (-not $connect.AsyncWaitHandle.WaitOne(350)) {
-      return $false
-    }
-    $client.EndConnect($connect)
-    return $true
-  } catch {
-    return $false
-  } finally {
-    $client.Close()
-  }
-}
-
 function Wait-TcpPort {
   param(
     [int]$Port,
@@ -198,13 +151,7 @@ function Ensure-LocalEnvironmentFiles {
 
   Write-Host "First-time local environment files were created:" -ForegroundColor Yellow
   $createdFiles | ForEach-Object { Write-Host "  $_" -ForegroundColor Yellow }
-  $launcherName = switch ($Target) {
-    "Server" { "01-start-server.cmd" }
-    "App" { "02-start-app.cmd" }
-    "Web" { "03-start-web.cmd" }
-    "Console" { "04-start-console.cmd" }
-  }
-  Write-Host "Configure local keys and development auth, then double-click $launcherName again." -ForegroundColor Yellow
+  Write-Host "Configure local keys and development auth, then start this target again from the dev console (01-dev-console.cmd)." -ForegroundColor Yellow
   Write-Host "See docs\local-development-launcher.md. Secrets must not be committed." -ForegroundColor Yellow
   return $false
 }
@@ -295,7 +242,7 @@ function Assert-BackendRunning {
     return
   }
 
-  throw "Backend is not running on port $Port. Double-click 01-start-server.cmd first."
+  throw "Backend is not running on port $Port. Start it from the dev console (01-dev-console.cmd) first."
 }
 
 function Start-Metro {
@@ -437,11 +384,7 @@ if (-not (Ensure-LocalEnvironmentFiles -Target $LaunchTarget)) {
 
 Ensure-NodeDependencies -Target $LaunchTarget
 
-$backendPortText = Get-EnvValue -Path $backendEnvPath -Name "PORT" -DefaultValue "3000"
-$backendPort = 0
-if (-not [int]::TryParse($backendPortText, [ref]$backendPort) -or $backendPort -lt 1 -or $backendPort -gt 65535) {
-  throw "backend/.env PORT must be a valid port number. Current value: $backendPortText"
-}
+$backendPort = Get-BackendPort -ThrowOnInvalid
 
 if ($LaunchTarget -eq "Server") {
   Ensure-PostgresDatabase
@@ -455,20 +398,6 @@ if ($LaunchTarget -eq "Server") {
 }
 
 Assert-BackendRunning -Port $backendPort
-
-if ($LaunchTarget -eq "Console") {
-  # The console used to be its own process on port 3100 (local-dev-console/); merged into the
-  # main backend under /dev-console on 2026-08-23, so this now just opens a browser tab -- no
-  # separate process to start, only the already-running backend from 01-start-server.cmd.
-  if (-not $SkipBrowser) {
-    Start-Process "http://127.0.0.1:$backendPort/dev-console" | Out-Null
-  }
-
-  Write-Host ""
-  Write-Host "DrinkGroupBuy console environment is ready." -ForegroundColor Green
-  Write-Host "Console: http://127.0.0.1:$backendPort/dev-console" -ForegroundColor Green
-  exit 0
-}
 
 if ($LaunchTarget -eq "Web") {
   Start-WebPreview -BackendPort $backendPort

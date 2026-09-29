@@ -34,6 +34,12 @@ function Invoke-Git {
   return $output
 }
 
+# Deliberately its own small copy, not dot-sourced from scripts/dev-common.ps1 (which
+# scripts/dev-console.ps1 also uses this exact same match from): this script updates the classroom
+# VM and has no other reason to depend on local-dev-console state (mobile paths, ports, etc.) --
+# pulling in the whole shared module would couple two genuinely unrelated workflows, so the small
+# duplication is kept instead. If the backend's start command ever changes, both copies need
+# updating by hand.
 function Get-BackendProcesses {
   Get-CimInstance Win32_Process -Filter "Name = 'node.exe'" |
     Where-Object { $_.CommandLine -match 'backend[\\/]server\.js' }

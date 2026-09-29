@@ -46,7 +46,7 @@ const OPTION_TYPE_LABELS = {
   topping: "加料選項"
 };
 
-export function MerchantMenuManagementScreen({ navigation, selectedMerchantStoreId }) {
+export function MerchantMenuManagementScreen({ selectedMerchantStoreId }) {
   const styles = useThemedStyles(makeStyles);
   const [menu, setMenu] = useState(null);
   const [loading, setLoading] = useState(true);
@@ -205,9 +205,8 @@ export function MerchantMenuManagementScreen({ navigation, selectedMerchantStore
   return (
     <>
     <MobileScreen
-      title="菜單管理"
+      title="菜單"
       subtitle={menu?.store?.name || selectedMerchantStoreId}
-      onBack={() => navigation.goBack()}
       headerRight={(
         <Pressable
           accessibilityRole="button"

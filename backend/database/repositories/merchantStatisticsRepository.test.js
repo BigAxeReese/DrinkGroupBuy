@@ -107,12 +107,42 @@ test("weekly trend is scoped to the given store, buckets in Asia/Taipei time, an
 
   const trendQuery = fake.queries.find((query) => query.statement.includes("date_trunc('week'"));
   assert.equal(trendQuery.parameters[0], injected);
-  assert.equal(trendQuery.parameters[1], 8);
+  assert.equal(trendQuery.parameters[1], 13);
   assert.match(trendQuery.statement, /activity\.store_id = \$1/);
   assert.match(trendQuery.statement, /AND orders\.payment_status = 'captured'/);
   assert.match(trendQuery.statement, /AT TIME ZONE 'Asia\/Taipei'/);
-  assert.match(trendQuery.statement, /submitted_at >= now\(\) - make_interval\(weeks => \$2::int\)/);
+  assert.match(trendQuery.statement, /generate_series\(/);
+  assert.match(trendQuery.statement, /LEFT JOIN order_data ON order_data\.week_start = week_series\.week_start/);
   assert.ok(!trendQuery.statement.includes("OR '1'='1"), "the store id must never be interpolated into SQL");
+
+  // The WHERE-clause window boundary compares orders.submitted_at (timestamptz) straight against
+  // now() (also timestamptz) -- never against something derived from "AT TIME ZONE 'Asia/Taipei'",
+  // which produces a naive timestamp. Comparing a naive timestamp to a timestamptz column makes
+  // Postgres cast it back using the session's own timezone (UTC on Azure, not Taipei), silently
+  // shifting this boundary by 8 hours and dropping real orders from the oldest week in the window.
+  assert.match(trendQuery.statement, /AND orders\.submitted_at >= now\(\) - make_interval\(weeks => \$2::int\)/);
+  assert.ok(
+    !/submitted_at\s*>=\s*date_trunc/.test(trendQuery.statement),
+    "the WHERE boundary must not compare submitted_at (timestamptz) to an AT TIME ZONE-derived (naive) value",
+  );
+});
+
+test("weekly trend fills in every week of the window, not just weeks that had orders", async () => {
+  const fake = createFakeDatabase({
+    sales: [], activities: [], drinks: [],
+    weeklyTrend: [
+      { week_start: "2026-08-03", order_count: "0", revenue: "0", discount_amount: "0" },
+      { week_start: "2026-08-10", order_count: "0", revenue: "0", discount_amount: "0" },
+      { week_start: "2026-08-17", order_count: "3", revenue: "150", discount_amount: "20" },
+    ],
+  });
+  const trend = await createMerchantStatisticsRepository({ database: fake.database }).getStoreWeeklyTrend("store-001");
+
+  // The fake DB just echoes back whatever rows are given -- the point of this test is that the real
+  // SQL (asserted above) generates a full week_series and LEFT JOINs onto it, so zero-order weeks
+  // like 08/03 and 08/10 come back as real rows instead of being silently absent from the array.
+  assert.deepEqual(trend.map((week) => week.weekStart), ["2026-08-03", "2026-08-10", "2026-08-17"]);
+  assert.deepEqual(trend.map((week) => week.orderCount), [0, 0, 3]);
 });
 
 test("a store with no sales gets zeros and no success rate instead of NaN or an error", async () => {

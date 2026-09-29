@@ -4,7 +4,9 @@ const test = require("node:test");
 const assert = require("node:assert/strict");
 const { createAdminStatisticsRepository } = require("./adminStatisticsRepository");
 
-function createFakeDatabase({ weeklyTrend = [], peakHours = [] } = {}) {
+// retentionWeekly's query also contains "date_trunc('week'" (same as weeklyTrend's), so it must be
+// checked first via its own unique "first_week" CTE name.
+function createFakeDatabase({ weeklyTrend = [], peakHours = [], retentionOverall = [], retentionWeekly = [] } = {}) {
   const queries = [];
   return {
     queries,
@@ -13,6 +15,8 @@ function createFakeDatabase({ weeklyTrend = [], peakHours = [] } = {}) {
         const statement = String(sql).replace(/\s+/g, " ").trim();
         queries.push({ statement, parameters });
         if (statement.includes("EXTRACT(HOUR FROM submitted_at")) return { rows: peakHours };
+        if (statement.includes("repeat_customers")) return { rows: retentionOverall };
+        if (statement.includes("first_week")) return { rows: retentionWeekly };
         if (statement.includes("date_trunc('week'")) return { rows: weeklyTrend };
         throw new Error(`Unexpected SQL: ${statement}`);
       },
@@ -72,4 +76,64 @@ test("peak hours query counts every order regardless of status, unlike the reven
   assert.match(query.statement, /AT TIME ZONE 'Asia\/Taipei'/);
   assert.ok(!query.statement.includes("payment_status"), "peak hours must not filter by payment status");
   assert.ok(!query.statement.includes("WHERE"), "peak hours must not filter out any order");
+});
+
+test("customer retention combines the overall repeat rate with the weekly returning-rate series", async () => {
+  const fake = createFakeDatabase({
+    retentionOverall: [{ total_customers: "20", repeat_customers: "5" }],
+    retentionWeekly: [
+      { week_start: "2026-09-07", active_customer_count: "10", returning_customer_count: "4" },
+      { week_start: "2026-09-14", active_customer_count: "6", returning_customer_count: "6" },
+    ],
+  });
+  const retention = await createAdminStatisticsRepository({ database: fake.database }).getCustomerRetention();
+
+  assert.deepEqual(retention, {
+    repeatPurchaseRate: 0.25,
+    totalCustomers: 20,
+    repeatCustomers: 5,
+    weeklyReturning: [
+      { weekStart: "2026-09-07", activeCustomerCount: 10, returningCustomerCount: 4, returningRate: 0.4 },
+      { weekStart: "2026-09-14", activeCustomerCount: 6, returningCustomerCount: 6, returningRate: 1 },
+    ],
+  });
+});
+
+test("customer retention returns null (not NaN) for the overall rate when nobody has ordered yet", async () => {
+  const fake = createFakeDatabase({ retentionOverall: [{ total_customers: "0", repeat_customers: "0" }] });
+  const retention = await createAdminStatisticsRepository({ database: fake.database }).getCustomerRetention();
+  assert.equal(retention.repeatPurchaseRate, null);
+  assert.deepEqual(retention.weeklyReturning, []);
+});
+
+test("customer retention's weekly query uses the same captured/non-cancelled order filter as every other statistic, and only windows the final grouping (not first_week)", async () => {
+  const fake = createFakeDatabase({ retentionOverall: [{ total_customers: "0", repeat_customers: "0" }] });
+  await createAdminStatisticsRepository({ database: fake.database }).getCustomerRetention();
+
+  const overallQuery = fake.queries.find((query) => query.statement.includes("repeat_customers"));
+  const weeklyQuery = fake.queries.find((query) => query.statement.includes("first_week"));
+
+  assert.match(overallQuery.statement, /payment_status = 'captured' AND status <> 'cancelled'/);
+  assert.match(weeklyQuery.statement, /AT TIME ZONE 'Asia\/Taipei'/);
+  assert.match(weeklyQuery.statement, /payment_status = 'captured' AND status <> 'cancelled'/);
+  // Same window expression as getWeeklyTrendPostgres (backend/server.js's other "近 8 週" chart), not
+  // a calendar-aligned one -- so both charts on the admin statistics page cover the same set of weeks.
+  assert.deepEqual(weeklyQuery.parameters, [8]);
+  assert.match(weeklyQuery.statement, /submitted_at >= now\(\) - make_interval\(weeks => \$1::int\)/);
+  // Guards the same bug class merchantStatisticsRepository.js's getStoreWeeklyTrendPostgres was fixed
+  // for: comparing submitted_at (timestamptz) against something derived from AT TIME ZONE (a naive
+  // timestamp) makes Postgres cast it back using the session's own timezone, not Asia/Taipei, silently
+  // shifting this boundary by hours and dropping real orders near the edge of the window.
+  assert.ok(
+    !/submitted_at\s*>=\s*date_trunc/.test(weeklyQuery.statement),
+    "the trailing-window filter must not compare submitted_at (timestamptz) to an AT TIME ZONE-derived (naive) value",
+  );
+
+  // first_week is a window function (MIN(...) OVER (PARTITION BY customer_user_id)) computed inside
+  // qualifying_orders, which itself has no trailing-weeks filter -- only WHERE payment_status/status.
+  // The trailing-window filter above is the CTE's own outer SELECT, applied AFTER first_week is
+  // already computed from the customer's full history, not before.
+  const qualifyingOrdersCte = weeklyQuery.statement.match(/qualifying_orders AS \( (.*?) \)\s*SELECT/)[1];
+  assert.match(qualifyingOrdersCte, /MIN\(.*\) OVER \(PARTITION BY customer_user_id\) AS first_week/);
+  assert.ok(!qualifyingOrdersCte.includes("make_interval"), "qualifying_orders (and so first_week) must not be windowed to the trailing weeks");
 });

@@ -2,18 +2,13 @@
 
 ## Windows 快速啟動
 
-完成一次性環境設定後，依需求在專案根目錄雙擊：
+完成一次性環境設定後，在專案根目錄雙擊：
 
 ```text
-01-start-server.cmd    先啟動共用 Backend 伺服器
-02-start-app.cmd       再啟動 Metro、Android 模擬器與 App
-03-start-web.cmd       或啟動 App 的網頁預覽版
-04-start-console.cmd   或啟動本機控制台與控制台網頁
+01-dev-console.cmd
 ```
 
-先執行 `01`，再依需求執行 `02`、`03`、`04`，也可同時執行需要的畫面。四個入口責任分開，並使用目前 clone 的相對路徑，因此可隨專案同步到 GitHub。詳細設定與常見問題請查看 [`docs/local-development-launcher.md`](./docs/local-development-launcher.md)。
-
-`local-dev-console/` 仍是本機專用、不同步 Git；沒有該資料夾時，`04-start-console.cmd` 會提示無法啟動，但不影響伺服器、App 與網頁預覽版。
+會開啟「開發控制台」視窗，列出 PostgreSQL 資料庫、後端伺服器、App 預覽（Metro）、網頁預覽四項的狀態，並提供啟動／停止按鈕；先啟動後端伺服器，App 與網頁預覽才能跟著啟動。使用目前 clone 的相對路徑，因此可隨專案同步到 GitHub。詳細設定與常見問題請查看 [`docs/local-development-launcher.md`](./docs/local-development-launcher.md)。
 
 ## 開發流程與規則
 

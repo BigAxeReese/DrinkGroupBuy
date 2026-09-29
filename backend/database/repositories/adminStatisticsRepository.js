@@ -22,6 +22,7 @@ function createAdminStatisticsRepository(input = {}) {
     getBasicStatistics: () => getBasicStatisticsPostgres(database),
     getWeeklyTrend: () => getWeeklyTrendPostgres(database),
     getPeakHours: () => getPeakHoursPostgres(database),
+    getCustomerRetention: () => getCustomerRetentionPostgres(database),
     close: async () => {
       if (ownsDatabase) await database.close();
     },
@@ -131,6 +132,76 @@ async function getPeakHoursPostgres(database) {
 
   const countByHour = new Map(result.rows.map((row) => [Number(row.hour_of_day), Number(row.order_count)]));
   return Array.from({ length: 24 }, (_, hour) => ({ hour, orderCount: countByHour.get(hour) ?? 0 }));
+}
+
+// "Repeat purchase" and "returning" both mean the same thing here: a customer with more than one
+// qualifying order. This is DELIBERATELY a stricter filter than getBasicStatisticsPostgres's
+// captured_orders / getWeeklyTrendPostgres's order_count above (payment_status = 'captured' only,
+// no status exclusion) -- a retention metric about "did this customer actually come back" shouldn't
+// count a visit whose activity was later cancelled, even though the platform-wide revenue/order
+// counts above intentionally do still count it as a captured order for those different questions.
+const QUALIFYING_RETENTION_ORDER_FILTER = "payment_status = 'captured' AND status <> 'cancelled'";
+
+async function getCustomerRetentionPostgres(database) {
+  const [overallResult, weeklyResult] = await Promise.all([
+    database.query(`
+      SELECT
+        COUNT(*) AS total_customers,
+        COUNT(*) FILTER (WHERE order_count >= 2) AS repeat_customers
+      FROM (
+        SELECT customer_user_id, COUNT(*) AS order_count
+        FROM orders
+        WHERE ${QUALIFYING_RETENTION_ORDER_FILTER}
+        GROUP BY customer_user_id
+      ) per_customer
+    `),
+    // first_week is a window function over the customer's FULL order history (every qualifying row,
+    // unfiltered by the trailing-weeks window below) -- a customer whose first order was months ago
+    // and who reappears this week must count as returning, not new. Only the outer WHERE windows the
+    // final rows, after first_week is already computed. That outer WHERE deliberately matches
+    // getWeeklyTrendPostgres's own submitted_at-based window (not a calendar-aligned one) so the two
+    // "近 8 週" charts on the admin statistics page cover the exact same set of weeks.
+    database.query(`
+      WITH qualifying_orders AS (
+        SELECT
+          customer_user_id,
+          submitted_at,
+          date_trunc('week', submitted_at AT TIME ZONE 'Asia/Taipei') AS week_start,
+          MIN(date_trunc('week', submitted_at AT TIME ZONE 'Asia/Taipei'))
+            OVER (PARTITION BY customer_user_id) AS first_week
+        FROM orders
+        WHERE ${QUALIFYING_RETENTION_ORDER_FILTER}
+      )
+      SELECT
+        to_char(week_start, 'YYYY-MM-DD') AS week_start,
+        COUNT(DISTINCT customer_user_id) AS active_customer_count,
+        COUNT(DISTINCT customer_user_id) FILTER (WHERE week_start > first_week) AS returning_customer_count
+      FROM qualifying_orders
+      WHERE submitted_at >= now() - make_interval(weeks => $1::int)
+      GROUP BY week_start
+      ORDER BY week_start
+    `, [WEEKLY_TREND_WEEKS]),
+  ]);
+
+  const overallRow = overallResult.rows[0];
+  const totalCustomers = Number(overallRow.total_customers);
+  const repeatCustomers = Number(overallRow.repeat_customers);
+
+  return {
+    repeatPurchaseRate: totalCustomers > 0 ? repeatCustomers / totalCustomers : null,
+    totalCustomers,
+    repeatCustomers,
+    weeklyReturning: weeklyResult.rows.map((row) => {
+      const activeCustomerCount = Number(row.active_customer_count);
+      const returningCustomerCount = Number(row.returning_customer_count);
+      return {
+        weekStart: row.week_start,
+        activeCustomerCount,
+        returningCustomerCount,
+        returningRate: returningCustomerCount / activeCustomerCount,
+      };
+    }),
+  };
 }
 
 module.exports = {

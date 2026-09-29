@@ -14,7 +14,9 @@ const TAB_INFO = {
   OrdersTab: { label: "我的訂單" },
   ProfileTab: { label: "個人中心" },
   MerchantDashboardTab: { label: "首頁" },
-  MerchantCreateTab: { label: "開團" }
+  MerchantCreateTab: { label: "開團" },
+  MerchantMenuTab: { label: "菜單" },
+  MerchantStatisticsTab: { label: "分析" }
 };
 
 // react-navigation's own tabBar prop shape ({ state, descriptors, navigation }); passed as

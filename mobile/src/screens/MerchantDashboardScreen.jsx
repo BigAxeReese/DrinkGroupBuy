@@ -202,18 +202,7 @@ export function MerchantDashboardScreen({ navigation, route, appState, actions, 
   }
 
   return (
-    <MobileScreen
-      title=""
-      headerRight={(
-        <Pressable
-          accessibilityRole="button"
-          onPress={confirmLogout}
-          style={({ pressed }) => [styles.logoutButton, pressed && styles.pressed]}
-        >
-          <Text style={styles.logoutButtonText}>登出</Text>
-        </Pressable>
-      )}
-    >
+    <MobileScreen title="">
       <View style={styles.hero}>
         <View style={styles.heroTop}>
           <View style={styles.storeAvatar}>
@@ -223,6 +212,13 @@ export function MerchantDashboardScreen({ navigation, route, appState, actions, 
             <Text style={styles.storeName}>{merchantStore?.name ?? "我的店家"}</Text>
             <Text style={styles.storeSubtitle}>商家首頁</Text>
           </View>
+          <Pressable
+            accessibilityRole="button"
+            onPress={confirmLogout}
+            style={({ pressed }) => [styles.logoutButton, pressed && styles.pressed]}
+          >
+            <Text style={styles.logoutButtonText}>登出</Text>
+          </Pressable>
         </View>
         <View style={styles.metricRow}>
           <MetricCard label="進行中活動" value={activeGroupBuyActivities.length} />
@@ -235,12 +231,6 @@ export function MerchantDashboardScreen({ navigation, route, appState, actions, 
         <Text style={styles.sectionTitle}>{tab === "active" ? "進行中的團購" : "歷史訂單"}</Text>
         {tab === "active" ? (
           <View style={styles.headerActions}>
-            <Pressable accessibilityRole="button" onPress={() => navigation.push("merchantStatistics")}>
-              <Text style={styles.createLink}>營運統計</Text>
-            </Pressable>
-            <Pressable accessibilityRole="button" onPress={() => navigation.push("merchantMenu")}>
-              <Text style={styles.createLink}>管理菜單</Text>
-            </Pressable>
             <Pressable accessibilityRole="button" onPress={() => navigation.push("merchantRefundRequests")}>
               <Text style={styles.createLink}>退款申請</Text>
             </Pressable>

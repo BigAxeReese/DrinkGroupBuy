@@ -3,7 +3,12 @@
 const { createRuntimeDatabaseAdapter } = require("..");
 
 const TOP_DRINKS_LIMIT = 3;
-const WEEKLY_TREND_WEEKS = 8;
+// ~3 calendar months. Deliberately its own constant, not shared with adminStatisticsRepository.js's
+// platform-wide WEEKLY_TREND_WEEKS (=8) -- this window backs both the merchant's own trend chart and
+// the admin per-store drill-down that reuses this same query, neither of which sits next to the
+// platform-wide admin chart, so there's no "two windows on one page" consistency requirement forcing
+// them to match (see adminStatisticsRepository.js's own comment on why ITS two charts must match).
+const WEEKLY_TREND_WEEKS = 13;
 
 // The orders that count as this store's sales -- one definition shared by every figure below so the
 // revenue, discount and top-drinks numbers always describe the same set of orders:
@@ -86,25 +91,53 @@ async function getStoreStatisticsPostgres(database, storeId) {
   };
 }
 
-// One row per calendar week (Monday start, Asia/Taipei) over the trailing WEEKLY_TREND_WEEKS
-// weeks, for just this store -- same SALES_ORDER_FILTER as the figures above, so "which orders
-// count" never drifts between the store's headline numbers and its trend. Like the platform-wide
-// admin trend, revenue/discount here are not refund-adjusted (a per-week refund allocation is
-// ambiguous -- a refund can land in a different week than the original order); only the
-// point-in-time getStoreStatistics total subtracts refunds.
+// One row per calendar week (Monday start, Asia/Taipei) over the trailing WEEKLY_TREND_WEEKS weeks,
+// for just this store -- same SALES_ORDER_FILTER as the figures above, so "which orders count" never
+// drifts between the store's headline numbers and its trend. week_series generates every week in the
+// window up front and LEFT JOINs the real orders onto it, so a week with zero orders still comes back
+// as a zero-value row instead of being silently absent -- a chart drawing "one bar per week" needs an
+// actual row per week, not just per week that happened to have activity, or slow weeks disappear from
+// the x-axis entirely instead of showing as a short bar. Revenue/discount here are not refund-adjusted
+// (a per-week refund allocation is ambiguous -- a refund can land in a different week than the
+// original order); only the point-in-time getStoreStatistics total subtracts refunds.
 async function getStoreWeeklyTrendPostgres(database, storeId) {
   const result = await database.query(`
+    WITH week_series AS (
+      SELECT generate_series(
+        date_trunc('week', now() AT TIME ZONE 'Asia/Taipei') - make_interval(weeks => $2::int - 1),
+        date_trunc('week', now() AT TIME ZONE 'Asia/Taipei'),
+        interval '1 week'
+      ) AS week_start
+    ),
+    order_data AS (
+      SELECT
+        date_trunc('week', orders.submitted_at AT TIME ZONE 'Asia/Taipei') AS week_start,
+        COUNT(*) AS order_count,
+        COALESCE(SUM(orders.final_amount), 0) AS revenue,
+        COALESCE(SUM(orders.original_amount - orders.final_amount), 0) AS discount_amount
+      FROM orders
+      JOIN group_buy_activities activity ON activity.id = orders.activity_id
+      WHERE ${SALES_ORDER_FILTER}
+        -- Deliberately NOT "date_trunc('week', now() AT TIME ZONE 'Asia/Taipei') - make_interval(...)"
+        -- here: that expression is a naive timestamp (AT TIME ZONE strips the zone), and comparing a
+        -- naive timestamp to submitted_at (timestamptz) makes Postgres cast it back using the
+        -- session's own timezone (UTC on Azure), not Asia/Taipei -- silently shifting the boundary by
+        -- the UTC+8 offset and dropping real orders from the oldest week. Comparing two timestamptz
+        -- values instead (like adminStatisticsRepository.js's getWeeklyTrendPostgres/getCustomerRetentionPostgres
+        -- already do) has no such ambiguity; using the full week count here (not $2 - 1) makes this
+        -- boundary a few days earlier than week_series' own earliest row needs, which is fine since
+        -- order_data rows that fall outside week_series just don't match anything in the LEFT JOIN below.
+        AND orders.submitted_at >= now() - make_interval(weeks => $2::int)
+      GROUP BY 1
+    )
     SELECT
-      to_char(date_trunc('week', orders.submitted_at AT TIME ZONE 'Asia/Taipei'), 'YYYY-MM-DD') AS week_start,
-      COUNT(*) AS order_count,
-      COALESCE(SUM(orders.final_amount), 0) AS revenue,
-      COALESCE(SUM(orders.original_amount - orders.final_amount), 0) AS discount_amount
-    FROM orders
-    JOIN group_buy_activities activity ON activity.id = orders.activity_id
-    WHERE ${SALES_ORDER_FILTER}
-      AND orders.submitted_at >= now() - make_interval(weeks => $2::int)
-    GROUP BY 1
-    ORDER BY 1
+      to_char(week_series.week_start, 'YYYY-MM-DD') AS week_start,
+      COALESCE(order_data.order_count, 0) AS order_count,
+      COALESCE(order_data.revenue, 0) AS revenue,
+      COALESCE(order_data.discount_amount, 0) AS discount_amount
+    FROM week_series
+    LEFT JOIN order_data ON order_data.week_start = week_series.week_start
+    ORDER BY week_series.week_start
   `, [storeId, WEEKLY_TREND_WEEKS]);
 
   return result.rows.map((row) => ({

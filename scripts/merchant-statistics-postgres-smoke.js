@@ -31,6 +31,30 @@ function currentTaipeiWeekStart() {
 }
 const targetWeekStart = currentTaipeiWeekStart();
 
+// getStoreWeeklyTrend now zero-fills every week in its window (see its own comment), so the expected
+// array for every store below is this same 13-week series with only the target week's numbers
+// differing per store -- not just a single-row or empty array like before that fill-in existed.
+const WEEKLY_TREND_WEEKS = 13;
+function weekSeriesEndingAt(weekStartString, count) {
+  const [year, month, day] = weekStartString.split("-").map(Number);
+  const base = new Date(Date.UTC(year, month - 1, day));
+  const series = [];
+  for (let weeksAgo = count - 1; weeksAgo >= 0; weeksAgo--) {
+    const date = new Date(base);
+    date.setUTCDate(date.getUTCDate() - weeksAgo * 7);
+    series.push(date.toISOString().slice(0, 10));
+  }
+  return series;
+}
+const expectedWeekSeries = weekSeriesEndingAt(targetWeekStart, WEEKLY_TREND_WEEKS);
+function buildExpectedWeeklyTrend(targetWeekFigures) {
+  return expectedWeekSeries.map((weekStart) => (
+    weekStart === targetWeekStart
+      ? { weekStart, ...targetWeekFigures }
+      : { weekStart, orderCount: 0, revenue: 0, discountAmount: 0 }
+  ));
+}
+
 // One activity per order (unique index: one non-cancelled order per activity and customer).
 // items: [name, quantity, unit price]. `refunds` are payment_refunds rows recorded against the order.
 const orders = [
@@ -101,13 +125,18 @@ async function main() {
     // Weekly trend is not refund-adjusted (see getStoreWeeklyTrendPostgres's own comment), so target's
     // revenue here (421) differs from expectedTarget.totalRevenue (376, which subtracts the 45 in
     // refunds); the order count and discount total are the same set of orders either way.
-    assert.deepEqual(await repository.getStoreWeeklyTrend(STORES.target), [
-      { weekStart: targetWeekStart, orderCount: 5, revenue: 421, discountAmount: 114 },
-    ]);
-    assert.deepEqual(await repository.getStoreWeeklyTrend(STORES.other), [
-      { weekStart: targetWeekStart, orderCount: 1, revenue: 2500, discountAmount: 500 },
-    ]);
-    assert.deepEqual(await repository.getStoreWeeklyTrend(STORES.empty), []);
+    assert.deepEqual(
+      await repository.getStoreWeeklyTrend(STORES.target),
+      buildExpectedWeeklyTrend({ orderCount: 5, revenue: 421, discountAmount: 114 }),
+    );
+    assert.deepEqual(
+      await repository.getStoreWeeklyTrend(STORES.other),
+      buildExpectedWeeklyTrend({ orderCount: 1, revenue: 2500, discountAmount: 500 }),
+    );
+    assert.deepEqual(
+      await repository.getStoreWeeklyTrend(STORES.empty),
+      buildExpectedWeeklyTrend({ orderCount: 0, revenue: 0, discountAmount: 0 }),
+    );
 
     console.log("PostgreSQL merchant statistics proof passed.");
   } finally {

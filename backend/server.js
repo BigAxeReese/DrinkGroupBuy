@@ -1136,9 +1136,25 @@ const server = http.createServer(async (request, response) => {
       if (!authUser.roles.includes("merchant") || !canManageStore(authUser, merchantStatisticsMatch[1])) {
         return sendJson(response, 403, { error: "Store access denied" });
       }
-      sendJson(response, 200, {
-        statistics: await merchantStatisticsRepository.getStoreStatistics(merchantStatisticsMatch[1])
-      });
+      // getStoreStatistics is the core figures this endpoint exists for; getStoreWeeklyTrend is the
+      // newer, secondary trend chart. A transient failure in just the trend query shouldn't also
+      // fail the core statistics that used to be this endpoint's only dependency -- degrade to a
+      // missing trend (mobile's normalizeMerchantStatistics sets weeklyTrendUnavailable, and
+      // MerchantStatisticsScreen shows that as its own distinct notice) instead of failing the whole
+      // response.
+      const [statistics, weeklyTrend] = await Promise.all([
+        merchantStatisticsRepository.getStoreStatistics(merchantStatisticsMatch[1]),
+        // null (not []) on failure: getStoreWeeklyTrend now always returns a full zero-filled array
+        // on success, so an empty result can only mean "the query failed" -- catching to [] here
+        // would make that failure indistinguishable from a store that genuinely has no orders yet.
+        // The mobile client (mobile/src/utils/merchantStatistics.js) treats null as "couldn't load
+        // trend" and shows that distinctly, while still rendering the rest of this store's figures.
+        merchantStatisticsRepository.getStoreWeeklyTrend(merchantStatisticsMatch[1]).catch((error) => {
+          console.error("getStoreWeeklyTrend failed:", error.message);
+          return null;
+        }),
+      ]);
+      sendJson(response, 200, { statistics: { ...statistics, weeklyTrend } });
       return;
     }
 
@@ -1953,7 +1969,7 @@ const server = http.createServer(async (request, response) => {
     // same /admin login, not just loopback. The two app-facing routes below are the exception:
     // the mobile app itself calls them directly (no browser, no admin session) to simulate
     // location during dev testing, so they stay reachable on the loopback+dev-mode gate alone.
-    if (url.pathname === "/dev-console" || url.pathname.startsWith("/dev-console/")) {
+    if (url.pathname === "/dev-console" || url.pathname.startsWith("/dev-console/") || url.pathname === "/admin/dev-console") {
       if (!isDevAuthModeEnabled() || !isLoopbackRequest(request)) {
         sendJson(response, 404, { error: "Not found" });
         return;
@@ -1966,8 +1982,30 @@ const server = http.createServer(async (request, response) => {
         if (!adminUser) return;
       }
 
+      // This is the one real page for the console -- rendered inside the admin sidebar shell so
+      // clicking the sidebar link behaves like every other admin page (content changes on the
+      // right, sidebar stays). Wrapped in a "shell" div so devConsole/public/styles.css's
+      // page-scoped rules (.shell a, .shell h1, etc.) apply to this content without also
+      // restyling the admin shell's own elements (the sidebar, its own page-title) that this
+      // content now shares a document with.
+      if (request.method === "GET" && url.pathname === "/admin/dev-console") {
+        sendHtml(response, 200, renderAdminPage({
+          title: "本機測試控制台",
+          bodyHtml: `<div class="shell">${renderDevConsoleBody()}</div>`,
+          activeNav: "devConsole",
+        }));
+        return;
+      }
+
+      // /dev-console itself used to be a full standalone page (its own <html>, no admin sidebar);
+      // now that both routes require the exact same login (the comment above), keeping two
+      // separately-maintained copies of this page's outer chrome had nothing left protecting it
+      // from drifting out of sync with each other, so a plain redirect replaces it -- any old
+      // bookmark or direct link still lands on the one real page instead of a second, easy-to-forget
+      // copy of it.
       if (request.method === "GET" && (url.pathname === "/dev-console" || url.pathname === "/dev-console/")) {
-        sendHtml(response, 200, await fs.readFile(path.join(__dirname, "devConsole", "public", "index.html"), "utf8"));
+        response.writeHead(302, { Location: "/admin/dev-console" });
+        response.end();
         return;
       }
       if (request.method === "GET" && url.pathname === "/dev-console/styles.css") {
@@ -2274,12 +2312,40 @@ const server = http.createServer(async (request, response) => {
       const adminUser = await requireAdminWebUser(request, response);
       if (!adminUser) return;
 
-      const [statistics, weeklyTrend, peakHours] = await Promise.all([
+      // getBasicStatistics is the page's core content, so a failure there still fails the whole
+      // request like before -- but the other three are each their own section further down the
+      // page, and a query-specific failure in just one of them (e.g. the retention CTEs) shouldn't
+      // take basic stats, top stores, and the other two sections down with it. Each fallback matches
+      // the shape its section renders as "no data" on success -- but since a fallback is now
+      // indistinguishable from genuine emptiness by shape alone, each catch also records which
+      // query actually failed, so renderAdminStatisticsBody can show "查詢失敗" instead of quietly
+      // implying the platform just had zero activity (the same distinction the merchant-facing
+      // getStoreWeeklyTrend fault-isolation above already makes via weeklyTrendUnavailable).
+      const failedQueries = [];
+      const [statistics, weeklyTrend, peakHours, retention] = await Promise.all([
         adminStatisticsRepository.getBasicStatistics(),
-        adminStatisticsRepository.getWeeklyTrend(),
-        adminStatisticsRepository.getPeakHours(),
+        adminStatisticsRepository.getWeeklyTrend().catch((error) => {
+          console.error("admin getWeeklyTrend failed:", error.message);
+          failedQueries.push("weeklyTrend");
+          return [];
+        }),
+        adminStatisticsRepository.getPeakHours().catch((error) => {
+          console.error("admin getPeakHours failed:", error.message);
+          failedQueries.push("peakHours");
+          return Array.from({ length: 24 }, (_, hour) => ({ hour, orderCount: 0 }));
+        }),
+        adminStatisticsRepository.getCustomerRetention().catch((error) => {
+          console.error("admin getCustomerRetention failed:", error.message);
+          failedQueries.push("retention");
+          return { repeatPurchaseRate: null, totalCustomers: 0, repeatCustomers: 0, weeklyReturning: [] };
+        }),
       ]);
-      const bodyHtml = renderAdminStatisticsBody({ ...statistics, weeklyTrend, peakHours });
+      const bodyHtml = renderAdminStatisticsBody({
+        ...statistics, weeklyTrend, peakHours, retention,
+        weeklyTrendFailed: failedQueries.includes("weeklyTrend"),
+        peakHoursFailed: failedQueries.includes("peakHours"),
+        retentionFailed: failedQueries.includes("retention"),
+      });
       sendHtml(response, 200, renderAdminPage({ title: "數據統計", bodyHtml, activeNav: "statistics" }));
       return;
     }
@@ -3088,9 +3154,11 @@ async function handleAdminMerchantApplicationDecision(response, { serviceFn, adm
   }
 }
 
-// Shared with backend/devConsole/public/styles.css's :root block -- same dark theme, same
-// tokens, so /admin and /dev-console (now cross-linked in the same nav) look like one tool
-// instead of two visually unrelated pages glued together.
+// Also the color source for backend/devConsole/public/styles.css (see its own comment) -- that
+// stylesheet deliberately has no :root of its own and relies on this block instead, since it's
+// only ever loaded by /admin/dev-console, which always renders this block first. One definition,
+// so /admin and the dev console (now the same tool, not two visually unrelated pages glued
+// together) can't drift into different themes.
 const ADMIN_THEME_VARIABLES = `
   :root {
     color-scheme: dark;
@@ -3130,6 +3198,13 @@ function renderAdminPage({ title, bodyHtml, activeNav }) {
     { key: "refunds", href: "/admin/refund-requests", label: "退款審核", icon: ADMIN_ICON_REFUND },
     { key: "merchantApplications", href: "/admin/merchant-applications", label: "商家申請審核", icon: ADMIN_ICON_STORE },
     { key: "accounts", href: "/admin/accounts", label: "帳號角色", icon: ADMIN_ICON_ACCOUNTS },
+    // Same isDevAuthModeEnabled() gate the footer link used before -- /dev-console itself is DEV
+    // ONLY (also loopback-restricted, checked separately by that route), so this entry stays out of
+    // the sidebar entirely on a real deployment instead of linking to a page that would just refuse
+    // the request.
+    ...(isDevAuthModeEnabled()
+      ? [{ key: "devConsole", href: "/admin/dev-console", label: "本機測試控制台", icon: ADMIN_ICON_CONSOLE }]
+      : []),
   ].map((link) => `
     <a class="${sidebarLinkClass(link.key)}" href="${link.href}">${link.icon}<span>${link.label}</span></a>`).join("\n");
 
@@ -3179,14 +3254,15 @@ ${ADMIN_THEME_VARIABLES}
   button:disabled { opacity: 0.45; cursor: not-allowed; }
   section.empty { color: var(--muted); font-size: 13px; padding: 10px 0; }
   h3.section-title { font-size: 13px; color: var(--muted); margin: 22px 0 8px; }
-  .dashboard-columns { display: grid; grid-template-columns: 1fr 1fr; gap: 24px; align-items: start; }
-  .dashboard-columns h3.section-title { margin-top: 0; }
-  @media (max-width: 720px) { .dashboard-columns { grid-template-columns: 1fr; } }
+  h3.section-title.chart-title { font-size: 16px; color: var(--text); font-weight: 700; }
+  .two-col-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 24px; align-items: start; }
+  .two-col-grid h3.section-title { margin-top: 0; }
+  @media (max-width: 720px) { .two-col-grid { grid-template-columns: 1fr; } }
   .stat-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); gap: 12px; margin-bottom: 24px; }
   .stat-card { background: var(--surface); border: 1px solid var(--line); border-radius: var(--radius); padding: 14px 16px; }
   .stat-card .stat-value { font-size: 24px; font-weight: 700; }
   .stat-card .stat-label { font-size: 12px; color: var(--muted); margin-top: 4px; }
-  table.stats-table { width: 100%; border-collapse: collapse; }
+  table.stats-table { width: 100%; border-collapse: collapse; margin-bottom: 20px; }
   table.stats-table th, table.stats-table td { text-align: left; padding: 8px 10px; border-bottom: 1px solid var(--line); font-size: 13px; }
   table.stats-table th { color: var(--muted); font-weight: 700; position: sticky; top: 0; background: var(--background); z-index: 1; }
   table.stats-table td a { color: var(--text); font-weight: 700; text-decoration: none; }
@@ -3202,7 +3278,7 @@ ${ADMIN_THEME_VARIABLES}
   .line-chart svg { width: 100%; height: 100%; display: block; }
   .line-chart-dot { position: absolute; width: 6px; height: 6px; border-radius: 999px; background: var(--text); transform: translate(-50%, -50%); }
   .line-chart-row { display: flex; }
-  .line-chart-row > div { flex: 1; min-width: 0; text-align: center; font-size: 10px; color: var(--muted); white-space: nowrap; }
+  .line-chart-row > div { flex: 1; min-width: 0; text-align: center; font-size: 10px; color: var(--muted); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
   .line-chart-row:first-of-type { margin-bottom: 4px; }
   .line-chart-row:last-of-type { margin-top: 20px; }
   .tabs { display: flex; gap: 18px; flex-wrap: wrap; margin-bottom: 14px; border-bottom: 1px solid var(--line); }
@@ -3229,7 +3305,6 @@ ${ADMIN_THEME_VARIABLES}
       ${sidebarLinks}
     </nav>
     <div class="sidebar-footer">
-      ${isDevAuthModeEnabled() ? `<a class="sidebar-link" href="/dev-console">${ADMIN_ICON_CONSOLE}<span>本機測試控制台</span></a>` : ""}
       <form method="POST" action="/admin/logout">
         <button type="submit">${ADMIN_ICON_LOGOUT}<span>登出</span></button>
       </form>
@@ -3244,6 +3319,142 @@ ${ADMIN_THEME_VARIABLES}
 </div>
 </body>
 </html>`;
+}
+
+// Ported from what used to be backend/devConsole/public/index.html (a static file) so this page's
+// structure is generated the same way every other admin page already is -- a template string in
+// this file -- instead of the standalone HTML file getting read off disk and sliced apart with a
+// regex to build the admin-embedded version below. That regex approach worked, but coupled the
+// embedded route's correctness to index.html's exact markup shape with nothing to catch drift if
+// someone edited one without the other; a single source of truth removes that risk entirely.
+// styles.css/app.js stay their own static files under devConsole/public/ (unlike the HTML, they
+// have no such duplication to resolve, and inlining ~300 lines of client JS into a template string
+// would only hurt readability) -- the route below still loads them the same way.
+// No user-controlled data is interpolated here: every value a visitor actually sees (account
+// names, business-time figures, event log text) is filled in client-side by app.js's own fetch
+// calls after load, so nothing here needs escapeHtml.
+// Only ever rendered inside the admin shell now (see the /admin/dev-console route) -- the bare
+// /dev-console URL is a redirect to that route, not a second copy of this page's chrome, so there's
+// no "standalone" variant left to branch on: renderAdminPage's own <h1 class="page-title"> already
+// reads "本機測試控制台", and the sidebar is the way back to /admin, so this fragment skips both.
+function renderDevConsoleBody() {
+  return `
+    <link rel="stylesheet" href="/dev-console/styles.css" />
+    <header class="hero">
+      <div></div>
+      <div class="header-actions">
+        <button id="refreshButton" class="button button-secondary" type="button">重新檢查</button>
+      </div>
+    </header>
+
+    <section class="status-grid" aria-label="系統狀態">
+      <article class="status-card">
+        <div class="status-label">控制伺服器</div>
+        <div id="consoleStatus" class="status-value">檢查中</div>
+        <div id="consoleMeta" class="status-meta">—</div>
+      </article>
+      <article class="status-card">
+        <div class="status-label">主 Backend</div>
+        <div id="backendStatus" class="status-value">檢查中</div>
+        <div id="backendMeta" class="status-meta">—</div>
+      </article>
+      <article class="status-card">
+        <div class="status-label">App 同步</div>
+        <div id="appStatus" class="status-value">尚未串接</div>
+        <div id="appMeta" class="status-meta">等待 Mobile 回報</div>
+      </article>
+    </section>
+
+    <div id="message" class="message" role="status" aria-live="polite" hidden></div>
+
+    <section class="panel">
+      <div class="panel-heading">
+        <div>
+          <div class="section-number">01</div>
+          <h2>所有測試帳號</h2>
+        </div>
+        <span id="accountCount" class="version-badge">— 個帳號</span>
+      </div>
+      <p class="panel-description">資料來自主 Backend 的 dev-only 帳號清單。顧客可各自設定定位；角色與店家權限維持唯讀。</p>
+      <div id="accountsMessage" class="empty-state">正在讀取測試帳號</div>
+      <div id="accountsTableWrap" class="table-wrap" hidden>
+        <table class="accounts-table">
+          <thead>
+            <tr>
+              <th>模擬帳號名稱</th>
+              <th>帳號資料</th>
+              <th>權限</th>
+              <th>商家店家</th>
+              <th>顧客定位方式</th>
+            </tr>
+          </thead>
+          <tbody id="accountsTableBody"></tbody>
+        </table>
+      </div>
+    </section>
+
+    <section class="panel">
+      <div class="panel-heading">
+        <div>
+          <div class="section-number">02</div>
+          <h2>全域業務時間</h2>
+        </div>
+        <span id="businessTimeBadge" class="version-badge">讀取中</span>
+      </div>
+      <p class="panel-description">所有測試帳號共用，後端用它判斷訂單截止、取消與取餐時限。只限開發模式；不改電腦時間、Firebase 或金流簽章時間。</p>
+      <form id="businessTimeForm" class="business-time-form">
+        <fieldset class="mode-selector business-time-modes">
+          <legend>時間方式</legend>
+          <label class="mode-option">
+            <input type="radio" name="businessTimeMode" value="real" checked />
+            <span><strong>真實時間</strong><small>與後端主機現在時間一致</small></span>
+          </label>
+          <label class="mode-option">
+            <input type="radio" name="businessTimeMode" value="offset" />
+            <span><strong>快轉／倒退</strong><small>跟著真實時間走，最多前後 7 天</small></span>
+          </label>
+          <label class="mode-option">
+            <input type="radio" name="businessTimeMode" value="fixed" />
+            <span><strong>固定時間</strong><small>停在指定時刻，最多前後 7 天</small></span>
+          </label>
+        </fieldset>
+        <div class="business-time-fields">
+          <label id="offsetField" class="field" hidden>
+            <span>位移分鐘（正數快轉、負數倒退）</span>
+            <input id="offsetMinutes" type="number" min="-10080" max="10080" step="1" value="60" />
+          </label>
+          <label id="fixedField" class="field" hidden>
+            <span>固定日期時間（台灣本機時間）</span>
+            <input id="fixedNow" type="datetime-local" />
+          </label>
+        </div>
+        <div class="business-time-summary">
+          <div><span>後端業務時間</span><strong id="effectiveBusinessTime">—</strong></div>
+          <div><span>真實伺服器時間</span><strong id="realBusinessTime">—</strong></div>
+        </div>
+        <div class="actions">
+          <button class="button button-primary" type="submit">套用時間設定</button>
+          <button id="resetBusinessTimeButton" class="button button-secondary" type="button">恢復真實時間</button>
+        </div>
+      </form>
+    </section>
+
+    <section class="panel">
+      <div class="panel-heading">
+        <div>
+          <div class="section-number">03</div>
+          <h2>操作紀錄</h2>
+        </div>
+      </div>
+      <ol id="eventList" class="event-list">
+        <li class="empty-state">讀取中</li>
+      </ol>
+    </section>
+
+    <footer>
+      <strong>本機限定：</strong>目前只監聽 127.0.0.1。尚未加入 Mobile 配對驗證前，不開放區域網路存取。
+    </footer>
+    <script src="/dev-console/app.js" defer></script>`;
 }
 
 function getFirebaseWebConfig() {
@@ -3465,7 +3676,7 @@ function renderAdminDashboardBody({ activities, notice, csrfToken }) {
     : historicalActivities.map((activity) => renderAdminActivityCard(activity, csrfToken)).join("\n");
 
   return `${noticeHtml}
-  <div class="dashboard-columns">
+  <div class="two-col-grid">
     <div>
       <h3 class="section-title">進行中團購（${inProgressActivities.length} 筆）</h3>
       ${inProgressHtml}
@@ -3497,6 +3708,10 @@ function renderBarChart(items) {
 // markers are separate absolutely-positioned HTML dots, not SVG circles, because a circle drawn in
 // those same stretched viewBox units would render as an ellipse. Value/label rows use the same
 // N-column flex layout as the dots' left% math (index+0.5)/n so text lines up under each point.
+// Evenly spaced across the same 10-90 vertical band pointFor() plots into, so the gridlines always
+// line up with where a point WOULD be at that fraction of maxValue, whatever maxValue is this call.
+const LINE_CHART_GRID_FRACTIONS = [0, 0.25, 0.5, 0.75, 1];
+
 function renderLineChart(items) {
   const maxValue = Math.max(1, ...items.map((item) => item.value));
   const count = items.length;
@@ -3506,6 +3721,10 @@ function renderLineChart(items) {
   });
   const points = items.map(pointFor);
   const polylinePoints = points.map((point) => `${point.xPercent},${point.yPercent}`).join(" ");
+  const gridLinesHtml = LINE_CHART_GRID_FRACTIONS.map((fraction) => {
+    const yPercent = 10 + (1 - fraction) * 80;
+    return `<line x1="0" y1="${yPercent}" x2="100" y2="${yPercent}" stroke="var(--line)" stroke-width="1" vector-effect="non-scaling-stroke"></line>`;
+  }).join("\n");
   const dotsHtml = points.map((point) => `
       <div class="line-chart-dot" style="left:${point.xPercent}%; top:${point.yPercent}%"></div>`).join("\n");
   const valuesHtml = items.map((item) => `<div>${escapeHtml(item.valueLabel ?? String(item.value))}</div>`).join("\n");
@@ -3514,6 +3733,7 @@ function renderLineChart(items) {
     <div class="line-chart-row">${valuesHtml}</div>
     <div class="line-chart">
       <svg viewBox="0 0 100 100" preserveAspectRatio="none">
+        ${gridLinesHtml}
         <polyline points="${polylinePoints}" fill="none" stroke="var(--text)" stroke-width="1.5" vector-effect="non-scaling-stroke"></polyline>
       </svg>
       ${dotsHtml}
@@ -3521,10 +3741,38 @@ function renderLineChart(items) {
     <div class="line-chart-row">${labelsHtml}</div>`;
 }
 
-function renderAdminStatisticsBody({ activities, orders, topStores, weeklyTrend, peakHours }) {
+// renderLineChart's own .line-chart-row siblings rely on :first-of-type/:last-of-type (this file's
+// <style> block) to space themselves from whatever sits next to them -- that only matches correctly
+// when each chart is the only run of .line-chart-row divs under its parent. Wrapping each call's
+// output in its own div resets that scope per chart, so stacking more than one line chart in the
+// same section (e.g. renderAdminStoreStatisticsBody's order-count + revenue pair below) doesn't leave
+// an earlier chart's labels row losing its margin to a later chart's.
+function renderWeeklyTrendLineChart(weeklyTrend, valueKey, formatValue) {
+  return `<div>${renderLineChart(weeklyTrend.map((week) => ({
+    value: week[valueKey],
+    valueLabel: formatValue(week[valueKey]),
+    label: formatAdminWeekLabel(week.weekStart),
+  })))}</div>`;
+}
+
+function renderAdminStatisticsBody({
+  activities, orders, topStores, weeklyTrend, peakHours, retention,
+  weeklyTrendFailed = false, peakHoursFailed = false, retentionFailed = false,
+}) {
   const successRateText = activities.successRate == null
     ? "尚無資料"
     : `${Math.round(activities.successRate * 100)}%`;
+  // retentionFailed specifically (not just "repeatPurchaseRate == null"): a genuine "no qualifying
+  // customers yet" also has repeatPurchaseRate == null, so without this the two cases would render
+  // the same reassuring "尚無資料" for what's actually a broken query.
+  const repeatPurchaseRateText = retentionFailed
+    ? "查詢失敗"
+    : retention.repeatPurchaseRate == null
+      ? "尚無資料"
+      : `${Math.round(retention.repeatPurchaseRate * 100)}%`;
+  const repeatPurchaseLabel = retention.totalCustomers > 0
+    ? `顧客回購率（${retention.repeatCustomers} / ${retention.totalCustomers} 位有 2 筆以上有效訂單）`
+    : "顧客回購率";
 
   const statCardsHtml = [
     { label: "團購總場次", value: activities.totalCount },
@@ -3533,6 +3781,7 @@ function renderAdminStatisticsBody({ activities, orders, topStores, weeklyTrend,
     { label: "已請款訂單數", value: orders.capturedOrders },
     { label: "總營收（已請款）", value: formatAdminCurrency(orders.totalRevenue) },
     { label: "平均客單價（已請款）", value: formatAdminCurrency(orders.averageOrderValue) },
+    { label: repeatPurchaseLabel, value: repeatPurchaseRateText },
   ].map((card) => `
     <div class="stat-card">
       <div class="stat-value">${escapeHtml(String(card.value))}</div>
@@ -3562,7 +3811,9 @@ function renderAdminStatisticsBody({ activities, orders, topStores, weeklyTrend,
       </tbody>
     </table>`;
 
-  const weeklyTrendHtml = weeklyTrend.length === 0
+  const weeklyTrendHtml = weeklyTrendFailed
+    ? `<section class="notice error">查詢失敗，請稍後再試。</section>`
+    : weeklyTrend.length === 0
     ? `<section class="empty">近期沒有訂單資料。</section>`
     : `
     ${renderLineChart(weeklyTrend.map((week) => ({
@@ -3598,7 +3849,9 @@ function renderAdminStatisticsBody({ activities, orders, topStores, weeklyTrend,
       </tbody>
     </table>`;
 
-  const peakHoursHtml = peakHours.every((hour) => hour.orderCount === 0)
+  const peakHoursHtml = peakHoursFailed
+    ? `<section class="notice error">查詢失敗，請稍後再試。</section>`
+    : peakHours.every((hour) => hour.orderCount === 0)
     ? `<section class="empty">目前沒有訂單資料。</section>`
     : renderBarChart(peakHours.map((hour) => ({
       value: hour.orderCount,
@@ -3606,14 +3859,38 @@ function renderAdminStatisticsBody({ activities, orders, topStores, weeklyTrend,
       label: String(hour.hour).padStart(2, "0"),
     })));
 
+  const returningRateHtml = retentionFailed
+    ? `<section class="notice error">查詢失敗，請稍後再試。</section>`
+    : retention.weeklyReturning.length === 0
+    ? `<section class="empty">近期沒有顧客下單資料。</section>`
+    : renderLineChart(retention.weeklyReturning.map((week) => ({
+      value: week.returningRate,
+      valueLabel: `${Math.round(week.returningRate * 100)}%`,
+      label: formatAdminWeekLabel(week.weekStart),
+    })));
+
   return `
     <div class="stat-grid">${statCardsHtml}</div>
-    <h3 class="section-title">熱門店家排行（依營收排序，最多 10 間）</h3>
-    ${topStoresHtml}
-    <h3 class="section-title">訂單與營收趨勢（近 8 週，已請款訂單）</h3>
-    ${weeklyTrendHtml}
-    <h3 class="section-title">顧客下單活躍時段（依小時統計，全部歷史訂單，台灣時間）</h3>
-    ${peakHoursHtml}`;
+    <div class="two-col-grid">
+      <div>
+        <h3 class="section-title chart-title">熱門店家排行（依營收排序，最多 10 間）</h3>
+        ${topStoresHtml}
+      </div>
+      <div>
+        <h3 class="section-title chart-title">訂單與營收趨勢（近 8 週，已請款訂單）</h3>
+        ${weeklyTrendHtml}
+      </div>
+    </div>
+    <div class="two-col-grid">
+      <div>
+        <h3 class="section-title chart-title">顧客下單活躍時段（依小時統計，全部歷史訂單，台灣時間）</h3>
+        ${peakHoursHtml}
+      </div>
+      <div>
+        <h3 class="section-title chart-title">每週回頭客佔比趨勢（近 8 週，回頭客＝更早之前就下過有效訂單）</h3>
+        ${returningRateHtml}
+      </div>
+    </div>`;
 }
 
 // The single-store drill-down reached by clicking a row in renderAdminStatisticsBody's top-stores
@@ -3640,11 +3917,10 @@ function renderAdminStoreStatisticsBody({ store, statistics, weeklyTrend }) {
   const weeklyTrendHtml = weeklyTrend.length === 0
     ? `<section class="empty">近期沒有訂單資料。</section>`
     : `
-    ${renderLineChart(weeklyTrend.map((week) => ({
-      value: week.orderCount,
-      valueLabel: String(week.orderCount),
-      label: formatAdminWeekLabel(week.weekStart),
-    })))}
+    <p class="meta">每週訂單數</p>
+    ${renderWeeklyTrendLineChart(weeklyTrend, "orderCount", String)}
+    <p class="meta">每週營收</p>
+    ${renderWeeklyTrendLineChart(weeklyTrend, "revenue", formatAdminCurrency)}
     <table class="stats-table">
       <thead>
         <tr>
@@ -3688,9 +3964,9 @@ function renderAdminStoreStatisticsBody({ store, statistics, weeklyTrend }) {
     <p class="meta"><a href="/admin/statistics">← 返回數據統計總覽</a></p>
     <p class="meta">店家 ID：${escapeHtml(store.id)}・${escapeHtml(ADMIN_STORE_STATUS_LABELS[store.businessStatus] || store.businessStatus)}</p>
     <div class="stat-grid">${statCardsHtml}</div>
-    <h3 class="section-title">訂單與營收趨勢（近 8 週）</h3>
+    <h3 class="section-title chart-title">訂單與營收趨勢（近 3 個月）</h3>
     ${weeklyTrendHtml}
-    <h3 class="section-title">熱賣飲品（累計銷售杯數前 3 名）</h3>
+    <h3 class="section-title chart-title">熱賣飲品（累計銷售杯數前 3 名）</h3>
     ${topDrinksHtml}`;
 }
 
