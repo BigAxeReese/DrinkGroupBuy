@@ -204,6 +204,9 @@ const {
 const {
   createPaymentReliabilityJobRepository
 } = require("./database/repositories/paymentReliabilityJobRepository");
+const {
+  createPushTokenRepository
+} = require("./database/repositories/pushTokenRepository");
 const { businessClock } = require("./time/businessClock");
 
 const port = Number(process.env.PORT ?? 3000);
@@ -336,6 +339,8 @@ const adminStatisticsRepository = createAdminStatisticsRepository({});
 const customerSavingsRepository = createCustomerSavingsRepository({});
 // Postgres-only: read-only per-store figures for the merchant statistics screen.
 const merchantStatisticsRepository = createMerchantStatisticsRepository({});
+// Postgres-only: no SQLite install has ever needed push notifications.
+const pushTokenRepository = createPushTokenRepository({});
 const orderRevisionRepository = createOrderRevisionRepository({
   sqliteGateway: {
     createRevision: (value) => createOrderRevision(value),
@@ -947,7 +952,8 @@ const server = http.createServer(async (request, response) => {
           orderId: merchantReadyForPickupMatch[2] ?? body.orderId,
           actorUserId: authUser.id,
           now: businessClock.nowIso(),
-          pickupCredentialRepository: pickupPostgresReady ? pickupCredentialRepository : undefined
+          pickupCredentialRepository: pickupPostgresReady ? pickupCredentialRepository : undefined,
+          pushTokenRepository: pickupPostgresReady ? pushTokenRepository : undefined
         }
       );
       sendPickupServiceResult(response, result);
@@ -1106,6 +1112,31 @@ const server = http.createServer(async (request, response) => {
       sendJson(response, 200, {
         savings: await customerSavingsRepository.getSavingsSummary(authUser.id)
       });
+      return;
+    }
+
+    // Registers/repoints this device's Expo push token to whoever is currently logged in -- any
+    // authenticated role, not just customer, since a merchant or admin's own device can register
+    // too. The userId always comes from the verified token, never the request body.
+    if (request.method === "POST" && url.pathname === "/api/push-tokens") {
+      const authUser = await getAuthenticatedUser(request);
+      if (!authUser) return sendJson(response, 401, { error: "Authentication required" });
+
+      const body = await readJsonBody(request);
+      const expoPushToken = typeof body.expoPushToken === "string" ? body.expoPushToken.trim() : "";
+      if (!expoPushToken || expoPushToken.length > 512) {
+        return sendJson(response, 400, { error: "invalid_expo_push_token" });
+      }
+      if (!["ios", "android"].includes(body.platform)) {
+        return sendJson(response, 400, { error: "invalid_platform" });
+      }
+
+      await pushTokenRepository.upsertPushToken({
+        userId: authUser.id,
+        expoPushToken,
+        platform: body.platform
+      });
+      sendJson(response, 200, { success: true });
       return;
     }
 
@@ -1821,7 +1852,8 @@ const server = http.createServer(async (request, response) => {
         now: businessClock.nowIso(),
         settlementRepository: settlementPostgresReady ? groupBuySettlementRepository : undefined,
         paymentCaptureRepository: settlementPostgresReady ? paymentCaptureRepository : undefined,
-        authorizationCancelRepository: settlementPostgresReady ? paymentAuthorizationCancelRepository : undefined
+        authorizationCancelRepository: settlementPostgresReady ? paymentAuthorizationCancelRepository : undefined,
+        pushTokenRepository: settlementPostgresReady ? pushTokenRepository : undefined
       });
 
       if (!result) {
@@ -2752,7 +2784,8 @@ server.listen(port, () => {
     nowProvider: () => businessClock.nowIso(),
     settlementRepository: settlementPostgresReady ? groupBuySettlementRepository : undefined,
     paymentCaptureRepository: settlementPostgresReady ? paymentCaptureRepository : undefined,
-    authorizationCancelRepository: settlementPostgresReady ? paymentAuthorizationCancelRepository : undefined
+    authorizationCancelRepository: settlementPostgresReady ? paymentAuthorizationCancelRepository : undefined,
+    pushTokenRepository: settlementPostgresReady ? pushTokenRepository : undefined
   });
   if (deadlineSettlementScheduler.enabled) {
     console.log(`Deadline settlement scheduler enabled (${deadlineSettlementScheduler.intervalMs}ms interval)`);

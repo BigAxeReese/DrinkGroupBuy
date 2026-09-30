@@ -32,6 +32,7 @@ import {
 import { clearAuthSession, loadAuthSession } from "../utils/authSession";
 import { getRouteForUser } from "../utils/authRouting";
 import { signOutFirebaseUser } from "../utils/firebaseAuth";
+import { registerForPushNotifications } from "../utils/pushNotifications";
 import { getBusinessNow } from "../utils/businessTime";
 import { AppStateContext } from "./AppStateContext";
 import { normalizeBackendGroupBuyActivity, buildLocalOrderFromBackend, buildLocalPaymentFromBackend, mergeBackendOrderList, isSameCartItemVariant, toBackendOrderItems } from "./stateHelpers";
@@ -232,6 +233,10 @@ export function AppStateProvider({ children }) {
       // first call after install actually shows the system dialog). LiveMapScreen still does
       // its own permission check/position fetch on mount; this just moves the prompt earlier.
       Location.requestForegroundPermissionsAsync().catch(() => {});
+      // Only customer-facing events (group-buy qualified, pickup ready) send pushes today, so
+      // only customer logins register a device token -- see registerForPushNotifications for why
+      // this never throws.
+      registerForPushNotifications();
     }
   }
 

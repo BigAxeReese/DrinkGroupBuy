@@ -140,6 +140,14 @@ const CHART_BAR_HEIGHT = 100;
 // bar and its own value number, just not every week gets a date underneath it.
 const MAX_VISIBLE_WEEK_LABELS = 7;
 
+// The chart's columns are narrow (13 weeks side by side), so formatCurrency's full "$14529" gets
+// cut down to "$..." by the value Text's numberOfLines={1} -- it simply doesn't fit. Dropping the
+// "$" (the "營收" sub-label above the chart already establishes these are money) and rounding to
+// the nearest thousand keeps the label as short as the order-count numbers next to it, which do fit.
+function formatRevenueCompact(amount) {
+  return amount >= 1000 ? `${Math.round(amount / 1000)}k` : `${amount}`;
+}
+
 // A plain-View bar chart (no SVG/chart library in this project -- adding one would need a new
 // native module and a fresh APK build, see docs/azure-classroom-deployment.md's update rules).
 // Bar height is `value / maxValue` of CHART_BAR_HEIGHT, same ratio math the admin web trend charts
@@ -190,7 +198,7 @@ function WeeklyTrendSection({ weeklyTrend, weeklyTrendUnavailable }) {
           <Text maxFontSizeMultiplier={maxFontSizeMultiplier} style={styles.chartSubLabel}>訂單數</Text>
           <WeeklyTrendChart weeklyTrend={weeklyTrend} valueKey="orderCount" formatValue={String} />
           <Text maxFontSizeMultiplier={maxFontSizeMultiplier} style={styles.chartSubLabel}>營收</Text>
-          <WeeklyTrendChart weeklyTrend={weeklyTrend} valueKey="revenue" formatValue={formatCurrency} />
+          <WeeklyTrendChart weeklyTrend={weeklyTrend} valueKey="revenue" formatValue={formatRevenueCompact} />
         </>
       )}
     </Section>

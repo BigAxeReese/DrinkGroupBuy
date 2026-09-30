@@ -540,6 +540,7 @@ function mapSettlement(row) {
 function mapActivity(row) {
   return {
     id: row.id,
+    title: row.title,
     status: row.status,
     deadlineAt: toIsoString(row.deadline_at),
     maximumCups: Number(row.maximum_cups),

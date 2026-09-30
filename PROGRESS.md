@@ -1,5 +1,5 @@
 ---
-updated: 2026-09-28
+updated: 2026-10-01
 ---
 
 ## 功能總覽 [完成]
@@ -232,6 +232,16 @@ updated: 2026-09-28
     > 顧客取餐時要出示的憑證（類似取貨碼），系統會產生、驗證這張憑證是否有效，並自動排程檢查有沒有訂單超過取貨時間還沒被領走。
   - Android 實機 E2E [待處理]
     > 拿真的 Android 手機把取貨、逾期提示的整個流程實際操作一次確認沒問題。
+- 顧客端推播通知（開團成功、可以領飲料） [進行中] (9/30)
+  > 團購成團或訂單可以領取時，主動推播通知顧客的手機，不用顧客自己打開 App 才知道。維運警報（LINE Pay 對帳失敗等）改走 n8n，跟這個顧客端推播是分開的兩件事，見 `docs/open-questions.md`「一致性與營運」表 2026-09-30 決定。
+  - 後端事件觸發與 Expo 推播模組 [完成] (9/30) — 新增 `push_tokens` 資料表（`009_push_tokens_postgres.sql`，尚未套用到真實開發資料庫，見下）與對應 repository、`backend/notifications/pushSender.js`（直接呼叫 Expo push service，風格比照既有 `alertNotifier.js`：失敗不拋例外、記結構化日誌，不會讓結算或取貨這種核心流程被推播失敗拖垮）。兩個觸發點：結算成團時（`settlementService.js`，只有真的剛完成結算的那次會通知，重試遇到已完成的結算不會重送）、商家標記可取餐時（`credentialService.js`／`pickupCredentialRepository.js`，只有真的從「未可取」轉成「可取」的訂單才會通知，重複標記已可取的訂單不會再發）。過程中補上兩個既有欄位缺口：`groupBuySettlementRepository.js` 的 `mapActivity()` 原本沒有回傳 `title`、標記可取餐的查詢原本沒有帶出 `customer_user_id`，通知文案需要這兩個欄位才寫得出來。22 項新增單元測試（fake-DB，含 SQL 語句、顧客去重、結算重試不重複通知、內部欄位不外洩到 HTTP 回應等斷言）與既有 `npm test` 233/233 全數通過。
+    > 團購成團或訂單標記可取餐這兩個時間點，後端自動呼叫 Expo 的推播服務把訊息送到顧客手機。
+  - Mobile 端取得並註冊裝置 [完成] (9/30) — 新增 `expo-notifications`（原生依賴）、`mobile/src/utils/pushNotifications.js`（要權限、註冊裝置、失敗一律靜默不中斷登入，比照既有 `authSession.js`／登入時定位權限請求的寫法），登入成功時（`AppStateProvider.jsx` 的 `selectRole`，涵蓋重開 App 自動登入與手動登入兩條路徑）顧客角色會嘗試註冊。已用 Expo Web 預覽實際走過本機開發模式登入流程，確認不影響登入、無新增錯誤（web 平台本來就不支援推播，直接略過，不會呼叫原生 API）。
+    > 顧客登入時，手機會在背景、不打斷操作的情況下跟後端登記這台手機可以接收推播。
+  - migration 套用到真實開發資料庫 [待處理]
+    > 上面的資料表定義還只存在於程式碼裡，還沒有真的在使用中的開發資料庫建立這張表。
+  - Android 實機推播驗證 [待處理]
+    > 前景、背景、App 完全關閉三種狀態下是否真的收到系統推播通知，以及通知權限詢問畫面的實際體驗，都還沒有拿真的 Android 手機測過——這項功能新增了原生依賴，必須先重新打包 APK（單純的 EAS Update 無法讓這類改動生效）才能在實機上測試。
 - 商家訂單展開與總製作清單 [進行中] (9/13) — 待製作訂單預設收合，展開後逐項顯示飲品、數量、客製化及單筆標記按鈕；總製作頁維持相同配方合併，排除已可取餐、已取餐、取消與逾期訂單。兩個畫面 Babel 語法解析通過，尚待實機確認展開／收合與導覽。
   > 店家能分別查看每筆訂單的飲品，也能查看所有待製作訂單合併後的飲品數量。
 - 商家待製作明細 [完成] (8/29) — 使用者實機操作發現：[MerchantDashboardScreen.jsx](mobile/src/screens/MerchantDashboardScreen.jsx) 原本只顯示「已請款 N 筆」這種統計數字，跟一個「標記可取餐（N 筆）」整批按鈕，完全沒有任何地方列出這些訂單實際的飲料品項、數量、客製化內容，商家無從得知要做什麼。查證後端 API（`listMerchantStoreOrders` → `getPostgresOrderDetail`）其實早就有回傳完整品項與客製化資料，手機端同步時也已經存進 `appState.orders[].items`，純粹是這個畫面從沒有把它印出來；補上「待製作明細」區塊，列出每筆待製作訂單的顧客與品項（例如「午後百香果茶 x1（微糖、正常冰、椰果）」），放在「標記可取餐」按鈕之前，讓商家點下去之前能先看到要做什麼。純手機端 UI 改動，未動後端。已用開發控制台真實登入測試商家帳號、對真實 PostgreSQL 資料庫裡一筆已請款訂單驗證畫面正確顯示品項與客製化內容，`npm test` 95/95 全過
@@ -345,8 +355,10 @@ updated: 2026-09-28
       > 確保正式環境的資料庫在出問題時（例如硬碟壞掉、程式有 bug）不會整個系統的資料都不見，需要先規劃好的備份、測試環境跟復原方案。
     - Azure 課堂展示環境 [進行中] (9/11) — 已確認採 Azure App Service（Node.js Backend）＋ Azure Database for PostgreSQL Flexible Server，讓安裝 APK 的組員能從不同網路連線；這是非正式營運的教學展示環境，不取代上方 production 正式部署決策。Azure 資源已建立（資源群組、PostgreSQL、App Service）、資料庫 migration 已套用、環境變數已設定、PostgreSQL 防火牆已開放給 App Service、Backend 已重新部署上線（含帳號角色切換、登入失敗鎖定）——`/health` 與需要資料庫的 API（店家、團購活動、帳號角色）皆已驗證回應正常。Android APK 已重新打包（Debug Key 簽署，僅供內部測試；發現舊版沒有正確接上 EAS Update 已修正並重新產生原生專案），Firebase／Google Cloud 的 Android OAuth 用戶端 SHA-1 已直接用工具驗證跟新版 APK 簽章一致，且真機上已確認「全新帳號自動註冊」乾淨成功一次（真實姓名顯示＋資料庫帳號 ID 格式雙重驗證，不是誤判）。應使用者要求，展示環境已改成跟正式版行為一致：截止結算、付款對帳、取貨逾期三個背景排程都已開啟，LINE Pay sandbox 憑證與回呼網址也已補上（`LINE_PAY_ENV` 仍是 sandbox，沒有開真實金流），詳見 `docs/AI-security-review-log.md` 2026-09-11 第四次追加。**尚未完成**：還沒有實際走過一次「開團→下單→付款→截止結算」完整流程驗證這些排程真的照預期運作；還沒有做兩個帳號、兩種網路的跨網路端對端驗證（目前只驗證過一支手機、一個帳號）；部署過程中 PostgreSQL 密碼／Firebase Service Account Key／Session Secret 曾經在操作畫面上出現過，正式交付前應輪替，目前使用者已知悉、決定暫緩處理。詳見 `docs/azure-classroom-deployment.md`「目前狀態」
       > 把後端與多人共用資料庫放到 Azure，提供公開的 HTTPS 網址，讓不同地點的組員使用同一套資料；免費層可能休眠，因此不承諾全天候背景排程。
-      - 展示用假資料產生器 [進行中] (9/25) — 新增 `scripts/seed-demo-data.js`（`npm run demo-data`）與產生邏輯 `scripts/helpers/demoDataBuilder.js`；單元測試 13 項（金額與正式結算逐筆比對、資料表關聯、狀態一致性、日期合理性，並做過三種「故意弄壞」反向驗證），`npm test` 190/190；已在本機 PostgreSQL 實際寫入約 30 場團購、215 筆訂單並用真實 API 讀回（個人中心省錢統計、訂單歷史與明細、取貨憑證、退款、活動列表、後台統計數字都正常），也測過清除後殘留 0 列且不影響原有資料，各種安全保護（不加 `--apply` 不寫入、遠端需 `--allow-remote`、已有示範資料拒絕重複寫入）逐一驗證。**尚未做的**：實際寫進 Azure（需要使用者自己執行：先清空舊團購、部署新版 Backend 並套用 migration 008，順序見 `docs/azure-classroom-deployment.md`）；「我的訂單」在顧客只有歷史訂單時看不到歷史分頁的既有問題尚未處理。
+      - 展示用假資料產生器 [進行中] (9/25，9/30 擴充) — 新增 `scripts/seed-demo-data.js`（`npm run demo-data`）與產生邏輯 `scripts/helpers/demoDataBuilder.js`；單元測試 13 項（金額與正式結算逐筆比對、資料表關聯、狀態一致性、日期合理性，並做過三種「故意弄壞」反向驗證），`npm test` 190/190；已在本機 PostgreSQL 實際寫入約 30 場團購、215 筆訂單並用真實 API 讀回（個人中心省錢統計、訂單歷史與明細、取貨憑證、退款、活動列表、後台統計數字都正常），也測過清除後殘留 0 列且不影響原有資料，各種安全保護（不加 `--apply` 不寫入、遠端需 `--allow-remote`、已有示範資料拒絕重複寫入）逐一驗證。**9/30 擴充**：(1) 下單時間改成集中在中午 12 點、下午 6 點前後（新函式 `pickSubmittedAt`），讓後台「顧客下單活躍時段」圖表有明顯雙峰，不是均勻散佈 24 小時；(2) 新函式 `assignStores` 保證每家店都拿到公平的活動數下限（`Math.floor(activityCount / storeCount)`），再疊加既有的人氣權重分配剩餘場次，避免冷門店家因為單純加權隨機被分到太少場次、週趨勢圖表稀疏到看不出東西；新增 2 項單元測試驗證這兩個效果，`npm test` 237/237。已實際對 Azure 課堂展示環境與本機都清空重跑（`--activities 540 --customers 48`，9 家店每家保底 60 場，約每隔一天 2 團的密度），兩邊資料庫都驗證過店家活動數與訂單數對得上預期。過程中發現本機「午後水果茶 雙十店」`business_status` 是 `temporarily_closed`（Azure 上是 `open`），這不是產生器的 bug——腳本正確地把它排除在外；已改回 `open` 並重新產生一次讓本機與 Azure 一致。**尚未做的**：「我的訂單」在顧客只有歷史訂單時看不到歷史分頁的既有問題尚未處理；Expo 推播的 Ticket-level 錯誤（失效 token）沒有清除機制，跟這個產生器無關，屬於另一個功能的已知缺口。
         > 為統計頁與個人中心的「省錢統計」準備可展示的歷史資料：假顧客、過去 60 天內已結束的團購與訂單，付款一律是假付款、資料 ID 都有固定前綴，可以整批移除。
+      - 9 家店菜單補齊到至少 15 種品項 [完成] (9/30) — Azure 與本機的店家菜單原本只有 1～13 種（多數店家只有 1～2 種），用既有、已測過的管理員批次匯入機制（`merchantMenuImportRepository.importMenuItems`，非新寫程式碼）逐店補上主題化新品項（依店名風格設計，例如「一中黑糖研究所」全黑糖系列、「森林紅茶」茶飲系店風），每個新品項都帶正確的甜度／冰量／尺寸／加料四組客製化選項（比照既有品項的選項與規則結構）。舊有品項依匯入機制既有行為下架（`is_available = false`），不會影響任何歷史訂單的參照完整性（此時兩個環境的團購活動都已經整批清空，沒有歷史訂單需要保留）。本機另外補上 Azure 上新增、本機缺少的 2 家店（森林紅茶 大雅店、橙山茶飲 崇德店，含對應商家帳號與門市資料），達到本機與 Azure 都是 9 家店、每家店 15～18 種菜單。
+        > 讓每家店的菜單看起來夠豐富，熱賣飲品排行、菜單瀏覽這類展示畫面才有東西可以展示，不是只有 1～2 種飲料可選。
       - Mobile 線上更新策略 [完成] (9/12) — 已確認採 EAS Update 更新一般 JavaScript／畫面／圖片變更；首次安裝仍需 APK，原生套件、Android 權限、Expo SDK 等原生變更仍須重新打包。專案已連結 EAS（`@royor/drink-group-buy-mobile-prototype`）、`expo-updates` 套件已安裝、`app.config.js` 補上 `updates`／`runtimeVersion`、`eas.json` 已設定三個 build profile（`preview` 明確指定輸出 APK，供組員直接安裝，不透過 Google Play）。真機測試一度完全沒有跳出更新提示對話框——追查後找到真正原因：專案改用本機 `expo run:android`／`gradlew assembleRelease` 打包（因為 EAS 雲端打包當時沒有正確帶入 `mobile/.env` 的 Firebase API Key，出現 `auth/api-key-not-valid` 而改用本機打包，本機打包會自動讀 `.env` 所以沒有這個問題），但本機打包完全跳過 `eas build` 自動幫你把「這支 APK 屬於哪個頻道（channel）」寫進原生專案這個步驟，導致 APK 雖然 `expo.modules.updates.ENABLED=true`、更新網址也對，但不知道自己屬於 `preview` 頻道，`checkForUpdateAsync()` 永遠問不到對的地方、靜默找不到更新（用 Android SDK 的 `aapt dump xmltree` 直接核對過打包出來的 `AndroidManifest.xml` 才確認到這個層級，不是猜測）。已在 `app.config.js` 的 `updates` 下明確補上 `requestHeaders: { "expo-channel-name": "preview" }`，讓這個設定不再依賴用哪個工具打包；重新 `expo prebuild --clean` ＋ `gradlew assembleRelease` 產生新 APK 並實機重新安裝後，發布一次真正的線上更新（底部導覽列選中顏色從測試用的紅色改回原本的藍色），**真機成功跳出更新提示對話框、按下後正確套用、畫面顏色即時變更**，全流程端對端驗證通過。之後只要不重新用本機工具產生原生專案，改 JS／畫面都不用再重打 APK。
         > 讓組員安裝一次 App 後，多數畫面與程式邏輯修改可在線上更新，只有會改到 Android 原生程式的變更才重新下載 APK。
     - 真實資料搬遷方案 [完成] (8/20) — 確認開發資料庫裡的商家／門市／菜單資料其實是既有的開發示範資料（非另外接洽的真實商家），使用者確認直接沿用當正式起始資料；新增 `database/production-reference-seed-postgres.sql`（只含商家／門市／菜單，排除密碼登入的假帳號），已在真實 PostgreSQL 16 用一次性 throwaway schema 驗證套用結果正確（7 商家/7 門市/8 品項/96 客製化選項/32 條規則），不掛進 `database/migrate.js` 的自動 migration 鏈以避免正式環境被誤套用開發假帳號

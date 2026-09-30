@@ -548,6 +548,19 @@ PostgreSQL 直接連結 `store_id`，不保存舊 SQLite 相容 schema 的 `merc
 | 6   | `metadata_json` | 補充資料         | jsonb |            | 操作相關的 JSON 補充資料                   | `{"reason":"test cancel"}`  |
 | 7   | `created_at`    | 建立時間         | timestamptz |            | ISO 8601 日期時間                          | `2026-06-25T15:35:00+08:00` |
 
+## `push_tokens`
+
+由 `009_push_tokens_postgres.sql` 加入，2026-09-30 決定：後端直接呼叫 Expo push service 發送顧客端推播（開團成功、可以領飲料），見 `docs/open-questions.md`「一致性與營運」表。Identity 是 `expo_push_token`（裝置）不是 `(user_id, expo_push_token)`：同一裝置換登入帳號時，upsert 把整筆改指向新的 `user_id`，不會留下指向舊使用者的重複紀錄。
+
+| No. | Field name        | 中文名稱     | Type        | Key        | 規則 / 格式 / 範圍                              | Example                            |
+| --- | ----------------- | ------------ | ----------- | ---------- | ------------------------------------------------ | ----------------------------------- |
+| 1   | `id`              | 推播裝置編號 | TEXT        | PK         | 建議使用 `push-token-` 加唯一後綴               | `push-token-001`                    |
+| 2   | `user_id`         | 使用者編號   | TEXT        | FK         | References `users(id)`；換綁時覆蓋              | `user_customer_001`                 |
+| 3   | `expo_push_token` | Expo 推播權杖 | TEXT       | UNIQUE     | 裝置身分本身；upsert 的衝突鍵                   | `ExponentPushToken[xxxxxxxxxxxxxx]` |
+| 4   | `platform`        | 平台         | TEXT        |            | `ios` 或 `android`                              | `android`                           |
+| 5   | `created_at`      | 建立時間     | timestamptz |            | ISO 8601 日期時間                                | `2026-09-30T15:30:00+08:00`         |
+| 6   | `updated_at`      | 更新時間     | timestamptz |            | 每次 upsert（含換綁使用者）都會更新              | `2026-09-30T15:35:00+08:00`         |
+
 ## 進度與未決事項
 
 本文件只維護 PostgreSQL 欄位定義，不維護功能完成度。現行進度以 `PROGRESS.md` 為準；尚待產品決策的資料庫議題以 `docs/open-questions.md` 為準。

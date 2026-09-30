@@ -19,6 +19,7 @@ const {
   voidLinePayAuthorization
 } = require("./linePayService");
 const { sendPaymentReliabilityJobAlert, sendSchedulerFailureAlert } = require("./alertNotifier");
+const { notifyUsers } = require("../notifications/pushSender");
 
 const CAPTURE_MAX_ATTEMPTS = 3;
 const CAPTURE_RETRY_INTERVAL_MS = 30_000;
@@ -310,6 +311,22 @@ async function settleGroupBuyActivityUnlocked(input = {}) {
     ? await settlementRepository.completeSettlement(completionInput)
     : completeGroupBuySettlement(activityId, completionInput);
 
+  // Only the run that actually just completed the settlement should notify -- a retried job that
+  // finds the settlement already recorded (completion.alreadyCompleted) already sent this once.
+  // Not awaited: notifyUsers never throws (see pushSender.js), and the merchant/admin waiting on
+  // this settlement's HTTP response shouldn't be blocked on an Expo push round-trip (up to 5s).
+  if (plan.outcome === "qualified" && !completion?.error && !completion?.alreadyCompleted) {
+    notifyUsers(buildGroupBuyQualifiedNotification(plan, results), {
+      pushTokenRepository: input.pushTokenRepository,
+      logger: input.logger,
+    }).catch((error) => {
+      (input.logger || console).error?.("[push-notification] failed to notify group buy qualified", {
+        activityId,
+        message: error.message,
+      });
+    });
+  }
+
   return {
     plan,
     results,
@@ -318,6 +335,37 @@ async function settleGroupBuyActivityUnlocked(input = {}) {
     failedOrderCount,
     settlement: completion?.settlement || null,
     activity: completion?.activity || null
+  };
+}
+
+// Pure and side-effect-free on purpose so the notification content itself (who gets notified,
+// what it says) is unit-testable without mocking the database or the Expo push call.
+// `results` (this run's actual per-order capture/void outcomes) is required, not just `plan`
+// (what settlement intended to do): a qualified settlement can still have individual orders whose
+// capture terminally failed (see createTerminalCaptureFailureResult) -- those go into `results`
+// with status "failed", not into the separate `failures` array that would have aborted the whole
+// settlement, so without this filter a customer who was never actually charged would still be told
+// "團購成團囉，請留意取貨通知". Uses the same "really captured" definition as capturedOrderCount above.
+function buildGroupBuyQualifiedNotification(plan, results) {
+  const capturedOrderIds = new Set([
+    ...(plan.orders || [])
+      .filter((order) => order.action === "already_captured")
+      .map((order) => order.id),
+    ...(results || [])
+      .filter((result) => result.action === "capture" && result.status === "captured")
+      .map((result) => result.orderId),
+  ]);
+  const customerUserIds = [...new Set(
+    (plan.orders || [])
+      .filter((order) => capturedOrderIds.has(order.id))
+      .map((order) => order.customerUserId)
+      .filter(Boolean)
+  )];
+  return {
+    userIds: customerUserIds,
+    title: "團購成團囉！",
+    body: `${plan.activity?.title || "你參加的團購"}已達成團門檻，請留意取貨通知`,
+    data: { type: "group_buy_qualified", activityId: plan.activity?.id },
   };
 }
 
@@ -405,7 +453,9 @@ async function runDueGroupBuySettlementJobs(input = {}) {
         now,
         settlementRepository: input.settlementRepository,
         paymentCaptureRepository: input.paymentCaptureRepository,
-        authorizationCancelRepository: input.authorizationCancelRepository
+        authorizationCancelRepository: input.authorizationCancelRepository,
+        pushTokenRepository: input.pushTokenRepository,
+        logger: input.logger
       });
       const retryable = !result
         || result.error === "settlement_retry_pending"
@@ -479,7 +529,9 @@ function startDeadlineSettlementScheduler(input = {}) {
         now: input.nowProvider ? input.nowProvider() : undefined,
         settlementRepository: input.settlementRepository,
         paymentCaptureRepository: input.paymentCaptureRepository,
-        authorizationCancelRepository: input.authorizationCancelRepository
+        authorizationCancelRepository: input.authorizationCancelRepository,
+        pushTokenRepository: input.pushTokenRepository,
+        logger
       });
 
       if (summary.queuedCount > 0 || summary.failedCount > 0) {
@@ -564,5 +616,6 @@ module.exports = {
   enqueueDueGroupBuySettlementJobs,
   runDueGroupBuySettlementJobs,
   startDeadlineSettlementScheduler,
-  settleGroupBuyActivity
+  settleGroupBuyActivity,
+  buildGroupBuyQualifiedNotification
 };

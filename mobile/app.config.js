@@ -71,7 +71,8 @@ module.exports = {
     // No iosUrlScheme option here -- this project only targets android/web (see `platforms`
     // above), and that option is iOS-only.
     "@react-native-google-signin/google-signin",
-    "expo-secure-store"
+    "expo-secure-store",
+    "expo-notifications"
   ],
   extra: {
     prototypeOnly: true,

@@ -25,6 +25,15 @@ const PAYMENT_PROVIDER = "mock_line_pay";
 const HOUR_MS = 3_600_000;
 const DAY_MS = 24 * HOUR_MS;
 
+// Two Taiwan-local hours most orders cluster around (lunch break, after-work/dinner) -- plausible
+// times to order a drink together, and gives the admin "顧客下單活躍時段" chart a readable
+// double-peak shape instead of a flat spread across all 24 hours.
+const PEAK_HOURS_LOCAL = [12, 18];
+const PEAK_JITTER_MS = 75 * 60_000; // triangular spread, roughly +/-1.25h around each peak
+// addOrder sets authorizedAt to submittedAt + up to this much (random.int(1, 3) minutes) -- kept
+// in lockstep with that call so pickSubmittedAt can leave enough headroom before deadlineAt.
+const AUTHORIZATION_DELAY_MAX_MS = 3 * 60_000;
+
 // Discount ladders a merchant might realistically set: [{ targetCups, discountPercent }].
 // discountPercent is percent OFF (10 = 9折). maximumCups always equals the highest target.
 const TIER_PRESETS = [
@@ -106,18 +115,11 @@ function buildDemoData(input) {
   // A few stores are clearly more popular than others, so a "top stores" ranking is interesting.
   const rankedStores = random.shuffle(eligibleStores);
   const storeWeights = rankedStores.map((_, rank) => 1 / Math.pow(rank + 1, 0.9));
-  const pickStore = () => {
-    let roll = random.next() * storeWeights.reduce((sum, weight) => sum + weight, 0);
-    for (let index = 0; index < rankedStores.length; index += 1) {
-      roll -= storeWeights[index];
-      if (roll <= 0) return rankedStores[index];
-    }
-    return rankedStores[rankedStores.length - 1];
-  };
+  const storeAssignments = assignStores(random, rankedStores, storeWeights, activityCount);
 
   const scenarios = planScenarios(random, activityCount);
   scenarios.forEach((scenario, index) => {
-    const store = pickStore();
+    const store = storeAssignments[index];
     addActivity(data, {
       random, index: index + 1, scenario, store, nowMillis, dayRange,
       storeMenu: menuByStore.get(store.id), participantPool, focusUserIds,
@@ -126,6 +128,33 @@ function buildDemoData(input) {
 
   data.summary = summarize(data);
   return data;
+}
+
+// Guarantees every store a fair baseline share of activities (round-robin) before layering the
+// existing popularity weighting on top for whatever's left over -- as long as activityCount is at
+// least the store count. Below that, baselinePerStore floors to 0 and this degrades to the same
+// pure popularity-weighted selection it replaces (seed-demo-data.js's own default of 30 activities
+// across a handful of stores never hits this, but a caller passing a smaller --activities than the
+// open-store count would). Pure weighted-random selection alone can easily leave an unpopular store
+// with too few activities to show a readable weekly trend -- the baseline pass fixes that while
+// still letting a few stores stand out as more popular for the "top stores" ranking.
+function assignStores(random, rankedStores, storeWeights, activityCount) {
+  const assignments = [];
+  const baselinePerStore = Math.floor(activityCount / rankedStores.length);
+  for (let round = 0; round < baselinePerStore; round += 1) {
+    assignments.push(...rankedStores);
+  }
+  const totalWeight = storeWeights.reduce((sum, weight) => sum + weight, 0);
+  const pickWeighted = () => {
+    let roll = random.next() * totalWeight;
+    for (let index = 0; index < rankedStores.length; index += 1) {
+      roll -= storeWeights[index];
+      if (roll <= 0) return rankedStores[index];
+    }
+    return rankedStores[rankedStores.length - 1];
+  };
+  while (assignments.length < activityCount) assignments.push(pickWeighted());
+  return random.shuffle(assignments);
 }
 
 function addUsers(data, random, customerCount, nowMillis, dayRange) {
@@ -277,6 +306,31 @@ function chooseParticipants(random, pool, focusUserIds, scenario) {
   return [...focus, ...others];
 }
 
+// Picks an order timestamp within [startAt, deadlineAt], biased toward whichever PEAK_HOURS_LOCAL
+// instants actually fall inside that window (an activity's window can span 1-2 calendar days, so
+// it may contain one, two, or even both peaks on different days). Given addActivity's actual
+// window (always >= 20h, exceeding the 18h max gap between the two peaks), every real call finds
+// at least one candidate -- the uniform-pick fallback below is unreachable today, kept only as a
+// safety net in case that window range is ever narrowed.
+function pickSubmittedAt(random, startAt, deadlineAt) {
+  const firstLocalMidnight = Math.floor((startAt + 8 * HOUR_MS) / DAY_MS) * DAY_MS - 8 * HOUR_MS;
+  const candidates = [];
+  for (let dayStart = firstLocalMidnight; dayStart <= deadlineAt; dayStart += DAY_MS) {
+    for (const hour of PEAK_HOURS_LOCAL) {
+      const peakAt = dayStart + hour * HOUR_MS;
+      if (peakAt >= startAt && peakAt <= deadlineAt) candidates.push(peakAt);
+    }
+  }
+  if (candidates.length === 0) {
+    return startAt + Math.floor(random.next() * (deadlineAt - startAt));
+  }
+  const peak = random.pick(candidates);
+  const jitter = Math.floor((random.next() - random.next()) * PEAK_JITTER_MS);
+  // Capped short of deadlineAt (not just clamped to it) so the caller's authorizedAt -- always a
+  // little after submittedAt -- can never land past the activity's own deadline.
+  return Math.min(deadlineAt - AUTHORIZATION_DELAY_MAX_MS, Math.max(startAt, peak + jitter));
+}
+
 function buildOrderSpec(random, storeMenu, customerId, forcedQuantity, forcedFallback) {
   const lineCount = Math.min(storeMenu.length, random.chance(0.3) ? 2 : 1);
   const lines = random.shuffle(storeMenu).slice(0, lineCount).map((item) => {
@@ -298,10 +352,8 @@ function addOrder(data, ctx) {
   const key = `${pad(activityIndex, 3)}-${pad(orderIndex, 2)}`;
   const orderId = `${DEMO_PREFIX}order-${key}`;
   const authorizationId = `${DEMO_PREFIX}authorization-${key}`;
-  const window = deadlineAt - startAt;
-  // Roughly 40% of people order in the last stretch before the deadline.
-  const submittedAt = startAt + Math.floor((random.chance(0.4) ? 0.85 + random.next() * 0.14 : random.next() * 0.85) * window);
-  const authorizedAt = submittedAt + random.int(1, 3) * 60_000;
+  const submittedAt = pickSubmittedAt(random, startAt, deadlineAt);
+  const authorizedAt = submittedAt + random.int(1, AUTHORIZATION_DELAY_MAX_MS / 60_000) * 60_000;
 
   // Outcome of THIS order once the activity has been settled.
   let capturedAmount = null;

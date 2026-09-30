@@ -1436,3 +1436,31 @@
 | 手機端（次要） | `WeeklyTrendChart` 用 React Native `View`／`Text` 渲染，不是 HTML，沒有注入面；`normalizeWeeklyTrend` 會在資料格式不對時整包拒絕 |
 
 **這次沒審查到／沒驗證到的部分**：沒有在 Azure 上實測（這次改動沒有牽涉 migration，之後推上去部署即可生效，不需要額外資料庫操作）。
+
+## 2026-09-30 — 顧客端推播通知（開團成功、可以領飲料，新功能）
+
+**範圍**：新增 `database/migrations/009_push_tokens_postgres.sql`、`backend/database/repositories/pushTokenRepository.js`、`backend/notifications/pushSender.js`；新路由 `POST /api/push-tokens`（`backend/server.js`）；兩個既有高風險流程新增的觸發點——`backend/payments/settlementService.js`（結算成團時）、`backend/pickup/credentialService.js` 與 `backend/database/repositories/pickupCredentialRepository.js`（標記可取餐時）；`backend/database/repositories/groupBuySettlementRepository.js` 的 `mapActivity()` 補回傳 `title` 欄位；mobile 端 `mobile/src/utils/pushNotifications.js`、`mobile/src/utils/apiClient.js` 的 `registerPushToken`、`mobile/src/state/AppStateProvider.jsx` 的登入 hook
+**觸發原因**：CLAUDE.md 規則自動觸發——改動碰到 `settlementService.js`（結算）與取貨（`credentialService.js`）這兩個既有高風險流程，且新增一支會寫入資料庫、任何登入者皆可呼叫的公開 API（`POST /api/push-tokens`）
+**方法**：一個獨立子任務先找漏洞，重點查（1）`POST /api/push-tokens` 的 `userId` 是否真的只取自 bearer token、不信任 request body；（2）新表 upsert 的「同裝置換帳號會覆蓋 user_id」這個刻意設計，有沒有辦法在不掌握該裝置實際 token 的情況下被觸發（等同 token 被劫持/轉移）；（3）`pickupCredentialRepository.js` 新增的 `readyOrderCustomerUserIds`／`storeName` 是否真的有從 `credentialService.js` 回傳給前端的 HTTP 回應裡剝除，不是只看註解、要追實際程式路徑；（4）兩個通知觸發點會不會把通知送給不相關活動/店家的顧客；（5)送到 Expo push API 外部服務的內容有沒有不該外流的欄位
+
+### 發現
+
+沒有找到信心度達到門檻（8/10 以上）的漏洞。
+
+| 嚴重度 | 位置 | 問題 | 建議修法 | 狀態 |
+|--------|------|------|----------|------|
+| — | — | 這次沒有新發現 | — | — |
+
+### 沒發現問題的部分
+
+| 面向 | 檢查結果 |
+|------|----------|
+| 授權（`POST /api/push-tokens`） | `userId` 完全只取自 `getAuthenticatedUser(request)` 驗證過的 `authUser.id`，從未讀取 request body；跟 `server.js` 其他已驗證路由（例如標記可取餐）的既有寫法一致 |
+| SQL 注入 | `expoPushToken`／`platform` 全程走參數化查詢（`$1`-`$4`），`pushTokenRepository.test.js` 有專門測試把 SQL 注入字串當參數值傳入，確認不會被拼接進 SQL 字串 |
+| Token 換帳號覆蓋（刻意設計） | `ON CONFLICT (expo_push_token)` 這個 upsert 需要呼叫者已經持有那支 Expo token 的實際字串值（一長串裝置專屬、無法猜測的字串），且新路由從來不會把任何使用者的 token 值回傳、列出或以其他方式外洩給其他使用者或角色——沒有「不掌握裝置本身就能覆蓋」的路徑 |
+| 資料外洩：取貨可取餐回應 | 追過實際程式碼、不只看註解：`credentialService.js` 用解構賦值把 `readyOrderCustomerUserIds`／`storeName` 從回傳物件剝除，`server.js` 把這個已剝除的結果原封不動送給 `sendJson`；新增的單元測試也明確斷言這兩個欄位不會出現在回傳物件裡 |
+| 跨用戶通知定位 | 取貨可取餐：只有這次呼叫裡真的從 `not_ready` 轉成 `ready` 的訂單（`rowCount === 1`）才會被列入通知名單，且查詢本來就以 `activity_id` 限定範圍，跟既有的權限檢查（`can_manage`）用同一把尺；開團成功：收件人來自既有、這次沒改動的 `plan.orders[].customerUserId`，這個欄位本來就被同一支函式拿去做實際請款/撤銷，若有跨活動外洩會是先於這次改動就存在的金流正確性問題，不是本次新增 |
+| 送到 Expo 外部 API 的內容 | payload 只有 `{to, title, body, data}`；`data` 只帶 `{type, activityId}` 或 `{type}` 這類內部識別碼；`body` 文字只有活動名稱／店名（本來就是顧客看得到的公開資訊），沒有金額、使用者 ID、憑證或其他敏感欄位 |
+| 重試/冪等 | 結算重試遇到 `completion.alreadyCompleted` 不會重送；取貨標記重複呼叫已可取的訂單不會重送——都有對應單元測試覆蓋 |
+
+**這次沒審查到／沒驗證到的部分**：這次的 migration（`009_push_tokens_postgres.sql`）尚未套用到任何真實資料庫（開發或 Azure），套用後建議之後再對真實資料庫做一次端對端確認；顧客端裝置實際收到推播的行為（前景／背景／關閉三種狀態）需要重新打包 APK 並用實機驗證，這次沒有做，也不在 `/security-review` 的檢查範圍內。

@@ -224,6 +224,53 @@ test("dates are ordered and every activity is finished well before now", () => {
   }
 });
 
+test("an order's authorization never lands after its own activity's deadline", () => {
+  // Regression test: pickSubmittedAt can land close enough to deadlineAt that the caller's
+  // submittedAt + up-to-3-minutes authorizedAt computation used to be able to cross deadlineAt.
+  const data = build({ activityCount: 200 });
+  const deadlineByActivity = new Map(data.activities.map((row) => [row.id, Date.parse(row.deadline_at)]));
+  for (const authorization of data.authorizations) {
+    const order = data.orders.find((row) => row.id === authorization.order_id);
+    const deadline = deadlineByActivity.get(order.activity_id);
+    assert.ok(
+      Date.parse(authorization.authorized_at) <= deadline,
+      `authorization ${authorization.id} authorized at ${authorization.authorized_at}, after deadline ${new Date(deadline).toISOString()}`
+    );
+  }
+});
+
+test("every store gets a guaranteed baseline share of activities, not just the popular ones", () => {
+  const data = build({ activityCount: 40 });
+  const countsByStore = new Map(stores.map((store) => [store.id, 0]));
+  for (const activity of data.activities) {
+    countsByStore.set(activity.store_id, (countsByStore.get(activity.store_id) || 0) + 1);
+  }
+  const baseline = Math.floor(40 / stores.length);
+  for (const store of stores) {
+    assert.ok(
+      countsByStore.get(store.id) >= baseline,
+      `${store.name} only got ${countsByStore.get(store.id)} activities, expected at least ${baseline}`
+    );
+  }
+});
+
+test("orders cluster around lunch and after-work hours instead of spreading evenly across the day", () => {
+  const data = build();
+  const hourCounts = new Array(24).fill(0);
+  for (const order of data.orders) {
+    const localHour = Math.floor((Date.parse(order.submitted_at) / 3_600_000 + 8) % 24);
+    hourCounts[localHour] += 1;
+  }
+  // Within +/-2h of either peak (12, 18) -- 8 of 24 hours -- a uniform spread would only put
+  // ~33% of orders there; clustering should put the large majority there instead.
+  const nearPeak = (hour) => [10, 11, 12, 13, 14, 16, 17, 18, 19, 20].includes(hour);
+  const nearPeakCount = hourCounts.reduce((sum, count, hour) => sum + (nearPeak(hour) ? count : 0), 0);
+  assert.ok(
+    nearPeakCount / data.orders.length > 0.7,
+    `expected most orders near a peak hour, got ${nearPeakCount}/${data.orders.length}: ${JSON.stringify(hourCounts)}`
+  );
+});
+
 test("no customer has two orders in the same group buy, and real (focus) users take part often", () => {
   const data = build();
   const seen = new Set();

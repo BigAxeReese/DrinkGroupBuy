@@ -226,6 +226,25 @@ export async function getCustomerSavings() {
   return payload.savings;
 }
 
+// Registers/repoints this device's Expo push token to whoever is currently logged in. Called
+// right after session restore succeeds (see AppStateProvider), not on every screen -- the token
+// rarely changes, and the backend upserts on the token itself so calling this again is harmless.
+export async function registerPushToken(expoPushToken, platform) {
+  const response = await fetch(`${backendBaseUrl}/api/push-tokens`, {
+    method: "POST",
+    headers: withAuthHeaders({ "Content-Type": "application/json" }),
+    body: JSON.stringify({ expoPushToken, platform })
+  });
+  const payload = await response.json();
+  if (!response.ok) {
+    const error = new Error(payload.error ?? "Register push token failed");
+    error.status = response.status;
+    error.payload = payload;
+    throw error;
+  }
+  return payload;
+}
+
 export async function listMerchantStoreOrders(storeId, input = {}) {
   return getOrderListRequest(`/api/merchant/stores/${encodeURIComponent(storeId)}/orders`, input);
 }

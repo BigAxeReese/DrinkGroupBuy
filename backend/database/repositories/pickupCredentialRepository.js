@@ -98,6 +98,7 @@ async function markReadyPostgres(database, input = {}) {
     const activityResult = await transaction.query(`
       SELECT
         activity.*,
+        store.name AS store_name,
         EXISTS (
           SELECT 1
           FROM merchant_users merchant_user
@@ -106,6 +107,7 @@ async function markReadyPostgres(database, input = {}) {
             AND merchant_user.status = 'active'
         ) AS can_manage
       FROM group_buy_activities activity
+      LEFT JOIN stores store ON store.id = activity.store_id
       WHERE activity.id = $2
       FOR UPDATE
     `, [actorUserId, activityId]);
@@ -122,7 +124,7 @@ async function markReadyPostgres(database, input = {}) {
     }
 
     const ordersResult = await transaction.query(`
-      SELECT id, pickup_status
+      SELECT id, pickup_status, customer_user_id
       FROM orders
       WHERE activity_id = $1
         AND ($2::text IS NULL OR id = $2)
@@ -154,6 +156,10 @@ async function markReadyPostgres(database, input = {}) {
     const credentials = [];
     let createdCredentialCount = 0;
     let readyOrderCount = 0;
+    // Only orders that just transitioned from not_ready -> ready belong here, not every order in
+    // this batch -- a call that regenerates a credential for an already-ready order (see the
+    // repeated-single-order branch below) must not re-notify a customer who was already told.
+    const readyOrderCustomerUserIds = [];
 
     for (const order of orders) {
       const readyUpdate = await transaction.query(`
@@ -166,6 +172,7 @@ async function markReadyPostgres(database, input = {}) {
       `, [now, order.id]);
       if (readyUpdate.rowCount === 1) {
         readyOrderCount += 1;
+        readyOrderCustomerUserIds.push(order.customer_user_id);
         await insertStatusHistory(transaction, "pickup", order.id, order.pickup_status,
           "ready", "merchant_marked_ready_for_pickup", actorUserId, now);
       }
@@ -216,7 +223,9 @@ async function markReadyPostgres(database, input = {}) {
       expiresAt,
       createdCredentialCount,
       readyOrderCount,
-      credentials
+      credentials,
+      readyOrderCustomerUserIds,
+      storeName: activity.store_name
     };
   });
 }

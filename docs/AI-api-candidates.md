@@ -1,6 +1,6 @@
 # API 清單與候選項
 
-最後更新：2026-08-29
+最後更新：2026-09-30
 
 ## 語言規則
 
@@ -291,6 +291,7 @@ API JSON 使用 `camelCase`。已實作 routes 只對目前開發 prototype 具�
 | `POST /api/group-buy-activities/:activityId/orders` | 訂單建立的替代 nested route      | 目前已實作 route 是 `POST /api/orders`；最終 route shape 尚未決定 |
 | `GET /api/customers/me/orders`                      | 顧客進行中與歷史訂單             | 已實作 bearer ownership、scope、cursor、limit、lifecycleBucket 與 availableActions |
 | `GET /api/customers/me/savings`                     | 顧客累計省下金額（個人中心）     | 已實作，回 `{ savings: { totalSavedAmount, savedOrderCount, savedCupCount } }`；顧客身分只取自 bearer token；只計 `payment_status = 'captured'`、訂單未取消、未逾期未取（`pickup_status` 為 `not_ready`／`ready`／`picked_up`）、所屬團購活動未被取消（管理員取消流程會略過已請款訂單，這類訂單仍是 `captured` 但永遠領不到飲料）且 `original_amount > final_amount` 的訂單，省下金額 = `original_amount - final_amount`，部分退款不扣、全額退款與逾期未取不計 |
+| `POST /api/push-tokens`                             | 註冊／換綁這台裝置的 Expo 推播權杖 | 已實作第一版（2026-09-30），任何已登入角色皆可呼叫；`userId` 只取自 bearer token；body 需 `{ expoPushToken, platform }`，`platform` 限 `ios`／`android`；以 `expoPushToken` 為 upsert 衝突鍵，換帳號登入同一裝置會覆蓋 `user_id` |
 | `GET /api/orders/:orderId/history`                  | 訂單與付款狀態歷史               | Owner/merchant visibility；dev/admin 補救權限另定                 |
 | `PATCH /api/orders/:orderId/items`                  | 若未來需要，更細的品項修改 route | 目前已有 `POST /api/orders/:orderId/revisions` 作為已授權修改入口 |
 | `POST /api/orders/:orderId/cancel`                  | 鎖定前退出團購                   | 已實作第一版；idempotency、pending 授權失效、authorized 先 void、revision 取消與 audit |

@@ -4,12 +4,27 @@ const {
   OperationLeaseError,
   withOperationLeaseSync
 } = require("../reliability/operationLease");
+const { notifyUsers } = require("../notifications/pushSender");
+
+// Pure and side-effect-free on purpose, same as settlementService's buildGroupBuyQualifiedNotification
+// -- keeps the notification wording unit-testable without mocking the database or the Expo push call.
+// Every customer in readyOrderCustomerUserIds gets the identical message (same activity, same
+// store), so this is one notifyUsers call for the whole batch, not one per customer.
+function buildPickupReadyNotification({ customerUserIds, storeName }) {
+  return {
+    userIds: customerUserIds,
+    title: "飲料可以領取囉！",
+    body: storeName ? `你在 ${storeName} 的訂單已經可以領取` : "你的訂單已經可以領取",
+    data: { type: "pickup_ready" }
+  };
+}
 
 async function markGroupBuyActivityReadyForPickup(activityId, input = {}) {
   const repository = input.pickupCredentialRepository;
   if (repository?.kind === "postgres") {
+    let result;
     try {
-      return await repository.withOperationLock(
+      result = await repository.withOperationLock(
         { activityId },
         () => repository.markReady({ activityId, orderId: input.orderId, actorUserId: input.actorUserId || null, now: input.now })
       );
@@ -23,6 +38,24 @@ async function markGroupBuyActivityReadyForPickup(activityId, input = {}) {
       }
       throw error;
     }
+
+    // readyOrderCustomerUserIds/storeName are internal to this notification step, not part of
+    // the API's response shape -- stripped out before the result reaches the HTTP layer.
+    const { readyOrderCustomerUserIds, storeName, ...publicResult } = result || {};
+    // Not awaited: notifyUsers never throws (see pushSender.js), and the merchant waiting on this
+    // request's HTTP response shouldn't be blocked on an Expo push round-trip (up to 5s).
+    if (readyOrderCustomerUserIds?.length) {
+      notifyUsers(buildPickupReadyNotification({ customerUserIds: readyOrderCustomerUserIds, storeName }), {
+        pushTokenRepository: input.pushTokenRepository,
+        logger: input.logger
+      }).catch((error) => {
+        (input.logger || console).error?.("[push-notification] failed to notify pickup ready", {
+          activityId,
+          message: error.message
+        });
+      });
+    }
+    return publicResult;
   }
   try {
     return withOperationLeaseSync({
@@ -596,5 +629,6 @@ module.exports = {
   getPickupCredentialForOrder,
   lookupPickupCode,
   markGroupBuyActivityReadyForPickup,
-  redeemPickupCode
+  redeemPickupCode,
+  buildPickupReadyNotification
 };
