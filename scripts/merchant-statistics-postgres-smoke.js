@@ -32,9 +32,9 @@ function currentTaipeiWeekStart() {
 const targetWeekStart = currentTaipeiWeekStart();
 
 // getStoreWeeklyTrend now zero-fills every week in its window (see its own comment), so the expected
-// array for every store below is this same 13-week series with only the target week's numbers
+// array for every store below is this same 9-week series with only the target week's numbers
 // differing per store -- not just a single-row or empty array like before that fill-in existed.
-const WEEKLY_TREND_WEEKS = 13;
+const WEEKLY_TREND_WEEKS = 9;
 function weekSeriesEndingAt(weekStartString, count) {
   const [year, month, day] = weekStartString.split("-").map(Number);
   const base = new Date(Date.UTC(year, month - 1, day));

@@ -1,12 +1,13 @@
 import { useCallback, useState } from "react";
 import { useFocusEffect } from "@react-navigation/native";
 import { StyleSheet, Text, View } from "react-native";
+import { LinearGradient } from "expo-linear-gradient";
 import { EmptyPanel } from "../components/EmptyPanel";
 import { MobileScreen, Section } from "../components/MobileScreen";
 import { Notice } from "../components/Notice";
 import { PrimaryButton } from "../components/PrimaryButton";
 import { maxFontSizeMultiplier, radii, spacing, typeScale } from "../theme/tokens";
-import { useThemedStyles } from "../theme/ThemeContext";
+import { useTheme, useThemedStyles } from "../theme/ThemeContext";
 import { getMerchantStoreStatistics } from "../utils/apiClient";
 import { formatCurrency } from "../utils/calculations";
 import { formatQualifiedRate, normalizeMerchantStatistics } from "../utils/merchantStatistics";
@@ -133,51 +134,98 @@ function StatCard({ label, value, hint }) {
   );
 }
 
-const CHART_BAR_HEIGHT = 100;
-// The window is long enough now (near 3 months, ~13 bars) that a "MM/DD" label under every single
-// bar collides with its neighbours on a real phone's width. Thinning to roughly this many evenly
-// spaced labels keeps the x-axis readable without hiding any bar itself -- every week still gets a
-// bar and its own value number, just not every week gets a date underneath it.
-const MAX_VISIBLE_WEEK_LABELS = 7;
-
 // The chart's columns are narrow (13 weeks side by side), so formatCurrency's full "$14529" gets
 // cut down to "$..." by the value Text's numberOfLines={1} -- it simply doesn't fit. Dropping the
 // "$" (the "營收" sub-label above the chart already establishes these are money) and rounding to
 // the nearest thousand keeps the label as short as the order-count numbers next to it, which do fit.
+// Also used to format the y-axis tick values (computeNiceAxisStep below already rounds those to
+// clean numbers, so "27000" reads as "27k" the same way a bar's own value does).
 function formatRevenueCompact(amount) {
   return amount >= 1000 ? `${Math.round(amount / 1000)}k` : `${amount}`;
 }
 
-// A plain-View bar chart (no SVG/chart library in this project -- adding one would need a new
-// native module and a fresh APK build, see docs/azure-classroom-deployment.md's update rules).
-// Bar height is `value / maxValue` of CHART_BAR_HEIGHT, same ratio math the admin web trend charts
-// use (backend/server.js's renderLineChart/renderBarChart), just expressed with RN View height
-// instead of an SVG/CSS percentage. `valueKey`/`formatValue` let the same chart plot either
+const CHART_HEIGHT = 120;
+const MIN_BAR_HEIGHT = 3;
+const Y_AXIS_WIDTH = 34;
+// 4 steps above 0 => 5 gridlines/labels (0, step, 2*step, 3*step, 4*step), matching the reference
+// chart's "0 / 5875 / 11750 / 17625 / 23500" style axis.
+const Y_AXIS_STEPS = 4;
+
+// Rounds maxValue/Y_AXIS_STEPS up to a "nice" 1/2/5 * 10^n number, so the axis reads like a real
+// chart's 0/5k/10k/15k/20k instead of an arbitrary fraction of whatever this week's max happens to
+// be. Always rounds UP (never down), so axisStep * Y_AXIS_STEPS is guaranteed >= maxValue.
+function computeNiceAxisStep(maxValue) {
+  const rawStep = maxValue / Y_AXIS_STEPS;
+  const magnitude = 10 ** Math.floor(Math.log10(rawStep));
+  const normalized = rawStep / magnitude;
+  const niceNormalized = normalized <= 1 ? 1 : normalized <= 2 ? 2 : normalized <= 5 ? 5 : 10;
+  return niceNormalized * magnitude;
+}
+
+// A gradient-filled bar chart with a y-axis scale and gridlines (mirrors the "0/5875/11750/17625/
+// 23500"-style reference chart the store owner asked to match), replacing the flat single-colour
+// bars and the earlier line-chart attempt neither of which had an axis scale. A week with an actual
+// 0 gets no bar at all (height 0, no floor); a non-zero value keeps a small floor so it doesn't
+// disappear next to a much taller neighbour. `valueKey`/`formatValue` let the same chart plot either
 // orderCount or revenue off the same weeklyTrend rows (see WeeklyTrendSection below).
 function WeeklyTrendChart({ weeklyTrend, valueKey, formatValue }) {
   const styles = useThemedStyles(makeStyles);
+  const { colors } = useTheme();
   const maxValue = Math.max(1, ...weeklyTrend.map((week) => week[valueKey]));
-  const labelStride = Math.max(1, Math.ceil(weeklyTrend.length / MAX_VISIBLE_WEEK_LABELS));
+  const axisStep = computeNiceAxisStep(maxValue);
+  const axisMax = axisStep * Y_AXIS_STEPS;
+  const ticksDescending = Array.from(
+    { length: Y_AXIS_STEPS + 1 },
+    (_, index) => axisStep * (Y_AXIS_STEPS - index)
+  );
 
   return (
-    <View style={styles.chart}>
-      {weeklyTrend.map((week, index) => (
-        <View key={week.weekStart} style={styles.chartCol}>
-          <Text
-            maxFontSizeMultiplier={maxFontSizeMultiplier}
-            style={styles.chartValue}
-            numberOfLines={1}
-          >
-            {formatValue(week[valueKey])}
-          </Text>
-          <View
-            style={[styles.chartBar, { height: (week[valueKey] / maxValue) * CHART_BAR_HEIGHT }]}
-          />
-          <Text maxFontSizeMultiplier={maxFontSizeMultiplier} style={styles.chartLabel}>
-            {index % labelStride === 0 ? formatWeekLabel(week.weekStart) : ""}
-          </Text>
+    <View>
+      <View style={styles.chartRow}>
+        <View style={styles.yAxisLabels}>
+          {ticksDescending.map((tick) => (
+            <Text key={tick} maxFontSizeMultiplier={maxFontSizeMultiplier} style={styles.yAxisLabel} numberOfLines={1}>
+              {formatValue(tick)}
+            </Text>
+          ))}
         </View>
-      ))}
+        <View style={styles.plotArea}>
+          <View style={styles.gridLines} pointerEvents="none">
+            {ticksDescending.map((tick) => (
+              <View key={tick} style={styles.gridLine} />
+            ))}
+          </View>
+          {weeklyTrend.map((week) => {
+            const value = week[valueKey];
+            const barHeight = value === 0 ? 0 : Math.max(MIN_BAR_HEIGHT, (value / axisMax) * CHART_HEIGHT);
+            return (
+              <View key={week.weekStart} style={styles.chartCol}>
+                <Text
+                  maxFontSizeMultiplier={maxFontSizeMultiplier}
+                  style={styles.chartValue}
+                  numberOfLines={1}
+                >
+                  {formatValue(value)}
+                </Text>
+                <LinearGradient
+                  colors={[colors.lineDecor, colors.accent]}
+                  style={[styles.chartBar, { height: barHeight }]}
+                />
+              </View>
+            );
+          })}
+        </View>
+      </View>
+      <View style={styles.xAxisRow}>
+        <View style={styles.yAxisSpacer} />
+        {weeklyTrend.map((week) => (
+          <View key={week.weekStart} style={styles.xAxisLabelCol}>
+            <Text maxFontSizeMultiplier={maxFontSizeMultiplier} style={styles.xAxisLabel} numberOfLines={1}>
+              {formatWeekLabel(week.weekStart)}
+            </Text>
+          </View>
+        ))}
+      </View>
     </View>
   );
 }
@@ -188,7 +236,7 @@ function WeeklyTrendChart({ weeklyTrend, valueKey, formatValue }) {
 function WeeklyTrendSection({ weeklyTrend, weeklyTrendUnavailable }) {
   const styles = useThemedStyles(makeStyles);
   return (
-    <Section title="近期訂單與營收趨勢（近 3 個月）">
+    <Section title="近期訂單與營收趨勢（近 2 個月）">
       {weeklyTrendUnavailable ? (
         <Notice tone="danger" message="暫時無法載入近期趨勢，請稍後再試。" />
       ) : weeklyTrend.length === 0 ? (
@@ -205,10 +253,11 @@ function WeeklyTrendSection({ weeklyTrend, weeklyTrendUnavailable }) {
   );
 }
 
-// "2026-09-07" -> "09/07"; weekStart is always that exact shape (see getStoreWeeklyTrendPostgres),
-// never parsed through Date, so this can't be thrown off by timezone.
+// "2026-09-07" -> "9/7" (no leading zeros); weekStart is always that exact shape (see
+// getStoreWeeklyTrendPostgres), never parsed through Date, so this can't be thrown off by timezone.
 function formatWeekLabel(weekStart) {
-  return weekStart.slice(5).replace("-", "/");
+  const [, month, day] = weekStart.split("-");
+  return `${Number(month)}/${Number(day)}`;
 }
 
 const makeStyles = (colors) => StyleSheet.create({
@@ -262,11 +311,34 @@ const makeStyles = (colors) => StyleSheet.create({
     ...typeScale.price,
     color: colors.text
   },
-  chart: {
+  chartRow: {
+    flexDirection: "row",
+    gap: spacing.s8
+  },
+  yAxisLabels: {
+    width: Y_AXIS_WIDTH,
+    height: CHART_HEIGHT,
+    justifyContent: "space-between"
+  },
+  yAxisLabel: {
+    ...typeScale.caption,
+    color: colors.textSecondary,
+    textAlign: "right"
+  },
+  plotArea: {
+    flex: 1,
     flexDirection: "row",
     alignItems: "flex-end",
     gap: spacing.s4,
-    height: CHART_BAR_HEIGHT + 44
+    height: CHART_HEIGHT
+  },
+  gridLines: {
+    ...StyleSheet.absoluteFillObject,
+    justifyContent: "space-between"
+  },
+  gridLine: {
+    height: 1,
+    backgroundColor: colors.lineRow
   },
   chartCol: {
     flex: 1,
@@ -276,19 +348,29 @@ const makeStyles = (colors) => StyleSheet.create({
   },
   chartBar: {
     width: "100%",
-    minHeight: 2,
-    borderRadius: radii.xs,
-    backgroundColor: colors.accent
+    borderTopLeftRadius: radii.xs,
+    borderTopRightRadius: radii.xs
   },
   chartValue: {
     ...typeScale.caption,
     color: colors.textSecondary,
     marginBottom: spacing.s4
   },
-  chartLabel: {
+  xAxisRow: {
+    flexDirection: "row",
+    gap: spacing.s4,
+    marginTop: spacing.s12
+  },
+  yAxisSpacer: {
+    width: Y_AXIS_WIDTH + spacing.s8
+  },
+  xAxisLabelCol: {
+    flex: 1,
+    alignItems: "center"
+  },
+  xAxisLabel: {
     ...typeScale.caption,
-    color: colors.textSecondary,
-    marginTop: spacing.s4
+    color: colors.textSecondary
   },
   chartSubLabel: {
     ...typeScale.caption,

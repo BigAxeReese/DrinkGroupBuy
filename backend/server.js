@@ -3997,7 +3997,7 @@ function renderAdminStoreStatisticsBody({ store, statistics, weeklyTrend }) {
     <p class="meta"><a href="/admin/statistics">← 返回數據統計總覽</a></p>
     <p class="meta">店家 ID：${escapeHtml(store.id)}・${escapeHtml(ADMIN_STORE_STATUS_LABELS[store.businessStatus] || store.businessStatus)}</p>
     <div class="stat-grid">${statCardsHtml}</div>
-    <h3 class="section-title chart-title">訂單與營收趨勢（近 3 個月）</h3>
+    <h3 class="section-title chart-title">訂單與營收趨勢（近 2 個月）</h3>
     ${weeklyTrendHtml}
     <h3 class="section-title chart-title">熱賣飲品（累計銷售杯數前 3 名）</h3>
     ${topDrinksHtml}`;

@@ -107,7 +107,7 @@ test("weekly trend is scoped to the given store, buckets in Asia/Taipei time, an
 
   const trendQuery = fake.queries.find((query) => query.statement.includes("date_trunc('week'"));
   assert.equal(trendQuery.parameters[0], injected);
-  assert.equal(trendQuery.parameters[1], 13);
+  assert.equal(trendQuery.parameters[1], 9);
   assert.match(trendQuery.statement, /activity\.store_id = \$1/);
   assert.match(trendQuery.statement, /AND orders\.payment_status = 'captured'/);
   assert.match(trendQuery.statement, /AT TIME ZONE 'Asia\/Taipei'/);

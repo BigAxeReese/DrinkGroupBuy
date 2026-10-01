@@ -3,12 +3,13 @@
 const { createRuntimeDatabaseAdapter } = require("..");
 
 const TOP_DRINKS_LIMIT = 3;
-// ~3 calendar months. Deliberately its own constant, not shared with adminStatisticsRepository.js's
+// ~2 calendar months. Deliberately its own constant, not shared with adminStatisticsRepository.js's
 // platform-wide WEEKLY_TREND_WEEKS (=8) -- this window backs both the merchant's own trend chart and
 // the admin per-store drill-down that reuses this same query, neither of which sits next to the
 // platform-wide admin chart, so there's no "two windows on one page" consistency requirement forcing
 // them to match (see adminStatisticsRepository.js's own comment on why ITS two charts must match).
-const WEEKLY_TREND_WEEKS = 13;
+// Was 13 (~3 months); narrowed after the mobile chart's bars got too cramped at 13-wide.
+const WEEKLY_TREND_WEEKS = 9;
 
 // The orders that count as this store's sales -- one definition shared by every figure below so the
 // revenue, discount and top-drinks numbers always describe the same set of orders:
