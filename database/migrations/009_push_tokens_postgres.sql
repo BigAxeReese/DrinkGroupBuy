@@ -1,6 +1,5 @@
 -- Stores Expo push tokens so the backend can send customer-facing notifications (group-buy
--- succeeded, drink ready for pickup) via the Expo push service. See docs/open-questions.md's
--- 2026-09-30 decision entry for why this is a direct backend->Expo call, not routed through n8n.
+-- succeeded, drink ready for pickup) via the Expo push service.
 --
 -- Identity is the token itself (UNIQUE(expo_push_token)), not (user_id, expo_push_token): a push
 -- token belongs to a physical device/app install, not a person. If a different user later logs

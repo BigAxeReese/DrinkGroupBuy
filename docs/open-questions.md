@@ -21,7 +21,7 @@
 | High   | Provider status reconciliation | Request status query、redirect 遺失恢復、持久化 retry job、admin 警示查詢與結構化日誌已完成；仍需 LINE Pay 核准後的 Sandbox 人工驗證與正式通知管道 |
 | High   | 跨執行個體 settlement locking | Provider 操作、settlement、cancel、repay 與 pickup 已加入 DB lease；兩個 Node.js 程序競爭及租約接管測試已通過，仍需 PostgreSQL row-lock 驗收 |
 | Medium | PostgreSQL runtime adapter | Reliability schema parity、`pg`、SQLite/PostgreSQL adapter 與 smoke 已完成；`backend/db.js` 尚未搬移，runtime 仍是 SQLite |
-| Medium | Notification table / delivery | 尚未設計 notification 或 delivery event schema；顧客端推播（開團成功、可以領飲料）與維運警報（走 n8n）的分工已於 2026-09-30 決定，見「一致性與營運」表 |
+| Medium | Notification table / delivery | 尚未設計 notification 或 delivery event schema；顧客端推播（開團成功、可以領飲料）與維運警報（沿用既有 `ALERT_WEBHOOK_URL` 通用 webhook，n8n 方案已於 2026-10-02 取消）的分工見「一致性與營運」表 |
 | Medium | 菜單管理與下單 E2E | 權威菜單 API、商家管理畫面、後端驗證與價格重算已完成第一版；仍需完整 Android E2E 與更細的逐項衝突修正 UX |
 | Medium | 正式退款申請 UI 與退款失敗重試 | 商家只提出退款申請、營運執行退款的規則已確認；`POST /api/merchant/orders/:orderId/refund-requests`（商家申請）與 `POST /api/admin/refund-requests/:requestId/approve`／`reject`（營運審核，重用既有 LINE Pay refund service）已完成第一版並有 `refund-request:smoke` 覆蓋；商家／營運手機或後台申請審核 UI、核准失敗時的正式重試 UX 與告警、正式 sandbox 人工端對端測試尚未完成 |
 
@@ -42,6 +42,7 @@
 | Resolved | 除了 alias 與取餐/訂單資料外，商家可以看到哪些顧客公開資料？                  | 商家只看得到顧客 alias、訂單品項、客製化內容、金額、付款狀態、取貨狀態與取貨憑證；不顯示 email、Firebase UID 或敏感身份資料。 |
 | Resolved | 第一階段是否保存顧客電話？ | 電話為選填而非必填；必須採加密或等效保護，商家介面不得顯示完整號碼。 |
 | Resolved | 使用者是否可以刪除帳號？ | 不採「永久不可刪除」。使用者可申請關閉帳號並立即停用登入；非必要個資刪除或去識別化，付款、退款、訂單與稽核紀錄只在法定保存、會計及爭議處理必要範圍內限制性保留。正式營運前需由法律與會計專業確認保存範圍及年限。 |
+| Medium | 是否要讓顧客選填年齡區間／性別等基本資料，用於顧客輪廓分析？ | 2026-10-01 討論，決定先記錄、暫不實作。起因是討論「折扣效果分析」時延伸出「能不能透過 Google 登入取得顧客年齡性別」——結論是不行：Google 登入標準流程只給姓名／Email／大頭貼；Google People API 雖然技術上可以要求生日／性別等欄位，但屬於需另外審核的敏感權限，且使用者帳號常常沒填或未公開，資料會很不完整；透過登入流程「順便」多要這類資料也容易引發使用者疑慮與個資法疑慮。如果之後真要做，討論出的方向：(1) 必須完全選填，不能擋在新用戶流程裡必填，否則等同脅迫同意；(2) 收年齡「區間」與性別「含不透露選項」，不收精確生日；(3) 存在獨立的 `user_profiles` 表，不混進 `users` 核心驗證欄位；(4) 存取權限比照本表上面「商家可以看到哪些顧客公開資料」那筆的既有原則——商家完全不可見個人明細，只有後台可看彙總統計；(5) 需要先更新隱私權政策、明確告知用途。尚未排入實作時程。 |
 
 ## 店家與菜單
 
@@ -126,7 +127,7 @@
 | Resolved | 除了 admin cancellation，哪些操作也需要 audit logs？              | 付款授權、請款、取消授權、結算、活動取消、訂單 revision 套用與敏感權限變更都需要 audit log。           |
 | Resolved | 是否需要、以及何時要用 PostgreSQL/MySQL 取代 SQLite？             | SQLite 只作本機開發；正式多人測試、真金流或部署前應切到 PostgreSQL。                                  |
 | Resolved | 第一階段通知如何交付？ | 先建立可持久化的站內通知與 delivery 狀態；付款、結算、void、退款等重要通知必須可重試與追蹤，手機推播留待後續整合。 |
-| Resolved | 維運警報與顧客端推播通知，後續分別怎麼做？ | 2026-09-30 決定：（1）維運警報（LINE Pay 對帳失敗、結算/取貨逾期排程異常、`/health` 沒回應等）改交給 n8n（官方雲端版，非自架）——後端偵測到事件後打 webhook 通知 n8n，由 n8n 決定通知誰、走哪個管道（LINE／Email／Slack）、要不要分層升級；n8n 只負責「事件發生後的通知編排」，不判斷業務邏輯、不觸發退款/結算/扣款等實際動作，也不接觸顧客個資或金流明細。選雲端版（不自架）是因為這個決定的主要動機是「之後會換人維護」，雲端版不用對方會操作伺服器。（2）顧客端即時推播（開團成功、可以領飲料）確認要做，但目前手機 App 完全沒有推播基礎建設（未安裝 `expo-notifications`、無權限請求、無裝置 token 註冊/儲存，後端也沒有寄送推播的程式碼），是獨立於 n8n 的手機端功能缺口，且需要新增原生依賴、必須重新打包 APK（EAS Update 無法讓這類改動生效）。推播「觸發」邏輯確認直接寫在後端對應事件發生處（結算、取貨排程），不透過 n8n，避免額外延遲與失敗環節。尚未排入實作時程。 |
+| Resolved | 維運警報與顧客端推播通知，後續分別怎麼做？ | 2026-09-30 決定：（1）維運警報（LINE Pay 對帳失敗、結算/取貨逾期排程異常、`/health` 沒回應等）改交給 n8n（官方雲端版，非自架）——後端偵測到事件後打 webhook 通知 n8n，由 n8n 決定通知誰、走哪個管道（LINE／Email／Slack）、要不要分層升級；n8n 只負責「事件發生後的通知編排」，不判斷業務邏輯、不觸發退款/結算/扣款等實際動作，也不接觸顧客個資或金流明細。選雲端版（不自架）是因為這個決定的主要動機是「之後會換人維護」，雲端版不用對方會操作伺服器。（2）顧客端即時推播（開團成功、可以領飲料）確認要做，但目前手機 App 完全沒有推播基礎建設（未安裝 `expo-notifications`、無權限請求、無裝置 token 註冊/儲存，後端也沒有寄送推播的程式碼），是獨立於 n8n 的手機端功能缺口，且需要新增原生依賴、必須重新打包 APK（EAS Update 無法讓這類改動生效）。推播「觸發」邏輯確認直接寫在後端對應事件發生處（結算、取貨排程），不透過 n8n，避免額外延遲與失敗環節。尚未排入實作時程。**後續（2026-10-02）：（1）已撤回**——使用者決定取消 n8n，維運警報不接 n8n，沿用既有的 `backend/payments/alertNotifier.js`（`ALERT_WEBHOOK_URL`，通用 JSON webhook，Slack／Discord／Mattermost 或自訂端點皆可，未設定時不送也不報錯），n8n 從未實作過，沒有任何程式或設定需要移除。（2）顧客端推播已於 2026-09-30 實作（見 `PROGRESS.md`），不受影響。 |
 
 ## 文件與命名
 

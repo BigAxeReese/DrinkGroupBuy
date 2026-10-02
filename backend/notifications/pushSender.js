@@ -2,8 +2,7 @@
 
 // Sends customer-facing push notifications (group-buy succeeded, drink ready for pickup) via the
 // Expo push service (a plain HTTPS POST -- no SDK/credentials setup needed), using the mobile
-// app's existing EAS projectId. See docs/open-questions.md's 2026-09-30 decision entry for why
-// this is direct backend->Expo, not routed through n8n.
+// app's existing EAS projectId.
 //
 // Same shape as ../payments/alertNotifier.js on purpose: a broken or slow push call must never
 // take down the settlement/pickup flow that triggered it, so failures are swallowed here and

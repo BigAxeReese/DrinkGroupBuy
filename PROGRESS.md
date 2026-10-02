@@ -1,5 +1,5 @@
 ---
-updated: 2026-10-01
+updated: 2026-10-02
 ---
 
 ## 功能總覽 [完成]
@@ -233,7 +233,7 @@ updated: 2026-10-01
   - Android 實機 E2E [待處理]
     > 拿真的 Android 手機把取貨、逾期提示的整個流程實際操作一次確認沒問題。
 - 顧客端推播通知（開團成功、可以領飲料） [進行中] (9/30)
-  > 團購成團或訂單可以領取時，主動推播通知顧客的手機，不用顧客自己打開 App 才知道。維運警報（LINE Pay 對帳失敗等）改走 n8n，跟這個顧客端推播是分開的兩件事，見 `docs/open-questions.md`「一致性與營運」表 2026-09-30 決定。
+  > 團購成團或訂單可以領取時，主動推播通知顧客的手機，不用顧客自己打開 App 才知道。維運警報（LINE Pay 對帳失敗等）走既有的 `ALERT_WEBHOOK_URL` 通用 webhook，跟這個顧客端推播是分開的兩件事，見 `docs/open-questions.md`「一致性與營運」表。
   - 後端事件觸發與 Expo 推播模組 [完成] (9/30) — 新增 `push_tokens` 資料表（`009_push_tokens_postgres.sql`，尚未套用到真實開發資料庫，見下）與對應 repository、`backend/notifications/pushSender.js`（直接呼叫 Expo push service，風格比照既有 `alertNotifier.js`：失敗不拋例外、記結構化日誌，不會讓結算或取貨這種核心流程被推播失敗拖垮）。兩個觸發點：結算成團時（`settlementService.js`，只有真的剛完成結算的那次會通知，重試遇到已完成的結算不會重送）、商家標記可取餐時（`credentialService.js`／`pickupCredentialRepository.js`，只有真的從「未可取」轉成「可取」的訂單才會通知，重複標記已可取的訂單不會再發）。過程中補上兩個既有欄位缺口：`groupBuySettlementRepository.js` 的 `mapActivity()` 原本沒有回傳 `title`、標記可取餐的查詢原本沒有帶出 `customer_user_id`，通知文案需要這兩個欄位才寫得出來。22 項新增單元測試（fake-DB，含 SQL 語句、顧客去重、結算重試不重複通知、內部欄位不外洩到 HTTP 回應等斷言）與既有 `npm test` 233/233 全數通過。
     > 團購成團或訂單標記可取餐這兩個時間點，後端自動呼叫 Expo 的推播服務把訊息送到顧客手機。
   - Mobile 端取得並註冊裝置 [完成] (9/30) — 新增 `expo-notifications`（原生依賴）、`mobile/src/utils/pushNotifications.js`（要權限、註冊裝置、失敗一律靜默不中斷登入，比照既有 `authSession.js`／登入時定位權限請求的寫法），登入成功時（`AppStateProvider.jsx` 的 `selectRole`，涵蓋重開 App 自動登入與手動登入兩條路徑）顧客角色會嘗試註冊。已用 Expo Web 預覽實際走過本機開發模式登入流程，確認不影響登入、無新增錯誤（web 平台本來就不支援推播，直接略過，不會呼叫原生 API）。
