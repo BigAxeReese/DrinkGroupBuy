@@ -8,10 +8,18 @@ import {
 } from "../utils/apiClient";
 import { signOutFirebaseUser, useFirebaseEmailLogin, useFirebaseGoogleLogin } from "../utils/firebaseAuth";
 import { getRouteForUser } from "../utils/authRouting";
+import { isDemoMode } from "../utils/demoMode";
+import { demoCustomerUserId, demoMerchantStoreId, demoMerchantUserProfile, demoUserProfile } from "../mock/demoContent";
 import { useAppState } from "../state/AppStateContext";
 import { useTheme, useThemedStyles } from "../theme/ThemeContext";
 
 export function RoleSelectScreen(props) {
+  // Checked before the dev-auth branch: unlike EXPO_PUBLIC_AUTH_MODE=dev (which still calls the
+  // real backend to list/log in dev accounts), demo mode must not make any network request at all.
+  if (isDemoMode()) {
+    return <DemoRoleSelectContent {...props} />;
+  }
+
   const isDevAuthMode = getAuthMode() === "dev";
 
   if (isDevAuthMode) {
@@ -19,6 +27,52 @@ export function RoleSelectScreen(props) {
   }
 
   return <FirebaseRoleSelectScreen {...props} />;
+}
+
+// No apiClient calls anywhere in this branch -- selectRole only touches local AppStateProvider
+// state, so this works with no backend reachable at all (see ../utils/demoMode.js). Deliberately
+// styled to match the real FirebaseRoleSelectScreen below (same hero, same primary button, same
+// footer links) rather than looking like a distinct dev tool -- only the button actions differ.
+function DemoRoleSelectContent({ navigation }) {
+  const styles = useThemedStyles(makeStyles);
+  const { selectRole } = useAppState();
+
+  return (
+    <ScrollView style={styles.screen} contentContainerStyle={styles.content}>
+      <View style={styles.hero}>
+        <LoginHeroIllustration />
+      </View>
+
+      <View style={styles.actionStack}>
+        <LoginOptionButton
+          icon="G"
+          iconStyle={styles.googleIcon}
+          label="使用 Google 登入／註冊"
+          onPress={() => selectRole("customer", { userId: demoCustomerUserId }, demoUserProfile)}
+        />
+        <Pressable
+          accessibilityRole="button"
+          onPress={() => selectRole("merchant", { storeId: demoMerchantStoreId }, demoMerchantUserProfile)}
+          style={({ pressed }) => [styles.textButton, pressed && styles.pressed]}
+        >
+          <Text style={styles.textButtonLabel}>店家示範登入</Text>
+        </Pressable>
+      </View>
+
+      <Pressable
+        accessibilityRole="button"
+        onPress={() => navigation.navigate("merchantApply")}
+        style={({ pressed }) => [styles.textButton, pressed && styles.pressed]}
+      >
+        <Text style={styles.textButtonLabel}>申請成為商家</Text>
+      </Pressable>
+
+      <Text style={styles.terms}>
+        登入代表你同意<Text style={styles.termsLink}>服務條款</Text>與<Text style={styles.termsLink}>隱私政策</Text>
+      </Text>
+      <Text style={styles.version}>飲料團購</Text>
+    </ScrollView>
+  );
 }
 
 function FirebaseRoleSelectScreen(props) {

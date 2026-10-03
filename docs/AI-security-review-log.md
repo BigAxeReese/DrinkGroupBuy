@@ -1464,3 +1464,32 @@
 | 重試/冪等 | 結算重試遇到 `completion.alreadyCompleted` 不會重送；取貨標記重複呼叫已可取的訂單不會重送——都有對應單元測試覆蓋 |
 
 **這次沒審查到／沒驗證到的部分**：這次的 migration（`009_push_tokens_postgres.sql`）尚未套用到任何真實資料庫（開發或 Azure），套用後建議之後再對真實資料庫做一次端對端確認；顧客端裝置實際收到推播的行為（前景／背景／關閉三種狀態）需要重新打包 APK 並用實機驗證，這次沒有做，也不在 `/security-review` 的檢查範圍內。
+
+---
+
+## 2026-10-03 — 離線展示模式（`EXPO_PUBLIC_DEMO_MODE`，新功能）與對外展示連線
+
+**範圍**：新增 `mobile/src/utils/demoMode.js`、`mobile/src/mock/demoContent.js`、`mobile/src/mock/demoBackend.js`；加了展示模式分支的既有檔案——登入畫面 `RoleSelectScreen.jsx`、購物車 `CartScreen.jsx`、全域狀態 `AppStateProvider.jsx`（`submitCart`／`updateOrderItems`／`cancelOrder`／標記可取餐／取餐核銷／取消團購等動作）、`apiClient.js`（菜單、統計、省錢統計、開團、菜單新增修改）；另外審視「用 Expo tunnel（ngrok）讓外部掃 QR code 連到本機開發伺服器」這個做法
+**觸發原因**：AGENTS.md 規則——改動碰到登入畫面與付款／訂單送出的 Mobile 程式碼（雖然只是加分支、沒有改後端與金額計算）；展示模式會繞過真實登入，必須確認它不能被誤開或被利用
+**方法**：聚焦複查，不是整個 branch 的 diff 掃描（工作目錄裡另有其他 session 的未提交文件改動）。追了每一個 `isDemoMode()` 呼叫點（共 28 處，都在 `mobile/src`），並確認旗標在哪些建置／設定檔裡有被設定
+
+### 發現
+
+| 嚴重度 | 位置 | 問題 | 建議修法 | 狀態 |
+|--------|------|------|----------|------|
+| 低 | Expo tunnel（`expo start --tunnel`） | 展示時把本機的 Metro 開發伺服器透過 ngrok 公開到網際網路，任何拿到網址的人都連得到。內容只有已經打包在 APK 裡的前端程式碼與本來就公開的 `EXPO_PUBLIC_*` 設定（沒有後端機密，展示模式也完全不連後端），但**沒有驗證**開發伺服器是否還有其他只該給本機用的內部端點（例如開啟編輯器之類）會被外部呼叫到 | 只在展示期間開著、用完關掉；正式展示建議改成 `expo export -p web` 的靜態網站，不要開著開發伺服器 | 評估後暫不修（展示用、時間有限；已記錄限制） |
+| 低 | ngrok 授權碼 | 這次設定 tunnel 時，使用者把 ngrok authtoken 貼在對話裡；已寫進使用者家目錄的 ngrok 設定檔（不在 repository 內，未提交） | 展示結束後到 ngrok dashboard 重設這組授權碼 | 待處理（由使用者執行） |
+
+### 沒發現問題的部分
+
+| 面向 | 檢查結果 |
+|------|----------|
+| 能否在正式版被打開 | `EXPO_PUBLIC_DEMO_MODE` 是建置時就寫死的常數（Metro 會把 `process.env.EXPO_PUBLIC_*` 直接替換進程式碼），使用者在已安裝的 App 裡沒有任何方式切換。旗標只出現在 `mobile/.env.example` 的註解行，`mobile/.env`（已被 gitignore）、`eas.json`、`app.config.js`、GitHub Actions 設定都沒有設定它；開發時是用命令列暫時帶入，沒有寫進任何檔案 |
+| 認證繞過 | 展示模式的「登入」只呼叫本機的 `selectRole()` 改畫面狀態，**不會取得、也不會設定任何 bearer token**（沒有呼叫 `setAuthToken`）。就算有人拿到展示版，要對後端做任何事仍會被後端以未登入／權限不足拒絕——後端的授權邏輯這次完全沒有改動 |
+| 金流與金額 | 展示模式下的「付款成功」是 `authorizeLinePayPayment()` 這個本來就存在、只改本機畫面狀態的動作，不會呼叫 LINE Pay 或任何後端；送出訂單時改用本機組出的假訂單編號取代 `createOrder`。後端的金額重算、冪等、鎖等保護完全沒有被改動或繞過 |
+| 資料寫入 | 展示模式下，假訂單、假菜單、假團購都只存在記憶體（`demoBackend.js` 的模組變數與 React state）；刻意不讀寫既有的本機 prototype 儲存，避免假資料混進同一台裝置之後的真實使用 |
+| 資料外洩 | 展示用資料取自 seed 檔裡本來就公開的店家與菜單資訊（店名、地址、品項、價格），沒有任何顧客個資、金流憑證或機密 |
+| 後端 | 這次沒有改動任何 `backend/` 檔案 |
+
+**這次沒審查到／沒驗證到的部分**：手機 App 原生建置內使用展示模式的行為沒有驗證；Expo 開發伺服器對外暴露的完整端點清單沒有逐一檢查（見上表第一列）。
+

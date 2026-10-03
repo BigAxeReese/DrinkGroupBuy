@@ -3,6 +3,9 @@ import { Platform } from "react-native";
 import { saveAuthSession } from "./authSession";
 import { fetchWithTimeout } from "./fetchWithTimeout";
 import { getOrderWriteErrorMessage } from "./orderWriteErrors";
+import { isDemoMode } from "./demoMode";
+import { demoCustomerSavings, demoMenu, demoMerchantStatistics } from "../mock/demoContent";
+import { createDemoGroupBuyActivity, createDemoMenuItem, getDemoMerchantMenu, updateDemoMenuItem } from "../mock/demoBackend";
 
 // 10.0.2.2 is the Android emulator's alias for the host machine's localhost;
 // it only resolves inside the emulator's virtual network, so web/browser
@@ -152,6 +155,7 @@ export async function getDevBusinessTime() {
 }
 
 export async function createGroupBuyActivity(input) {
+  if (isDemoMode()) return createDemoGroupBuyActivity(input);
   const requestKey = `createGroupBuyActivity:${stableStringify(input)}`;
   return dedupeRequest(requestKey, async () => {
     const idempotencyKey = input.idempotencyKey ?? requestKey;
@@ -205,6 +209,7 @@ export async function listStores() {
 }
 
 export async function getStoreMenu(storeId) {
+  if (isDemoMode()) return demoMenu;
   return getMenuRequest(`/api/stores/${encodeURIComponent(storeId)}/menu`, false);
 }
 
@@ -213,6 +218,7 @@ export async function listCustomerOrders(input = {}) {
 }
 
 export async function getCustomerSavings() {
+  if (isDemoMode()) return demoCustomerSavings;
   const response = await fetch(`${backendBaseUrl}/api/customers/me/savings`, {
     headers: withAuthHeaders()
   });
@@ -267,6 +273,7 @@ async function getOrderListRequest(path, input) {
 }
 
 export async function getMerchantStoreStatistics(storeId) {
+  if (isDemoMode()) return demoMerchantStatistics;
   const response = await fetch(`${backendBaseUrl}/api/merchant/stores/${encodeURIComponent(storeId)}/statistics`, {
     headers: withAuthHeaders()
   });
@@ -281,10 +288,12 @@ export async function getMerchantStoreStatistics(storeId) {
 }
 
 export async function getMerchantStoreMenu(storeId) {
+  if (isDemoMode()) return getDemoMerchantMenu();
   return getMenuRequest(`/api/merchant/stores/${encodeURIComponent(storeId)}/menu`, true);
 }
 
 export async function createMerchantMenuItem(storeId, input) {
+  if (isDemoMode()) return createDemoMenuItem(input);
   return writeMenuItemRequest(
     `/api/merchant/stores/${encodeURIComponent(storeId)}/menu-items`,
     "POST",
@@ -293,6 +302,7 @@ export async function createMerchantMenuItem(storeId, input) {
 }
 
 export async function updateMerchantMenuItem(storeId, menuItemId, input) {
+  if (isDemoMode()) return updateDemoMenuItem(menuItemId, input);
   return writeMenuItemRequest(
     `/api/merchant/stores/${encodeURIComponent(storeId)}/menu-items/${encodeURIComponent(menuItemId)}`,
     "PATCH",

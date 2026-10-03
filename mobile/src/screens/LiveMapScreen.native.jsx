@@ -16,21 +16,17 @@ import { useTheme, useThemedStyles } from "../theme/ThemeContext";
 import { DARK_MAP_STYLE, LIGHT_MAP_STYLE } from "../theme/mapStyles";
 
 // Android turns pinColor into a hue only (react-native-maps: Color.colorToHSV -> defaultMarker(hue)),
-// so these tokens choose the hue of the default pin, not its exact colour. The recruiting / no
-// recruiting difference is therefore also drawn on the label under the pin (solid vs hollow dot).
-// The user pin's hue has no status meaning -- it exists only so it reads as clearly different from
-// the accent-hued "recruiting" and text-hued "idle" store pins above. It is deliberately a local
-// value, not read from `tones` (whose entries ARE status colours, e.g. tones.success also means
-// "已成團/已付款"): borrowing a status colour just for its hue would risk a future status-colour
-// tweak silently changing this pin too. `colors.*` has no hue this different from accent/text
-// (slate reads as a blue pin and deep purple as a violet one, since only the hue survives), so
-// there is no existing token to point at instead: green keeps the user pin clearly apart from both.
-const USER_PIN_HUE = "#2F5A14";
+// so these are each just the hue of the named colour, not an exact match to it. Fixed values per
+// explicit user decision, not theme tokens like colors.accent/colors.text (which these used to be)
+// -- they need to read the same in light and dark mode. The recruiting/no-recruiting difference is
+// always also drawn on the label under the pin (solid vs hollow dot), so pin colour was already a
+// secondary signal, free to pick for contrast rather than theme consistency.
+const RECRUITING_PIN_COLOR = "yellow";
+const IDLE_PIN_COLOR = "cyan";
 
 export function LiveMapScreen({ navigation, appState, selectedAuthUserId }) {
   const styles = useThemedStyles(makeStyles);
-  const { colors, isDark } = useTheme();
-  const pinColors = useMemo(() => ({ user: USER_PIN_HUE, recruiting: colors.accent, idle: colors.text }), [colors]);
+  const { isDark } = useTheme();
   const mapRef = useRef(null);
   const lastReportSignatureRef = useRef("");
   // True once a real GPS fix has been received. This effect re-runs on every re-focus of the tab, and
@@ -229,11 +225,13 @@ export function LiveMapScreen({ navigation, appState, selectedAuthUserId }) {
         onMapReady={recomputeMarkerLabelPositions}
         onRegionChangeComplete={recomputeMarkerLabelPositions}
       >
+        {/* No pinColor: omitting it gives Android's own default marker (Google's native red) --
+            passing a red hex through the hue-only conversion above is a less direct way to ask
+            for the same thing. */}
         <Marker
           coordinate={userPosition}
           title={locationName}
           description={effectiveLocationMode === "live" ? "顧客即時 GPS；失敗時使用固定備援位置" : "控制台指定的顧客固定位置"}
-          pinColor={pinColors.user}
         />
         {visibleMapStores.map((store) => {
           const hasRecruitingGroupBuyActivity = store.hasRecruitingGroupBuyActivity;
@@ -247,7 +245,7 @@ export function LiveMapScreen({ navigation, appState, selectedAuthUserId }) {
                 setFilteredOutStoreName(null);
                 setSelectedStoreId(store.id);
               }}
-              pinColor={hasRecruitingGroupBuyActivity ? pinColors.recruiting : pinColors.idle}
+              pinColor={hasRecruitingGroupBuyActivity ? RECRUITING_PIN_COLOR : IDLE_PIN_COLOR}
             />
           );
         })}

@@ -34,6 +34,9 @@ import { getRouteForUser } from "../utils/authRouting";
 import { signOutFirebaseUser } from "../utils/firebaseAuth";
 import { registerForPushNotifications } from "../utils/pushNotifications";
 import { getBusinessNow } from "../utils/businessTime";
+import { isDemoMode } from "../utils/demoMode";
+import { demoRawGroupBuyActivity, demoStores } from "../mock/demoContent";
+import { createDemoPickupReadyResult, lookupDemoPickupCredential, redeemDemoPickupCredential } from "../mock/demoBackend";
 import { AppStateContext } from "./AppStateContext";
 import { normalizeBackendGroupBuyActivity, buildLocalOrderFromBackend, buildLocalPaymentFromBackend, mergeBackendOrderList, isSameCartItemVariant, toBackendOrderItems } from "./stateHelpers";
 
@@ -86,9 +89,13 @@ export function AppStateProvider({ children }) {
   const [selectedCustomerId, setSelectedCustomerId] = useState("customer-yinji");
   const [selectedAuthUserId, setSelectedAuthUserId] = useState(null);
   const [selectedMerchantStoreId, setSelectedMerchantStoreId] = useState("store-001");
-  const [stores, setStores] = useState([]);
+  // Demo mode seeds these directly instead of waiting on syncStores/syncGroupBuyActivities (both
+  // skipped below, see the syncBackendState effect) -- there is no backend to sync from.
+  const [stores, setStores] = useState(() => (isDemoMode() ? demoStores : []));
   const [storeSyncStatus, setStoreSyncStatus] = useState("idle");
-  const [groupBuyActivities, setGroupBuyActivities] = useState([]);
+  const [groupBuyActivities, setGroupBuyActivities] = useState(() => (
+    isDemoMode() ? [normalizeBackendGroupBuyActivity(demoRawGroupBuyActivity)] : []
+  ));
   const [groupBuyActivitySyncStatus, setGroupBuyActivitySyncStatus] = useState("idle");
   const [orders, setOrders] = useState(initialOrders);
   const [paymentAuthorizations, setPaymentAuthorizations] = useState(initialPaymentAuthorizations);
@@ -127,6 +134,13 @@ export function AppStateProvider({ children }) {
   }, []);
 
   useEffect(() => {
+    // Demo mode always starts from demoContent.js fresh -- it neither reads nor writes this real
+    // prototype-storage key, so a later non-demo run on the same browser/device never finds leftover
+    // fake orders, and a later demo run never inherits whatever a real run happened to save.
+    if (isDemoMode()) {
+      setStorageLoaded(true);
+      return;
+    }
     clearPrototypeStateOnce("2026-07-29-clear-all-group-buys-orders-cart");
     const storedState = loadPrototypeState();
     if (storedState) {
@@ -139,7 +153,7 @@ export function AppStateProvider({ children }) {
   }, []);
 
   useEffect(() => {
-    if (!storageLoaded) return;
+    if (!storageLoaded || isDemoMode()) return;
     savePrototypeState({
       groupBuyActivities,
       orders,
@@ -403,17 +417,21 @@ export function AppStateProvider({ children }) {
       if (existingOrder) {
         if (existingOrder.paymentStatus !== "pending") {
           let revision;
-          try {
-            revision = await createOrderRevision(existingOrder.id, {
-              fallbackPurchasePreference,
-              items: backendItems
-            });
-          } catch (error) {
-            return {
-              error: "backend_order_revision_failed",
-              message: error.message,
-              orderId: existingOrder.id
-            };
+          if (isDemoMode()) {
+            revision = { id: `demo-revision-${Date.now()}`, originalAmount: finalSubtotal, totalCups: finalQuantity };
+          } else {
+            try {
+              revision = await createOrderRevision(existingOrder.id, {
+                fallbackPurchasePreference,
+                items: backendItems
+              });
+            } catch (error) {
+              return {
+                error: "backend_order_revision_failed",
+                message: error.message,
+                orderId: existingOrder.id
+              };
+            }
           }
 
           setOrders((items) => items.map((order) => (
@@ -457,16 +475,26 @@ export function AppStateProvider({ children }) {
         }
 
         let backendOrder;
-        try {
-          backendOrder = await updateOrder(existingOrder.id, {
-            fallbackPurchasePreference,
-            items: backendItems
-          });
-        } catch (error) {
-          return {
-            error: "backend_order_update_failed",
-            message: error.message
+        if (isDemoMode()) {
+          backendOrder = {
+            status: "submitted",
+            paymentStatus: "pending",
+            authorizationStatus: "pending",
+            merchantAcceptanceStatus: "pending",
+            pickupStatus: "not_ready"
           };
+        } else {
+          try {
+            backendOrder = await updateOrder(existingOrder.id, {
+              fallbackPurchasePreference,
+              items: backendItems
+            });
+          } catch (error) {
+            return {
+              error: "backend_order_update_failed",
+              message: error.message
+            };
+          }
         }
 
         setOrders((items) => items.map((order) => (
@@ -522,22 +550,29 @@ export function AppStateProvider({ children }) {
         return existingOrder.id;
       }
 
-      let backendOrder;
-      try {
-        backendOrder = await createOrder({
-          activityId: groupBuyActivityId,
-          customerUserId: backendCustomerUserIds[selectedCustomerId] ?? selectedCustomerId,
-          fallbackPurchasePreference,
-          items: backendItems
-        });
-      } catch (error) {
-        return {
-          error: "backend_order_create_failed",
-          message: error.message
-        };
+      // Demo mode never reaches the real backend -- an id made up here stands in for what
+      // createOrder() would otherwise assign.
+      let orderId;
+      if (isDemoMode()) {
+        orderId = `demo-order-${Date.now()}`;
+      } else {
+        let backendOrder;
+        try {
+          backendOrder = await createOrder({
+            activityId: groupBuyActivityId,
+            customerUserId: backendCustomerUserIds[selectedCustomerId] ?? selectedCustomerId,
+            fallbackPurchasePreference,
+            items: backendItems
+          });
+        } catch (error) {
+          return {
+            error: "backend_order_create_failed",
+            message: error.message
+          };
+        }
+        orderId = backendOrder.id;
       }
 
-      const orderId = backendOrder.id;
       const newOrder = {
         id: orderId,
         customerId: selectedCustomerId,
@@ -595,21 +630,25 @@ export function AppStateProvider({ children }) {
         const revisionAmount = nextOrderItems.reduce((sum, item) => sum + item.subtotal, 0);
         const revisionCups = nextOrderItems.reduce((sum, item) => sum + item.quantity, 0);
         let revision;
-        try {
-          revision = await createOrderRevision(orderId, {
-            fallbackPurchasePreference: orderToUpdate.fallbackPurchasePreference ?? "decline_original_price",
-            items: toBackendOrderItems(nextOrderItems)
-          });
-        } catch (error) {
-          setOrders((items) => items.map((order) => (
-            order.id === orderId
-              ? {
-                  ...order,
-                  revisionError: error.message
-                }
-              : order
-          )));
-          return;
+        if (isDemoMode()) {
+          revision = { id: `demo-revision-${Date.now()}`, originalAmount: revisionAmount, totalCups: revisionCups };
+        } else {
+          try {
+            revision = await createOrderRevision(orderId, {
+              fallbackPurchasePreference: orderToUpdate.fallbackPurchasePreference ?? "decline_original_price",
+              items: toBackendOrderItems(nextOrderItems)
+            });
+          } catch (error) {
+            setOrders((items) => items.map((order) => (
+              order.id === orderId
+                ? {
+                    ...order,
+                    revisionError: error.message
+                  }
+                : order
+            )));
+            return;
+          }
         }
 
         setOrders((items) => items.map((order) => (
@@ -790,6 +829,10 @@ export function AppStateProvider({ children }) {
       )));
     },
     async syncOrderFromBackend(orderId) {
+      // CustomerOrdersScreen calls this unconditionally whenever route.params.orderId is set (and
+      // again on a poll loop while a pickup code is showing) -- demo orders have no real backend
+      // counterpart to fetch, so this would otherwise be a guaranteed-401 network call every time.
+      if (isDemoMode()) return null;
       const backendOrder = await getOrder(orderId);
       let pickupCredential = null;
       if (["ready", "picked_up"].includes(backendOrder.pickupStatus)) {
@@ -857,6 +900,10 @@ export function AppStateProvider({ children }) {
       return { order: backendOrder, activity: backendActivity };
     },
     async syncCustomerOrderList(scope = "active") {
+      // CustomerOrdersScreen's tab-switch sync -- demo orders live only in local state (see
+      // submitCart above), so there is nothing on a real backend to merge in, and this would
+      // otherwise overwrite the demo order list with an empty/401'd fetch.
+      if (isDemoMode()) return { orders: [] };
       const result = await fetchCustomerOrders({ scope, limit: 100 });
       const replacedOrderIds = new Set(orders
         .filter((order) => order.customerId === selectedCustomerId
@@ -873,6 +920,10 @@ export function AppStateProvider({ children }) {
       return result;
     },
     async syncMerchantOrderList(scope = "active") {
+      // MerchantDashboardScreen calls this directly via useOrderListSync on mount/tab-change,
+      // bypassing the syncBackendState effect's own demo-mode gate above -- guarded here too so it
+      // doesn't fire a real (401'd) request.
+      if (isDemoMode()) return { orders: [] };
       const result = await fetchMerchantStoreOrders(selectedMerchantStoreId, { scope, limit: 100 });
       const storeActivityIds = new Set(groupBuyActivities
         .filter((activity) => activity.storeId === selectedMerchantStoreId)
@@ -892,17 +943,21 @@ export function AppStateProvider({ children }) {
       return result;
     },
     async cancelOrder(orderId) {
-      const order = await cancelOrderApi(orderId, {
-        reason: "customer_withdrawal",
-        idempotencyKey: `customer-cancel-${orderId}`
-      });
+      const order = isDemoMode()
+        ? { id: orderId, status: "cancelled" }
+        : await cancelOrderApi(orderId, {
+            reason: "customer_withdrawal",
+            idempotencyKey: `customer-cancel-${orderId}`
+          });
       setOrders((current) => current.map((item) => item.id === orderId
         ? { ...item, status: "cancelled", pickupStatus: "cancelled", lifecycleBucket: "history", availableActions: [] }
         : item));
       return order;
     },
     async markOrdersReadyForPickupForGroupBuyActivity(groupBuyActivityId, orderId) {
-      const result = await markGroupBuyActivityReadyForPickup(groupBuyActivityId, orderId);
+      const result = isDemoMode()
+        ? createDemoPickupReadyResult(orders, groupBuyActivities.find((activity) => activity.id === groupBuyActivityId), orderId)
+        : await markGroupBuyActivityReadyForPickup(groupBuyActivityId, orderId);
       const credentialByOrderId = new Map(
         (result.credentials || []).map((credential) => [credential.orderId, credential])
       );
@@ -925,10 +980,11 @@ export function AppStateProvider({ children }) {
       return result;
     },
     lookupPickupCredential(pickupCode) {
+      if (isDemoMode()) return lookupDemoPickupCredential(pickupCode);
       return lookupPickupCredentialApi(pickupCode);
     },
     async redeemPickupCredential(pickupCode) {
-      const result = await redeemPickupCredentialApi(pickupCode);
+      const result = isDemoMode() ? redeemDemoPickupCredential(pickupCode) : await redeemPickupCredentialApi(pickupCode);
       const credential = result.credential;
 
       setOrders((items) => items.map((order) => (
@@ -983,7 +1039,22 @@ export function AppStateProvider({ children }) {
       )));
     },
     async cancelMerchantGroupBuyActivity(groupBuyActivityId, reason) {
-      const result = await cancelMerchantGroupBuyActivityApi(groupBuyActivityId, { reason });
+      let result;
+      if (isDemoMode()) {
+        const activity = groupBuyActivities.find((item) => item.id === groupBuyActivityId);
+        // Mirrors the real endpoint's own rule (listEligibleOrders): only orders that haven't been
+        // captured yet ride along with the activity cancellation -- already-paid orders stay as they
+        // are and would go through the separate refund flow instead (out of scope for this demo).
+        const cancelledOrderIds = orders
+          .filter((order) => order.groupBuyActivityId === groupBuyActivityId && !["captured", "refunded"].includes(order.paymentStatus))
+          .map((order) => order.id);
+        result = {
+          activity: { ...activity, status: "cancelled", cancellationReason: reason },
+          cancelledOrderIds
+        };
+      } else {
+        result = await cancelMerchantGroupBuyActivityApi(groupBuyActivityId, { reason });
+      }
       actionsRef.current.cancelMerchantGroupBuyActivityFromApi(result.activity, result.cancelledOrderIds);
       return result;
     },
@@ -993,7 +1064,7 @@ export function AppStateProvider({ children }) {
   actionsRef.current = actions;
 
   useEffect(() => {
-    if (!storageLoaded || !currentRole) return undefined;
+    if (!storageLoaded || !currentRole || isDemoMode()) return undefined;
 
     function syncBackendState() {
       actionsRef.current.syncStores().catch(() => {});

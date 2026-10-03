@@ -136,6 +136,21 @@ Expo Web is fixed to `http://localhost:8083` in local development so Google OAut
 
 如果你用 Android 實機測試，`localhost` 會指向手機本身，不是電腦。那時要改成電腦區網 IP 或 tunnel URL。
 
+## 離線展示模式
+
+`EXPO_PUBLIC_DEMO_MODE=true` 會讓 App 完全不連後端：登入頁（樣式與正式版一致）可一鍵以顧客或店家身份進入，菜單、團購、統計、開團、新增飲品、送出訂單都改用 `src/mock/demoContent.js` 與 `src/mock/demoBackend.js` 的假資料，不寫入任何真實資料庫。用途是專題展或試玩時讓人直接操作介面。
+
+只在命令列暫時帶入，**不要寫進 `mobile/.env`、`eas.json` 或 EAS 環境變數**——旗標是建置時寫死的，寫進去之後打出來的 APK 或發出去的 EAS Update 會整包變成假資料版：
+
+```bash
+cd mobile
+EXPO_PUBLIC_DEMO_MODE=true npx expo start --web --port 8083
+```
+
+要讓不同網路的人掃 QR code 連進來，加上 `--tunnel`（需要先 `npm install -g @expo/ngrok`，並到 ngrok 申請免費帳號、執行 `ngrok authtoken <你的授權碼>`；這台電腦要保持開機，網址跟著這個連線）。
+
+限制：假資料重新整理就重置；展示模式沒涵蓋的畫面（例如退款、商家申請）仍會嘗試連後端；取消訂單、標記可取餐、取餐核銷、取消團購只有本機模擬。登入頁在展示模式下不會取得任何 token，後端的授權邏輯完全沒有改動。
+
 ## Firebase Google Login
 
 Mobile now uses Firebase Auth with Google Login as the primary login path. The app sends the Firebase ID token to `POST /api/auth/firebase-session`, and the backend decides the user role from `users.firebase_uid`, `user_roles`, and `merchant_users`.

@@ -2,9 +2,9 @@ import { Pressable, StyleSheet, Text } from "react-native";
 import { radii, sizes, spacing, typeScale } from "../theme/tokens";
 import { useThemedStyles } from "../theme/ThemeContext";
 
-// A pill you pick from a group (drink size, category, tab, filter). Selected = white with a 2px
-// brown-sugar outline and bold text (docs/ui-style-guide.md), unselected = the milk-tea fill, so the
-// choice never depends on colour alone. `role` is the accessibility role: "radio" for pick-one
+// A pill you pick from a group (drink size, category, tab, filter). Selected = page-coloured with a
+// 2px accent outline (docs/ui-style-guide.md rule 2), unselected = the recess fill. Same text weight
+// in both states -- see selectedLabel below for why bold is not used. `role` is the accessibility role: "radio" for pick-one
 // groups, "checkbox" for pick-many, "tab" for tab bars, "button" otherwise.
 export function ChoiceChip({ label, selected = false, onPress, disabled = false, role = "button", accessibilityLabel, style }) {
   const styles = useThemedStyles(makeStyles);
@@ -56,8 +56,12 @@ const makeStyles = (colors) => StyleSheet.create({
     ...typeScale.bodyDense,
     color: colors.text
   },
+  // Color only, same weight as the unselected label -- bold text measures wider than regular at
+  // the same size, so toggling weight on select made neighbouring chips in the same flex-wrap row
+  // shift position every time one was picked (reported as "點擊客製化選項字會跑掉" on a real device).
+  // The 2px outline (docs/ui-style-guide.md rule 2) is this app's one selected-state convention; it
+  // doesn't need bold text alongside it to read as selected.
   selectedLabel: {
-    color: colors.accentInk,
-    fontWeight: typeScale.label.fontWeight
+    color: colors.accentInk
   }
 });

@@ -1,6 +1,6 @@
 # Azure 課堂展示環境
 
-最後更新：2026-09-12
+最後更新：2026-10-03（新增「專題展現場注意事項」）
 
 ## 目前狀態（2026-09-11）
 
@@ -124,6 +124,18 @@ PICKUP_EXPIRATION_SCHEDULER_ENABLED=false
 - **只改 Backend**：App Service 的部署中心已設定 GitHub Actions 持續部署（CI/CD），`git push` 到 `main` 會自動觸發建置與部署，不需要手動操作 Cloud Shell 或 Portal；設定檔在 `.github/workflows/main_drinkgroupbuy-demo-api.yml`（Azure 自動產生並提交）。第一次接上這個設定時，第一次自動部署可能因為 Azure 剛建立的身份驗證設定還沒在 Entra ID 傳播完成而失敗（`No subscriptions found` 之類的錯誤），重新觸發一次通常就會過。
 - 改 Mobile JavaScript／畫面／圖片：EAS Update 已完成設定並實機驗證成功，`eas update --branch preview` 發布後，已安裝的 APK 重開後會跳出更新提示，不用重打 APK。**前提**：APK 必須是透過 `eas build` 或有明確在 `app.config.js` 設定 `updates.requestHeaders["expo-channel-name"]` 的方式打包出來的——本機純用 `expo run:android`／`gradlew assembleRelease` 打包會跳過 `eas build` 自動注入頻道設定的步驟，即使 `expo.modules.updates.ENABLED=true`、更新網址正確，仍會因為不知道自己屬於哪個頻道而永遠收不到更新（2026-09-12 已實際遇到並修好這個問題，見 `PROGRESS.md`）。
 - 改原生套件、Android 權限、Expo SDK 或其他 native 設定：即使已有 EAS Update，仍要重新打包 APK。
+
+## 專題展現場注意事項
+
+**學校 Wi-Fi 可能擋掉 Google 地圖底圖。** 2026-10-01 實測：同一份 APK，一位組員在學校 Wi-Fi 下看到的地圖是粉紅空白底加店家圖釘（圖釘與店名是我們自己後端的資料；街道底圖是每台裝置直接向 Google 地圖伺服器要的，被擋），換成自己的行動網路就正常。這跟 Azure 或後端放在哪裡無關，只跟「看畫面那台裝置」走的網路有關，所以展示用的設備若必須連學校網路就會遇到。
+
+展示前建議依序處理：
+
+1. **先到展場用學校網路實測一次**，不要等到當天。
+2. 若被擋，向學校資訊處提出**限期、限範圍**的放行申請（只要展示期間，並把網域直接列給對方）：`*.googleapis.com`、`*.google.com`、`*.gstatic.com`、`mt0.google.com`～`mt3.google.com`（地圖圖磚）。也可以先問主辦單位有沒有限制較少的活動／訪客網路。
+3. 備案（不保證）：在有網路的地方先把展示範圍的地圖開過、滑過一遍，Google 會把看過的圖磚暫存在裝置上；另外準備一段地圖正常運作的錄影。
+
+**不依賴後端的展示版**：`EXPO_PUBLIC_DEMO_MODE=true` 的離線展示模式（見 `mobile/README.md`「離線展示模式」）可以讓人在網頁上直接操作介面，用的是假資料，不會動到 Azure 上的資料。它仍然需要能載入 Google 地圖，所以上面的網路問題照樣會影響地圖畫面。以 Expo tunnel 提供掃 QR code 連線時，那台電腦要保持開機、連線中斷後要重新啟動；開著期間等於把本機開發伺服器公開在網路上，展示完就關掉。
 
 ## 展示用假資料（歷史團購與統計）
 

@@ -15,23 +15,27 @@ import { buildStoreMapStores, getStoreMapDestination, getStoreMarkerLabel } from
 import { useTheme, useThemedStyles } from "../theme/ThemeContext";
 import { DARK_MAP_STYLE, LIGHT_MAP_STYLE } from "../theme/mapStyles";
 
-// The markers are raw DOM nodes and cannot read the StyleSheet, so their looks are spelled out here.
-// Solid accent = the store has a group to join, page colour with an accent outline = it has none, text
-// colour = the customer's own position. Fill versus outline keeps the difference from depending on colour
-// alone. Built from the active theme's colours, so the markers are redrawn when the theme changes.
-function getMarkerLooks(colors) {
-  return {
-    user: { fill: colors.text, border: colors.page, ink: colors.onDark },
-    recruiting: { fill: colors.accent, border: colors.page, ink: colors.onAccent },
-    idle: { fill: colors.page, border: colors.accent, ink: colors.accentInk }
-  };
+// This screen mirrors LiveMapScreen.native.jsx so the web preview looks like the app: the same
+// red / cyan / yellow teardrop pins, the same name label under each store pin (page-coloured pill with
+// a solid or hollow dot), and no points-of-interest clutter. The markers are raw DOM nodes and cannot
+// read the StyleSheet, so their looks are spelled out here. Fixed hex values rather than theme tokens,
+// like the native pins -- they have to read the same in light and dark mode.
+const USER_PIN_COLOR = "#EA4335"; // Google red
+const RECRUITING_PIN_COLOR = "#FBC02D"; // yellow
+const IDLE_PIN_COLOR = "#00BCD4"; // cyan
+const PIN_WIDTH = 27;
+const PIN_HEIGHT = 38;
+
+// The native map passes showsPointsOfInterest={false}; the Maps JavaScript API has no such flag, so the
+// same result comes from a style rule. Appended last so it also wins over DARK_MAP_STYLE's poi colours.
+const HIDE_POI_LABELS_STYLE = { featureType: "poi", elementType: "labels", stylers: [{ visibility: "off" }] };
+function getMapStyles(isDark) {
+  return [...(isDark ? DARK_MAP_STYLE : LIGHT_MAP_STYLE), HIDE_POI_LABELS_STYLE];
 }
-const MARKER_SIZE = spacing.s32 + spacing.s4;
 
 export function LiveMapScreen({ navigation, appState, selectedAuthUserId }) {
   const styles = useThemedStyles(makeStyles);
   const { colors, isDark } = useTheme();
-  const markerLooks = useMemo(() => getMarkerLooks(colors), [colors]);
   const mapElementRef = useRef(null);
   const lastReportSignatureRef = useRef("");
   // True once a real GPS fix has been received. This effect re-runs on every re-focus of the tab, and
@@ -212,7 +216,7 @@ export function LiveMapScreen({ navigation, appState, selectedAuthUserId }) {
   // The night style follows the app theme, also while the map is already on screen.
   useEffect(() => {
     if (!mapReady || !mapInstanceRef.current) return;
-    mapInstanceRef.current.setOptions({ styles: isDark ? DARK_MAP_STYLE : LIGHT_MAP_STYLE });
+    mapInstanceRef.current.setOptions({ styles: getMapStyles(isDark) });
   }, [mapReady, isDark]);
 
   const recenterOnUser = () => {
@@ -233,15 +237,14 @@ export function LiveMapScreen({ navigation, appState, selectedAuthUserId }) {
     markersByStoreIdRef.current.clear();
     const nextMarkers = [];
 
+    // Like the native map, the customer's own pin carries no permanent name label (only a hover title).
     const userMarker = createStoreOverlayMarker({
       colors,
       googleMaps,
       map,
       position: userMapCenter,
       title: locationName,
-      look: markerLooks.user,
-      markerText: "我",
-      labelText: locationName
+      pinColor: USER_PIN_COLOR
     });
     nextMarkers.push(userMarker);
 
@@ -252,9 +255,9 @@ export function LiveMapScreen({ navigation, appState, selectedAuthUserId }) {
         map,
         position: { lat: store.latitude, lng: store.longitude },
         title: store.name,
-        look: store.hasRecruitingGroupBuyActivity ? markerLooks.recruiting : markerLooks.idle,
-        markerText: "店",
+        pinColor: store.hasRecruitingGroupBuyActivity ? RECRUITING_PIN_COLOR : IDLE_PIN_COLOR,
         labelText: getStoreMarkerLabel(store),
+        labelDotSolid: store.hasRecruitingGroupBuyActivity,
         onPress: () => focusStore(store)
       });
       markersByStoreIdRef.current.set(store.id, marker);
@@ -270,7 +273,7 @@ export function LiveMapScreen({ navigation, appState, selectedAuthUserId }) {
         markersByStoreIdRef.current.clear();
       }
     };
-  }, [locationName, mapReady, visibleMapStores, userMapCenter, markerLooks, colors]);
+  }, [locationName, mapReady, visibleMapStores, userMapCenter, colors]);
 
   useEffect(() => {
     const mapElement = mapElementRef.current;
@@ -446,83 +449,120 @@ function loadGoogleMaps(apiKey) {
   return window.__drinkGroupBuyGoogleMapsPromise;
 }
 
-function createStoreOverlayMarker({ colors, googleMaps, map, position, title, look, markerText, labelText, onPress }) {
+const SVG_NS = "http://www.w3.org/2000/svg";
+
+// A teardrop pin whose tip is the anchor point, plus (for stores) a name label below it -- the same
+// arrangement the native map gets from its default marker and the absolutely-positioned label pill.
+// The root has no size and sits exactly on the coordinate; the pin grows up from it, the label hangs
+// below it. Only the pin takes clicks, like the native map (its labels are pointerEvents none).
+function createStoreOverlayMarker({ colors, googleMaps, map, position, title, pinColor, labelText = "", labelDotSolid = false, onPress }) {
   class StoreOverlayMarker extends googleMaps.OverlayView {
     constructor() {
       super();
       this.position = new googleMaps.LatLng(position.lat, position.lng);
       this.title = title;
-      this.look = look;
-      this.markerText = markerText;
+      this.pinColor = pinColor;
       this.labelText = labelText;
+      this.labelDotSolid = labelDotSolid;
       this.onPress = onPress;
       this.element = null;
-      this.markerElement = null;
-      this.markerTextElement = null;
+      this.pinElement = null;
+      this.pinShapeElement = null;
       this.labelElement = null;
+      this.labelDotElement = null;
+      this.labelTextElement = null;
     }
 
     onAdd() {
-      const element = document.createElement("button");
-      element.type = "button";
-      element.title = this.title;
-      element.style.position = "absolute";
-      element.style.transform = "translate(-50%, -50%)";
-      element.style.border = "0";
-      element.style.background = "transparent";
-      element.style.padding = "0";
-      element.style.cursor = this.onPress ? "pointer" : "default";
-      element.style.display = "flex";
-      element.style.flexDirection = "column";
-      element.style.alignItems = "center";
-      element.style.gap = `${spacing.s4}px`;
-      element.style.pointerEvents = "auto";
-      element.style.willChange = "transform";
+      const root = document.createElement("div");
+      root.style.position = "absolute";
+      root.style.width = "0";
+      root.style.height = "0";
+      root.style.pointerEvents = "none";
 
-      const marker = document.createElement("div");
-      marker.style.boxSizing = "border-box";
-      marker.style.width = `${MARKER_SIZE}px`;
-      marker.style.height = `${MARKER_SIZE}px`;
-      marker.style.borderRadius = `${radii.pill}px`;
-      marker.style.borderStyle = "solid";
-      marker.style.borderWidth = `${sizes.stroke}px`;
-      marker.style.display = "flex";
-      marker.style.alignItems = "center";
-      marker.style.justifyContent = "center";
-      marker.style.fontSize = `${typeScale.label.fontSize}px`;
-      marker.style.fontWeight = typeScale.label.fontWeight;
+      const pin = document.createElement("button");
+      pin.type = "button";
+      pin.title = this.title;
+      pin.style.position = "absolute";
+      pin.style.left = `${-PIN_WIDTH / 2}px`;
+      pin.style.bottom = "0";
+      pin.style.width = `${PIN_WIDTH}px`;
+      pin.style.height = `${PIN_HEIGHT}px`;
+      pin.style.border = "0";
+      pin.style.background = "transparent";
+      pin.style.padding = "0";
+      pin.style.cursor = this.onPress ? "pointer" : "default";
+      pin.style.pointerEvents = "auto";
 
-      const markerTextNode = document.createElement("span");
-      marker.appendChild(markerTextNode);
+      const svg = document.createElementNS(SVG_NS, "svg");
+      svg.setAttribute("viewBox", "0 0 24 34");
+      svg.setAttribute("width", String(PIN_WIDTH));
+      svg.setAttribute("height", String(PIN_HEIGHT));
+      svg.style.display = "block";
+      const pinShape = document.createElementNS(SVG_NS, "path");
+      pinShape.setAttribute("d", "M12 .5C5.6.5.5 5.6.5 12c0 8.6 11.5 21.5 11.5 21.5S23.5 20.6 23.5 12C23.5 5.6 18.4.5 12 .5z");
+      pinShape.setAttribute("stroke", "rgba(0,0,0,0.28)");
+      pinShape.setAttribute("stroke-width", "1");
+      const pinHole = document.createElementNS(SVG_NS, "circle");
+      pinHole.setAttribute("cx", "12");
+      pinHole.setAttribute("cy", "12");
+      pinHole.setAttribute("r", "4.5");
+      pinHole.setAttribute("fill", "rgba(0,0,0,0.32)");
+      svg.append(pinShape, pinHole);
+      pin.appendChild(svg);
 
-      const label = document.createElement("div");
-      label.style.maxWidth = "148px";
-      label.style.borderRadius = `${radii.xs}px`;
-      label.style.background = colors.page;
-      label.style.color = colors.text;
-      label.style.fontSize = `${typeScale.label.fontSize}px`;
-      label.style.fontWeight = typeScale.label.fontWeight;
-      label.style.lineHeight = `${typeScale.label.lineHeight}px`;
-      label.style.padding = `${spacing.s4}px ${spacing.s8}px`;
-      label.style.whiteSpace = "nowrap";
-      label.style.overflow = "hidden";
-      label.style.textOverflow = "ellipsis";
-
-      element.append(marker, label);
       if (this.onPress) {
-        element.addEventListener("click", (event) => {
+        pin.addEventListener("click", (event) => {
           event.preventDefault();
           event.stopPropagation();
           this.onPress();
         });
       }
 
-      this.element = element;
-      this.markerElement = marker;
-      this.markerTextElement = markerTextNode;
+      const label = document.createElement("div");
+      label.style.position = "absolute";
+      label.style.top = `${spacing.s4}px`;
+      label.style.left = "0";
+      label.style.transform = "translateX(-50%)";
+      label.style.maxWidth = "148px";
+      label.style.boxSizing = "border-box";
+      label.style.display = "flex";
+      label.style.alignItems = "center";
+      label.style.gap = `${spacing.s4}px`;
+      label.style.borderRadius = `${radii.xs}px`;
+      label.style.background = colors.page;
+      label.style.color = colors.text;
+      label.style.padding = `${spacing.s4}px ${spacing.s8}px`;
+      label.style.pointerEvents = "none";
+
+      const labelDot = document.createElement("span");
+      labelDot.style.flex = "none";
+      labelDot.style.boxSizing = "border-box";
+      labelDot.style.width = `${spacing.s12}px`;
+      labelDot.style.height = `${spacing.s12}px`;
+      labelDot.style.borderRadius = `${radii.pill}px`;
+      labelDot.style.border = `${sizes.stroke}px solid ${colors.accent}`;
+
+      const labelTextNode = document.createElement("span");
+      labelTextNode.style.minWidth = "0";
+      labelTextNode.style.fontSize = `${typeScale.label.fontSize}px`;
+      labelTextNode.style.fontWeight = typeScale.label.fontWeight;
+      labelTextNode.style.lineHeight = `${typeScale.label.lineHeight}px`;
+      labelTextNode.style.whiteSpace = "nowrap";
+      labelTextNode.style.overflow = "hidden";
+      labelTextNode.style.textOverflow = "ellipsis";
+
+      label.append(labelDot, labelTextNode);
+      root.append(pin, label);
+
+      this.element = root;
+      this.pinShapeElement = pinShape;
+      this.pinElement = pin;
       this.labelElement = label;
+      this.labelDotElement = labelDot;
+      this.labelTextElement = labelTextNode;
       this.render();
-      this.getPanes().overlayMouseTarget.appendChild(element);
+      this.getPanes().overlayMouseTarget.appendChild(root);
     }
 
     draw() {
@@ -544,13 +584,12 @@ function createStoreOverlayMarker({ colors, googleMaps, map, position, title, lo
     }
 
     render() {
-      if (!this.element || !this.markerElement || !this.markerTextElement || !this.labelElement) return;
-      this.element.title = this.title;
-      this.markerElement.style.background = this.look.fill;
-      this.markerElement.style.borderColor = this.look.border;
-      this.markerElement.style.color = this.look.ink;
-      this.markerTextElement.textContent = this.markerText;
-      this.labelElement.textContent = this.labelText;
+      if (!this.element || !this.pinShapeElement || !this.labelElement) return;
+      this.pinElement.title = this.title;
+      this.pinShapeElement.setAttribute("fill", this.pinColor);
+      this.labelElement.style.display = this.labelText ? "flex" : "none";
+      this.labelDotElement.style.background = this.labelDotSolid ? colors.accent : colors.page;
+      this.labelTextElement.textContent = this.labelText;
     }
   }
 

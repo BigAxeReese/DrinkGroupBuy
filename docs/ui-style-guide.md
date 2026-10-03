@@ -88,7 +88,7 @@
 - **深色的值**在 `tokens.js` 的 `darkColors`／`darkTones`，鍵名與淺色完全相同：頁面近黑紫 `#15101D`、文字淡紫 `#F1EAF7`、按鈕與畫出來的線改成青 `#65DCD5`（按鈕上的字反過來用深色）、薄荷底改成深青 `#1D3A3C`、取餐碼面板變成淺色底深色數字。狀態標籤也有一組深色版。自動檢查兩組都會跑（文字對比 ≥4.5、線 ≥3、標籤底色色差 ≥8）。
 - **切換是漸變**：新主題的底色圖層先淡入蓋住舊畫面（約 0.18 秒），在圖層底下換掉主題，再淡出（約 0.26 秒），兩段都在原生執行緒。這不是每個顏色各自漸變，因為那要每一格畫面都重新算樣式，手機上會卡。
 - **寫法**：畫面與元件不可直接 `import { colors }`。樣式寫成 `const makeStyles = (colors, tones) => StyleSheet.create({...})`，元件裡用 `const styles = useThemedStyles(makeStyles)`；要在程式裡直接用顏色（例如 `ActivityIndicator`）就 `const { colors, tones } = useTheme()`。`radii`／`spacing`／`sizes`／`typeScale` 是不變的，照舊從 `tokens.js` 引用。
-- **地圖**：`theme/mapStyles.js` 的 `DARK_MAP_STYLE` 是調成深紫青的 Google 夜間樣式，手機版（`customMapStyle`）與網頁版（`styles`）共用，跟著主題切換。地圖上的商家圖釘、Google 的商店小圖示顏色不受主題控制。
+- **地圖**：`theme/mapStyles.js` 的 `DARK_MAP_STYLE` 是調成深紫青的 Google 夜間樣式，手機版（`customMapStyle`）與網頁版（`styles`）共用，跟著主題切換。地圖上的圖釘用固定顏色，不隨主題變：紅色＝自己的位置、黃色＝有招募中團購的店、青色＝沒有（手機版因 Android 原生圖釘只能指定色相，是近似色；網頁預覽畫同樣的水滴圖釘與店名標籤，兩邊看起來一致）。Google 的商店小圖示在手機版與網頁預覽都已隱藏。選項按鈕（`ChoiceChip`）選中與未選中使用相同字重，只靠外框與底色區分，避免粗體變寬把同一排的按鈕擠得跑位。
 - **登入插圖**：改用透明底的線稿 `login-hero-light.png`（灰藍）與 `login-hero-dark.png`（青），舊的 `login-hero.png` 已沒有程式使用。
 - **還沒處理**：桌面圖示與啟動畫面（原生設定，深色系統下啟動瞬間仍是淺色，要重新打包才會改）；商家端沒有個人中心，目前沒有切換鈕；深色下的畫面只在網頁模擬看過，Android 實機尚未確認。
 

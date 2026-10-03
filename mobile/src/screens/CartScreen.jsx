@@ -10,6 +10,7 @@ import { QuantityStepper } from "../components/QuantityStepper";
 import { maxFontSizeMultiplier, sizes, spacing, typeScale } from "../theme/tokens";
 import { formatCurrency, getGroupBuyActivityById, isWithdrawalLocked } from "../utils/calculations";
 import { isDeadlineReached } from "../utils/deadlineTime";
+import { isDemoMode } from "../utils/demoMode";
 import { getGroupBuyActivityCapacityInfo } from "../utils/groupBuyActivityProgress";
 import { formatOrderItemCustomizations } from "../utils/orderItems";
 import { goToCustomerHome } from "../navigation/goToCustomerHome";
@@ -208,6 +209,18 @@ export function CartScreen({ navigation, route, appState, actions, selectedCusto
               return;
             }
             const orderId = typeof submitResult === "string" ? submitResult : submitResult?.orderId;
+            if (orderId && isDemoMode()) {
+              // No real LINE Pay to authorize against -- this existing local-only action (built for
+              // early prototyping, before the real LINE Pay integration) marks the order paid
+              // directly, so demo mode can skip the payment screen and still show a completed order.
+              actions.authorizeLinePayPayment(orderId);
+              // "customerOrders" lives in OrdersStack, a sibling tab's nested stack (CustomerTabs.jsx)
+              // -- not reachable with push(), which only targets the current stack (cart is in
+              // HomeStack). navigate()'s { screen, params } form is how React Navigation crosses into
+              // another tab's nested screen.
+              navigation.navigate("OrdersTab", { screen: "customerOrders", params: { orderId } });
+              return;
+            }
             const orderRevisionId = typeof submitResult === "object" ? submitResult.orderRevisionId : null;
             const revisionAmount = typeof submitResult === "object" ? submitResult.revisionAmount : null;
             const revisionItems = typeof submitResult === "object" ? submitResult.revisionItems : null;
